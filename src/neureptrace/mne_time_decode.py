@@ -296,6 +296,89 @@ def _probability_average(probability_sum: np.ndarray, n_models: int) -> np.ndarr
     return probabilities / row_sums
 
 
+def _estimator_classes(model) -> np.ndarray | None:
+    """Return the class order used by an estimator's probability columns."""
+
+    classes = getattr(model, "classes_", None)
+    if classes is not None:
+        return np.asarray(classes).ravel()
+
+    best_estimator = getattr(model, "best_estimator_", None)
+    if best_estimator is not None:
+        classes = _estimator_classes(best_estimator)
+        if classes is not None:
+            return classes
+
+    if hasattr(model, "named_steps"):
+        for step in reversed(list(model.named_steps.values())):
+            classes = _estimator_classes(step)
+            if classes is not None:
+                return classes
+
+    return None
+
+
+def _align_probabilities_to_classes(
+    probabilities: np.ndarray,
+    *,
+    model,
+    classes: np.ndarray,
+) -> np.ndarray:
+    """Align estimator probability columns to the global encoded class order."""
+
+    probabilities = np.asarray(probabilities, dtype=float)
+    classes = np.asarray(classes).ravel()
+    if probabilities.ndim != 2:
+        raise ValueError("Predicted probabilities must be a two-dimensional matrix.")
+
+    estimator_classes = _estimator_classes(model)
+    if probabilities.shape[1] == classes.size and np.array_equal(estimator_classes, classes):
+        return probabilities
+
+    if estimator_classes is None:
+        if probabilities.shape[1] == classes.size:
+            return probabilities
+        raise ValueError(
+            "Cannot align probability columns because the fitted estimator does "
+            "not expose classes_ and the probability width differs from the global class count."
+        )
+    if estimator_classes.shape[0] != probabilities.shape[1]:
+        raise ValueError(
+            "Estimator class count does not match predicted probability columns: "
+            f"{estimator_classes.shape[0]} != {probabilities.shape[1]}."
+        )
+
+    class_to_column = {class_label: column for column, class_label in enumerate(classes.tolist())}
+    aligned = np.zeros((probabilities.shape[0], classes.size), dtype=float)
+    for source_column, class_label in enumerate(estimator_classes.tolist()):
+        target_column = class_to_column.get(class_label)
+        if target_column is None:
+            raise ValueError(f"Estimator produced probability column for unknown class {class_label!r}.")
+        aligned[:, target_column] = probabilities[:, source_column]
+
+    row_sums = aligned.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("Aligned probabilities must have positive row sums.")
+    return aligned / row_sums
+
+
+def _predict_aligned_emission_probabilities(
+    model,
+    features: np.ndarray,
+    *,
+    emission_mode: str,
+    classes: np.ndarray,
+) -> np.ndarray:
+    """Predict emissions and align columns to the global LabelEncoder classes."""
+
+    probabilities = predict_emission_probabilities(
+        model,
+        features,
+        emission_mode=emission_mode,
+    )
+    return _align_probabilities_to_classes(probabilities, model=model, classes=classes)
+
+
 def _train_window_summary(
     epochs: mne.Epochs,
     train_windows: list[TimeWindow],
@@ -437,10 +520,11 @@ def _select_temporal_train_windows_nested_cv(
                 tuning_c_grid=tuning_c_grid_values,
             )
             model.fit(features[inner_train_idx], labels[inner_train_idx])
-            probabilities = predict_emission_probabilities(
+            probabilities = _predict_aligned_emission_probabilities(
                 model,
                 features[inner_validation_idx],
                 emission_mode=current_emission_mode,
+                classes=classes,
             )
             fold_scores.append(
                 _metric_value(
@@ -861,10 +945,11 @@ def run_time_resolved_decode(
                     )
                     model.fit(features[train_idx], labels[train_idx])
 
-                    probabilities = predict_emission_probabilities(
+                    probabilities = _predict_aligned_emission_probabilities(
                         model,
                         features[test_idx],
                         emission_mode=current_emission_mode,
+                        classes=classes,
                     )
                     tuning_metadata = _tuning_metadata(
                         model,
@@ -995,10 +1080,11 @@ def run_time_resolved_decode(
                     model.fit(train_features[train_idx], labels[train_idx])
                     fitted_models.append(model)
                     for test_window in windows:
-                        probability_sums[test_window] += predict_emission_probabilities(
+                        probability_sums[test_window] += _predict_aligned_emission_probabilities(
                             model,
                             feature_cache[test_window][test_idx],
                             emission_mode=current_emission_mode,
+                            classes=classes,
                         )
 
                 tuning_metadata = _tuning_metadata(
