@@ -52,6 +52,7 @@ RESULT_SELECTION_METRIC_CHOICES = (
     "ece",
 )
 RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece", "mean_true_label_rank", "median_true_label_rank"}
+INPUT_FORMAT_CHOICES = ("mne-epochs", "fieldtrip-mat")
 TimeWindow = tuple[int, int, float]
 TemporalTrainWindow = tuple[float, float]
 DEFAULT_RANKING_TOP_K = (2, 3)
@@ -190,9 +191,31 @@ def _write_prediction_diagnostic_tables(
 def _load_epochs_and_metadata(
     epochs_path: Path,
     metadata_csv: Path | None,
+    *,
+    input_format: str = "mne-epochs",
+    fieldtrip_root_path: Sequence[str | int] | str | None = None,
+    fieldtrip_label_base: int | None = 1,
+    fieldtrip_trim_overlong_labels: bool = True,
+    fieldtrip_ch_type: str = "grad",
 ) -> tuple[mne.Epochs, pd.DataFrame]:
-    epochs = mne.read_epochs(epochs_path, preload=True, verbose="error")
-    metadata = epochs.metadata.copy() if epochs.metadata is not None else None
+    if input_format == "mne-epochs":
+        epochs = mne.read_epochs(epochs_path, preload=True, verbose="error")
+        metadata = epochs.metadata.copy() if epochs.metadata is not None else None
+    elif input_format == "fieldtrip-mat":
+        from neureptrace.fieldtrip_mat import FieldTripRawMatConfig, load_fieldtrip_raw_mat_epochs
+
+        epochs, metadata = load_fieldtrip_raw_mat_epochs(
+            epochs_path,
+            config=FieldTripRawMatConfig(
+                label_base=fieldtrip_label_base,
+                trim_overlong_labels=fieldtrip_trim_overlong_labels,
+                ch_type=fieldtrip_ch_type,
+            ),
+            root_path=fieldtrip_root_path,
+        )
+    else:
+        raise ValueError(f"Unsupported input format: {input_format!r}. Supported formats: {', '.join(INPUT_FORMAT_CHOICES)}")
+
     if metadata_csv is not None:
         metadata = pd.read_csv(metadata_csv)
     if metadata is None:
@@ -762,6 +785,11 @@ def run_time_resolved_decode(
     out_path: Path,
     *,
     metadata_csv: Path | None = None,
+    input_format: str = "mne-epochs",
+    fieldtrip_root_path: Sequence[str | int] | str | None = None,
+    fieldtrip_label_base: int | None = 1,
+    fieldtrip_trim_overlong_labels: bool = True,
+    fieldtrip_ch_type: str = "grad",
     group_column: str | None = None,
     picks: str = "data",
     tmin: float | None = None,
@@ -792,7 +820,7 @@ def run_time_resolved_decode(
     confusion_out_path: Path | None = None,
     per_class_out_path: Path | None = None,
 ) -> pd.DataFrame:
-    """Run time-resolved decoding on an MNE epochs file and save metrics as CSV.
+    """Run time-resolved decoding on epochs input and save metrics as CSV.
 
     If ``temporal_train_window`` is set, models are trained on every decoding
     window whose center lies in that interval and are evaluated at every test
@@ -808,7 +836,15 @@ def run_time_resolved_decode(
     all test times. ``temporal_train_window`` and ``temporal_selection_window``
     are mutually exclusive.
     """
-    epochs, metadata = _load_epochs_and_metadata(epochs_path, metadata_csv)
+    epochs, metadata = _load_epochs_and_metadata(
+        epochs_path,
+        metadata_csv,
+        input_format=input_format,
+        fieldtrip_root_path=fieldtrip_root_path,
+        fieldtrip_label_base=fieldtrip_label_base,
+        fieldtrip_trim_overlong_labels=fieldtrip_trim_overlong_labels,
+        fieldtrip_ch_type=fieldtrip_ch_type,
+    )
     decoder_name = normalize_decoder_name(decoder)
     emission_modes = list(EMISSION_MODE_CHOICES) if emission_mode == "both" else [normalize_emission_mode(emission_mode)]
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
@@ -1193,9 +1229,27 @@ def run_time_resolved_decode(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run calibrated time-resolved decoding on an MNE Epochs FIF file."
+        description="Run calibrated time-resolved decoding on an MNE Epochs FIF file or FieldTrip raw MATLAB file."
     )
     parser.add_argument("--epochs", type=Path, required=True)
+    parser.add_argument("--input-format", choices=INPUT_FORMAT_CHOICES, default="mne-epochs")
+    parser.add_argument(
+        "--fieldtrip-root-path",
+        default="data,0",
+        help="MATLAB path to the FieldTrip raw struct when --input-format fieldtrip-mat is used, e.g. 'data,0'.",
+    )
+    parser.add_argument(
+        "--fieldtrip-label-base",
+        type=int,
+        default=1,
+        help="Subtract this value from numeric trialinfo to create the default 'condition' metadata column.",
+    )
+    parser.add_argument(
+        "--fieldtrip-no-trim-overlong-labels",
+        action="store_true",
+        help="Fail instead of trimming data.label when it is longer than the trial channel count.",
+    )
+    parser.add_argument("--fieldtrip-ch-type", default="grad", help="MNE channel type assigned to FieldTrip trial rows.")
     parser.add_argument("--label-column", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--metadata-csv", type=Path)
@@ -1282,6 +1336,11 @@ def main() -> None:
     results = run_time_resolved_decode(
         epochs_path=args.epochs,
         metadata_csv=args.metadata_csv,
+        input_format=args.input_format,
+        fieldtrip_root_path=args.fieldtrip_root_path,
+        fieldtrip_label_base=args.fieldtrip_label_base,
+        fieldtrip_trim_overlong_labels=not args.fieldtrip_no_trim_overlong_labels,
+        fieldtrip_ch_type=args.fieldtrip_ch_type,
         label_column=args.label_column,
         group_column=args.group_column,
         out_path=args.out,

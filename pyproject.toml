@@ -39,6 +39,7 @@ numpy = "*"
 pandas = "*"
 pyyaml = "*"
 scikit-learn = "*"
+scipy = "*"
 xgboost = { version = "*", optional = true }
 torch = { version = "*", optional = true }
 pytorch-lightning = { version = "*", optional = true }
