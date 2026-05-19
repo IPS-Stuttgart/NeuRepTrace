@@ -41,6 +41,14 @@ python -m neureptrace.mne_time_decode \
 The output CSV contains fold-wise accuracy, log loss, Brier score, and expected
 calibration error for each time window.
 
+For probability-driven model selection, tune inside each outer training fold
+with a proper or calibration-oriented probability objective instead of accuracy:
+
+```bash
+python -m neureptrace.mne_time_decode ... --tune-hyperparameters --tuning-scoring neg_log_loss
+python -m neureptrace.mne_time_decode ... --tune-hyperparameters --tuning-scoring neg_brier
+```
+
 The optional observations CSV keeps the held-out decoder probabilities before
 they are reduced to accuracy or calibration summaries. Each row is one
 trial/time-window observation with the fold, time, sample index, true class,
@@ -358,6 +366,7 @@ manifest column or `--decoder` CLI option:
 - `elastic_net_logistic`: balanced logistic regression with SAGA elastic-net
   regularization;
 - `ridge`: calibrated balanced ridge classifier;
+- `gaussian_nb`: Gaussian naive Bayes;
 - `lda`: linear discriminant analysis;
 - `shrinkage_lda`: LDA with LSQR covariance shrinkage estimated inside each
   training fold;
@@ -483,6 +492,23 @@ python -m neureptrace.benchmark \
 `ridge` uses a balanced `RidgeClassifier` with sigmoid calibration by default.
 When `tune_hyperparameters=true`, nested CV searches alpha values
 `0.01,0.1,1,10,100`.
+
+Run the Gaussian naive Bayes variant over all 19 staged subjects:
+
+```bash
+python -m neureptrace.benchmark \
+  benchmarks/nod_animate_gaussian_nb_all.csv \
+  --out-dir results/nod_animate_gaussian_nb_all \
+  --aggregate-out results/nod_animate_gaussian_nb_all/summary.csv \
+  --plot-out results/nod_animate_gaussian_nb_all/summary.png \
+  --calibration-dir results/nod_animate_gaussian_nb_all/calibration \
+  --chance 0.5 \
+  --resume
+```
+
+`gaussian_nb` estimates class-conditional feature distributions independently.
+When `tune_hyperparameters=true`, nested CV searches variance smoothing values
+`1e-12,1e-10,1e-9,1e-8,1e-6`.
 
 Run the slower tuned temporal train-window ensemble:
 
@@ -672,6 +698,18 @@ gh workflow run nod-decoder-all.yml \
   -f data_root=../data/nod \
   -f manifest_csv=benchmarks/nod_animate_ridge_all.csv \
   -f output_dir=results/nod_animate_ridge_all \
+  -f n_permutations=10000
+```
+
+Or run the Gaussian naive Bayes manifest:
+
+```bash
+gh workflow run nod-decoder-all.yml \
+  --repo IPS-Stuttgart/NeuRepTrace \
+  --ref main \
+  -f data_root=../data/nod \
+  -f manifest_csv=benchmarks/nod_animate_gaussian_nb_all.csv \
+  -f output_dir=results/nod_animate_gaussian_nb_all \
   -f n_permutations=10000
 ```
 

@@ -205,7 +205,7 @@ jobs:
             goto after_inference
           )
           set "NEUREPTRACE_RAN_EXACT_INFERENCE="
-          for %%D in (logistic sparse_logistic elastic_net_logistic ridge lda shrinkage_lda linear_svm) do (
+          for %%D in (logistic sparse_logistic elastic_net_logistic ridge gaussian_nb lda shrinkage_lda linear_svm) do (
             if exist "%NEUREPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" (
               set "NEUREPTRACE_RAN_EXACT_INFERENCE=1"
               py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference "%NEUREPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_%%D_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_%%D_clusters.csv"
