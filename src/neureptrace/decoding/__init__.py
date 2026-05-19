@@ -8,7 +8,7 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.feature_selection import SelectPercentile, f_classif
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold, StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -23,7 +23,15 @@ from neureptrace.decoding.sampling import (
     select_class_limited_indices as select_class_limited_indices,
 )
 
-DECODER_CHOICES = ("logistic", "sparse_logistic", "elastic_net_logistic", "lda", "shrinkage_lda", "linear_svm")
+DECODER_CHOICES = (
+    "logistic",
+    "sparse_logistic",
+    "elastic_net_logistic",
+    "ridge",
+    "lda",
+    "shrinkage_lda",
+    "linear_svm",
+)
 EMISSION_MODE_CHOICES = ("calibrated", "uncalibrated")
 FEATURE_PREPROCESSOR_CHOICES = ("none", "pca", "pca_whiten", "anova_select")
 TUNING_SCORING_CHOICES = ("accuracy", "balanced_accuracy", "neg_log_loss")
@@ -32,6 +40,7 @@ DEFAULT_ANOVA_SELECT_PERCENTILE = 20
 ANOVA_SELECT_PERCENTILE_GRID = (10, 20, 40, 60)
 DEFAULT_ELASTIC_NET_L1_RATIO = 0.5
 ELASTIC_NET_L1_RATIO_GRID = (0.15, 0.5, 0.85)
+DEFAULT_TUNING_ALPHA_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
 
 
 def make_logistic_decoder(
@@ -133,6 +142,22 @@ def make_decoder(
             *feature_steps,
             LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto"),
         )
+    if normalized == "ridge":
+        ridge = make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            RidgeClassifier(
+                class_weight="balanced",
+                max_iter=max_iter,
+            ),
+        )
+        if emission_mode == "uncalibrated":
+            return ridge
+        return _make_calibrated_classifier(
+            ridge,
+            method="sigmoid",
+            cv=3,
+        )
 
     linear_svm = make_pipeline(
         StandardScaler(),
@@ -166,8 +191,8 @@ def make_tuned_decoder(
 
     Logistic regression, sparse logistic regression, and linear SVM tune the
     regularization strength ``C``. Elastic-net logistic regression tunes both
-    ``C`` and the L1/L2 mixing ratio. LDA compares the default SVD solver with
-    shrinkage LDA
+    ``C`` and the L1/L2 mixing ratio. Ridge tunes the L2 penalty strength
+    ``alpha``. LDA compares the default SVD solver with shrinkage LDA
     (``solver='lsqr', shrinkage='auto'``), which is often better conditioned for
     high-dimensional M/EEG windows.
     """
@@ -244,6 +269,24 @@ def make_tuned_decoder(
             LinearDiscriminantAnalysis(solver="lsqr"),
         )
         param_grid = {"lineardiscriminantanalysis__shrinkage": ["auto", 0.1, 0.3, 0.5, 0.7, 0.9]}
+        param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
+    elif normalized == "ridge":
+        if emission_mode == "uncalibrated" and scoring == "neg_log_loss":
+            raise ValueError("neg_log_loss tuning requires probability estimates; use calibrated emissions for ridge.")
+        ridge = make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            RidgeClassifier(
+                class_weight="balanced",
+                max_iter=max_iter,
+            ),
+        )
+        if emission_mode == "uncalibrated":
+            estimator = ridge
+            param_grid = {"ridgeclassifier__alpha": DEFAULT_TUNING_ALPHA_GRID}
+        else:
+            estimator = _make_calibrated_classifier(ridge, method="sigmoid", cv=3)
+            param_grid = {_calibrated_estimator_param(estimator, "ridgeclassifier__alpha"): DEFAULT_TUNING_ALPHA_GRID}
         param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
     else:
         if emission_mode == "uncalibrated" and scoring == "neg_log_loss":
@@ -341,6 +384,8 @@ def normalize_decoder_name(name: str) -> str:
         return "sparse_logistic"
     if normalized in {"elasticnet_logistic", "logistic_elastic_net", "elastic_net_logreg"}:
         return "elastic_net_logistic"
+    if normalized in {"ridge_classifier", "ridge_classification"}:
+        return "ridge"
     if normalized in {"lda_shrinkage", "shrinkage_lda", "shrinkagelda"}:
         return "shrinkage_lda"
     if normalized not in DECODER_CHOICES:
