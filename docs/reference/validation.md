@@ -1,3 +1,3 @@
 # Validation
 
-::: reptrace.validate_manifest
+::: neureptrace.validate_manifest

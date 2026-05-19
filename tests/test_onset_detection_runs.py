@@ -4,7 +4,7 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-from reptrace.onset_detection import _detection_runs, _first_detection_run
+from neureptrace.onset_detection import _detection_runs, _first_detection_run
 
 
 def _candidates() -> pd.DataFrame:

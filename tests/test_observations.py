@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from reptrace.observations import ProbabilityObservationTable, probability_columns, stable_hash
+from neureptrace.observations import ProbabilityObservationTable, probability_columns, stable_hash
 
 
 def test_stable_hash_is_order_insensitive_for_mappings() -> None:

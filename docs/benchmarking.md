@@ -8,10 +8,10 @@ and metadata locally first.
 
 Use the NOD preprocessed epochs file and the matching detailed events CSV. If
 the metadata already contains `stim_is_animate`, pass it directly to
-`reptrace.mne_time_decode` or derive a named condition column first:
+`neureptrace.mne_time_decode` or derive a named condition column first:
 
 ```bash
-python -m reptrace.metadata \
+python -m neureptrace.metadata \
   --events-csv data/nod/sub-01_events.csv \
   --source-column stim_is_animate \
   --positive-pattern "True" \
@@ -24,7 +24,7 @@ python -m reptrace.metadata \
 Then run the decoder:
 
 ```bash
-python -m reptrace.mne_time_decode \
+python -m neureptrace.mne_time_decode \
   --epochs data/nod/sub-01_epo.fif \
   --metadata-csv data/nod/sub-01_metadata_animate.csv \
   --label-column condition \
@@ -52,7 +52,7 @@ models.
 Fit the first conservative temporal model from those observations:
 
 ```bash
-python -m reptrace.temporal_model \
+python -m neureptrace.temporal_model \
   results/nod_sub-01_animate_observations.csv \
   --out-summary results/nod_sub-01_animate_temporal_model.csv \
   --out-states results/nod_sub-01_animate_state_trace.csv \
@@ -73,7 +73,7 @@ When the observations contain both calibrated and uncalibrated emissions, compar
 which emission mode gives cleaner state inference:
 
 ```bash
-python -m reptrace.emission_compare \
+python -m neureptrace.emission_compare \
   results/nod_sub-01_animate_temporal_model.csv \
   --out-csv results/nod_sub-01_animate_emission_compare.csv \
   --out-report results/nod_sub-01_animate_emission_compare.md
@@ -88,7 +88,7 @@ state inference, not merely nicer reliability plots.
 Ask the first NOD neuroscience question from the state traces:
 
 ```bash
-python -m reptrace.semantic_stages \
+python -m neureptrace.semantic_stages \
   results/nod_sub-01_animate_state_trace.csv \
   --out-time results/nod_sub-01_animate_semantic_stage_time.csv \
   --out-stages results/nod_sub-01_animate_semantic_stages.csv \
@@ -109,7 +109,7 @@ controls above.
 Plot the single-subject result:
 
 ```bash
-python -m reptrace.plot_time_decode \
+python -m neureptrace.plot_time_decode \
   results/nod_sub-01_animate.csv \
   --chance 0.5 \
   --title "NOD sub-01 animate/inanimate" \
@@ -119,7 +119,7 @@ python -m reptrace.plot_time_decode \
 After running several subjects, aggregate across subjects:
 
 ```bash
-python -m reptrace.results \
+python -m neureptrace.results \
   results/nod_sub-01_animate.csv \
   results/nod_sub-02_animate.csv \
   results/nod_sub-03_animate.csv \
@@ -129,7 +129,7 @@ python -m reptrace.results \
 Then plot the aggregate:
 
 ```bash
-python -m reptrace.plot_time_decode \
+python -m neureptrace.plot_time_decode \
   results/nod_animate_summary.csv \
   --chance 0.5 \
   --title "NOD animate/inanimate summary" \
@@ -141,11 +141,11 @@ python -m reptrace.plot_time_decode \
 The same workflow can be run from a manifest:
 
 ```bash
-python -m reptrace.validate_manifest \
+python -m neureptrace.validate_manifest \
   benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \
@@ -164,11 +164,11 @@ For a paper-ready first pass, use the same animate/inanimate task and run five
 subjects at once from a single manifest:
 
 ```bash
-python -m reptrace.validate_manifest \
+python -m neureptrace.validate_manifest \
   benchmarks/nod_animate_first5.csv \
   --report-out results/nod_animate_first5_validation.csv
 
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_first5.csv \
   --out-dir results/nod_animate_first5 \
   --aggregate-out results/nod_animate_first5_summary.csv \
@@ -183,7 +183,7 @@ Generate a compact Markdown report from the aggregate and subject-level result
 CSVs:
 
 ```bash
-python -m reptrace.report \
+python -m neureptrace.report \
   results/nod_animate_first5/summary.csv \
   "results/nod_animate_first5/sub-*_time_decode.csv" \
   --chance 0.5 \
@@ -200,7 +200,7 @@ files, validate the 19-subject manifest. This manifest uses 2 grouped folds
 because several subjects have only 2 unique session groups:
 
 ```bash
-python -m reptrace.validate_manifest \
+python -m neureptrace.validate_manifest \
   benchmarks/nod_animate_all.csv \
   --report-out results/nod_animate_all_validation.csv
 ```
@@ -208,7 +208,7 @@ python -m reptrace.validate_manifest \
 Then run the same animate/inanimate benchmark over every staged NOD-EEG subject:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_all.csv \
   --out-dir results/nod_animate_all \
   --aggregate-out results/nod_animate_all/summary.csv \
@@ -219,7 +219,7 @@ python -m reptrace.benchmark \
 Make calibration explicit in the benchmark report:
 
 ```bash
-python -m reptrace.calibration \
+python -m neureptrace.calibration \
   results/nod_animate_all/summary.csv \
   --out-report results/nod_animate_all/calibration_report.md
 ```
@@ -231,7 +231,7 @@ probability quality visible rather than treating it as a secondary metric.
 Run subject-level inference on the resulting subject CSVs:
 
 ```bash
-python -m reptrace.inference \
+python -m neureptrace.inference \
   "results/nod_animate_all/sub-*_time_decode.csv" \
   --chance 0.5 \
   --n-permutations 10000 \
@@ -258,11 +258,11 @@ matches one of those labels. The full staged set contains 7,293 canine trials
 and 6,950 device trials across 19 subjects.
 
 ```bash
-python -m reptrace.validate_manifest \
+python -m neureptrace.validate_manifest \
   benchmarks/nod_superclass_canine_device_all.csv \
   --report-out results/nod_superclass_canine_device_all_validation.csv
 
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_superclass_canine_device_all.csv \
   --out-dir results/nod_superclass_canine_device_all \
   --aggregate-out results/nod_superclass_canine_device_all/summary.csv \
@@ -270,13 +270,13 @@ python -m reptrace.benchmark \
   --calibration-dir results/nod_superclass_canine_device_all/calibration \
   --chance 0.5
 
-python -m reptrace.report \
+python -m neureptrace.report \
   results/nod_superclass_canine_device_all/summary.csv \
   "results/nod_superclass_canine_device_all/sub-*_time_decode.csv" \
   --chance 0.5 \
   --out results/nod_superclass_canine_device_all/report.md
 
-python -m reptrace.inference \
+python -m neureptrace.inference \
   "results/nod_superclass_canine_device_all/sub-*_time_decode.csv" \
   --chance 0.5 \
   --n-permutations 10000 \
@@ -284,7 +284,7 @@ python -m reptrace.inference \
   --out-time results/nod_superclass_canine_device_all/inference_time.csv \
   --out-clusters results/nod_superclass_canine_device_all/inference_clusters.csv
 
-python -m reptrace.calibration \
+python -m neureptrace.calibration \
   results/nod_superclass_canine_device_all/summary.csv \
   "results/nod_superclass_canine_device_all/calibration/*_calibration_bins.csv" \
   --out-report results/nod_superclass_canine_device_all/calibration_report.md \
@@ -304,11 +304,11 @@ the animate/inanimate distinction. The full staged set contains 5,215 container
 trials and 4,809 covering trials across all 19 subjects.
 
 ```bash
-python -m reptrace.validate_manifest \
+python -m neureptrace.validate_manifest \
   benchmarks/nod_superclass_container_covering_all.csv \
   --report-out results/nod_superclass_container_covering_all_validation.csv
 
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_superclass_container_covering_all.csv \
   --out-dir results/nod_superclass_container_covering_all \
   --aggregate-out results/nod_superclass_container_covering_all/summary.csv \
@@ -322,26 +322,26 @@ After the benchmark finishes, generate the same report, inference, calibration,
 and reliability outputs as for the canine/device superclass task:
 
 ```bash
-python -m reptrace.report \
+python -m neureptrace.report \
   results/nod_superclass_container_covering_all/summary.csv \
   "results/nod_superclass_container_covering_all/sub-*_time_decode.csv" \
   --out results/nod_superclass_container_covering_all/report.md \
   --chance 0.5
 
-python -m reptrace.inference \
+python -m neureptrace.inference \
   "results/nod_superclass_container_covering_all/sub-*_time_decode.csv" \
   --chance 0.5 \
   --n-permutations 10000 \
   --out-time results/nod_superclass_container_covering_all/inference_time.csv \
   --out-clusters results/nod_superclass_container_covering_all/inference_clusters.csv
 
-python -m reptrace.calibration \
+python -m neureptrace.calibration \
   results/nod_superclass_container_covering_all/summary.csv \
   "results/nod_superclass_container_covering_all/calibration/*_calibration_bins.csv" \
   --out-report results/nod_superclass_container_covering_all/calibration_report.md \
   --out-bins results/nod_superclass_container_covering_all/reliability_bins.csv
 
-python -m reptrace.plot_calibration \
+python -m neureptrace.plot_calibration \
   results/nod_superclass_container_covering_all/reliability_bins.csv \
   --out results/nod_superclass_container_covering_all/reliability.png \
   --time-window 0.1 0.8 \
@@ -365,7 +365,7 @@ manifest column or `--decoder` CLI option:
 Run the first-five-subject decoder comparison:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_decoders_first5.csv \
   --out-dir results/nod_animate_decoders_first5 \
   --aggregate-out results/nod_animate_decoders_first5/summary.csv \
@@ -396,7 +396,7 @@ check whether an apparent gain changes accuracy as well as calibration metrics.
 Run the tuned PCA-whitened logistic variant over all 19 staged subjects:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_logistic_tuned_pca_whiten_all.csv \
   --out-dir results/nod_animate_logistic_tuned_pca_whiten_all \
   --aggregate-out results/nod_animate_logistic_tuned_pca_whiten_all/summary.csv \
@@ -415,7 +415,7 @@ Run the tuned ANOVA feature-selection logistic variant over all 19 staged
 subjects:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_logistic_tuned_anova_select_all.csv \
   --out-dir results/nod_animate_logistic_tuned_anova_select_all \
   --aggregate-out results/nod_animate_logistic_tuned_anova_select_all/summary.csv \
@@ -433,7 +433,7 @@ main animate/inanimate task without changing the outer held-out folds.
 Run an explicit shrinkage-LDA variant over all 19 staged subjects:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_shrinkage_lda_all.csv \
   --out-dir results/nod_animate_shrinkage_lda_all \
   --aggregate-out results/nod_animate_shrinkage_lda_all/summary.csv \
@@ -452,7 +452,7 @@ Run the elastic-net logistic variant when dense logistic regression may be using
 too many weak noisy features but pure feature selection would be too aggressive:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_elastic_net_logistic_all.csv \
   --out-dir results/nod_animate_elastic_net_logistic_all \
   --aggregate-out results/nod_animate_elastic_net_logistic_all/summary.csv \
@@ -469,7 +469,7 @@ searches both the C grid and the L1/L2 mixing grid `0.15,0.5,0.85`.
 Run the slower tuned temporal train-window ensemble:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_logistic_tuned_temporal_ensemble_all.csv \
   --out-dir results/nod_animate_logistic_tuned_temporal_ensemble_all \
   --aggregate-out results/nod_animate_logistic_tuned_temporal_ensemble_all/summary.csv \
@@ -488,7 +488,7 @@ Compare raw decoder probabilities with temporal posterior smoothing without
 changing the decoder:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_logistic_temporal_smoothing_all.csv \
   --out-dir results/nod_animate_logistic_temporal_smoothing_all \
   --aggregate-out results/nod_animate_logistic_temporal_smoothing_all/summary.csv \
@@ -512,7 +512,7 @@ Run the sparse logistic variant when dense logistic regression may be using too
 many noisy sensor-time features:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_sparse_logistic_all.csv \
   --out-dir results/nod_animate_sparse_logistic_all \
   --aggregate-out results/nod_animate_sparse_logistic_all/summary.csv \
@@ -525,7 +525,7 @@ python -m reptrace.benchmark \
 Generate a decoder comparison report:
 
 ```bash
-python -m reptrace.report \
+python -m neureptrace.report \
   results/nod_animate_decoders_first5/summary.csv \
   --out results/nod_animate_decoders_first5/report.md
 ```
@@ -537,7 +537,7 @@ more relevant reported number when a decoder shows pre-stimulus bias.
 Create a calibration-aware decoder report and aggregate reliability bins:
 
 ```bash
-python -m reptrace.calibration \
+python -m neureptrace.calibration \
   results/nod_animate_decoders_first5/summary.csv \
   "results/nod_animate_decoders_first5/calibration/*_calibration_bins.csv" \
   --out-report results/nod_animate_decoders_first5/calibration_report.md \
@@ -547,7 +547,7 @@ python -m reptrace.calibration \
 Plot an effect-window reliability diagram from aggregate reliability bins:
 
 ```bash
-python -m reptrace.plot_calibration \
+python -m neureptrace.plot_calibration \
   results/nod_animate_decoders_first5/reliability_bins.csv \
   --out results/nod_animate_decoders_first5/reliability.png \
   --time-window 0.1 0.8 \
@@ -557,7 +557,7 @@ python -m reptrace.plot_calibration \
 Run paired subject-level decoder statistics:
 
 ```bash
-python -m reptrace.paired_stats \
+python -m neureptrace.paired_stats \
   "results/nod_animate_decoders_first5/sub-*_time_decode.csv" \
   --out-csv results/nod_animate_decoders_first5/paired_stats.csv \
   --out-report results/nod_animate_decoders_first5/paired_stats.md \
@@ -704,7 +704,7 @@ After a manifest run with `--observation-dir`, fit the same temporal model acros
 all exported subject observations:
 
 ```bash
-python -m reptrace.temporal_model \
+python -m neureptrace.temporal_model \
   "results/nod_animate_all/observations/*_observations.csv" \
   --out-summary results/nod_animate_all/temporal_model.csv \
   --out-states results/nod_animate_all/state_trace.csv \
@@ -714,7 +714,7 @@ python -m reptrace.temporal_model \
 Compare calibrated versus uncalibrated emissions:
 
 ```bash
-python -m reptrace.emission_compare \
+python -m neureptrace.emission_compare \
   results/nod_animate_all/temporal_model.csv \
   --out-csv results/nod_animate_all/emission_compare.csv \
   --out-report results/nod_animate_all/emission_compare.md
@@ -723,7 +723,7 @@ python -m reptrace.emission_compare \
 Then summarize category-conditioned stages:
 
 ```bash
-python -m reptrace.semantic_stages \
+python -m neureptrace.semantic_stages \
   results/nod_animate_all/state_trace.csv \
   --out-time results/nod_animate_all/semantic_stage_time.csv \
   --out-stages results/nod_animate_all/semantic_stages.csv \
@@ -732,7 +732,7 @@ python -m reptrace.semantic_stages \
 
 ## Calibration-Aware Temporal-State Workflow
 
-Use `reptrace.temporal_state_workflow` to run the calibration-aware temporal-state pass
+Use `neureptrace.temporal_state_workflow` to run the calibration-aware temporal-state pass
 across the three staged NOD tasks: animate/inanimate, canine/device, and
 container/covering. The workflow prepares runner-local manifests, validates all
 19 NOD-EEG subjects, runs matched calibrated and uncalibrated emissions in the
@@ -740,7 +740,7 @@ same folds, fits sticky temporal models, compares controls, summarizes semantic
 stages, and writes compact artifacts for the compact export directory.
 
 ```bash
-python -m reptrace.temporal_state_workflow \
+python -m neureptrace.temporal_state_workflow \
   --data-root data/nod \
   --out-dir results/temporal_state_inference \
   --compact-export-dir ../NeuRepTrace-Compact-Results/results/temporal_state_inference \
@@ -755,7 +755,7 @@ excludes large probability observation and state-trace CSVs.
 For a smoke test, run one task and one subject with fewer permutations:
 
 ```bash
-python -m reptrace.temporal_state_workflow \
+python -m neureptrace.temporal_state_workflow \
   --data-root data/nod \
   --out-dir results/temporal_state_smoke \
   --task nod_animate \

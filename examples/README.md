@@ -12,7 +12,7 @@ same decoder used for public benchmark data.
 Plot the output with:
 
 ```bash
-python -m reptrace.plot_time_decode \
+python -m neureptrace.plot_time_decode \
   results/synthetic_decoding.csv \
   --chance 0.5 \
   --out results/synthetic_decoding.png
@@ -31,7 +31,7 @@ After exporting probability observations with `prob_class_*` columns, detect
 zero, one, or many stimulus events in a long stream with:
 
 ```bash
-python -m reptrace.stimulus_detection \
+python -m neureptrace.stimulus_detection \
   results/sub-01_stream_observations.csv \
   --stream-column sequence_id \
   --score-mode class_probability \
@@ -49,7 +49,7 @@ When annotated stimulus onsets are available, pass them for event-level matching
 and latency summaries:
 
 ```bash
-python -m reptrace.stimulus_detection \
+python -m neureptrace.stimulus_detection \
   results/sub-01_stream_observations.csv \
   --annotations results/sub-01_stimulus_annotations.csv \
   --stream-column stream_id \

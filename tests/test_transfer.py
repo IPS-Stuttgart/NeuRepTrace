@@ -1,6 +1,6 @@
 import numpy as np
 
-from reptrace.decoding.transfer import (
+from neureptrace.decoding.transfer import (
     append_null_class_features,
     cross_validate_feature_decoding,
     evaluate_feature_transfer,

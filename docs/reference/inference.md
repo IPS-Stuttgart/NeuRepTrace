@@ -1,3 +1,3 @@
 # Inference
 
-::: reptrace.inference
+::: neureptrace.inference

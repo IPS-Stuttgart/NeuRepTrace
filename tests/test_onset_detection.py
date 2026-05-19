@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from reptrace.onset_detection import (
+from neureptrace.onset_detection import (
     annotate_threshold_crossings,
     detect_onsets,
     detect_onsets_from_csvs,

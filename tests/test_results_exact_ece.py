@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.results import aggregate_time_decode_csvs, aggregate_time_decode_results
+from neureptrace.results import aggregate_time_decode_csvs, aggregate_time_decode_results
 
 
 def test_aggregate_time_decode_results_recomputes_ece_from_pooled_observations():

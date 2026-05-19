@@ -1,11 +1,11 @@
 # Onset Workflow
 
-`reptrace.onset_workflow` runs onset detection across multiple task result directories and writes task-level plus combined summaries.
+`neureptrace.onset_workflow` runs onset detection across multiple task result directories and writes task-level plus combined summaries.
 
 Example:
 
 ```bash
-python -m reptrace.onset_workflow \
+python -m neureptrace.onset_workflow \
   --task-dir results/nod_animate_all \
   --task-dir results/nod_superclass_canine_device_all \
   --task-dir results/nod_superclass_container_covering_all \
@@ -26,4 +26,4 @@ Use `--detection-window 0.000 0.800` for a post-stimulus latency benchmark. Use
 an earlier start, for example `--detection-window -0.200 0.800`, when the goal is
 to allow and count pre-stimulus false alarms.
 
-::: reptrace.onset_workflow
+::: neureptrace.onset_workflow

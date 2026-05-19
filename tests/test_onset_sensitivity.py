@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.onset_sensitivity import (
+from neureptrace.onset_sensitivity import (
     build_sensitivity_settings,
     run_onset_sensitivity,
     summarize_sensitivity,

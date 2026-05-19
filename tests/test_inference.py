@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from reptrace.inference import sign_flip_time_inference, subject_time_effects
+from neureptrace.inference import sign_flip_time_inference, subject_time_effects
 
 
 def _write_subject_csv(path: Path, subject: str, effects: list[float]) -> None:

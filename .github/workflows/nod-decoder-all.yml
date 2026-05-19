@@ -114,7 +114,7 @@ jobs:
           $cacheRoot = Join-Path $homeDir "github-runner"
           $cacheRoot = Join-Path $cacheRoot ".cache"
           $cacheRoot = Join-Path $cacheRoot "datasets"
-          $cacheRoot = Join-Path $cacheRoot "reptrace"
+          $cacheRoot = Join-Path $cacheRoot "neureptrace"
           $cacheRoot = Join-Path $cacheRoot "nod-eeg-full-v1"
 
           $requestedDataRoot = "${{ inputs.data_root }}"
@@ -152,9 +152,9 @@ jobs:
           $manifestCsv = "${{ inputs.manifest_csv }}"
           New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
           & py "-${{ inputs.python_version }}" -m poetry run python scripts\prepare_benchmark_manifest.py $manifestCsv $runManifest --data-root $dataRoot
-          "REPTRACE_DATA_ROOT=$dataRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "REPTRACE_OUTPUT_DIR=$outputDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "REPTRACE_RUN_MANIFEST=$runManifest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NEUREPTRACE_DATA_ROOT=$dataRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NEUREPTRACE_OUTPUT_DIR=$outputDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NEUREPTRACE_RUN_MANIFEST=$runManifest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "Using data root: $dataRoot"
           "Valid staged NOD-EEG subject pairs: $subjectCount"
           "Source benchmark manifest: $manifestCsv"
@@ -165,7 +165,7 @@ jobs:
         shell: cmd
         run: |
           set "PYTHONPATH=%GITHUB_WORKSPACE%\src"
-          py -${{ inputs.python_version }} -m poetry run python -m reptrace.validate_manifest "%REPTRACE_RUN_MANIFEST%" --report-out "%REPTRACE_OUTPUT_DIR%\validation.csv"
+          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.validate_manifest "%NEUREPTRACE_RUN_MANIFEST%" --report-out "%NEUREPTRACE_OUTPUT_DIR%\validation.csv"
 
       - name: Run all-subject decoder comparison
         shell: cmd
@@ -173,19 +173,19 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/src
         run: |
           if /I "${{ inputs.temporal_smoothing }}"=="true" (
-            py -${{ inputs.python_version }} -m poetry run python -m reptrace.benchmark "%REPTRACE_RUN_MANIFEST%" ^
-              --out-dir "%REPTRACE_OUTPUT_DIR%" ^
-              --aggregate-out "%REPTRACE_OUTPUT_DIR%\summary.csv" ^
-              --plot-out "%REPTRACE_OUTPUT_DIR%\summary.png" ^
-              --calibration-dir "%REPTRACE_OUTPUT_DIR%\calibration" ^
-              --observation-dir "%REPTRACE_OUTPUT_DIR%\observations" ^
-              --temporal-smoothing-dir "%REPTRACE_OUTPUT_DIR%\temporal_smoothing" ^
+            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.benchmark "%NEUREPTRACE_RUN_MANIFEST%" ^
+              --out-dir "%NEUREPTRACE_OUTPUT_DIR%" ^
+              --aggregate-out "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" ^
+              --plot-out "%NEUREPTRACE_OUTPUT_DIR%\summary.png" ^
+              --calibration-dir "%NEUREPTRACE_OUTPUT_DIR%\calibration" ^
+              --observation-dir "%NEUREPTRACE_OUTPUT_DIR%\observations" ^
+              --temporal-smoothing-dir "%NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing" ^
               --temporal-smoothing-fit-window "${{ inputs.temporal_smoothing_fit_window_start }}" "${{ inputs.temporal_smoothing_fit_window_stop }}" ^
               --temporal-smoothing-stay-grid-size "${{ inputs.temporal_smoothing_stay_grid_size }}" ^
               --chance 0.5 ^
               --resume
           ) else (
-            py -${{ inputs.python_version }} -m poetry run python -m reptrace.benchmark "%REPTRACE_RUN_MANIFEST%" --out-dir "%REPTRACE_OUTPUT_DIR%" --aggregate-out "%REPTRACE_OUTPUT_DIR%\summary.csv" --plot-out "%REPTRACE_OUTPUT_DIR%\summary.png" --calibration-dir "%REPTRACE_OUTPUT_DIR%\calibration" --chance 0.5 --resume
+            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.benchmark "%NEUREPTRACE_RUN_MANIFEST%" --out-dir "%NEUREPTRACE_OUTPUT_DIR%" --aggregate-out "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" --plot-out "%NEUREPTRACE_OUTPUT_DIR%\summary.png" --calibration-dir "%NEUREPTRACE_OUTPUT_DIR%\calibration" --chance 0.5 --resume
           )
 
       - name: Generate reports and inference tables
@@ -193,28 +193,28 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: |
-          set "REPTRACE_SUBJECT_CSVS=%REPTRACE_OUTPUT_DIR%\sub-*_time_decode.csv"
-          if exist "%REPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv" set "REPTRACE_SUBJECT_CSVS=%REPTRACE_SUBJECT_CSVS% %REPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv"
-          py -${{ inputs.python_version }} -m poetry run python -m reptrace.report "%REPTRACE_OUTPUT_DIR%\summary.csv" %REPTRACE_SUBJECT_CSVS% --out "%REPTRACE_OUTPUT_DIR%\report.md" --chance 0.5
-          py -${{ inputs.python_version }} -m poetry run python -m reptrace.calibration "%REPTRACE_OUTPUT_DIR%\summary.csv" "%REPTRACE_OUTPUT_DIR%\calibration\*_calibration_bins.csv" --out-report "%REPTRACE_OUTPUT_DIR%\calibration_report.md" --out-bins "%REPTRACE_OUTPUT_DIR%\reliability_bins.csv"
-          py -${{ inputs.python_version }} -m poetry run python -m reptrace.plot_calibration "%REPTRACE_OUTPUT_DIR%\reliability_bins.csv" --out "%REPTRACE_OUTPUT_DIR%\reliability.png" --time-window 0.1 0.8 --title "NOD animate/inanimate decoder calibration"
-          py -${{ inputs.python_version }} -m poetry run python -m reptrace.paired_stats %REPTRACE_SUBJECT_CSVS% --out-csv "%REPTRACE_OUTPUT_DIR%\paired_stats.csv" --out-report "%REPTRACE_OUTPUT_DIR%\paired_stats.md" --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" || echo Skipping paired stats because fewer than two paired decoder conditions were available.
-          if exist "%REPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv" (
-            py -${{ inputs.python_version }} -m poetry run python -m reptrace.inference %REPTRACE_SUBJECT_CSVS% --emission-mode calibrated --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%REPTRACE_OUTPUT_DIR%\inference_calibrated_time.csv" --out-clusters "%REPTRACE_OUTPUT_DIR%\inference_calibrated_clusters.csv" || exit /b 1
-            py -${{ inputs.python_version }} -m poetry run python -m reptrace.inference %REPTRACE_SUBJECT_CSVS% --emission-mode calibrated_temporal_posterior --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%REPTRACE_OUTPUT_DIR%\inference_calibrated_temporal_posterior_time.csv" --out-clusters "%REPTRACE_OUTPUT_DIR%\inference_calibrated_temporal_posterior_clusters.csv" || exit /b 1
+          set "NEUREPTRACE_SUBJECT_CSVS=%NEUREPTRACE_OUTPUT_DIR%\sub-*_time_decode.csv"
+          if exist "%NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv" set "NEUREPTRACE_SUBJECT_CSVS=%NEUREPTRACE_SUBJECT_CSVS% %NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv"
+          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.report "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" %NEUREPTRACE_SUBJECT_CSVS% --out "%NEUREPTRACE_OUTPUT_DIR%\report.md" --chance 0.5
+          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.calibration "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" "%NEUREPTRACE_OUTPUT_DIR%\calibration\*_calibration_bins.csv" --out-report "%NEUREPTRACE_OUTPUT_DIR%\calibration_report.md" --out-bins "%NEUREPTRACE_OUTPUT_DIR%\reliability_bins.csv"
+          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.plot_calibration "%NEUREPTRACE_OUTPUT_DIR%\reliability_bins.csv" --out "%NEUREPTRACE_OUTPUT_DIR%\reliability.png" --time-window 0.1 0.8 --title "NOD animate/inanimate decoder calibration"
+          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.paired_stats %NEUREPTRACE_SUBJECT_CSVS% --out-csv "%NEUREPTRACE_OUTPUT_DIR%\paired_stats.csv" --out-report "%NEUREPTRACE_OUTPUT_DIR%\paired_stats.md" --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" || echo Skipping paired stats because fewer than two paired decoder conditions were available.
+          if exist "%NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv" (
+            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference %NEUREPTRACE_SUBJECT_CSVS% --emission-mode calibrated --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_clusters.csv" || exit /b 1
+            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference %NEUREPTRACE_SUBJECT_CSVS% --emission-mode calibrated_temporal_posterior --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_temporal_posterior_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_temporal_posterior_clusters.csv" || exit /b 1
             goto after_inference
           )
-          set "REPTRACE_RAN_EXACT_INFERENCE="
+          set "NEUREPTRACE_RAN_EXACT_INFERENCE="
           for %%D in (logistic sparse_logistic elastic_net_logistic lda shrinkage_lda linear_svm) do (
-            if exist "%REPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" (
-              set "REPTRACE_RAN_EXACT_INFERENCE=1"
-              py -${{ inputs.python_version }} -m poetry run python -m reptrace.inference "%REPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%REPTRACE_OUTPUT_DIR%\inference_%%D_time.csv" --out-clusters "%REPTRACE_OUTPUT_DIR%\inference_%%D_clusters.csv"
+            if exist "%NEUREPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" (
+              set "NEUREPTRACE_RAN_EXACT_INFERENCE=1"
+              py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference "%NEUREPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_%%D_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_%%D_clusters.csv"
             ) else (
               echo Skipping %%D inference because no exact %%D result files were produced.
             )
           )
-          if not defined REPTRACE_RAN_EXACT_INFERENCE (
-            py -${{ inputs.python_version }} -m poetry run python -m reptrace.inference %REPTRACE_SUBJECT_CSVS% --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%REPTRACE_OUTPUT_DIR%\inference_manifest_time.csv" --out-clusters "%REPTRACE_OUTPUT_DIR%\inference_manifest_clusters.csv"
+          if not defined NEUREPTRACE_RAN_EXACT_INFERENCE (
+            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference %NEUREPTRACE_SUBJECT_CSVS% --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_manifest_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_manifest_clusters.csv"
           )
           :after_inference
 

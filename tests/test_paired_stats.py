@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from reptrace.paired_stats import paired_decoder_statistics, sign_flip_p_value, subject_decoder_metrics
+from neureptrace.paired_stats import paired_decoder_statistics, sign_flip_p_value, subject_decoder_metrics
 
 
 def _write_decoder_csv(path: Path, subject: str, decoder: str, baseline: float, effect: float, *, emission_mode: str | None = None) -> None:

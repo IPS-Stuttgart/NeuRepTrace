@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from reptrace.decoding import (
+from neureptrace.decoding import (
     DECODER_CHOICES,
     make_cross_validator,
     make_decoder,

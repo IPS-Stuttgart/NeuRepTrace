@@ -1,7 +1,7 @@
 import numpy as np
 
-from reptrace.decoding import make_decoder
-from reptrace.decoding.temporal_generalization import (
+from neureptrace.decoding import make_decoder
+from neureptrace.decoding.temporal_generalization import (
     TemporalFeatureWindow,
     compute_temporal_generalization_matrix,
     summarize_temporal_generalization_matrix,

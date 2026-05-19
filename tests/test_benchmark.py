@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.benchmark import run_benchmark_manifest
+from neureptrace.benchmark import run_benchmark_manifest
 
 
 def _fake_decode(**kwargs):
@@ -88,7 +88,7 @@ def test_run_benchmark_manifest_runs_subjects_and_aggregates(tmp_path: Path, mon
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(manifest, out_dir=tmp_path / "results")
 
@@ -117,7 +117,7 @@ def test_run_benchmark_manifest_prepares_metadata_from_events(tmp_path: Path, mo
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run_benchmark_manifest(manifest, out_dir=tmp_path / "results")
 
@@ -140,7 +140,7 @@ def test_run_benchmark_manifest_supports_decoder_column(tmp_path: Path, monkeypa
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(manifest, out_dir=tmp_path / "results")
 
@@ -163,7 +163,7 @@ def test_run_benchmark_manifest_passes_calibration_output_paths(tmp_path: Path, 
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(
         manifest,
@@ -189,7 +189,7 @@ def test_run_benchmark_manifest_passes_observation_output_paths(tmp_path: Path, 
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(
         manifest,
@@ -261,7 +261,7 @@ def test_run_benchmark_manifest_can_compare_temporal_smoothing(tmp_path: Path, m
         pd.DataFrame(observation_rows).to_csv(observation_out_path, index=False)
         return frame
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(
         manifest,
@@ -293,7 +293,7 @@ def test_run_benchmark_manifest_supports_emission_mode_column(tmp_path: Path, mo
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(manifest, out_dir=tmp_path / "results")
 
@@ -319,7 +319,7 @@ def test_run_benchmark_manifest_supports_tuned_pca_whiten_variant(tmp_path: Path
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(manifest, out_dir=tmp_path / "results")
 
@@ -353,7 +353,7 @@ def test_run_benchmark_manifest_supports_tuned_temporal_train_window(tmp_path: P
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(manifest, out_dir=tmp_path / "results")
 
@@ -394,7 +394,7 @@ def test_run_benchmark_manifest_resume_skips_complete_existing_rows(tmp_path: Pa
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(manifest, out_dir=tmp_path / "results", resume=True)
 
@@ -432,7 +432,7 @@ def test_run_benchmark_manifest_resume_reruns_when_calibration_is_missing(tmp_pa
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(
         manifest,
@@ -473,7 +473,7 @@ def test_run_benchmark_manifest_resume_reruns_when_observations_are_missing(tmp_
         calls.append(kwargs)
         return _fake_decode(**kwargs)
 
-    monkeypatch.setattr("reptrace.benchmark.run_time_resolved_decode", fake_decode)
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
 
     run = run_benchmark_manifest(
         manifest,

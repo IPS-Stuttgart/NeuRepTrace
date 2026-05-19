@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from reptrace.mne_time_decode import run_time_resolved_decode
+from neureptrace.mne_time_decode import run_time_resolved_decode
 
 
 def _write_synthetic_epochs(tmp_path) -> object:

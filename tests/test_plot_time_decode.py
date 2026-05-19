@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.plot_time_decode import plot_time_decode_results
+from neureptrace.plot_time_decode import plot_time_decode_results
 
 
 def test_plot_time_decode_results_writes_png(tmp_path: Path):

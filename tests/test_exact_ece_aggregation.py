@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from reptrace.results import aggregate_time_decode_csvs, aggregate_time_decode_results
+from neureptrace.results import aggregate_time_decode_csvs, aggregate_time_decode_results
 
 
 def _fold_results(subjects=("s1",)) -> pd.DataFrame:

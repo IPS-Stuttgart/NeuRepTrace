@@ -1,3 +1,3 @@
 # Emission Compare
 
-::: reptrace.emission_compare
+::: neureptrace.emission_compare

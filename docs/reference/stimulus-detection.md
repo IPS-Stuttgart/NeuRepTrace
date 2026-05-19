@@ -1,8 +1,8 @@
 # Stimulus Detection
 
-`reptrace.stimulus_detection` detects zero, one, or many stimulus events in a
+`neureptrace.stimulus_detection` detects zero, one, or many stimulus events in a
 long probability stream. It is the stream-oriented counterpart to
-`reptrace.onset_detection`, which reports the first threshold crossing per
+`neureptrace.onset_detection`, which reports the first threshold crossing per
 trial-like probability-observation sequence.
 
 Use this module when a decoder has produced a time series of class probabilities
@@ -67,7 +67,7 @@ An optional annotation CSV may look like this:
 Without annotations:
 
 ```bash
-python -m reptrace.stimulus_detection \
+python -m neureptrace.stimulus_detection \
   results/sub-01_stream_observations.csv \
   --stream-column sequence_id \
   --score-mode class_probability \
@@ -84,7 +84,7 @@ python -m reptrace.stimulus_detection \
 With annotations:
 
 ```bash
-python -m reptrace.stimulus_detection \
+python -m neureptrace.stimulus_detection \
   results/sub-01_stream_observations.csv \
   --annotations results/sub-01_stimulus_annotations.csv \
   --stream-column stream_id \
@@ -118,7 +118,7 @@ This command:
 ```python
 import pandas as pd
 
-from reptrace.stimulus_detection import (
+from neureptrace.stimulus_detection import (
     detect_stimulus_events,
     fit_stimulus_detection_thresholds,
     match_stimulus_annotations,
@@ -168,7 +168,7 @@ This can detect reproducible event-like probability trajectories even when a
 single time bin is not a strong standalone threshold crossing.
 
 ```python
-from reptrace.stimulus_detection import (
+from neureptrace.stimulus_detection import (
     detect_matched_filter_stimulus_events,
     fit_matched_filter_thresholds,
     fit_stimulus_event_templates,
@@ -229,4 +229,4 @@ observe enough evidence before confirming the event.
 
 ## API reference
 
-::: reptrace.stimulus_detection
+::: neureptrace.stimulus_detection

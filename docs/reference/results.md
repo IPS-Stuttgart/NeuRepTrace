@@ -1,7 +1,7 @@
 # Results
 
-::: reptrace.results
+::: neureptrace.results
 
 ## Tables
 
-::: reptrace.results.tables
+::: neureptrace.results.tables

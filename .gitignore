@@ -48,8 +48,8 @@ _reference_pyrecest/
 data/
 outputs/
 results/
-!src/reptrace/results/
-!src/reptrace/results/*.py
+!src/neureptrace/results/
+!src/neureptrace/results/*.py
 *.fif
 *.h5
 *.hdf5

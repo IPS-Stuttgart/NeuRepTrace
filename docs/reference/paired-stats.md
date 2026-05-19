@@ -1,3 +1,3 @@
 # Paired Statistics
 
-::: reptrace.paired_stats
+::: neureptrace.paired_stats

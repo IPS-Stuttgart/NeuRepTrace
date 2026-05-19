@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from reptrace.mne_time_decode import run_time_resolved_decode
+from neureptrace.mne_time_decode import run_time_resolved_decode
 
 
 class FakeEpochs:
@@ -45,7 +45,7 @@ def test_run_time_resolved_decode_writes_probability_observations(tmp_path: Path
     data[labels == "animate", 0, :] += 0.5
     metadata = pd.DataFrame({"condition": labels, "session": ["a", "a", "b", "b", "c", "c", "d", "d"]})
     epochs = FakeEpochs(data, np.array([0.00, 0.01, 0.02, 0.03, 0.04]), metadata)
-    monkeypatch.setattr("reptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
 
     out = tmp_path / "decode.csv"
     observations_out = tmp_path / "observations.csv"
@@ -93,7 +93,7 @@ def test_temporal_train_window_ensemble_writes_all_test_times(tmp_path: Path, mo
     data[labels == "animate", 0, :2] += 0.75
     metadata = pd.DataFrame({"condition": labels, "session": ["a", "a", "b", "b", "c", "c", "d", "d"]})
     epochs = FakeEpochs(data, np.array([0.00, 0.01, 0.02, 0.03, 0.04]), metadata)
-    monkeypatch.setattr("reptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
 
     out = tmp_path / "decode_temporal_ensemble.csv"
     observations_out = tmp_path / "observations_temporal_ensemble.csv"
@@ -133,7 +133,7 @@ def test_run_time_resolved_decode_can_tune_decoder_hyperparameters(tmp_path: Pat
     data[labels == "animate", 0, :] += 0.5
     metadata = pd.DataFrame({"condition": labels, "session": ["a", "a", "b", "b", "c", "c", "d", "d", "e", "e", "f", "f"]})
     epochs = FakeEpochs(data, np.array([0.00, 0.01, 0.02, 0.03, 0.04]), metadata)
-    monkeypatch.setattr("reptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
 
     out = tmp_path / "decode.csv"
     observations_out = tmp_path / "observations.csv"
@@ -166,7 +166,7 @@ def test_temporal_train_window_ensemble_can_tune_hyperparameters(tmp_path: Path,
     data[labels == "animate", 0, :2] += 0.75
     metadata = pd.DataFrame({"condition": labels, "session": ["a", "a", "b", "b", "c", "c", "d", "d", "e", "e", "f", "f"]})
     epochs = FakeEpochs(data, np.array([0.00, 0.01, 0.02, 0.03, 0.04]), metadata)
-    monkeypatch.setattr("reptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
 
     out = tmp_path / "decode_temporal_tuned.csv"
     observations_out = tmp_path / "observations_temporal_tuned.csv"

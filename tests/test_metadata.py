@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from reptrace.metadata import add_binary_label
+from neureptrace.metadata import add_binary_label
 
 
 def test_add_binary_label_marks_positive_and_default_negative():

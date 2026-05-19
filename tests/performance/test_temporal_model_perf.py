@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from reptrace.temporal_model import fit_sticky_switching_model, fit_temporal_models
+from neureptrace.temporal_model import fit_sticky_switching_model, fit_temporal_models
 
 from .synthetic import synthetic_probability_observations, write_observation_csvs
 

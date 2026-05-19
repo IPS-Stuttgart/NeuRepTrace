@@ -6,8 +6,8 @@ import mne
 import numpy as np
 import pandas as pd
 
-from reptrace.continuous_stimulus_scan import label_event_table, run_continuous_stimulus_scan
-from reptrace.observation_schema import validate_probability_observations
+from neureptrace.continuous_stimulus_scan import label_event_table, run_continuous_stimulus_scan
+from neureptrace.observation_schema import validate_probability_observations
 
 
 def _write_raw(path: Path, events: pd.DataFrame, *, sfreq: float = 100.0, duration: float = 9.0) -> None:

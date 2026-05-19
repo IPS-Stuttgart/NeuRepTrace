@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pandas as pd
 
-from reptrace.observation_schema import (
+from neureptrace.observation_schema import (
     probability_columns,
     read_validated_probability_observations,
     summarize_probability_observations,
     validate_probability_observations,
 )
-from reptrace.observation_schema import main as validate_observations_main
+from neureptrace.observation_schema import main as validate_observations_main
 
 
 def _valid_observations() -> pd.DataFrame:

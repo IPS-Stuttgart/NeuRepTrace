@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.onset_workflow import plot_onset_summary, run_onset_workflow, run_task_onset_detection
+from neureptrace.onset_workflow import plot_onset_summary, run_onset_workflow, run_task_onset_detection
 from onset_test_helpers import FALSE_ALARM_TRACE, write_observations
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from reptrace.stimulus_detection import detect_stimulus_events
+from neureptrace.stimulus_detection import detect_stimulus_events
 
 THRESHOLD_WINDOW = (-0.65, -0.05)
 

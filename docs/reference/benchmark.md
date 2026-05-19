@@ -1,3 +1,3 @@
 # Benchmark
 
-::: reptrace.benchmark
+::: neureptrace.benchmark

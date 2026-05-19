@@ -109,9 +109,9 @@ jobs:
 
       - name: Run mocked PyMEGDec downstream smoke tests
         run: |
-          REPTRACE_PYTHON="$(cd NeuRepTrace && poetry env info --path)/bin/python"
+          NEUREPTRACE_PYTHON="$(cd NeuRepTrace && poetry env info --path)/bin/python"
           cd PyMEGDec
-          "$REPTRACE_PYTHON" -m unittest \
+          "$NEUREPTRACE_PYTHON" -m unittest \
             tests.test_stimulus_decoding.TestStimulusDecoding.test_evaluate_participant_time_resolved_stimulus_transfer \
             tests.test_stimulus_decoding.TestStimulusDecoding.test_evaluate_participant_stimulus_temporal_generalization \
             tests.test_stimulus_decoding.TestStimulusDecoding.test_evaluate_participant_stimulus_onset_scan

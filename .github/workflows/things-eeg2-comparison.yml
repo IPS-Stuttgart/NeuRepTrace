@@ -210,10 +210,10 @@ jobs:
 
           & py "-${{ inputs.python_version }}" -m poetry run python @stageArgs
 
-          "REPTRACE_THINGS_ROOT=$dataRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "REPTRACE_LABEL_MAP=$labelMap" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "REPTRACE_OUTPUT_DIR=$outputDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "REPTRACE_RUN_MANIFEST=$runManifest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NEUREPTRACE_THINGS_ROOT=$dataRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NEUREPTRACE_LABEL_MAP=$labelMap" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NEUREPTRACE_OUTPUT_DIR=$outputDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NEUREPTRACE_RUN_MANIFEST=$runManifest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "Using THINGS-EEG2 root: $dataRoot"
           "Using label map: $labelMap"
           "Wrote run manifest: $runManifest"
@@ -223,14 +223,14 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: |
-          py -${{ inputs.python_version }} -m poetry run python -m reptrace.validate_manifest "%REPTRACE_RUN_MANIFEST%" --report-out "%REPTRACE_OUTPUT_DIR%\validation.csv"
+          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.validate_manifest "%NEUREPTRACE_RUN_MANIFEST%" --report-out "%NEUREPTRACE_OUTPUT_DIR%\validation.csv"
 
       - name: Run THINGS-EEG2 decoder comparison
         shell: cmd
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: |
-          py -${{ inputs.python_version }} -m poetry run python -m reptrace.benchmark "%REPTRACE_RUN_MANIFEST%" --out-dir "%REPTRACE_OUTPUT_DIR%" --aggregate-out "%REPTRACE_OUTPUT_DIR%\summary.csv" --plot-out "%REPTRACE_OUTPUT_DIR%\summary.png" --calibration-dir "%REPTRACE_OUTPUT_DIR%\calibration" --chance ${{ inputs.chance }} --resume
+          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.benchmark "%NEUREPTRACE_RUN_MANIFEST%" --out-dir "%NEUREPTRACE_OUTPUT_DIR%" --aggregate-out "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" --plot-out "%NEUREPTRACE_OUTPUT_DIR%\summary.png" --calibration-dir "%NEUREPTRACE_OUTPUT_DIR%\calibration" --chance ${{ inputs.chance }} --resume
 
       - name: Generate THINGS-EEG2 reports and inference tables
         shell: pwsh
@@ -239,15 +239,15 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $decoders = "${{ inputs.decoders }}" -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-          & py "-${{ inputs.python_version }}" -m poetry run python -m reptrace.report "$env:REPTRACE_OUTPUT_DIR\summary.csv" "$env:REPTRACE_OUTPUT_DIR\sub-*_time_decode.csv" --out "$env:REPTRACE_OUTPUT_DIR\report.md" --chance "${{ inputs.chance }}"
-          & py "-${{ inputs.python_version }}" -m poetry run python -m reptrace.calibration "$env:REPTRACE_OUTPUT_DIR\summary.csv" "$env:REPTRACE_OUTPUT_DIR\calibration\*_calibration_bins.csv" --out-report "$env:REPTRACE_OUTPUT_DIR\calibration_report.md" --out-bins "$env:REPTRACE_OUTPUT_DIR\reliability_bins.csv"
-          & py "-${{ inputs.python_version }}" -m poetry run python -m reptrace.plot_calibration "$env:REPTRACE_OUTPUT_DIR\reliability_bins.csv" --out "$env:REPTRACE_OUTPUT_DIR\reliability.png" --time-window 0.1 "${{ inputs.tmax }}" --title "THINGS-EEG2 decoder calibration"
+          & py "-${{ inputs.python_version }}" -m poetry run python -m neureptrace.report "$env:NEUREPTRACE_OUTPUT_DIR\summary.csv" "$env:NEUREPTRACE_OUTPUT_DIR\sub-*_time_decode.csv" --out "$env:NEUREPTRACE_OUTPUT_DIR\report.md" --chance "${{ inputs.chance }}"
+          & py "-${{ inputs.python_version }}" -m poetry run python -m neureptrace.calibration "$env:NEUREPTRACE_OUTPUT_DIR\summary.csv" "$env:NEUREPTRACE_OUTPUT_DIR\calibration\*_calibration_bins.csv" --out-report "$env:NEUREPTRACE_OUTPUT_DIR\calibration_report.md" --out-bins "$env:NEUREPTRACE_OUTPUT_DIR\reliability_bins.csv"
+          & py "-${{ inputs.python_version }}" -m poetry run python -m neureptrace.plot_calibration "$env:NEUREPTRACE_OUTPUT_DIR\reliability_bins.csv" --out "$env:NEUREPTRACE_OUTPUT_DIR\reliability.png" --time-window 0.1 "${{ inputs.tmax }}" --title "THINGS-EEG2 decoder calibration"
           if ($decoders.Count -gt 1) {
-            & py "-${{ inputs.python_version }}" -m poetry run python -m reptrace.paired_stats "$env:REPTRACE_OUTPUT_DIR\sub-*_time_decode.csv" --out-csv "$env:REPTRACE_OUTPUT_DIR\paired_stats.csv" --out-report "$env:REPTRACE_OUTPUT_DIR\paired_stats.md" --chance "${{ inputs.chance }}" --n-permutations "${{ inputs.n_permutations }}"
+            & py "-${{ inputs.python_version }}" -m poetry run python -m neureptrace.paired_stats "$env:NEUREPTRACE_OUTPUT_DIR\sub-*_time_decode.csv" --out-csv "$env:NEUREPTRACE_OUTPUT_DIR\paired_stats.csv" --out-report "$env:NEUREPTRACE_OUTPUT_DIR\paired_stats.md" --chance "${{ inputs.chance }}" --n-permutations "${{ inputs.n_permutations }}"
           }
           foreach ($decoder in $decoders) {
             $decoderSafe = $decoder.ToLower().Replace("-", "_").Replace(" ", "_")
-            & py "-${{ inputs.python_version }}" -m poetry run python -m reptrace.inference "$env:REPTRACE_OUTPUT_DIR\sub-*_${decoderSafe}_time_decode.csv" --chance "${{ inputs.chance }}" --n-permutations "${{ inputs.n_permutations }}" --out-time "$env:REPTRACE_OUTPUT_DIR\inference_${decoderSafe}_time.csv" --out-clusters "$env:REPTRACE_OUTPUT_DIR\inference_${decoderSafe}_clusters.csv"
+            & py "-${{ inputs.python_version }}" -m poetry run python -m neureptrace.inference "$env:NEUREPTRACE_OUTPUT_DIR\sub-*_${decoderSafe}_time_decode.csv" --chance "${{ inputs.chance }}" --n-permutations "${{ inputs.n_permutations }}" --out-time "$env:NEUREPTRACE_OUTPUT_DIR\inference_${decoderSafe}_time.csv" --out-clusters "$env:NEUREPTRACE_OUTPUT_DIR\inference_${decoderSafe}_clusters.csv"
           }
 
       - name: Upload compact result artifacts

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from reptrace.decoding.hyperalignment_initialization import (
+from neureptrace.decoding.hyperalignment_initialization import (
     HYPERALIGNMENT_INITIALIZATION_MODES,
     fit_class_hyperalignment,
     fit_hyperalignment,

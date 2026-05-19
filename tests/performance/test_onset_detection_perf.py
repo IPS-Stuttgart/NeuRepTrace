@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from reptrace.onset_detection import annotate_threshold_crossings, detect_onsets
+from neureptrace.onset_detection import annotate_threshold_crossings, detect_onsets
 
 from .synthetic import synthetic_probability_observations
 

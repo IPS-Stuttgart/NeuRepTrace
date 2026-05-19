@@ -9,7 +9,7 @@ poetry install --with dev
 Run the first benchmark against an MNE epochs file:
 
 ```bash
-python -m reptrace.mne_time_decode \
+python -m neureptrace.mne_time_decode \
   --epochs path/to/sub-01_epo.fif \
   --metadata-csv path/to/sub-01_events.csv \
   --label-column stim_is_animate \
@@ -24,7 +24,7 @@ If the metadata does not yet contain the binary decoding target, derive one from
 a text column:
 
 ```bash
-python -m reptrace.metadata \
+python -m neureptrace.metadata \
   --events-csv data/nod/sub-01_events.csv \
   --source-column stim_is_animate \
   --positive-pattern "True" \

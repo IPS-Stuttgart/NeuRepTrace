@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from reptrace.decoding import (
+from neureptrace.decoding import (
     DEFAULT_CLASS_LIMIT_SELECTION,
     normalize_class_limit_seed,
     normalize_class_limit_selection,

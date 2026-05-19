@@ -4,7 +4,7 @@ import mne
 import numpy as np
 import pandas as pd
 
-from reptrace.mne_time_decode import run_time_resolved_decode
+from neureptrace.mne_time_decode import run_time_resolved_decode
 
 
 def main() -> None:

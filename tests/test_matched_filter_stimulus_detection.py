@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from reptrace.matched_filter_detection import (
+from neureptrace.matched_filter_detection import (
     detect_matched_filter_stimulus_events,
     fit_matched_filter_thresholds,
     fit_stimulus_event_templates,
