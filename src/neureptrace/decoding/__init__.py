@@ -605,7 +605,7 @@ def make_tuning_scorer(scoring: str, *, emission_mode: str = "calibrated") -> st
 
     Accuracy-oriented objectives are forwarded to scikit-learn by name. Probability
     objectives are implemented here so they use the same calibrated or
-    score-derived emissions that RepTrace writes to the held-out observation
+    score-derived emissions that NeuRepTrace writes to the held-out observation
     tables. This keeps model selection aligned with downstream temporal-state
     inference, where probability quality matters more than the hard class label.
     """

@@ -45,8 +45,8 @@ For probability-driven model selection, tune inside each outer training fold
 with a proper or calibration-oriented probability objective instead of accuracy:
 
 ```bash
-python -m reptrace.mne_time_decode ... --tune-hyperparameters --tuning-scoring neg_log_loss
-python -m reptrace.mne_time_decode ... --tune-hyperparameters --tuning-scoring neg_brier
+python -m neureptrace.mne_time_decode ... --tune-hyperparameters --tuning-scoring neg_log_loss
+python -m neureptrace.mne_time_decode ... --tune-hyperparameters --tuning-scoring neg_brier
 ```
 
 The optional observations CSV keeps the held-out decoder probabilities before
