@@ -6,10 +6,11 @@ from typing import Any
 
 import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import make_pipeline
@@ -30,6 +31,10 @@ DEFAULT_CLASSIFIER_PARAMS = {
     "scikit-mlp": (150, 1000),
     "correlation-prototype": None,
     "multinomial-logistic": 1.0,
+    "multinomial-logistic-weighted": 1.0,
+    "gaussian-naive-bayes": 1e-9,
+    "regularized-qda": 0.5,
+    "shrinkage-prototype": 0.25,
     "shrinkage-lda": None,
     "xgboost": 100,
     "pytorch-mlp": {
@@ -101,6 +106,51 @@ class CorrelationPrototypeClassifier(ClassifierMixin, BaseEstimator):
         norms = np.linalg.norm(centered, axis=1, keepdims=True)
         norms = np.where(norms < 1e-12, 1.0, norms)
         return centered / norms
+
+
+class ShrinkagePrototypeClassifier(ClassifierMixin, BaseEstimator):
+    """Classify rows by distance to class prototypes shrunk toward the grand mean."""
+
+    def __init__(self, shrinkage: float = 0.25):
+        self.shrinkage = float(shrinkage)
+        self.classes_: np.ndarray | None = None
+        self.class_prototypes_: np.ndarray | None = None
+        self.global_prototype_: np.ndarray | None = None
+        self.shrunk_prototypes_: np.ndarray | None = None
+
+    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence | np.ndarray):
+        features = np.asarray(features, dtype=float)
+        labels = np.asarray(labels).ravel()
+        if features.ndim != 2:
+            raise ValueError("features must be a two-dimensional feature matrix.")
+        if labels.shape[0] != features.shape[0]:
+            raise ValueError("labels must contain one label per feature row.")
+        if features.shape[0] == 0:
+            raise ValueError("At least one training row is required.")
+        if not 0.0 <= self.shrinkage <= 1.0:
+            raise ValueError("shrinkage-prototype classifier_param must be a numeric shrinkage in [0, 1].")
+
+        self.classes_ = np.unique(labels)
+        if self.classes_.size == 0:
+            raise ValueError("At least one class is required.")
+        self.class_prototypes_ = np.vstack([np.mean(features[labels == class_label], axis=0) for class_label in self.classes_])
+        self.global_prototype_ = np.mean(features, axis=0, keepdims=True)
+        self.shrunk_prototypes_ = (1.0 - self.shrinkage) * self.class_prototypes_ + self.shrinkage * self.global_prototype_
+        return self
+
+    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        if self.shrunk_prototypes_ is None:
+            raise RuntimeError("ShrinkagePrototypeClassifier must be fitted before scoring.")
+        features = np.asarray(features, dtype=float)
+        if features.ndim != 2:
+            raise ValueError("features must be a two-dimensional feature matrix.")
+        squared_distances = np.sum(np.square(features[:, None, :] - self.shrunk_prototypes_[None, :, :]), axis=2)
+        return -squared_distances
+
+    def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        if self.classes_ is None:
+            raise RuntimeError("ShrinkagePrototypeClassifier must be fitted before prediction.")
+        return self.classes_[np.argmax(self.decision_function(features), axis=1)]
 
 
 class DecodedLabelClassifier:
@@ -242,6 +292,39 @@ def _build_multinomial_logistic(_features: np.ndarray, _labels: np.ndarray, clas
     return LogisticRegression(C=float(classifier_param), max_iter=1000, random_state=random_state)
 
 
+def _build_weighted_multinomial_logistic(_features: np.ndarray, _labels: np.ndarray, classifier_param: Any, random_state: int | None):
+    return LogisticRegression(
+        C=float(classifier_param),
+        class_weight="balanced",
+        max_iter=1000,
+        random_state=random_state,
+    )
+
+
+def _build_gaussian_naive_bayes(_features: np.ndarray, _labels: np.ndarray, classifier_param: Any, _random_state: int | None):
+    return GaussianNB(var_smoothing=float(classifier_param))
+
+
+def _build_regularized_qda(_features: np.ndarray, _labels: np.ndarray, classifier_param: Any, _random_state: int | None):
+    reg_param = DEFAULT_CLASSIFIER_PARAMS["regularized-qda"] if classifier_param is None else float(classifier_param)
+    if not 0.0 <= reg_param <= 1.0:
+        raise ValueError("regularized-qda classifier_param must be a numeric regularization in [0, 1].")
+    return QuadraticDiscriminantAnalysis(reg_param=reg_param)
+
+
+def _normalize_shrinkage_prototype_param(classifier_param: Any):
+    if classifier_param is None:
+        return DEFAULT_CLASSIFIER_PARAMS["shrinkage-prototype"]
+    shrinkage = float(classifier_param)
+    if not 0.0 <= shrinkage <= 1.0:
+        raise ValueError("shrinkage-prototype classifier_param must be a numeric shrinkage in [0, 1].")
+    return shrinkage
+
+
+def _build_shrinkage_prototype(_features: np.ndarray, _labels: np.ndarray, classifier_param: Any, _random_state: int | None):
+    return ShrinkagePrototypeClassifier(shrinkage=_normalize_shrinkage_prototype_param(classifier_param))
+
+
 def _normalize_lda_shrinkage(classifier_param: Any):
     if classifier_param is None:
         return "auto"
@@ -280,6 +363,10 @@ CLASSIFIER_REGISTRY = {
     "scikit-mlp": ClassifierSpec(_build_scikit_mlp),
     "correlation-prototype": ClassifierSpec(_build_correlation_prototype),
     "multinomial-logistic": ClassifierSpec(_build_multinomial_logistic),
+    "multinomial-logistic-weighted": ClassifierSpec(_build_weighted_multinomial_logistic),
+    "gaussian-naive-bayes": ClassifierSpec(_build_gaussian_naive_bayes),
+    "regularized-qda": ClassifierSpec(_build_regularized_qda),
+    "shrinkage-prototype": ClassifierSpec(_build_shrinkage_prototype),
     "shrinkage-lda": ClassifierSpec(_build_shrinkage_lda),
     "xgboost": ClassifierSpec(_build_xgboost),
     "pytorch-mlp": ClassifierSpec(_build_pytorch_mlp_classifier, fits_in_builder=True),

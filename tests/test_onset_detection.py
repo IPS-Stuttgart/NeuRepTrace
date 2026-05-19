@@ -53,6 +53,72 @@ def _observation_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _metadata_grouping_frame() -> pd.DataFrame:
+    rows = []
+    thresholds = {
+        "low": (0.20, 0.30),
+        "high": (0.80, 0.90),
+    }
+    for classifier_index, (classifier, baseline_scores) in enumerate(thresholds.items()):
+        for local_sequence_id in range(2):
+            sequence_id = classifier_index * 10 + local_sequence_id
+            for time, confidence in [
+                (-0.20, baseline_scores[0]),
+                (-0.10, baseline_scores[1]),
+                (0.10, 0.95),
+            ]:
+                rows.append(
+                    {
+                        "participant": "sub-01",
+                        "classifier": classifier,
+                        "time": time,
+                        "sequence_id": sequence_id,
+                        "predicted_label": 0,
+                        "predicted_class": "class-0",
+                        "confidence": confidence,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def test_default_grouping_uses_participant_and_classifier_alias_columns():
+    thresholded = annotate_threshold_crossings(
+        _metadata_grouping_frame(),
+        threshold_window=(-0.20, -0.10),
+        threshold_quantile=1.0,
+    )
+
+    thresholds = thresholded.groupby("classifier")["score_threshold"].first().to_dict()
+
+    assert thresholds == {"high": 0.90, "low": 0.30}
+    threshold_group_columns = thresholded["threshold_group_columns"].iloc[0].split(",")
+    assert "participant" in threshold_group_columns
+    assert "classifier" in threshold_group_columns
+
+
+def test_detect_onsets_recomputes_cached_thresholds_when_group_columns_change():
+    pooled = annotate_threshold_crossings(
+        _metadata_grouping_frame(),
+        threshold_window=(-0.20, -0.10),
+        threshold_quantile=1.0,
+        group_columns=[],
+    )
+
+    assert pooled["score_threshold"].nunique() == 1
+    assert pooled["score_threshold"].iloc[0] == 0.90
+
+    events = detect_onsets(
+        pooled,
+        threshold_window=(-0.20, -0.10),
+        threshold_quantile=1.0,
+        detection_start=0.0,
+        group_columns=["classifier"],
+    )
+
+    thresholds = events.groupby("classifier")["score_threshold"].first().to_dict()
+    assert thresholds == {"high": 0.90, "low": 0.30}
+
+
 def test_detect_onsets_finds_first_threshold_crossing():
     events = detect_onsets(
         _observation_frame(),

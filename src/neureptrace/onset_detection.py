@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +20,32 @@ DEFAULT_THRESHOLD_WINDOW = (-0.35, -0.05)
 DEFAULT_DETECTION_WINDOW = (0.0, float("inf"))
 DEFAULT_THRESHOLD_QUANTILE = 0.95
 THRESHOLD_METHODS = ("point", "max_run")
-GROUP_COLUMNS = ("subject", "decoder", "emission_mode")
+DEFAULT_GROUP_COLUMN_CANDIDATES = (
+    "subject",
+    "participant",
+    "participant_id",
+    "session",
+    "session_id",
+    "task",
+    "condition",
+    "decoder",
+    "classifier",
+    "model",
+    "model_name",
+    "emission_mode",
+    "variant",
+    "analysis",
+    "source_file",
+    "train_subject",
+    "source_subject",
+    "validation_subject",
+    "target_subject",
+    "train_window_center_s",
+    "train_window_start_s",
+    "train_window_stop_s",
+    "window_size_s",
+)
+GROUP_COLUMNS = DEFAULT_GROUP_COLUMN_CANDIDATES
 
 
 def _expand_paths(patterns: list[str]) -> list[Path]:
@@ -33,8 +59,33 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
     return paths
 
 
-def _group_columns(frame: pd.DataFrame) -> list[str]:
-    return [column for column in GROUP_COLUMNS if column in frame.columns]
+def _requested_group_columns(group_columns: Sequence[str] | str | None) -> list[str]:
+    if group_columns is None:
+        return list(GROUP_COLUMNS)
+    if isinstance(group_columns, str):
+        return [group_columns]
+    return list(group_columns)
+
+
+def _group_columns(
+    frame: pd.DataFrame,
+    group_columns: Sequence[str] | str | None = None,
+) -> list[str]:
+    requested_columns = _requested_group_columns(group_columns)
+    missing_columns = [column for column in requested_columns if column not in frame.columns]
+    if group_columns is not None and missing_columns:
+        missing = ", ".join(missing_columns)
+        raise ValueError(f"Requested grouping columns are missing from observations: {missing}")
+
+    resolved_columns: list[str] = []
+    for column in requested_columns:
+        if column in frame.columns and column not in resolved_columns:
+            resolved_columns.append(column)
+    return resolved_columns
+
+
+def _format_group_columns(group_columns: Sequence[str]) -> str:
+    return ",".join(group_columns)
 
 
 def _sequence_columns(frame: pd.DataFrame) -> list[str]:
@@ -349,6 +400,7 @@ def _event_row(
     min_consecutive: int,
     min_duration: float | None,
     require_stable_prediction: bool,
+    threshold_group_columns: Sequence[str],
 ) -> dict:
     first_row = sequence_frame.iloc[0]
     detection_row = detection_run.iloc[0] if detection_run is not None and not detection_run.empty else None
@@ -365,6 +417,7 @@ def _event_row(
         "score_threshold": threshold,
         "score_column": score_column,
         "threshold_method": threshold_method,
+        "threshold_group_columns": _format_group_columns(threshold_group_columns),
         "threshold_quantile": threshold_quantile,
         "threshold_window_start": threshold_window[0],
         "threshold_window_stop": threshold_window[1],
@@ -434,6 +487,7 @@ def _annotate_group_threshold(
     min_consecutive: int,
     min_duration: float | None,
     require_stable_prediction: bool,
+    threshold_group_columns: Sequence[str],
 ) -> pd.DataFrame:
     frame = frame.copy()
     frame["_onset_score"] = _score_values(frame, score_column)
@@ -452,6 +506,7 @@ def _annotate_group_threshold(
     frame["above_threshold"] = np.isfinite(threshold) & (frame["_onset_score"] >= threshold)
     frame["score_column"] = score_column
     frame["threshold_method"] = threshold_method
+    frame["threshold_group_columns"] = _format_group_columns(threshold_group_columns)
     frame["threshold_quantile"] = threshold_quantile
     frame["threshold_window_start"] = threshold_window[0]
     frame["threshold_window_stop"] = threshold_window[1]
@@ -473,8 +528,13 @@ def annotate_threshold_crossings(
     min_consecutive: int = 1,
     min_duration: float | None = None,
     require_stable_prediction: bool = False,
+    group_columns: Sequence[str] | str | None = None,
 ) -> pd.DataFrame:
-    """Annotate observation rows with baseline-derived threshold crossings."""
+    """Annotate observation rows with baseline-derived threshold crossings.
+
+    Thresholds are estimated independently for each resolved metadata group.
+    Pass ``group_columns=[]`` to intentionally pool all observations.
+    """
 
     if not 0.0 <= threshold_quantile <= 1.0:
         raise ValueError("threshold_quantile must be between 0 and 1.")
@@ -484,9 +544,13 @@ def annotate_threshold_crossings(
         raise ValueError("Observation rows must contain a time column.")
 
     observations = _ensure_prediction_columns(observations)
-    group_columns = _group_columns(observations)
+    resolved_group_columns = _group_columns(observations, group_columns)
     frames = []
-    grouped = observations.groupby(group_columns, sort=True) if group_columns else [((), observations)]
+    grouped = (
+        observations.groupby(resolved_group_columns, sort=True, dropna=False)
+        if resolved_group_columns
+        else [((), observations)]
+    )
     for _, group_frame in grouped:
         frames.append(
             _annotate_group_threshold(
@@ -498,6 +562,7 @@ def annotate_threshold_crossings(
                 min_consecutive=min_consecutive,
                 min_duration=min_duration,
                 require_stable_prediction=require_stable_prediction,
+                threshold_group_columns=resolved_group_columns,
             )
         )
     return pd.concat(frames, ignore_index=True) if frames else observations.copy()
@@ -551,6 +616,7 @@ def _has_matching_threshold_annotation(
     min_consecutive: int,
     min_duration: float | None,
     require_stable_prediction: bool,
+    group_columns: Sequence[str],
 ) -> bool:
     if "score_threshold" not in observations.columns:
         return False
@@ -572,6 +638,8 @@ def _has_matching_threshold_annotation(
         return False
     if not _column_matches_bool(observations, "require_stable_prediction", require_stable_prediction):
         return False
+    if not _column_matches_text(observations, "threshold_group_columns", _format_group_columns(group_columns)):
+        return False
     return True
 
 
@@ -585,6 +653,7 @@ def _prepare_thresholded_observations(
     min_consecutive: int,
     min_duration: float | None,
     require_stable_prediction: bool,
+    group_columns: Sequence[str],
 ) -> pd.DataFrame:
     if _has_matching_threshold_annotation(
         observations,
@@ -595,6 +664,7 @@ def _prepare_thresholded_observations(
         min_consecutive=min_consecutive,
         min_duration=min_duration,
         require_stable_prediction=require_stable_prediction,
+        group_columns=group_columns,
     ):
         thresholded = _ensure_prediction_columns(observations).copy()
         if "_onset_score" not in thresholded.columns:
@@ -613,6 +683,7 @@ def _prepare_thresholded_observations(
         min_consecutive=min_consecutive,
         min_duration=min_duration,
         require_stable_prediction=require_stable_prediction,
+        group_columns=group_columns,
     )
 
 
@@ -651,16 +722,21 @@ def summarize_threshold_crossings(
     *,
     baseline_window: tuple[float, float] = DEFAULT_THRESHOLD_WINDOW,
     detection_window: tuple[float, float] = DEFAULT_DETECTION_WINDOW,
+    group_columns: Sequence[str] | str | None = None,
 ) -> pd.DataFrame:
     """Summarize baseline false positives separately from post-event detections."""
 
-    group_columns = _group_columns(thresholded_observations)
+    resolved_group_columns = _group_columns(thresholded_observations, group_columns)
     sequence_columns = _sequence_columns(thresholded_observations)
     rows = []
-    grouped = thresholded_observations.groupby(group_columns, sort=True) if group_columns else [((), thresholded_observations)]
+    grouped = (
+        thresholded_observations.groupby(resolved_group_columns, sort=True, dropna=False)
+        if resolved_group_columns
+        else [((), thresholded_observations)]
+    )
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
-        group_values = dict(zip(group_columns, key_values, strict=True))
+        group_values = dict(zip(resolved_group_columns, key_values, strict=True))
         baseline_stats = _window_threshold_stats(group_frame, baseline_window, sequence_columns)
         detection_stats = _window_threshold_stats(group_frame, detection_window, sequence_columns)
         rows.append(
@@ -669,6 +745,11 @@ def summarize_threshold_crossings(
                 "score_threshold": group_frame["score_threshold"].iloc[0] if "score_threshold" in group_frame else np.nan,
                 "score_column": group_frame["score_column"].iloc[0] if "score_column" in group_frame else "",
                 "threshold_method": group_frame["threshold_method"].iloc[0] if "threshold_method" in group_frame else "",
+                "threshold_group_columns": (
+                    group_frame["threshold_group_columns"].iloc[0]
+                    if "threshold_group_columns" in group_frame
+                    else _format_group_columns(resolved_group_columns)
+                ),
                 "threshold_quantile": group_frame["threshold_quantile"].iloc[0] if "threshold_quantile" in group_frame else np.nan,
                 "baseline_window_start": baseline_window[0],
                 "baseline_window_stop": baseline_window[1],
@@ -704,6 +785,7 @@ def detect_onsets(
     min_consecutive: int = 1,
     min_duration: float | None = None,
     require_stable_prediction: bool = False,
+    group_columns: Sequence[str] | str | None = None,
 ) -> pd.DataFrame:
     """Find the first threshold-crossing time for each probability-observation sequence.
 
@@ -724,6 +806,7 @@ def detect_onsets(
     if "time" not in observations.columns:
         raise ValueError("Observation rows must contain a time column.")
 
+    resolved_group_columns = _group_columns(observations, group_columns)
     observations = _prepare_thresholded_observations(
         observations,
         threshold_window=threshold_window,
@@ -733,15 +816,19 @@ def detect_onsets(
         min_consecutive=min_consecutive,
         min_duration=min_duration,
         require_stable_prediction=require_stable_prediction,
+        group_columns=resolved_group_columns,
     )
-    group_columns = _group_columns(observations)
     sequence_columns = _sequence_columns(observations)
     event_rows = []
 
-    grouped = observations.groupby(group_columns, sort=True) if group_columns else [((), observations)]
+    grouped = (
+        observations.groupby(resolved_group_columns, sort=True, dropna=False)
+        if resolved_group_columns
+        else [((), observations)]
+    )
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
-        group_values = dict(zip(group_columns, key_values, strict=True))
+        group_values = dict(zip(resolved_group_columns, key_values, strict=True))
         threshold = (
             group_frame["score_threshold"].iloc[0]
             if "score_threshold" in group_frame
@@ -787,20 +874,29 @@ def detect_onsets(
                     min_consecutive=min_consecutive,
                     min_duration=min_duration,
                     require_stable_prediction=require_stable_prediction,
+                    threshold_group_columns=resolved_group_columns,
                 )
             )
     return pd.DataFrame(event_rows)
 
 
-def summarize_onset_events(events: pd.DataFrame) -> pd.DataFrame:
+def summarize_onset_events(
+    events: pd.DataFrame,
+    *,
+    group_columns: Sequence[str] | str | None = None,
+) -> pd.DataFrame:
     """Summarize onset-detection events by subject/decoder/emission group."""
 
-    group_columns = _group_columns(events)
+    resolved_group_columns = _group_columns(events, group_columns)
     rows = []
-    grouped = events.groupby(group_columns, sort=True) if group_columns else [((), events)]
+    grouped = (
+        events.groupby(resolved_group_columns, sort=True, dropna=False)
+        if resolved_group_columns
+        else [((), events)]
+    )
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
-        group_values = dict(zip(group_columns, key_values, strict=True))
+        group_values = dict(zip(resolved_group_columns, key_values, strict=True))
         detected = group_frame["detected"].astype(bool)
         false_alarm = group_frame["detected_before_zero"].astype(bool)
         correct = group_frame["is_correct_at_detection"].astype(bool)
@@ -845,6 +941,11 @@ def summarize_onset_events(events: pd.DataFrame) -> pd.DataFrame:
                     if "threshold_method" in group_frame
                     else ""
                 ),
+                "threshold_group_columns": (
+                    group_frame["threshold_group_columns"].iloc[0]
+                    if "threshold_group_columns" in group_frame
+                    else _format_group_columns(resolved_group_columns)
+                ),
                 "threshold_quantile": (
                     group_frame["threshold_quantile"].iloc[0]
                     if "threshold_quantile" in group_frame
@@ -883,6 +984,7 @@ def detect_onsets_from_csvs(
     min_consecutive: int = 1,
     min_duration: float | None = None,
     require_stable_prediction: bool = False,
+    group_columns: Sequence[str] | str | None = None,
     out_events: Path | None = None,
     out_summary: Path | None = None,
     out_thresholded_observations: Path | None = None,
@@ -902,6 +1004,7 @@ def detect_onsets_from_csvs(
         min_consecutive=min_consecutive,
         min_duration=min_duration,
         require_stable_prediction=require_stable_prediction,
+        group_columns=group_columns,
     )
     events = detect_onsets(
         thresholded_observations,
@@ -914,12 +1017,14 @@ def detect_onsets_from_csvs(
         min_consecutive=min_consecutive,
         min_duration=min_duration,
         require_stable_prediction=require_stable_prediction,
+        group_columns=group_columns,
     )
-    summary = summarize_onset_events(events)
+    summary = summarize_onset_events(events, group_columns=group_columns)
     threshold_summary = summarize_threshold_crossings(
         thresholded_observations,
         baseline_window=threshold_window,
         detection_window=event_detection_window,
+        group_columns=group_columns,
     )
     if out_events is not None:
         out_events.parent.mkdir(parents=True, exist_ok=True)
@@ -978,6 +1083,22 @@ def main() -> None:
         action="store_true",
         help="Require the predicted class to remain stable across the onset run.",
     )
+    parser.add_argument(
+        "--group-column",
+        action="append",
+        dest="group_columns",
+        help=(
+            "Metadata column used for independent baseline thresholds and summaries. "
+            "Repeat this option for multiple columns. By default, common metadata columns "
+            "such as subject/participant, decoder/classifier, session, source_file, and "
+            "training-window columns are autodetected."
+        ),
+    )
+    parser.add_argument(
+        "--pool-thresholds",
+        action="store_true",
+        help="Pool threshold estimation over all observations instead of grouping by metadata columns.",
+    )
     args = parser.parse_args()
 
     events, summary = detect_onsets_from_csvs(
@@ -992,6 +1113,7 @@ def main() -> None:
         min_consecutive=args.min_consecutive,
         min_duration=args.min_duration,
         require_stable_prediction=args.require_stable_prediction,
+        group_columns=[] if args.pool_thresholds else args.group_columns,
         out_events=args.out_events,
         out_summary=args.out_summary,
         out_thresholded_observations=args.out_thresholded_observations,

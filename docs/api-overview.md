@@ -33,6 +33,7 @@ Reusable table-oriented APIs include:
 
 - `neureptrace.metrics` for calibration/probabilistic scoring metrics, pre/post window comparisons, and confusion-table summaries.
 - `neureptrace.decoding.alignment_window` for applying projections fitted on one M/EEG feature window to matching-channel features from another window.
+- `neureptrace.decoding.group_generalization` for nested leave-one-group-out candidate selection and untouched outer-group scoring from generic feature matrices.
 - `neureptrace.continuous_stimulus_scan` for training an event-locked decoder on one raw run, scanning a held-out raw run, exporting long-stream class probabilities, and scoring detected events.
 - `neureptrace.stimulus_detection` for detecting zero, one, or many stimulus events in long probability streams and evaluating them against annotation tables.
 - `neureptrace.results` for time-decoding aggregation, participant/window result tables, and peak-window diagnostics.

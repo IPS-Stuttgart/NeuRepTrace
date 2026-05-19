@@ -31,6 +31,23 @@ from neureptrace.decoding.sampling import (
     normalize_class_limit_selection as normalize_class_limit_selection,
     select_class_limited_indices as select_class_limited_indices,
 )
+from neureptrace.decoding.normalization import (
+    BASELINE_WHITENING_EIGENVALUE_FLOOR as BASELINE_WHITENING_EIGENVALUE_FLOOR,
+    BASELINE_WHITENING_SHRINKAGE as BASELINE_WHITENING_SHRINKAGE,
+    NORMALIZATION_MODES as NORMALIZATION_MODES,
+    baseline_channel_whitening_matrix_from_features as baseline_channel_whitening_matrix_from_features,
+    baseline_whiten_feature_blocks as baseline_whiten_feature_blocks,
+    baseline_whiten_features as baseline_whiten_features,
+    baseline_zscore_features as baseline_zscore_features,
+    covariance_matrix as covariance_matrix,
+    nonzero_std as nonzero_std,
+    normalize_normalization as normalize_normalization,
+    normalize_subject_features as normalize_subject_features,
+    shrink_covariance as shrink_covariance,
+    subject_zscore_features as subject_zscore_features,
+    trial_zscore_features as trial_zscore_features,
+    whitening_matrix as whitening_matrix,
+)
 from neureptrace.metrics import brier_score_multiclass, expected_calibration_error
 
 BUILTIN_DECODER_CHOICES = (

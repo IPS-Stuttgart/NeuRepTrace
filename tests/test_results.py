@@ -6,14 +6,18 @@ from neureptrace.results import (
     aggregate_time_decode_csvs,
     aggregate_time_decode_results,
     add_rank_diagnostics,
+    append_temporal_diagonal_flag,
     build_provenance_table,
     category_confusion_summary,
     confusion_counts,
+    metric_summary_columns,
     metadata_conditioned_confusion_enrichment,
     peak_metric_rows,
     per_class_recall,
     ranked_label_metrics,
+    summarize_decoding_metric_rows,
     summarize_metric_table,
+    summary_records,
     true_label_ranks,
 )
 
@@ -199,6 +203,46 @@ def test_summarize_metric_table_reports_participants_chance_and_scaled_values():
     assert round(float(logistic["accuracy_minus_chance_mean"]), 3) == 20.0
 
 
+def test_summarize_decoding_metric_rows_orders_records_and_counts_permutations():
+    rows = [
+        {
+            "participant": "s1",
+            "variant": "without_null",
+            "window_center_s": 0.1,
+            "accuracy": 0.40,
+            "chance_accuracy": 0.50,
+            "n_validation_classes": 2,
+            "permutation_p_value": 0.10,
+        },
+        {
+            "participant": "s2",
+            "variant": "without_null",
+            "window_center_s": 0.1,
+            "accuracy": 0.75,
+            "chance_accuracy": None,
+            "n_validation_classes": 4,
+            "permutation_p_value": 0.01,
+        },
+    ]
+
+    summary, group_columns = summarize_decoding_metric_rows(
+        rows,
+        group_column_candidates=("variant", "window_center_s", "missing_column"),
+        permutation_p_column="permutation_p_value",
+    )
+    records = summary_records(summary, metric_summary_columns(group_columns, include_permutation=True))
+
+    assert group_columns == ("variant", "window_center_s")
+    assert len(records) == 1
+    row = records[0]
+    assert row["n_participants"] == 2
+    assert round(float(row["accuracy_mean"]), 3) == 0.575
+    assert row["above_chance_count"] == 1
+    assert row["n_with_permutation"] == 2
+    assert row["n_significant_p_0.05"] == 1
+    assert row["chance_classes_counts"] == "2:1;4:1"
+
+
 def test_peak_metric_rows_breaks_ties_toward_preferred_time():
     frame = pd.DataFrame(
         {
@@ -258,6 +302,31 @@ def test_summarize_metric_table_reports_rich_chance_and_permutation_fields():
     assert row["n_significant_p_0.01"] == 1
 
 
+def test_summarize_metric_table_prefers_class_count_over_stale_chance_column():
+    frame = pd.DataFrame(
+        {
+            "decoder": ["logistic", "logistic"],
+            "window": [0.1, 0.1],
+            "accuracy": [0.40, 0.60],
+            "chance_accuracy": [1.0 / 16.0, 1.0 / 16.0],
+            "n_validation_classes": [2, 2],
+        }
+    )
+
+    summary = summarize_metric_table(
+        frame,
+        "accuracy",
+        ("decoder", "window"),
+        chance_column="chance_accuracy",
+        chance_class_columns=("n_validation_classes",),
+    )
+
+    row = summary.iloc[0]
+    assert row["chance_accuracy_mean"] == 0.5
+    assert row["accuracy_above_chance_count"] == 1
+    assert round(float(row["accuracy_minus_chance_accuracy_mean"]), 3) == 0.0
+
+
 def test_summarize_metric_table_can_zero_singleton_dispersion():
     frame = pd.DataFrame({"decoder": ["logistic"], "accuracy": [0.75], "chance": [0.5]})
 
@@ -272,6 +341,21 @@ def test_summarize_metric_table_can_zero_singleton_dispersion():
     row = summary.iloc[0]
     assert row["accuracy_std"] == 0.0
     assert row["accuracy_sem"] == 0.0
+
+
+def test_append_temporal_diagonal_flag_rounds_window_centers():
+    frame = pd.DataFrame(
+        {
+            "train_window_center_s": [0.1, 0.2, 0.30000000001],
+            "test_window_center_s": [0.100000000001, 0.25, 0.3],
+            "accuracy": [0.7, 0.8, 0.9],
+        }
+    )
+
+    annotated = append_temporal_diagonal_flag(frame)
+
+    assert annotated["is_diagonal"].tolist() == [True, False, True]
+    assert "is_diagonal" not in frame.columns
 
 
 def _prediction_diagnostic_frame() -> pd.DataFrame:

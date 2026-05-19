@@ -7,6 +7,18 @@ import numpy as np
 import pandas as pd
 
 
+DEFAULT_CHANCE_CLASS_COLUMNS = ("chance_classes", "n_chance_classes", "n_validation_classes")
+DEFAULT_CHANCE_SUMMARY_COLUMNS = (
+    "chance_accuracy",
+    "chance_percent",
+    "chance_accuracy_min",
+    "chance_accuracy_max",
+    "chance_classes_mean",
+    "chance_classes_counts",
+)
+DEFAULT_PERMUTATION_SUMMARY_COLUMNS = ("n_with_permutation", "n_significant_p_0.05", "n_significant_p_0.01")
+
+
 def summarize_metric_table(
     frame: pd.DataFrame,
     value_column: str,
@@ -131,6 +143,134 @@ def peak_metric_rows(
     return result.reset_index(drop=True)
 
 
+def summarize_decoding_metric_rows(
+    rows: Sequence[dict[str, object]],
+    value_column: str = "accuracy",
+    group_columns: Sequence[str] | str | None = None,
+    *,
+    group_column_candidates: Sequence[str] | str | None = None,
+    participant_column: str | None = "participant",
+    chance_column: str | None = "chance_accuracy",
+    percent_scale: float | None = 100.0,
+    chance_percent_column: str | None = "chance_percent",
+    chance_class_columns: Sequence[str] | str | None = DEFAULT_CHANCE_CLASS_COLUMNS,
+    permutation_p_column: str | None = None,
+    zero_singleton_dispersion: bool = True,
+    compact_chance_column_names: bool = True,
+) -> tuple[pd.DataFrame, tuple[str, ...]]:
+    """Summarize row dictionaries from a decoding workflow.
+
+    This is a thin, figure-independent convenience wrapper around
+    :func:`summarize_metric_table`. It keeps project packages from having to
+    duplicate the common pattern ``rows -> DataFrame -> grouped metric summary
+    -> presentation columns`` while remaining agnostic to the concrete dataset.
+    """
+    if group_columns is not None and group_column_candidates is not None:
+        raise ValueError("Pass either group_columns or group_column_candidates, not both.")
+
+    if not rows:
+        return pd.DataFrame(), ()
+
+    resolved_group_columns = (
+        present_group_columns(rows, group_column_candidates)
+        if group_column_candidates is not None
+        else tuple(_normalize_columns(group_columns))
+    )
+    if participant_column is not None and not all(participant_column in row for row in rows):
+        participant_column = None
+
+    summary = summarize_metric_table(
+        rows_frame(rows),
+        value_column,
+        resolved_group_columns,
+        participant_column=participant_column,
+        chance_column=chance_column,
+        percent_scale=percent_scale,
+        chance_percent_column=chance_percent_column,
+        chance_class_columns=chance_class_columns,
+        permutation_p_column=permutation_p_column,
+        zero_singleton_dispersion=zero_singleton_dispersion,
+    )
+    if "n_participants" not in summary.columns:
+        summary["n_participants"] = summary["n_rows"].astype(int)
+    if compact_chance_column_names and chance_column is not None:
+        summary = summary.rename(
+            columns={
+                f"{value_column}_above_{chance_column}_count": "above_chance_count",
+                f"{chance_column}_mean": chance_column,
+            }
+        )
+    return summary, resolved_group_columns
+
+
+def metric_summary_columns(
+    group_columns: Sequence[str] | str | None,
+    *,
+    value_column: str = "accuracy",
+    percent_prefix: str = "percent",
+    include_participants: bool = True,
+    include_permutation: bool = False,
+    include_diagonal: bool = False,
+    chance_summary_columns: Sequence[str] = DEFAULT_CHANCE_SUMMARY_COLUMNS,
+) -> list[str]:
+    """Return a stable, report-oriented column order for metric summaries."""
+    columns = list(_normalize_columns(group_columns))
+    if include_participants:
+        columns.append("n_participants")
+    columns.extend(
+        (
+            f"{value_column}_mean",
+            f"{value_column}_std",
+            f"{value_column}_sem",
+            f"{percent_prefix}_mean",
+            f"{percent_prefix}_median",
+            f"{percent_prefix}_std",
+            f"{percent_prefix}_sem",
+            "above_chance_count",
+        )
+    )
+    if include_permutation:
+        columns.extend(DEFAULT_PERMUTATION_SUMMARY_COLUMNS)
+    if include_diagonal:
+        columns.append("is_diagonal")
+    columns.extend(chance_summary_columns)
+    return columns
+
+
+def summary_records(frame: pd.DataFrame, columns: Sequence[str] | None = None) -> list[dict[str, object]]:
+    """Return summary rows as dictionaries, optionally filtering/reordering columns."""
+    if columns is None:
+        return frame.to_dict("records")
+    return frame[[column for column in columns if column in frame.columns]].to_dict("records")
+
+
+def append_temporal_diagonal_flag(
+    frame: pd.DataFrame,
+    *,
+    train_column: str = "train_window_center_s",
+    test_column: str = "test_window_center_s",
+    output_column: str = "is_diagonal",
+    decimals: int = 10,
+) -> pd.DataFrame:
+    """Annotate train/test-time summaries with a same-time diagonal flag."""
+    _require_columns(frame, [train_column, test_column])
+    result = frame.copy()
+    result[output_column] = pd.to_numeric(result[train_column], errors="coerce").round(decimals).eq(
+        pd.to_numeric(result[test_column], errors="coerce").round(decimals)
+    )
+    return result
+
+
+def present_group_columns(rows: Sequence[dict[str, object]], columns: Sequence[str] | str | None) -> tuple[str, ...]:
+    """Keep only candidate group columns that are present in at least one row."""
+    return tuple(column for column in _normalize_columns(columns) if any(column in row for row in rows))
+
+
+def rows_frame(rows: Sequence[dict[str, object]]) -> pd.DataFrame:
+    """Convert decoding row dictionaries to a DataFrame with a stable public helper."""
+    return pd.DataFrame(list(rows))
+
+
 def _normalize_columns(columns: Sequence[str] | str | None) -> list[str]:
     if columns is None:
         return []
@@ -226,26 +366,35 @@ def _chance_classes_for_group(
 
 
 def _row_chance_accuracy(row: pd.Series, chance_column: str, chance_class_columns: Sequence[str], *, scale: float) -> float:
+    class_count = _row_chance_class_count_from_columns(row, chance_class_columns)
+    if class_count is not None:
+        return float(scale) / class_count
+
     chance = _positive_float(row.get(chance_column))
     if chance is not None:
         return chance
-    class_count = _row_chance_classes(row, chance_column, chance_class_columns, scale=scale)
-    if not np.isfinite(class_count) or class_count <= 0.0:
-        return np.nan
-    return float(scale) / class_count
+    return np.nan
 
 
 def _row_chance_classes(row: pd.Series, chance_column: str, chance_class_columns: Sequence[str], *, scale: float) -> float:
+    class_count = _row_chance_class_count_from_columns(row, chance_class_columns)
+    if class_count is not None:
+        return float(class_count)
+
+    chance = _positive_float(row.get(chance_column))
+    if chance is None or scale <= 0.0:
+        return np.nan
+    return float(round(float(scale) / chance))
+
+
+def _row_chance_class_count_from_columns(row: pd.Series, chance_class_columns: Sequence[str]) -> int | None:
     for key in chance_class_columns:
         if key not in row:
             continue
         class_count = _positive_int(row.get(key))
         if class_count is not None:
-            return float(class_count)
-    chance = _positive_float(row.get(chance_column))
-    if chance is None or scale <= 0.0:
-        return np.nan
-    return float(round(float(scale) / chance))
+            return class_count
+    return None
 
 
 def _chance_classes_counts(chance_classes: object) -> str:

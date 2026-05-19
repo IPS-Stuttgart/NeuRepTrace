@@ -41,15 +41,19 @@ def test_registry_contains_supported_classifiers():
     assert set(CLASSIFIER_REGISTRY) == {
         "always1Dummy",
         "correlation-prototype",
+        "gaussian-naive-bayes",
         "gradient-boosting",
         "knn",
         "mostFrequentDummy",
         "multiclass-svm",
         "multiclass-svm-weighted",
         "multinomial-logistic",
+        "multinomial-logistic-weighted",
         "pytorch-mlp",
         "random-forest",
+        "regularized-qda",
         "scikit-mlp",
+        "shrinkage-prototype",
         "shrinkage-lda",
         "xgboost",
     }
@@ -60,14 +64,18 @@ def test_registry_trains_fast_sklearn_classifiers(multiclass_data):
     classifier_params = {
         "always1Dummy": None,
         "correlation-prototype": None,
+        "gaussian-naive-bayes": 1e-9,
         "gradient-boosting": 5,
         "knn": 1,
         "mostFrequentDummy": None,
         "multiclass-svm": 1.0,
         "multiclass-svm-weighted": 1.0,
         "multinomial-logistic": 1.0,
+        "multinomial-logistic-weighted": 1.0,
         "random-forest": 5,
+        "regularized-qda": 0.5,
         "scikit-mlp": (5, 50),
+        "shrinkage-prototype": 0.25,
         "shrinkage-lda": None,
     }
 
@@ -164,6 +172,105 @@ def test_shrinkage_lda_rejects_invalid_numeric_shrinkage(multiclass_data):
         train_multiclass_classifier(features, labels, "shrinkage-lda", 1.5)
 
 
+def test_gaussian_naive_bayes_trains_and_predicts_probabilities():
+    features = np.asarray(
+        [
+            [0.0, 0.0],
+            [0.0, 0.1],
+            [1.0, 1.0],
+            [1.1, 1.0],
+            [2.0, 0.0],
+            [2.0, 0.1],
+        ],
+        dtype=float,
+    )
+    labels = np.asarray([0, 0, 1, 1, 2, 2], dtype=int)
+
+    model = train_multiclass_classifier(features, labels, "gaussian-naive-bayes", 1e-8)
+    probabilities = model.predict_proba(features[:3])
+
+    assert "gaussian-naive-bayes" in CLASSIFIER_REGISTRY
+    assert model.model.var_smoothing == 1e-8
+    assert probabilities.shape == (3, 3)
+    np.testing.assert_allclose(np.sum(probabilities, axis=1), np.ones(3))
+
+
+def test_regularized_qda_trains_and_predicts_probabilities():
+    rng = np.random.default_rng(13)
+    features = np.vstack(
+        [
+            rng.normal(loc=(-1.0, -1.0, 0.0), scale=0.2, size=(8, 3)),
+            rng.normal(loc=(1.0, 0.5, 0.0), scale=0.2, size=(8, 3)),
+            rng.normal(loc=(0.0, 1.2, 1.0), scale=0.2, size=(8, 3)),
+        ]
+    )
+    labels = np.repeat(np.arange(3, dtype=int), 8)
+
+    model = train_multiclass_classifier(features, labels, "regularized-qda", 0.25)
+    probabilities = model.predict_proba(features[:4])
+
+    assert "regularized-qda" in CLASSIFIER_REGISTRY
+    assert model.model.reg_param == 0.25
+    assert probabilities.shape == (4, 3)
+    np.testing.assert_allclose(np.sum(probabilities, axis=1), np.ones(4))
+
+
+def test_regularized_qda_rejects_invalid_regularization(multiclass_data):
+    features, labels = multiclass_data
+    with pytest.raises(ValueError, match="regularized-qda classifier_param"):
+        train_multiclass_classifier(features, labels, "regularized-qda", 1.5)
+
+
+def test_weighted_multinomial_logistic_trains():
+    features = np.asarray(
+        [
+            [0.0, 0.0],
+            [0.0, 0.2],
+            [0.1, 0.0],
+            [1.0, 1.0],
+            [2.0, 2.0],
+        ],
+        dtype=float,
+    )
+    labels = np.asarray([0, 0, 0, 1, 2], dtype=int)
+
+    model = train_multiclass_classifier(features, labels, "multinomial-logistic-weighted", 1.0, random_state=13)
+
+    assert "multinomial-logistic-weighted" in CLASSIFIER_REGISTRY
+    assert model.model.class_weight == "balanced"
+    assert len(model.predict(features)) == len(labels)
+
+
+def test_shrinkage_prototype_classifier_trains_and_scores():
+    features = np.asarray(
+        [
+            [0.0, 0.0],
+            [0.0, 0.2],
+            [1.0, 1.0],
+            [1.1, 1.0],
+            [2.0, 0.0],
+            [2.1, 0.1],
+        ],
+        dtype=float,
+    )
+    labels = np.asarray([0, 0, 1, 1, 2, 2], dtype=int)
+
+    model = train_multiclass_classifier(features, labels, "shrinkage-prototype", 0.1)
+    predictions = model.predict(np.asarray([[0.0, 0.1], [1.1, 1.0], [2.1, 0.0]], dtype=float))
+    scores = model.decision_function(features[:3])
+
+    assert "shrinkage-prototype" in CLASSIFIER_REGISTRY
+    assert model.model.shrinkage == 0.1
+    np.testing.assert_array_equal(predictions, np.asarray([0, 1, 2], dtype=int))
+    assert scores.shape == (3, 3)
+
+
+def test_shrinkage_prototype_rejects_invalid_shrinkage(multiclass_data):
+    features, labels = multiclass_data
+    with pytest.raises(ValueError, match="shrinkage-prototype classifier_param"):
+        train_multiclass_classifier(features, labels, "shrinkage-prototype", 1.5)
+
+
 def test_random_state_reproduces_stochastic_classifier_predictions(multiclass_data):
     features, labels = multiclass_data
 
@@ -180,6 +287,10 @@ def test_default_classifier_params_include_shared_and_legacy_helpers():
     assert get_default_classifier_param("lasso") == 0.005
     assert get_default_classifier_param("multinomial-logistic") == 1.0
     assert get_default_classifier_param("correlation-prototype") is None
+    assert get_default_classifier_param("gaussian-naive-bayes") == 1e-9
+    assert get_default_classifier_param("multinomial-logistic-weighted") == 1.0
+    assert get_default_classifier_param("regularized-qda") == 0.5
+    assert get_default_classifier_param("shrinkage-prototype") == 0.25
     assert get_default_classifier_param("shrinkage-lda") is None
     pytorch_params = get_default_classifier_param("pytorch-mlp")
     pytorch_params["hidden_dim"] = 1
