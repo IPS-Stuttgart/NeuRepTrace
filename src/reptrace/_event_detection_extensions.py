@@ -63,8 +63,10 @@ def _install_onset_detection_extensions() -> None:
 def _metadata_text_matches(observations: pd.DataFrame, column: str, expected: object) -> bool:
     if column not in observations.columns:
         return False
-    values = observations[column].dropna()
-    return not values.empty and values.astype(str).eq(str(expected)).all()
+    values = observations[column]
+    if values.empty or values.isna().any():
+        return False
+    return values.astype(str).eq(str(expected)).all()
 
 
 def _metadata_number_matches(observations: pd.DataFrame, column: str, expected: float) -> bool:
@@ -88,9 +90,12 @@ def _metadata_optional_number_matches(observations: pd.DataFrame, column: str, e
 def _metadata_bool_matches(observations: pd.DataFrame, column: str, expected: bool) -> bool:
     if column not in observations.columns:
         return False
-    values = observations[column].dropna().astype(str).str.lower()
+    values = observations[column]
+    if values.empty or values.isna().any():
+        return False
+    values = values.astype(str).str.lower()
     mapped = values.map({"true": True, "1": True, "false": False, "0": False})
-    return not values.empty and not mapped.isna().any() and mapped.eq(bool(expected)).all()
+    return not mapped.isna().any() and mapped.eq(bool(expected)).all()
 
 
 def _install_threshold_annotation_extensions() -> None:

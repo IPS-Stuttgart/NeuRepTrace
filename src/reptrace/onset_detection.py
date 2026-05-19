@@ -506,8 +506,11 @@ def annotate_threshold_crossings(
 def _column_matches_text(observations: pd.DataFrame, column: str, expected: str) -> bool:
     if column not in observations.columns:
         return False
-    values = observations[column].dropna().astype(str)
-    return not values.empty and values.eq(str(expected)).all()
+    values = observations[column]
+    if values.isna().any():
+        return False
+    normalized = values.astype(str)
+    return not normalized.empty and normalized.eq(str(expected)).all()
 
 
 def _column_matches_numeric(observations: pd.DataFrame, column: str, expected: float | int) -> bool:
@@ -533,8 +536,8 @@ def _column_matches_optional_numeric(
 def _column_matches_bool(observations: pd.DataFrame, column: str, expected: bool) -> bool:
     if column not in observations.columns:
         return False
-    values = observations[column].dropna()
-    if values.empty:
+    values = observations[column]
+    if values.empty or values.isna().any():
         return False
     normalized = values.astype(str).str.strip().str.lower()
     parsed = normalized.map({"true": True, "false": False, "1": True, "0": False})

@@ -191,3 +191,69 @@ def test_continuous_stimulus_scan_trains_scans_and_summarizes_events(tmp_path: P
     assert result.summary.iloc[0]["recall"] == 1.0
     assert (tmp_path / "scan_results" / "stream_observations.csv").is_file()
     assert (tmp_path / "scan_results" / "stimulus_summary.csv").is_file()
+
+
+def test_continuous_stimulus_scan_forwards_decoder_preprocessing_and_tuning(tmp_path: Path) -> None:
+    train_events = pd.DataFrame(
+        [
+            {"onset": 1.0, "stimulus_class": "A"},
+            {"onset": 2.0, "stimulus_class": "B"},
+            {"onset": 3.0, "stimulus_class": "A"},
+            {"onset": 4.0, "stimulus_class": "B"},
+            {"onset": 5.0, "stimulus_class": "A"},
+            {"onset": 6.0, "stimulus_class": "B"},
+        ]
+    )
+    scan_events = pd.DataFrame(
+        [
+            {"onset": 2.0, "stimulus_class": "A"},
+            {"onset": 4.0, "stimulus_class": "B"},
+            {"onset": 6.0, "stimulus_class": "A"},
+        ]
+    )
+    train_raw = tmp_path / "train_raw.fif"
+    scan_raw = tmp_path / "scan_raw.fif"
+    _write_raw(train_raw, train_events)
+    _write_raw(scan_raw, scan_events)
+
+    result = run_continuous_stimulus_scan(
+        train_raw=train_raw,
+        train_events=train_events,
+        scan_raw=scan_raw,
+        scan_events=scan_events,
+        out_dir=tmp_path / "scan_results_pca_tuned",
+        train_window=(0.10, 0.20),
+        picks="eeg",
+        decoder="logistic",
+        max_iter=1000,
+        feature_preprocessor="pca",
+        pca_components=1,
+        tune_hyperparameters=True,
+        tuning_cv_splits=3,
+        tuning_scoring="accuracy",
+        tuning_c_grid=(0.1, 1.0),
+        scan_step=0.05,
+        scan_start=0.0,
+        scan_stop=8.0,
+        target_classes=["A"],
+        threshold_window=(0.0, 1.0),
+        detection_window=(1.0, 8.0),
+        min_consecutive=1,
+        merge_gap=0.10,
+        refractory=0.50,
+        match_tolerance=0.20,
+        annotation_latency=0.15,
+    )
+
+    assert result.observations["feature_preprocessor"].unique().tolist() == ["pca"]
+    assert result.observations["pca_components"].unique().tolist() == [1]
+    assert result.observations["tuned_hyperparameters"].unique().tolist() == [True]
+    assert result.observations["tuning_cv_splits"].unique().tolist() == [3]
+    assert result.observations["tuning_scoring"].unique().tolist() == ["accuracy"]
+    assert result.observations["tuning_c_grid"].unique().tolist() == ["0.1|1.0"]
+    assert result.observations["best_params"].astype(str).str.contains("logisticregression__C").all()
+    assert result.observations["preprocessing_hash"].str.len().eq(16).all()
+    assert result.observations["model_hash"].str.len().eq(16).all()
+    assert not result.event_metrics.empty
+    assert result.event_metrics["feature_preprocessor"].unique().tolist() == ["pca"]
+    assert result.event_metrics["tuned_hyperparameters"].unique().tolist() == [True]

@@ -4,7 +4,12 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-from reptrace.onset_detection import _detection_runs, _first_detection_run
+from reptrace.onset_detection import (
+    _detection_runs,
+    _first_detection_run,
+    _has_matching_threshold_annotation,
+    _prepare_thresholded_observations,
+)
 
 
 def _candidates() -> pd.DataFrame:
@@ -17,6 +22,101 @@ def _candidates() -> pd.DataFrame:
             "predicted_label": [0, 0, 0, 1, 1, 1],
         }
     )
+
+
+def _thresholded_observations_with_stale_threshold() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "time": [-0.2, -0.1, 0.1],
+            "sequence_id": [0, 0, 0],
+            "prob_class_0": [0.1, 0.2, 0.9],
+            "prob_class_1": [0.9, 0.8, 0.1],
+            "onset_score": [0.9, 0.8, 0.9],
+            "score_threshold": [0.1, 0.1, 0.1],
+            "above_threshold": [True, True, True],
+            "score_column": ["confidence", "confidence", "confidence"],
+            "threshold_method": ["point", "point", "point"],
+            "threshold_quantile": [0.5, 0.5, 0.5],
+            "threshold_window_start": [-0.2, -0.2, -0.2],
+            "threshold_window_stop": [-0.1, -0.1, -0.1],
+            "min_consecutive": [1, 1, 1],
+            "min_duration": [float("nan")] * 3,
+            "require_stable_prediction": pd.Series([False, False, False], dtype=object),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "metadata_column",
+    ["score_column", "threshold_method", "require_stable_prediction"],
+)
+def test_threshold_annotation_reuse_rejects_partially_missing_metadata(
+    metadata_column,
+):
+    observations = _thresholded_observations_with_stale_threshold()
+    observations.loc[1, metadata_column] = None
+
+    assert not _has_matching_threshold_annotation(
+        observations,
+        threshold_window=(-0.2, -0.1),
+        threshold_quantile=0.5,
+        score_column="confidence",
+        threshold_method="point",
+        min_consecutive=1,
+        min_duration=None,
+        require_stable_prediction=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("metadata_column", "stale_value"),
+    [
+        ("score_column", "probability_true_class"),
+        ("threshold_method", "max_run"),
+        ("threshold_quantile", 0.9),
+        ("threshold_window_start", -0.3),
+        ("threshold_window_stop", -0.05),
+        ("min_consecutive", 2),
+        ("min_duration", 0.1),
+        ("require_stable_prediction", True),
+    ],
+)
+def test_threshold_annotation_reuse_rejects_parameter_mismatches(
+    metadata_column,
+    stale_value,
+):
+    observations = _thresholded_observations_with_stale_threshold()
+    observations[metadata_column] = stale_value
+
+    assert not _has_matching_threshold_annotation(
+        observations,
+        threshold_window=(-0.2, -0.1),
+        threshold_quantile=0.5,
+        score_column="confidence",
+        threshold_method="point",
+        min_consecutive=1,
+        min_duration=None,
+        require_stable_prediction=False,
+    )
+
+
+def test_prepare_thresholded_observations_recomputes_partial_metadata_match():
+    observations = _thresholded_observations_with_stale_threshold()
+    observations.loc[1, "require_stable_prediction"] = None
+
+    thresholded = _prepare_thresholded_observations(
+        observations,
+        threshold_window=(-0.2, -0.1),
+        threshold_quantile=0.5,
+        score_column="confidence",
+        threshold_method="point",
+        min_consecutive=1,
+        min_duration=None,
+        require_stable_prediction=False,
+    )
+
+    assert thresholded["score_threshold"].tolist() == pytest.approx([0.85, 0.85, 0.85])
+    assert thresholded["above_threshold"].tolist() == [True, False, True]
 
 
 def test_detection_runs_returns_all_valid_segments_and_preserves_first_run_behavior():

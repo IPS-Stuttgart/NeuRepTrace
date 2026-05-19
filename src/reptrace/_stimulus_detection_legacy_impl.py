@@ -12,7 +12,30 @@ from reptrace.temporal_model import probability_columns
 
 DEFAULT_THRESHOLD_WINDOW = (-0.35, -0.05)
 DEFAULT_THRESHOLD_QUANTILE = 0.95
-DEFAULT_GROUP_COLUMNS = ("subject", "decoder", "emission_mode")
+DEFAULT_GROUP_COLUMNS = (
+    # Subject/decoder/emission define only the coarse comparison.  The
+    # stimulus detector derives thresholds from baseline score distributions,
+    # so mixing runs that differ in preprocessing, tuning, temporal-window, or
+    # smoothing settings changes the null distribution and can change reported
+    # detections.  Keep analysis-condition columns in the default grouping;
+    # _group_columns still drops columns that are absent from a particular
+    # observations table.
+    "subject",
+    "decoder",
+    "emission_mode",
+    "feature_preprocessor",
+    "pca_components",
+    "tuned_hyperparameters",
+    "tuning_cv_splits",
+    "tuning_scoring",
+    "tuning_c_grid",
+    "temporal_mode",
+    "temporal_train_window_start",
+    "temporal_train_window_stop",
+    "temporal_smoothing_method",
+    "temporal_smoothing_fit_window_start",
+    "temporal_smoothing_fit_window_stop",
+)
 DEFAULT_STREAM_FALLBACKS = (
     ("subject", "stream_id"),
     ("subject", "sequence_id"),
@@ -249,7 +272,7 @@ def _threshold_for_scores(
         scores = pd.to_numeric(baseline["_stimulus_score"], errors="coerce").dropna()
     elif threshold_method == "max_run":
         null_scores = []
-        grouped = baseline.groupby(list(stream_columns), sort=True) if stream_columns else [((), baseline)]
+        grouped = baseline.groupby(list(stream_columns), sort=True, dropna=False) if stream_columns else [((), baseline)]
         for _, sequence_frame in grouped:
             candidates = _valid_run_score_candidates(sequence_frame, min_consecutive=min_consecutive, min_duration=min_duration)
             if candidates:
@@ -324,7 +347,7 @@ def fit_stimulus_detection_thresholds(
     streams = _stream_columns(observations, stream_columns)
     classes = _target_class_table(observations, target_classes)
     rows = []
-    grouped = observations.groupby(groups, sort=True) if groups else [((), observations)]
+    grouped = observations.groupby(groups, sort=True, dropna=False) if groups else [((), observations)]
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(groups, key_values, strict=True))
@@ -370,6 +393,24 @@ def _filter_group(frame: pd.DataFrame, group_values: dict[str, object]) -> pd.Da
     for column, value in group_values.items():
         filtered = filtered.loc[filtered[column].astype(str) == str(value)]
     return filtered
+
+
+def _threshold_group_columns(
+    thresholds: pd.DataFrame,
+    group_columns: Sequence[str],
+    *,
+    supplied: bool,
+) -> list[str]:
+    if not supplied:
+        return _present_columns(thresholds, group_columns)
+    missing = [column for column in group_columns if column not in thresholds.columns]
+    if missing:
+        raise ValueError(
+            "Supplied stimulus detection thresholds are missing requested group columns: "
+            f"{missing}. Refit thresholds with the same group columns, or omit "
+            "--thresholds-csv so thresholds are estimated from the current observations."
+        )
+    return list(group_columns)
 
 
 def _event_row(
@@ -448,6 +489,7 @@ def detect_stimulus_events(
 
     groups = _group_columns(observations, group_columns)
     streams = _stream_columns(observations, stream_columns)
+    supplied_thresholds = thresholds is not None
     if thresholds is None:
         thresholds = fit_stimulus_detection_thresholds(
             observations,
@@ -466,7 +508,11 @@ def detect_stimulus_events(
 
     rows = []
     event_counters: dict[tuple[object, ...], int] = {}
-    threshold_group_columns = _present_columns(thresholds, groups)
+    threshold_group_columns = _threshold_group_columns(
+        thresholds,
+        groups,
+        supplied=supplied_thresholds,
+    )
     for _, threshold_row in thresholds.iterrows():
         if not np.isfinite(float(threshold_row["score_threshold"])):
             continue
@@ -486,7 +532,7 @@ def detect_stimulus_events(
             scored = scored.loc[_window_mask(scored, detection_window)]
         if scored.empty:
             continue
-        grouped_streams = scored.groupby(streams, sort=True) if streams else [((), scored)]
+        grouped_streams = scored.groupby(streams, sort=True, dropna=False) if streams else [((), scored)]
         for stream_key, stream_frame in grouped_streams:
             key_values = stream_key if isinstance(stream_key, tuple) else (stream_key,)
             stream_values = dict(zip(streams, key_values, strict=True))
@@ -594,7 +640,7 @@ def summarize_stimulus_events(
     """Summarize event-level detection quality."""
     groups = _group_columns(events, group_columns) if not events.empty else list(group_columns or [])
     rows = []
-    grouped = events.groupby(groups, sort=True) if groups and not events.empty else [((), events)]
+    grouped = events.groupby(groups, sort=True, dropna=False) if groups and not events.empty else [((), events)]
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(groups, key_values, strict=True))

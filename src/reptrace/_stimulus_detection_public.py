@@ -124,7 +124,7 @@ def _resolve_event_conflicts(events: pd.DataFrame, *, partition_columns: Sequenc
         return events
     frames = []
     present_partition_columns = _present_columns(events, partition_columns)
-    grouped = events.groupby(present_partition_columns, sort=True) if present_partition_columns else [((), events)]
+    grouped = events.groupby(present_partition_columns, sort=True, dropna=False) if present_partition_columns else [((), events)]
     for _, partition_events in grouped:
         if conflict_resolution == "winner_take_all":
             frames.append(_resolve_winner_take_all(partition_events))
@@ -141,7 +141,7 @@ def _reindex_events(events: pd.DataFrame, *, partition_columns: Sequence[str]) -
     sort_columns = [column for column in [*partition_columns, "onset_time", "stimulus_class"] if column in events.columns]
     events = events.sort_values(sort_columns, kind="mergesort").reset_index(drop=True)
     present_partition_columns = _present_columns(events, partition_columns)
-    grouped = events.groupby(present_partition_columns, sort=False) if present_partition_columns else [((), events)]
+    grouped = events.groupby(present_partition_columns, sort=False, dropna=False) if present_partition_columns else [((), events)]
     for _, partition_events in grouped:
         events.loc[partition_events.index, "event_index"] = range(len(partition_events))
     events["event_index"] = events["event_index"].astype(int)
@@ -216,6 +216,26 @@ def _add_annotation_candidate_columns(events: pd.DataFrame) -> pd.DataFrame:
     return events
 
 
+def _annotation_match_key(
+    annotation: pd.Series,
+    annotation_id: object,
+    stream_columns: Sequence[str],
+) -> tuple[tuple[tuple[str, str], ...], object]:
+    """Return the internal one-to-one claim key for an annotation.
+
+    External annotation exports commonly reuse short annotation IDs per stream
+    or run.  Keep the user-facing annotation ID unchanged in the output, but
+    qualify the internal claim key by the stream columns that are available on
+    the annotation table so independent streams do not suppress each other.
+    """
+    stream_key = tuple(
+        (column, str(annotation[column]))
+        for column in stream_columns
+        if column in annotation.index and pd.notna(annotation[column])
+    )
+    return stream_key, annotation_id
+
+
 def match_stimulus_annotations(
     events: pd.DataFrame,
     annotations: pd.DataFrame,
@@ -240,7 +260,7 @@ def match_stimulus_annotations(
     streams = _stream_columns(events, stream_columns)
     if "onset_time" not in annotations.columns:
         raise ValueError("Annotation rows must contain onset_time.")
-    used: set[object] = set()
+    used: set[tuple[tuple[tuple[str, str], ...], object]] = set()
 
     for event_index, event in matched.sort_values("onset_time").iterrows():
         candidates = annotations.copy()
@@ -256,6 +276,15 @@ def match_stimulus_annotations(
             continue
         candidates = candidates.copy()
         candidates["_annotation_id"] = [_annotation_id(row, index) for index, row in candidates.iterrows()]
+        match_keys = [
+            _annotation_match_key(row, annotation_id, streams)
+            for annotation_id, (_, row) in zip(
+                candidates["_annotation_id"],
+                candidates.iterrows(),
+                strict=True,
+            )
+        ]
+        candidates["_annotation_match_key"] = pd.Series(match_keys, index=candidates.index, dtype="object")
         candidates["_latency"] = float(event["onset_time"]) - pd.to_numeric(candidates["onset_time"], errors="coerce")
         candidates["_abs_latency"] = candidates["_latency"].abs()
         candidates = candidates.loc[candidates["_abs_latency"] <= match_tolerance].sort_values("_abs_latency")
@@ -270,14 +299,15 @@ def match_stimulus_annotations(
         matched.loc[event_index, "candidate_annotation_label"] = _annotation_value(nearest, "stimulus_label", default=np.nan)
         matched.loc[event_index, "candidate_latency"] = float(nearest["_latency"])
 
-        available = candidates.loc[~candidates["_annotation_id"].isin(used)]
+        available_mask = [key not in used for key in candidates["_annotation_match_key"]]
+        available = candidates.loc[available_mask]
         if available.empty:
             matched.loc[event_index, "is_duplicate_detection"] = True
             continue
 
         annotation = available.iloc[0]
         annotation_id = annotation["_annotation_id"]
-        used.add(annotation_id)
+        used.add(annotation["_annotation_match_key"])
         latency = float(annotation["_latency"])
         matched.loc[event_index, "matched_annotation_id"] = annotation_id
         matched.loc[event_index, "matched_annotation_onset_time"] = float(annotation["onset_time"])
@@ -304,7 +334,7 @@ def _duration_minutes(
         return np.nan
 
     streams = _present_columns(frame, stream_columns or [])
-    grouped = frame.groupby(streams, sort=False) if streams else [((), frame)]
+    grouped = frame.groupby(streams, sort=False, dropna=False) if streams else [((), frame)]
     seconds = 0.0
     for _, stream_frame in grouped:
         times = pd.to_numeric(stream_frame["time"], errors="coerce").dropna()
@@ -356,7 +386,7 @@ def summarize_stimulus_events(
     """
     groups = _group_columns(events, group_columns) if not events.empty else list(group_columns or [])
     rows = []
-    grouped = events.groupby(groups, sort=True) if groups and not events.empty else [((), events)]
+    grouped = events.groupby(groups, sort=True, dropna=False) if groups and not events.empty else [((), events)]
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(groups, key_values, strict=True))

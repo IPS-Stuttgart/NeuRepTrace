@@ -287,6 +287,8 @@ def _continuous_preprocessing_hash(
     scan_step: float,
     n_window_samples: int,
     channel_names: Sequence[str],
+    feature_preprocessor: str,
+    pca_components: int | float | None,
 ) -> str:
     return stable_hash(
         {
@@ -297,6 +299,8 @@ def _continuous_preprocessing_hash(
             "scan_step": scan_step,
             "n_window_samples": n_window_samples,
             "channel_names": list(channel_names),
+            "feature_preprocessor": feature_preprocessor,
+            "pca_components": pca_components,
         }
     )
 
@@ -401,25 +405,31 @@ def _standardize_stream_observations(
     train_time: float,
     preprocessing_hash: str,
     model_hash: str,
+    feature_preprocessor: str,
+    pca_components: int | float | None,
+    tuning_metadata: dict[str, object] | None = None,
 ) -> pd.DataFrame:
     standardized = observations.copy()
+    tuning_metadata = {} if tuning_metadata is None else tuning_metadata
     if "sequence_id" not in standardized.columns and {"stream_id", "sample_index"}.issubset(standardized.columns):
         standardized["sequence_id"] = standardized["stream_id"].astype(str) + ":" + standardized["sample_index"].astype(str)
-    return ProbabilityObservationTable(standardized).standardized(
-        defaults={
-            "subject": "" if subject is None else subject,
-            "fold": "",
-            "split_id": split_id,
-            "seed": slice_seed,
-            "decoder": decoder,
-            "backend": "sklearn",
-            "emission_mode": emission_mode,
-            "train_time": train_time,
-            "calibration_fold": "",
-            "preprocessing_hash": preprocessing_hash,
-            "model_hash": model_hash,
-        }
-    ).frame
+    defaults = {
+        "subject": "" if subject is None else subject,
+        "fold": "",
+        "split_id": split_id,
+        "seed": slice_seed,
+        "decoder": decoder,
+        "backend": "sklearn",
+        "emission_mode": emission_mode,
+        "train_time": train_time,
+        "calibration_fold": "",
+        "preprocessing_hash": preprocessing_hash,
+        "model_hash": model_hash,
+        "feature_preprocessor": feature_preprocessor,
+        "pca_components": "" if pca_components is None else pca_components,
+    }
+    defaults.update(tuning_metadata)
+    return ProbabilityObservationTable(standardized).standardized(defaults=defaults).frame
 
 
 def _event_mask_in_window(events: pd.DataFrame, *, onset_column: str, start: float, stop: float, labels: set[str] | None = None, label_column: str = "stimulus_class") -> pd.Series:
@@ -518,13 +528,13 @@ def _scan_raw_probabilities(
     scan_step: float,
     decoder: str,
     emission_mode: str,
-    feature_preprocessor: str = "none",
-    pca_components: int | float | None = None,
-    tuning_metadata: dict[str, object] | None = None,
     subject: str | None,
     train_window: tuple[float, float],
     baseline: tuple[float | None, float | None] | None,
     demean_window: bool,
+    feature_preprocessor: str = "none",
+    pca_components: int | float | None = None,
+    tuning_metadata: dict[str, object] | None = None,
 ) -> pd.DataFrame:
     if scan_step <= 0:
         raise ValueError("scan_step must be positive.")
@@ -760,6 +770,8 @@ def run_continuous_stimulus_scan(
         scan_step=scan_step,
         n_window_samples=n_window_samples,
         channel_names=channel_names,
+        feature_preprocessor=feature_preprocessor_name,
+        pca_components=pca_components_value,
     )
     model_hash = _continuous_model_hash(
         decoder=decoder_name,
@@ -820,6 +832,9 @@ def run_continuous_stimulus_scan(
         train_time=float(np.mean(train_window)),
         preprocessing_hash=preprocessing_hash,
         model_hash=model_hash,
+        feature_preprocessor=feature_preprocessor_name,
+        pca_components=pca_components_value,
+        tuning_metadata=tuning_metadata,
     )
     annotations = _annotation_table(
         scan_events=scan_events,

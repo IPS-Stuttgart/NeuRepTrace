@@ -515,6 +515,33 @@ python -m reptrace.paired_stats \
   --chance 0.5
 ```
 
+To avoid copy/paste drift when comparing the result-relevant all-subject
+variants, run the predefined variant sweep. The command validates each manifest,
+runs the benchmark with calibration bins and plots, then writes the matched
+report, inference, and calibration outputs into each variant directory:
+
+```bash
+python -m reptrace.nod_variant_sweep \
+  --results-root results \
+  --resume
+```
+
+Inspect the commands first without touching the filesystem:
+
+```bash
+python -m reptrace.nod_variant_sweep --dry-run
+```
+
+To run only selected variants, repeat `--variant` with any of the built-in names,
+for example:
+
+```bash
+python -m reptrace.nod_variant_sweep \
+  --variant logistic_pca_whiten_tuned \
+  --variant logistic_anova_select_tuned \
+  --resume
+```
+
 Run the full 19-subject decoder comparison on a self-hosted GitHub Actions
 runner:
 

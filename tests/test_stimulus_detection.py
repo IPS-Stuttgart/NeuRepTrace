@@ -4,6 +4,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from reptrace.stimulus_detection import (
     detect_stimulus_events,
@@ -143,6 +144,39 @@ def test_fit_thresholds_can_be_reused_for_detection():
     assert thresholds.set_index("stimulus_class").loc[["A", "B", "C"], "score_threshold"].eq(0.60).all()
     assert len(events) == 3
     assert events["score_threshold"].notna().all()
+
+
+def test_supplied_thresholds_must_include_requested_group_columns():
+    frame = _stream_frame()
+    group_columns = ("subject", "decoder", "emission_mode")
+    thresholds = fit_stimulus_detection_thresholds(
+        frame,
+        group_columns=group_columns,
+        stream_columns=("stream_id",),
+        threshold_window=THRESHOLD_WINDOW,
+        threshold_quantile=1.0,
+    )
+    thresholds_without_decoder = thresholds.drop(columns=["decoder"])
+
+    with pytest.raises(ValueError, match="missing requested group columns.*decoder"):
+        detect_stimulus_events(
+            frame,
+            thresholds=thresholds_without_decoder,
+            group_columns=group_columns,
+            stream_columns=("stream_id",),
+            detection_window=(0.0, float("inf")),
+            min_consecutive=2,
+        )
+
+    events = detect_stimulus_events(
+        frame,
+        thresholds=thresholds,
+        group_columns=group_columns,
+        stream_columns=("stream_id",),
+        detection_window=(0.0, float("inf")),
+        min_consecutive=2,
+    )
+    assert events["stimulus_class"].tolist() == ["A", "B", "A"]
 
 
 def test_predicted_class_confidence_only_scores_matching_winning_class():
@@ -296,6 +330,32 @@ def test_annotation_matching_and_summary_report_event_level_metrics():
     assert summary.iloc[0]["f1"] == 1.0
     assert summary.iloc[0]["class_accuracy_for_matched_events"] == 1.0
     assert summary.iloc[0]["onset_latency_mean"] == 0.0
+
+
+def test_annotation_matching_scopes_reused_annotation_ids_by_stream():
+    events = pd.DataFrame(
+        [
+            _manual_event("run-1", 0.0, "A", 0),
+            _manual_event("run-2", 1.0, "A", 0),
+        ]
+    )
+    annotations = pd.DataFrame(
+        [
+            {"stream_id": "run-1", "annotation_id": 1, "stimulus_class": "A", "onset_time": 0.0},
+            {"stream_id": "run-2", "annotation_id": 1, "stimulus_class": "A", "onset_time": 1.0},
+        ]
+    )
+
+    matched = match_stimulus_annotations(
+        events,
+        annotations,
+        stream_columns=("stream_id",),
+        match_tolerance=0.01,
+    )
+
+    assert matched["is_true_positive"].tolist() == [True, True]
+    assert matched["is_duplicate_detection"].tolist() == [False, False]
+    assert matched["matched_annotation_id"].tolist() == [1, 1]
 
 
 def test_summary_counts_duplicate_detections_and_false_alarms_per_minute():
