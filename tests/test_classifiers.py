@@ -206,11 +206,13 @@ def test_regularized_qda_trains_and_predicts_probabilities():
     )
     labels = np.repeat(np.arange(3, dtype=int), 8)
 
-    model = train_multiclass_classifier(features, labels, "regularized-qda", 0.25)
-    probabilities = model.predict_proba(features[:4])
+    default_model = train_multiclass_classifier(features, labels, "regularized-qda", None)
+    numeric_model = train_multiclass_classifier(features, labels, "regularized-qda", 0.25)
+    probabilities = numeric_model.predict_proba(features[:4])
 
     assert "regularized-qda" in CLASSIFIER_REGISTRY
-    assert model.model.reg_param == 0.25
+    assert default_model.model.reg_param == 0.5
+    assert numeric_model.model.reg_param == 0.25
     assert probabilities.shape == (4, 3)
     np.testing.assert_allclose(np.sum(probabilities, axis=1), np.ones(4))
 
@@ -241,7 +243,7 @@ def test_weighted_multinomial_logistic_trains():
     assert len(model.predict(features)) == len(labels)
 
 
-def test_shrinkage_prototype_classifier_trains_and_scores():
+def test_shrinkage_prototype_classifier_trains_scores_and_predicts_probabilities():
     features = np.asarray(
         [
             [0.0, 0.0],
@@ -258,11 +260,14 @@ def test_shrinkage_prototype_classifier_trains_and_scores():
     model = train_multiclass_classifier(features, labels, "shrinkage-prototype", 0.1)
     predictions = model.predict(np.asarray([[0.0, 0.1], [1.1, 1.0], [2.1, 0.0]], dtype=float))
     scores = model.decision_function(features[:3])
+    probabilities = model.predict_proba(features[:3])
 
     assert "shrinkage-prototype" in CLASSIFIER_REGISTRY
     assert model.model.shrinkage == 0.1
     np.testing.assert_array_equal(predictions, np.asarray([0, 1, 2], dtype=int))
     assert scores.shape == (3, 3)
+    assert probabilities.shape == (3, 3)
+    np.testing.assert_allclose(np.sum(probabilities, axis=1), np.ones(3))
 
 
 def test_shrinkage_prototype_rejects_invalid_shrinkage(multiclass_data):

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
-from neureptrace.mne_time_decode import run_time_resolved_decode
+from neureptrace.mne_time_decode import run_time_resolved_decode, run_time_resolved_decode_from_epochs
 
 
 class FakeEpochs:
@@ -37,6 +37,38 @@ class FakeEpochs:
 
     def get_data(self, copy: bool = False):
         return self._data.copy() if copy else self._data
+
+
+def test_run_time_resolved_decode_from_epochs_uses_preloaded_inputs(tmp_path: Path):
+    rng = np.random.default_rng(7)
+    labels = np.array(["animate", "inanimate"] * 4)
+    data = rng.normal(size=(8, 1, 5))
+    data[labels == "animate", 0, :] += 0.5
+    metadata = pd.DataFrame({"condition": labels, "session": ["a", "a", "b", "b", "c", "c", "d", "d"]})
+    epochs = FakeEpochs(data, np.array([0.00, 0.01, 0.02, 0.03, 0.04]), metadata)
+
+    out = tmp_path / "decode_from_epochs.csv"
+    observations_out = tmp_path / "observations_from_epochs.csv"
+
+    results = run_time_resolved_decode_from_epochs(
+        epochs=epochs,
+        metadata=metadata,
+        label_column="condition",
+        out_path=out,
+        n_splits=2,
+        window_ms=20,
+        step_ms=20,
+        emission_mode="uncalibrated",
+        observation_out_path=observations_out,
+        subject="sub-01",
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert out.exists()
+    assert observations_out.exists()
+    assert results["n_classes"].unique().tolist() == [2]
+    assert observations["subject"].unique().tolist() == ["sub-01"]
+    assert sorted(observations["true_class"].unique().tolist()) == ["animate", "inanimate"]
 
 
 def test_run_time_resolved_decode_writes_probability_observations(tmp_path: Path, monkeypatch):

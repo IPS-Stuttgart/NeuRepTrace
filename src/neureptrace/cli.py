@@ -8,8 +8,10 @@ from collections.abc import Sequence
 from importlib import import_module
 
 COMMAND_MODULES = {
+    "alpha": "neureptrace.meg.alpha_cli",
     "benchmark": "neureptrace.benchmark",
     "continuous-stimulus-scan": "neureptrace.continuous_stimulus_scan",
+    "dataset": "neureptrace.dataset_workflow",
     "ensemble-observations": "neureptrace.observation_ensemble",
     "event-detect": "neureptrace.event_detection",
     "event-detection": "neureptrace.event_detection",

@@ -9,9 +9,11 @@ packages = [{ include = "neureptrace", from = "src" }]
 
 [tool.poetry.scripts]
 neureptrace = "neureptrace.cli:main"
+neureptrace-alpha = "neureptrace.meg.alpha_cli:main"
 neureptrace-benchmark = "neureptrace.benchmark:main"
 neureptrace-continuous-stimulus-scan = "neureptrace.continuous_stimulus_scan:main"
 neureptrace-cross-person-decode = "neureptrace.cross_person:main"
+neureptrace-dataset = "neureptrace.dataset_workflow:main"
 neureptrace-event-detect = "neureptrace.event_detection:main"
 neureptrace-metadata = "neureptrace.metadata:main"
 neureptrace-mne-time-decode = "neureptrace.mne_time_decode:main"

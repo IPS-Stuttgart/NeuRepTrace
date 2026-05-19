@@ -188,6 +188,16 @@ def _write_prediction_diagnostic_tables(
         per_class.to_csv(per_class_out_path, index=False)
 
 
+def _default_observation_path(out_path: Path) -> Path:
+    """Return the canonical probability-observation path paired with a metric CSV."""
+    return out_path.with_name(f"{out_path.stem}_observations.csv")
+
+
+def _resolve_observation_out_path(out_path: Path, observation_out_path: Path | None, no_observations: bool) -> Path | None:
+    """Resolve CLI observation output behavior while keeping the Python API explicit."""
+    return None if no_observations else observation_out_path or _default_observation_path(out_path)
+
+
 def _load_epochs_and_metadata(
     epochs_path: Path,
     metadata_csv: Path | None,
@@ -820,22 +830,7 @@ def run_time_resolved_decode(
     confusion_out_path: Path | None = None,
     per_class_out_path: Path | None = None,
 ) -> pd.DataFrame:
-    """Run time-resolved decoding on epochs input and save metrics as CSV.
-
-    If ``temporal_train_window`` is set, models are trained on every decoding
-    window whose center lies in that interval and are evaluated at every test
-    time. The per-test-time probabilities are averaged across those train-time
-    models, turning temporal generalization into a direct result-improving
-    train-window ensemble. Without the option, the historical diagonal
-    train-time == test-time decoding path is used.
-
-    If ``temporal_selection_window`` is set, train-time windows inside that
-    interval are selected independently inside each outer train fold using
-    nested cross-validation on training trials only. The selected top-k windows
-    are then refit on the full outer train fold and probability-ensembled across
-    all test times. ``temporal_train_window`` and ``temporal_selection_window``
-    are mutually exclusive.
-    """
+    """Load epochs input, run time-resolved decoding, and save metrics as CSV."""
     epochs, metadata = _load_epochs_and_metadata(
         epochs_path,
         metadata_csv,
@@ -845,6 +840,94 @@ def run_time_resolved_decode(
         fieldtrip_trim_overlong_labels=fieldtrip_trim_overlong_labels,
         fieldtrip_ch_type=fieldtrip_ch_type,
     )
+    return run_time_resolved_decode_from_epochs(
+        epochs=epochs,
+        metadata=metadata,
+        label_column=label_column,
+        out_path=out_path,
+        group_column=group_column,
+        picks=picks,
+        tmin=tmin,
+        tmax=tmax,
+        window_ms=window_ms,
+        step_ms=step_ms,
+        n_splits=n_splits,
+        max_iter=max_iter,
+        decoder=decoder,
+        emission_mode=emission_mode,
+        feature_preprocessor=feature_preprocessor,
+        pca_components=pca_components,
+        tune_hyperparameters=tune_hyperparameters,
+        tuning_cv_splits=tuning_cv_splits,
+        tuning_scoring=tuning_scoring,
+        tuning_c_grid=tuning_c_grid,
+        calibration_out_path=calibration_out_path,
+        calibration_bins=calibration_bins,
+        observation_out_path=observation_out_path,
+        subject=subject,
+        temporal_train_window=temporal_train_window,
+        temporal_selection_window=temporal_selection_window,
+        temporal_selection_metric=temporal_selection_metric,
+        temporal_selection_cv_splits=temporal_selection_cv_splits,
+        temporal_selection_top_k=temporal_selection_top_k,
+        ranking_top_k=ranking_top_k,
+        ranking_row_top_k=ranking_row_top_k,
+        confusion_out_path=confusion_out_path,
+        per_class_out_path=per_class_out_path,
+    )
+
+
+def run_time_resolved_decode_from_epochs(
+    epochs: mne.Epochs,
+    metadata: pd.DataFrame,
+    label_column: str,
+    out_path: Path,
+    *,
+    group_column: str | None = None,
+    picks: str = "data",
+    tmin: float | None = None,
+    tmax: float | None = None,
+    window_ms: float = 20.0,
+    step_ms: float = 10.0,
+    n_splits: int = 5,
+    max_iter: int = 1000,
+    decoder: str = "logistic",
+    emission_mode: str = "calibrated",
+    feature_preprocessor: str = "none",
+    pca_components: int | float | str | None = None,
+    tune_hyperparameters: bool = False,
+    tuning_cv_splits: int = 3,
+    tuning_scoring: str = "accuracy",
+    tuning_c_grid: Sequence[float] | str | None = None,
+    calibration_out_path: Path | None = None,
+    calibration_bins: int = 10,
+    observation_out_path: Path | None = None,
+    subject: str | None = None,
+    temporal_train_window: tuple[float, float] | None = None,
+    temporal_selection_window: tuple[float, float] | None = None,
+    temporal_selection_metric: str = "accuracy",
+    temporal_selection_cv_splits: int = 3,
+    temporal_selection_top_k: int = 1,
+    ranking_top_k: Sequence[int] | str | None = DEFAULT_RANKING_TOP_K,
+    ranking_row_top_k: int = DEFAULT_RANKING_ROW_TOP_K,
+    confusion_out_path: Path | None = None,
+    per_class_out_path: Path | None = None,
+) -> pd.DataFrame:
+    """Run time-resolved decoding on preloaded epochs and metadata.
+
+    File-specific loaders normalize their inputs to ``epochs`` plus a
+    trial-aligned metadata frame and call this function. If
+    ``temporal_train_window`` is set, models are trained on every decoding
+    window whose center lies in that interval and are evaluated at every test
+    time. If ``temporal_selection_window`` is set, train-time windows inside
+    that interval are selected independently inside each outer train fold using
+    nested cross-validation on training trials only.
+    """
+    if len(metadata) != len(epochs):
+        raise ValueError(
+            f"Metadata row count ({len(metadata)}) does not match epochs ({len(epochs)})."
+        )
+    metadata = metadata.copy().reset_index(drop=True)
     decoder_name = normalize_decoder_name(decoder)
     emission_modes = list(EMISSION_MODE_CHOICES) if emission_mode == "both" else [normalize_emission_mode(emission_mode)]
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
@@ -1209,7 +1292,7 @@ def run_time_resolved_decode(
         calibration_out_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(calibration_rows).to_csv(calibration_out_path, index=False)
     if observation_out_path is not None:
-        ProbabilityObservationTable(pd.DataFrame(observation_rows)).standardized(
+        observation_table = ProbabilityObservationTable(pd.DataFrame(observation_rows)).standardized(
             defaults={
                 "backend": "sklearn",
                 "split_id": split_id,
@@ -1218,7 +1301,9 @@ def run_time_resolved_decode(
                 "preprocessing_hash": preprocessing_hash,
                 "model_hash": default_model_hash,
             }
-        ).to_csv(observation_out_path)
+        )
+        observation_table.validate(profile="canonical", require_normalized=True).raise_for_errors()
+        observation_table.to_csv(observation_out_path)
     _write_prediction_diagnostic_tables(
         observation_rows,
         confusion_out_path=confusion_out_path,
@@ -1289,7 +1374,12 @@ def main() -> None:
     )
     parser.add_argument("--calibration-out", type=Path)
     parser.add_argument("--calibration-bins", type=int, default=10)
-    parser.add_argument("--observations-out", type=Path, help="Optional held-out trial/time probability observation CSV.")
+    parser.add_argument(
+        "--observations-out",
+        type=Path,
+        help="Canonical held-out trial/time probability observation CSV. Defaults to '<out stem>_observations.csv'.",
+    )
+    parser.add_argument("--no-observations", action="store_true", help="Disable canonical probability-observation CSV output.")
     parser.add_argument("--confusion-out", type=Path, help="Optional true/predicted class-pair count CSV.")
     parser.add_argument("--per-class-out", type=Path, help="Optional per-class recall/accuracy CSV.")
     parser.add_argument("--subject", help="Optional subject identifier to include in output CSVs.")
@@ -1333,6 +1423,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    observations_out = _resolve_observation_out_path(args.out, args.observations_out, args.no_observations)
+
     results = run_time_resolved_decode(
         epochs_path=args.epochs,
         metadata_csv=args.metadata_csv,
@@ -1361,7 +1453,7 @@ def main() -> None:
         tuning_c_grid=args.tuning_c_grid,
         calibration_out_path=args.calibration_out,
         calibration_bins=args.calibration_bins,
-        observation_out_path=args.observations_out,
+        observation_out_path=observations_out,
         subject=args.subject,
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
         temporal_selection_window=tuple(args.temporal_selection_window) if args.temporal_selection_window is not None else None,
@@ -1374,8 +1466,8 @@ def main() -> None:
         per_class_out_path=args.per_class_out,
     )
     print(f"Wrote {args.out}")
-    if args.observations_out is not None:
-        print(f"Wrote probability observations: {args.observations_out}")
+    if observations_out is not None:
+        print(f"Wrote probability observations: {observations_out}")
     if args.confusion_out is not None:
         print(f"Wrote confusion counts: {args.confusion_out}")
     if args.per_class_out is not None:

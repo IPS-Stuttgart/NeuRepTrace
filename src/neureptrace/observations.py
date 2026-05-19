@@ -10,6 +10,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import accuracy_score, log_loss
+
+from neureptrace.metrics import brier_score_multiclass, expected_calibration_error
 
 STANDARD_OBSERVATION_COLUMNS: tuple[str, ...] = (
     "subject",
@@ -57,6 +60,44 @@ def probability_columns(frame: pd.DataFrame) -> tuple[str, ...]:
     return tuple(sorted((column for column in frame.columns if column.startswith("prob_class_")), key=_probability_sort_key))
 
 
+DECODING_SUMMARY_GROUP_COLUMNS: tuple[str, ...] = (
+    "subject",
+    "fold",
+    "decoder",
+    "emission_mode",
+    "feature_preprocessor",
+    "pca_components",
+    "normalization",
+    "baseline_window_start",
+    "baseline_window_stop",
+    "temporal_mode",
+    "temporal_train_window_start",
+    "temporal_train_window_stop",
+    "train_time",
+    "time",
+    "test_time",
+    "train_window_start",
+    "train_window_stop",
+    "n_train_windows",
+    "window_start",
+    "window_stop",
+    "split_id",
+    "preprocessing_hash",
+    "model_hash",
+    "tuned_hyperparameters",
+    "tuning_cv_splits",
+    "tuning_scoring",
+    "tuning_c_grid",
+    "best_params",
+    "best_score",
+)
+
+
+def _present_group_columns(frame: pd.DataFrame, group_columns: Sequence[str] | None) -> list[str]:
+    columns = DECODING_SUMMARY_GROUP_COLUMNS if group_columns is None else tuple(group_columns)
+    return [column for column in columns if column in frame.columns]
+
+
 def _value_at(values: Sequence[object] | np.ndarray | pd.Series | None, index: int, default: object = "") -> object:
     if values is None:
         return default
@@ -71,6 +112,83 @@ def _empty_or_missing(series: pd.Series) -> pd.Series:
     if series.dtype == object:
         missing |= series.astype(str).eq("")
     return missing
+
+
+def _first_present_value(frame: pd.DataFrame, column: str, default: object = "") -> object:
+    if column not in frame.columns:
+        return default
+    present = ~_empty_or_missing(frame[column])
+    if not bool(present.any()):
+        return default
+    return frame.loc[present, column].iloc[0]
+
+
+def _class_names_from_group(group: pd.DataFrame, prob_columns: Sequence[str]) -> list[str]:
+    class_names: list[str] = []
+    for prob_column in prob_columns:
+        suffix = prob_column.removeprefix("prob_class_")
+        class_column = f"class_{suffix}"
+        class_name = _first_present_value(group, class_column, suffix)
+        class_names.append(str(class_name))
+    return class_names
+
+
+def _summarize_decoding_group(
+    group: pd.DataFrame,
+    *,
+    prob_columns: Sequence[str],
+    group_columns: Sequence[str],
+) -> dict[str, object]:
+    probabilities = group.loc[:, list(prob_columns)].apply(pd.to_numeric, errors="raise").to_numpy(dtype=float)
+    true_labels = pd.to_numeric(group["true_label"], errors="raise").to_numpy(dtype=int)
+    predictions = probabilities.argmax(axis=1)
+    n_classes = probabilities.shape[1]
+
+    row = {column: group[column].iloc[0] for column in group_columns}
+    for column in ("n_train", "n_train_windows", "tuning_cv_splits"):
+        if column in group.columns and column not in row:
+            row[column] = _first_present_value(group, column)
+    row.update(
+        {
+            "accuracy": accuracy_score(true_labels, predictions),
+            "log_loss": log_loss(true_labels, probabilities, labels=np.arange(n_classes)),
+            "brier": brier_score_multiclass(probabilities, true_labels),
+            "ece": expected_calibration_error(probabilities, true_labels),
+            "n_test": int(len(group)),
+            "n_classes": int(n_classes),
+            "class_names": "|".join(_class_names_from_group(group, prob_columns)),
+        }
+    )
+    return row
+
+
+def summarize_decoding_observations(
+    frame: pd.DataFrame,
+    *,
+    group_columns: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Rebuild time-resolved decoding metric rows from probability observations.
+
+    This is the bridge needed for phasing out dataset-specific result tables:
+    downstream code can treat canonical ``prob_class_*`` observation CSVs as the
+    durable artifact and regenerate the usual accuracy/log-loss/Brier/ECE rows
+    when needed.
+    """
+
+    prob_columns = probability_columns(frame)
+    if "true_label" not in frame.columns:
+        raise ValueError("Decoding observation summaries require a 'true_label' column.")
+
+    present_group_columns = _present_group_columns(frame, group_columns)
+    if not present_group_columns:
+        return pd.DataFrame(
+            [_summarize_decoding_group(frame, prob_columns=prob_columns, group_columns=[])]
+        )
+
+    rows = []
+    for _key, group in frame.groupby(present_group_columns, dropna=False, sort=True):
+        rows.append(_summarize_decoding_group(group, prob_columns=prob_columns, group_columns=present_group_columns))
+    return pd.DataFrame(rows)
 
 
 @dataclass(frozen=True)

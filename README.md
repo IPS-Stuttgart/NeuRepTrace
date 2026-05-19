@@ -53,6 +53,12 @@ interfaces. In particular, PyMEGDec owns the MATLAB `.mat` loaders, the
 geometry handling, alpha analyses, stimulus-specific defaults, and
 paper-facing export scripts for the MEG dataset it was developed around.
 
+The migration path for phasing out PyMEGDec is documented in
+`docs/migration/pymegdec.md`. FieldTrip-style MATLAB files can be described as
+NeuRepTrace dataset inputs once a `fieldtrip-mat` loader is available; the
+expected file structure, label-trimming behavior, and YAML conventions are
+documented in `docs/datasets/fieldtrip-mat.md`.
+
 ## Installation
 
 NeuRepTrace requires Python 3.11 or newer and earlier than Python 3.14.

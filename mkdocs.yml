@@ -8,6 +8,11 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Data Staging: data-staging.md
+  - MEG Alpha: meg-alpha.md
+  - Datasets:
+      - FieldTrip MAT: datasets/fieldtrip-mat.md
+  - Migration:
+      - PyMEGDec: migration/pymegdec.md
   - Dataset Configs: config.md
   - Benchmarking: benchmarking.md
   - API Overview: api-overview.md
@@ -20,6 +25,7 @@ nav:
       - Emission Compare: reference/emission-compare.md
       - Inference: reference/inference.md
       - Metadata: reference/metadata.md
+      - MEG Alpha: reference/meg-alpha.md
       - Metrics: reference/metrics.md
       - Observation Schema: reference/observation-schema.md
       - Onset Detection: reference/onset-detection.md

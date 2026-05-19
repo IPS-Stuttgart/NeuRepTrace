@@ -144,8 +144,17 @@ class ShrinkagePrototypeClassifier(ClassifierMixin, BaseEstimator):
         features = np.asarray(features, dtype=float)
         if features.ndim != 2:
             raise ValueError("features must be a two-dimensional feature matrix.")
+        if features.shape[1] != self.shrunk_prototypes_.shape[1]:
+            raise ValueError("features must have the same number of columns as the fitted prototypes.")
         squared_distances = np.sum(np.square(features[:, None, :] - self.shrunk_prototypes_[None, :, :]), axis=2)
         return -squared_distances
+
+    def predict_proba(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        """Return softmax-normalized negative-distance probabilities."""
+        scores = self.decision_function(features)
+        shifted = scores - np.max(scores, axis=1, keepdims=True)
+        exp_scores = np.exp(np.clip(shifted, -50.0, 50.0))
+        return exp_scores / exp_scores.sum(axis=1, keepdims=True)
 
     def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
         if self.classes_ is None:
