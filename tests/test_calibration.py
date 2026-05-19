@@ -73,5 +73,5 @@ def test_build_calibration_report_writes_markdown(tmp_path: Path):
 
     report = build_calibration_report(summary_csv, effect_window=(0.1, 0.2))
 
-    assert "# RepTrace Calibration Report" in report
+    assert "# NeuRepTrace Calibration Report" in report
     assert "| logistic | 5 | 0.060 | 0.470 | 0.660 | 0.600 |" in report

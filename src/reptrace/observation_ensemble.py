@@ -354,7 +354,7 @@ def _parse_weights(weights: Sequence[float] | None, decoders: Sequence[str]) -> 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Command-line entry point for baseline-debiased probability ensembling."""
-    parser = argparse.ArgumentParser(description="Create a baseline-debiased log-probability ensemble from RepTrace observation CSVs.")
+    parser = argparse.ArgumentParser(description="Create a baseline-debiased log-probability ensemble from NeuRepTrace observation CSVs.")
     parser.add_argument("observation_csv", nargs="+", type=Path, help="Observation CSVs or glob patterns containing source decoder probability rows.")
     parser.add_argument("--out", type=Path, required=True, help="CSV path for the ensembled probability observations.")
     parser.add_argument("--metrics-out", type=Path, help="Optional time-resolved metrics CSV computed from the ensembled observations.")

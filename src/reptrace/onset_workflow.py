@@ -282,7 +282,7 @@ def run_onset_workflow(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run RepTrace onset detection across task result directories.")
+    parser = argparse.ArgumentParser(description="Run NeuRepTrace onset detection across task result directories.")
     parser.add_argument(
         "--task-dir",
         action="append",

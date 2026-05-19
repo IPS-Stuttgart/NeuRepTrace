@@ -102,7 +102,7 @@ def plot_time_decode_results(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Plot time-resolved decoding metrics from a RepTrace result CSV."
+        description="Plot time-resolved decoding metrics from a NeuRepTrace result CSV."
     )
     parser.add_argument("results_csv", type=Path)
     parser.add_argument("--out", type=Path, required=True)

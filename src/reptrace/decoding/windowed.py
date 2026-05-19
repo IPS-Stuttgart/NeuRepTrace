@@ -49,7 +49,7 @@ def fit_window_model(
     """Fit one model for a precomputed feature window.
 
     Dataset-specific projects provide the windowed feature matrix and a model
-    factory. RepTrace owns the reusable PCA fit/transform bookkeeping.
+    factory. NeuRepTrace owns the reusable PCA fit/transform bookkeeping.
     """
 
     train_features = _feature_matrix(train_features, name="train_features")

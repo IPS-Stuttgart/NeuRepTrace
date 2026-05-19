@@ -1,6 +1,6 @@
 # Probability-observation schema
 
-RepTrace workflows exchange held-out decoder outputs as probability-observation
+NeuRepTrace workflows exchange held-out decoder outputs as probability-observation
 tables. The schema validator checks those tables before downstream onset,
 stimulus-event, or temporal-state analyses.
 

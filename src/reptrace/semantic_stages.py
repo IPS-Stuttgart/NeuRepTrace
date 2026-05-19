@@ -283,7 +283,7 @@ def build_stage_report(
 ) -> str:
     """Build a compact Markdown report for the semantic-stage question."""
     lines = [
-        "# RepTrace Semantic Stage Report",
+        "# NeuRepTrace Semantic Stage Report",
         "",
         "Question: do semantic categories unfold in stable temporal stages?",
         "",

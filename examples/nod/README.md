@@ -1,6 +1,6 @@
 # NOD Benchmark Notes
 
-RepTrace expects NOD data to be staged locally. The first pilot should use one
+NeuRepTrace expects NOD data to be staged locally. The first pilot should use one
 subject's epoched `.fif` file and matching events CSV.
 
 Prepare a binary animate/inanimate metadata file:

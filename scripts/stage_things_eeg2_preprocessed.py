@@ -1,4 +1,4 @@
-"""Stage THINGS-EEG2 author-preprocessed arrays for RepTrace benchmarks."""
+"""Stage THINGS-EEG2 author-preprocessed arrays for NeuRepTrace benchmarks."""
 
 from __future__ import annotations
 
@@ -308,7 +308,7 @@ def main() -> None:
         step_ms=args.step_ms,
         n_splits=args.n_splits,
     )
-    print(f"Wrote THINGS-EEG2 RepTrace manifest: {args.manifest_out}")
+    print(f"Wrote THINGS-EEG2 NeuRepTrace manifest: {args.manifest_out}")
 
 
 if __name__ == "__main__":

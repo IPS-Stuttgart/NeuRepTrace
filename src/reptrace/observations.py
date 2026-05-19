@@ -1,4 +1,4 @@
-"""Canonical probability-observation tables emitted by RepTrace workflows."""
+"""Canonical probability-observation tables emitted by NeuRepTrace workflows."""
 
 from __future__ import annotations
 

@@ -25,4 +25,4 @@ def test_grouped_cli_dispatches_to_module_main(monkeypatch):
 def test_grouped_cli_without_command_prints_help(capsys):
     assert cli.main([]) == 0
     captured = capsys.readouterr()
-    assert "RepTrace command-line interface" in captured.out
+    assert "NeuRepTrace command-line interface" in captured.out

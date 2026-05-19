@@ -1,10 +1,10 @@
-# RepTrace
+# NeuRepTrace
 
-[![Documentation](https://github.com/IPS-Stuttgart/RepTrace/actions/workflows/pages.yml/badge.svg)](https://ips-stuttgart.github.io/RepTrace/)
+[![Documentation](https://github.com/IPS-Stuttgart/NeuRepTrace/actions/workflows/pages.yml/badge.svg)](https://ips-stuttgart.github.io/NeuRepTrace/)
 
 Probabilistic tracing of neural representations over time.
 
-RepTrace is an early-stage Python toolkit for benchmarking calibrated,
+NeuRepTrace is an early-stage Python toolkit for benchmarking calibrated,
 time-resolved decoders on M/EEG data. The initial goal is to turn classifier
 outputs from non-invasive neural recordings into probability traces that are
 useful for studying representational dynamics, planning, and replay-like
@@ -12,7 +12,7 @@ sequences.
 
 ## Features
 
-RepTrace currently provides tools for:
+NeuRepTrace currently provides tools for:
 
 - time-resolved decoding from MNE `Epochs` files;
 - held-out trial/time probability observation exports for downstream state
@@ -41,13 +41,13 @@ RepTrace currently provides tools for:
 
 ## Project boundary with PyMEGDec
 
-RepTrace owns the dataset-independent M/EEG decoding layer. Keep reusable
+NeuRepTrace owns the dataset-independent M/EEG decoding layer. Keep reusable
 feature-matrix decoding, classifier calibration, temporal generalization,
 onset/state inference, confusion and per-class metrics, MNE `Epochs` decoding,
 and generic summary-table/reporting helpers here.
 
 Dataset-specific projects should adapt their own file formats and experimental
-conventions into RepTrace's feature-matrix and probability-observation
+conventions into NeuRepTrace's feature-matrix and probability-observation
 interfaces. In particular, PyMEGDec owns the MATLAB `.mat` loaders, the
 `Part*Data.mat` / `Part*CueData.mat` participant-file conventions, CTF sensor
 geometry handling, alpha analyses, stimulus-specific defaults, and
@@ -55,7 +55,7 @@ paper-facing export scripts for the MEG dataset it was developed around.
 
 ## Installation
 
-RepTrace requires Python 3.11 or newer and earlier than Python 3.14.
+NeuRepTrace requires Python 3.11 or newer and earlier than Python 3.14.
 
 For development from a source checkout, use Poetry:
 
@@ -276,7 +276,7 @@ artifacts:
 reptrace-temporal-state-workflow \
   --data-root data/nod \
   --out-dir results/temporal_state_inference \
-  --compact-export-dir ../RepTrace-Compact-Results/results/temporal_state_inference \
+  --compact-export-dir ../NeuRepTrace-Compact-Results/results/temporal_state_inference \
   --decoders logistic linear_svm \
   --n-permutations 100
 ```
@@ -288,7 +288,7 @@ test before launching the full run. Resume is enabled by default; pass
 ## Documentation
 
 The documentation site is published at
-<https://ips-stuttgart.github.io/RepTrace/>.
+<https://ips-stuttgart.github.io/NeuRepTrace/>.
 
 The `docs/` directory contains the project documentation:
 
@@ -317,18 +317,18 @@ python -m pytest
 
 ## Citation
 
-If you use **RepTrace** in your research, please cite the repository for now:
+If you use **NeuRepTrace** in your research, please cite the repository for now:
 
 ```bibtex
 @software{pfaff_reptrace_2026,
   author = {Florian Pfaff},
-  title = {RepTrace: Probabilistic Tracing of Neural Representations over Time},
+  title = {NeuRepTrace: Probabilistic Tracing of Neural Representations over Time},
   year = {2026},
-  url = {https://github.com/IPS-Stuttgart/RepTrace},
+  url = {https://github.com/IPS-Stuttgart/NeuRepTrace},
   license = {MIT}
 }
 ```
 
 ## License
 
-`RepTrace` is licensed under the MIT License.
+`NeuRepTrace` is licensed under the MIT License.

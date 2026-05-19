@@ -252,7 +252,7 @@ def build_paired_stats_report(
 ) -> str:
     """Build a Markdown paired decoder statistics report."""
     lines = [
-        "# RepTrace Paired Decoder Statistics",
+        "# NeuRepTrace Paired Decoder Statistics",
         "",
         f"- Chance level: {_format_float(chance)}",
         f"- Baseline window: {_format_float(baseline_window[0])} to {_format_float(baseline_window[1])} s",

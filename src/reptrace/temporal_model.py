@@ -56,7 +56,7 @@ def _class_names(frame: pd.DataFrame, prob_columns: list[str]) -> list[str]:
 
 
 def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
-    """Read held-out probability observation CSVs emitted by RepTrace."""
+    """Read held-out probability observation CSVs emitted by NeuRepTrace."""
     if not csv_paths:
         raise ValueError("At least one observation CSV path is required.")
 
@@ -457,7 +457,7 @@ def fit_temporal_models(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Fit conservative sticky switching models to RepTrace probability observation CSVs."
+        description="Fit conservative sticky switching models to NeuRepTrace probability observation CSVs."
     )
     parser.add_argument("observation_csv", nargs="+", help="Observation CSVs or glob patterns emitted by --observations-out/--observation-dir.")
     parser.add_argument("--out-summary", type=Path, required=True)

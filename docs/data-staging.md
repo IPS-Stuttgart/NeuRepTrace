@@ -1,6 +1,6 @@
 # Data Staging
 
-RepTrace does not download large public datasets automatically and does not
+NeuRepTrace does not download large public datasets automatically and does not
 store staged data in git. Stage datasets outside version control under
 `data/`, then validate the benchmark manifest before running decoding.
 
@@ -16,7 +16,7 @@ NOD-MEG and provides preprocessed epoch data.
 - NOD-EEG: OpenNeuro `ds005811`
 - NOD-MEG: OpenNeuro `ds005810`
 
-For each subject, RepTrace expects:
+For each subject, NeuRepTrace expects:
 
 - an epochs file named like `sub-01_epo.fif`;
 - a detailed events CSV named like `sub-01_events.csv`;
@@ -144,7 +144,7 @@ python scripts/download_nodeeg_data.py \
   --require-subject-count 19
 ```
 
-The downloader copies only the flat files expected by RepTrace:
+The downloader copies only the flat files expected by NeuRepTrace:
 `sub-*_epo.fif` and `sub-*_events.csv`.
 
 OpenNeuro's browser download, the Deno OpenNeuro CLI, or DataLad/git-annex can

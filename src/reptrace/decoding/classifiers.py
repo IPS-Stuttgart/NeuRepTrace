@@ -143,7 +143,7 @@ class DecodedLabelClassifier:
         try:
             import torch
         except ImportError as exc:
-            raise ImportError("Install RepTrace with the torch extra to score classifier='pytorch-mlp'.") from exc
+            raise ImportError("Install NeuRepTrace with the torch extra to score classifier='pytorch-mlp'.") from exc
         if hasattr(self.model, "eval"):
             self.model.eval()
         with torch.no_grad():
@@ -253,7 +253,7 @@ def _build_xgboost(_features: np.ndarray, _labels: np.ndarray, classifier_param:
     try:
         import xgboost as xgb
     except ImportError as exc:
-        raise ImportError("Install RepTrace with the xgboost extra to use classifier='xgboost'.") from exc
+        raise ImportError("Install NeuRepTrace with the xgboost extra to use classifier='xgboost'.") from exc
     return xgb.XGBClassifier(n_estimators=int(classifier_param), eval_metric="mlogloss", random_state=random_state)
 
 
@@ -375,7 +375,7 @@ def _seed_pytorch_training(random_seed: int) -> None:
     try:
         import pytorch_lightning as pl
     except ImportError as exc:
-        raise ImportError("Install RepTrace with the torch extra to use classifier='pytorch-mlp'.") from exc
+        raise ImportError("Install NeuRepTrace with the torch extra to use classifier='pytorch-mlp'.") from exc
     pl.seed_everything(random_seed, workers=True)
 
 
@@ -383,7 +383,7 @@ def _build_pytorch_mlp(features: np.ndarray, labels: np.ndarray, classifier_para
     try:
         from reptrace.decoding.torch_models import MLPClassifierTorch
     except ImportError as exc:
-        raise ImportError("Install RepTrace with the torch extra to use classifier='pytorch-mlp'.") from exc
+        raise ImportError("Install NeuRepTrace with the torch extra to use classifier='pytorch-mlp'.") from exc
     return MLPClassifierTorch(
         features.shape[1],
         int(classifier_param["hidden_dim"]),
@@ -397,7 +397,7 @@ def _build_pytorch_data_loaders(features, labels, *, random_seed: int | None = N
     try:
         import torch
     except ImportError as exc:
-        raise ImportError("Install RepTrace with the torch extra to use classifier='pytorch-mlp'.") from exc
+        raise ImportError("Install NeuRepTrace with the torch extra to use classifier='pytorch-mlp'.") from exc
     train_dataset, val_dataset = _split_pytorch_dataset(torch, features, labels, random_seed)
     train_generator = _build_torch_generator(torch, random_seed)
     return (
@@ -425,7 +425,7 @@ def _build_pytorch_trainer(classifier_param: dict[str, Any], *, random_seed: int
     try:
         import pytorch_lightning as pl
     except ImportError as exc:
-        raise ImportError("Install RepTrace with the torch extra to use classifier='pytorch-mlp'.") from exc
+        raise ImportError("Install NeuRepTrace with the torch extra to use classifier='pytorch-mlp'.") from exc
     return pl.Trainer(
         max_epochs=int(classifier_param["max_epochs"]),
         default_root_dir=r"lightning_logs",

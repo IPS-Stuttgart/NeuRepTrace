@@ -10,7 +10,7 @@ and the question is:
 
 > Did one of the possible stimuli occur in this stream, and if so, when?
 
-The detector works with the usual RepTrace probability-observation columns:
+The detector works with the usual NeuRepTrace probability-observation columns:
 
 | Column | Meaning |
 | --- | --- |
@@ -161,7 +161,7 @@ summary = summarize_stimulus_events(events, annotations=annotations)
 ## Matched-filter event detection
 
 The baseline detector searches for contiguous above-threshold runs. For noisier
-continuous streams, RepTrace also exposes a matched-filter detector that learns a
+continuous streams, NeuRepTrace also exposes a matched-filter detector that learns a
 class-specific probability template from annotated event-locked traces and then
 scores each candidate onset by the temporal shape of the local evidence trace.
 This can detect reproducible event-like probability trajectories even when a

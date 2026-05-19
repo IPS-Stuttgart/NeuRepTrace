@@ -1,6 +1,6 @@
 # API Overview
 
-RepTrace exposes modules for metadata preparation, manifest validation, MNE time decoding, result aggregation, calibration reporting, plotting, inference, paired decoder statistics,
+NeuRepTrace exposes modules for metadata preparation, manifest validation, MNE time decoding, result aggregation, calibration reporting, plotting, inference, paired decoder statistics,
 probability-trace onset detection, continuous raw-stream stimulus scanning, stream-level stimulus event detection, onset chunk validation, multi-task onset workflows, onset sensitivity
 analysis, sticky temporal modeling, temporal posterior smoothing, emission comparison, semantic-stage analysis, and the calibration-aware temporal-state workflow.
 

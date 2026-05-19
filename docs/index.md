@@ -1,6 +1,6 @@
-# RepTrace
+# NeuRepTrace
 
-RepTrace is a small Python toolkit for calibrated, time-resolved decoding of
+NeuRepTrace is a small Python toolkit for calibrated, time-resolved decoding of
 neural representations from M/EEG data.
 
 The project starts with public decoding benchmarks such as NOD-MEG/NOD-EEG and

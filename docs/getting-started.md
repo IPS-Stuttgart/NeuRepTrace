@@ -1,6 +1,6 @@
 # Getting Started
 
-Install RepTrace from a source checkout:
+Install NeuRepTrace from a source checkout:
 
 ```bash
 poetry install --with dev

@@ -1,4 +1,4 @@
-"""PyTorch Lightning models used by optional RepTrace classifiers."""
+"""PyTorch Lightning models used by optional NeuRepTrace classifiers."""
 
 from __future__ import annotations
 
