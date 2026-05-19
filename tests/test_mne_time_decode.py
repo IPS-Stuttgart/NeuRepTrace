@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
-from neureptrace.mne_time_decode import run_time_resolved_decode
+from neureptrace.mne_time_decode import _align_probability_columns, run_time_resolved_decode
 
 
 class FakeEpochs:
@@ -37,6 +37,70 @@ class FakeEpochs:
 
     def get_data(self, copy: bool = False):
         return self._data.copy() if copy else self._data
+
+
+class MissingClassDecoder:
+    def fit(self, features: np.ndarray, labels: np.ndarray):
+        self.classes_ = np.unique(labels)
+        return self
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probabilities = np.tile(np.array([[0.7, 0.3]]), (features.shape[0], 1))
+        return probabilities[:, : len(self.classes_)]
+
+
+def test_align_probability_columns_expands_missing_model_classes():
+    model = MissingClassDecoder()
+    model.classes_ = np.array([2, 0])
+    probabilities = np.array([[0.75, 0.25], [0.1, 0.9]])
+
+    aligned = _align_probability_columns(probabilities, model=model, classes=np.array([0, 1, 2]))
+
+    np.testing.assert_allclose(
+        aligned,
+        np.array(
+            [
+                [0.25, 0.0, 0.75],
+                [0.9, 0.0, 0.1],
+            ]
+        ),
+    )
+    np.testing.assert_allclose(aligned.sum(axis=1), np.ones(2))
+
+
+def test_run_time_resolved_decode_aligns_missing_fold_class_probabilities(tmp_path: Path, monkeypatch):
+    labels = np.array(["a", "b", "c", "a", "b", "c"])
+    data = np.arange(12, dtype=float).reshape(6, 1, 2)
+    metadata = pd.DataFrame({"condition": labels, "session": ["s1", "s1", "s1", "s2", "s2", "s2"]})
+    epochs = FakeEpochs(data, np.array([0.00, 0.01]), metadata)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr(
+        "neureptrace.mne_time_decode.make_cross_validator",
+        lambda labels, groups, n_splits: iter([(np.array([0, 2, 3, 5]), np.array([1, 4]))]),
+    )
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: MissingClassDecoder())
+
+    out = tmp_path / "decode_missing_class.csv"
+    observations_out = tmp_path / "observations_missing_class.csv"
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        out_path=out,
+        n_splits=2,
+        window_ms=10,
+        step_ms=10,
+        emission_mode="uncalibrated",
+        observation_out_path=observations_out,
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert results["n_classes"].unique().tolist() == [3]
+    assert {"prob_class_0", "prob_class_1", "prob_class_2"}.issubset(observations.columns)
+    assert observations["true_class"].unique().tolist() == ["b"]
+    assert observations["prob_class_1"].tolist() == [0.0] * len(observations)
+    assert observations["probability_true_class"].tolist() == [0.0] * len(observations)
+    assert observations[["prob_class_0", "prob_class_1", "prob_class_2"]].sum(axis=1).round(6).tolist() == [1.0] * len(observations)
 
 
 def test_run_time_resolved_decode_writes_probability_observations(tmp_path: Path, monkeypatch):
