@@ -1,3 +1,3 @@
 # Temporal Model
 
-::: reptrace.temporal_model
+::: neureptrace.temporal_model

@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from reptrace.decoding.mcca import class_alignment_matrices, fit_class_mcca, fit_mcca
-from reptrace.decoding.mcca_target import class_alignment_matrix, fit_target_mcca_projection
+from neureptrace.decoding.mcca import class_alignment_matrices, fit_class_mcca, fit_mcca
+from neureptrace.decoding.mcca_target import class_alignment_matrix, fit_target_mcca_projection
 
 
 def _synthetic_subjects(seed=13):

@@ -57,13 +57,13 @@ columns are present. Continuous-stream canonical rows with a non-empty
 Validate a generic probability-observation CSV:
 
 ```bash
-reptrace validate-observations observations.csv
+neureptrace validate-observations observations.csv
 ```
 
 Validate a table before temporal modeling and write machine-readable reports:
 
 ```bash
-reptrace validate-observations observations.csv \
+neureptrace validate-observations observations.csv \
   --profile temporal-model \
   --report-out results/observation_validation.csv \
   --summary-out results/observation_summary.csv
@@ -72,7 +72,7 @@ reptrace validate-observations observations.csv \
 Validate a long-stream stimulus table with an explicit stream identifier:
 
 ```bash
-reptrace validate-observations stream_observations.csv \
+neureptrace validate-observations stream_observations.csv \
   --profile stimulus-detection \
   --stream-column stream_id \
   --report-out results/stream_observation_validation.csv
@@ -82,7 +82,7 @@ Validate canonical probability observations before using them in a benchmark or
 leaderboard:
 
 ```bash
-reptrace validate-observations observations.csv \
+neureptrace validate-observations observations.csv \
   --profile canonical \
   --report-out results/canonical_observation_validation.csv
 ```
@@ -91,7 +91,7 @@ Write a row-normalized copy when classifier exports contain unnormalized scores
 that are otherwise suitable probability-like emissions:
 
 ```bash
-reptrace validate-observations observations.csv \
+neureptrace validate-observations observations.csv \
   --normalize-out results/observations_normalized.csv
 ```
 
@@ -104,7 +104,7 @@ while still writing the validation report.
 
 ```python
 import pandas as pd
-from reptrace.observation_schema import (
+from neureptrace.observation_schema import (
     read_validated_probability_observations,
     summarize_probability_observations,
     validate_probability_observations,

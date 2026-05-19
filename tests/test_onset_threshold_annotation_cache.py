@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from reptrace.onset_detection import annotate_threshold_crossings, detect_onsets
+from neureptrace.onset_detection import annotate_threshold_crossings, detect_onsets
 
 
 def _cached_threshold_frame() -> pd.DataFrame:

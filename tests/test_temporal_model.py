@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.temporal_model import fit_temporal_models, probability_columns, read_probability_observations
+from neureptrace.temporal_model import fit_temporal_models, probability_columns, read_probability_observations
 
 
 def _observation_frame() -> pd.DataFrame:

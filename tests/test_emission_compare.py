@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.emission_compare import compare_emission_modes, compare_temporal_summary
+from neureptrace.emission_compare import compare_emission_modes, compare_temporal_summary
 
 
 def _temporal_summary() -> pd.DataFrame:

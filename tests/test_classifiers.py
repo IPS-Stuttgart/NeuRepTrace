@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from sklearn.exceptions import ConvergenceWarning
 
-from reptrace.decoding.classifiers import (
+from neureptrace.decoding.classifiers import (
     CLASSIFIER_REGISTRY,
     get_default_classifier_param,
     prediction_scores,
@@ -93,7 +93,7 @@ def test_train_multiclass_classifier_encodes_nonzero_labels_and_decodes_outputs(
         seen["labels"] = np.asarray(labels, dtype=int).copy()
         return EncodedBinaryModel()
 
-    with patch("reptrace.decoding.classifiers.train_classifier", side_effect=fake_train_classifier):
+    with patch("neureptrace.decoding.classifiers.train_classifier", side_effect=fake_train_classifier):
         model = train_multiclass_classifier(
             np.zeros((2, 2)),
             np.asarray([10, 20], dtype=int),
@@ -212,7 +212,7 @@ def test_optional_ml_dependencies_are_lazy_imported(multiclass_data):
 def test_seeded_torch_data_loaders_are_reproducible():
     if importlib.util.find_spec("torch") is None:
         pytest.skip("PyTorch dependencies are not installed: No module named 'torch'")
-    from reptrace.decoding.classifiers import _build_pytorch_data_loaders
+    from neureptrace.decoding.classifiers import _build_pytorch_data_loaders
 
     features = np.arange(40).reshape(20, 2)
     labels = np.arange(20)

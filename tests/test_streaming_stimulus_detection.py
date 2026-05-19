@@ -5,8 +5,8 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-from reptrace.stimulus_detection import detect_stimulus_events, fit_stimulus_detection_thresholds
-from reptrace.streaming_stimulus_detection import StimulusDetectionConfig, StreamingStimulusDetector
+from neureptrace.stimulus_detection import detect_stimulus_events, fit_stimulus_detection_thresholds
+from neureptrace.streaming_stimulus_detection import StimulusDetectionConfig, StreamingStimulusDetector
 
 THRESHOLD_WINDOW = (-0.65, -0.05)
 CLASS_NAMES = ("A", "B", "C")

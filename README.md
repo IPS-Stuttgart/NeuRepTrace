@@ -69,11 +69,11 @@ Alternatively, install the package in editable mode with pip:
 python -m pip install -e .
 ```
 
-Installed environments expose both a grouped `reptrace` command and focused
-workflow commands such as `reptrace-benchmark`, `reptrace-mne-time-decode`,
-`reptrace-onset-detect`, `reptrace-continuous-stimulus-scan`,
-`reptrace-stimulus-detect`, and
-`reptrace-temporal-model`. The equivalent `python -m reptrace.<module>` forms
+Installed environments expose both a grouped `neureptrace` command and focused
+workflow commands such as `neureptrace-benchmark`, `neureptrace-mne-time-decode`,
+`neureptrace-onset-detect`, `neureptrace-continuous-stimulus-scan`,
+`neureptrace-stimulus-detect`, and
+`neureptrace-temporal-model`. The equivalent `python -m neureptrace.<module>` forms
 remain available for source-checkout debugging.
 
 ## Quickstart
@@ -81,11 +81,11 @@ remain available for source-checkout debugging.
 Run the pilot NOD-EEG benchmark from a manifest:
 
 ```bash
-reptrace-validate-manifest \
+neureptrace-validate-manifest \
   benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 
-reptrace-benchmark \
+neureptrace-benchmark \
   benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \
@@ -96,11 +96,11 @@ reptrace-benchmark \
 The grouped CLI provides the same workflows:
 
 ```bash
-reptrace validate-manifest \
+neureptrace validate-manifest \
   benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 
-reptrace benchmark \
+neureptrace benchmark \
   benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \
@@ -111,7 +111,7 @@ reptrace benchmark \
 Run time-resolved decoding directly on an MNE epochs file with metadata:
 
 ```bash
-reptrace-mne-time-decode \
+neureptrace-mne-time-decode \
   --epochs path/to/sub-01_epo.fif \
   --metadata-csv path/to/sub-01_events.csv \
   --label-column stim_is_animate \
@@ -123,7 +123,7 @@ reptrace-mne-time-decode \
 Plot the resulting time course:
 
 ```bash
-reptrace-plot-time-decode \
+neureptrace-plot-time-decode \
   results/nod_sub-01_animate.csv \
   --chance 0.5 \
   --out results/nod_sub-01_animate.png
@@ -133,7 +133,7 @@ Detect the first threshold-crossing representation time from probability
 observations:
 
 ```bash
-reptrace-onset-detect \
+neureptrace-onset-detect \
   results/nod_sub-01_animate_observations.csv \
   --threshold-window -0.35 -0.05 \
   --threshold-quantile 0.95 \
@@ -151,7 +151,7 @@ post-stimulus threshold-crossing rates.
 Detect zero, one, or many stimulus events in a long probability stream:
 
 ```bash
-python -m reptrace.stimulus_detection \
+python -m neureptrace.stimulus_detection \
   results/sub-01_stream_observations.csv \
   --stream-column sequence_id \
   --score-mode class_probability \
@@ -168,7 +168,7 @@ python -m reptrace.stimulus_detection \
 With annotation matching and latency summaries:
 
 ```bash
-reptrace-stimulus-detect \
+neureptrace-stimulus-detect \
   results/sub-01_stream_observations.csv \
   --annotations results/sub-01_stimulus_annotations.csv \
   --stream-column stream_id \
@@ -194,7 +194,7 @@ Train an event-locked decoder on one raw run and scan a held-out raw run for
 face-like events:
 
 ```bash
-reptrace-continuous-stimulus-scan \
+neureptrace-continuous-stimulus-scan \
   --train-raw data/ds000117/sub-01/ses-meg/meg/sub-01_ses-meg_task-facerecognition_run-01_meg.fif \
   --train-events data/ds000117/sub-01/ses-meg/meg/sub-01_ses-meg_task-facerecognition_run-01_events.tsv \
   --scan-raw data/ds000117/sub-01/ses-meg/meg/sub-01_ses-meg_task-facerecognition_run-02_meg.fif \
@@ -232,7 +232,7 @@ If the events CSV has the NOD `stim_is_animate` column but no named decoding
 condition yet, create one:
 
 ```bash
-reptrace-metadata \
+neureptrace-metadata \
   --events-csv data/nod/sub-01_events.csv \
   --source-column stim_is_animate \
   --positive-pattern "True" \
@@ -245,7 +245,7 @@ reptrace-metadata \
 After running several subjects, aggregate them:
 
 ```bash
-reptrace-results \
+neureptrace-results \
   results/nod_sub-01_animate.csv \
   results/nod_sub-02_animate.csv \
   --out results/nod_animate_summary.csv
@@ -273,7 +273,7 @@ models, compares controls, summarizes semantic stages, and writes compact
 artifacts:
 
 ```bash
-reptrace-temporal-state-workflow \
+neureptrace-temporal-state-workflow \
   --data-root data/nod \
   --out-dir results/temporal_state_inference \
   --compact-export-dir ../NeuRepTrace-Compact-Results/results/temporal_state_inference \
@@ -320,7 +320,7 @@ python -m pytest
 If you use **NeuRepTrace** in your research, please cite the repository for now:
 
 ```bibtex
-@software{pfaff_reptrace_2026,
+@software{pfaff_neureptrace_2026,
   author = {Florian Pfaff},
   title = {NeuRepTrace: Probabilistic Tracing of Neural Representations over Time},
   year = {2026},

@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from reptrace.onset_validation import OnsetChunk, parse_chunk_spec, run_onset_chunk_validation, summarize_onset_chunks
+from neureptrace.onset_validation import OnsetChunk, parse_chunk_spec, run_onset_chunk_validation, summarize_onset_chunks
 
 
 def _chunk_observations() -> pd.DataFrame:

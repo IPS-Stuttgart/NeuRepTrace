@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from reptrace.observation_ensemble import (
+from neureptrace.observation_ensemble import (
     DEFAULT_ENSEMBLE_DECODER,
     ensemble_probability_observations,
     main,

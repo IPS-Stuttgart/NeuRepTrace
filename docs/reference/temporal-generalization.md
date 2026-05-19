@@ -14,7 +14,7 @@ probabilities before computing accuracy, log loss, Brier score, ECE,
 calibration bins, and probability-observation exports.
 
 ```bash
-reptrace-mne-time-decode \
+neureptrace-mne-time-decode \
   --epochs path/to/sub-01_epo.fif \
   --metadata-csv path/to/sub-01_events.csv \
   --label-column condition \
@@ -27,7 +27,7 @@ reptrace-mne-time-decode \
 The ensemble can be combined with nested decoder tuning:
 
 ```bash
-reptrace-mne-time-decode \
+neureptrace-mne-time-decode \
   --epochs path/to/sub-01_epo.fif \
   --metadata-csv path/to/sub-01_events.csv \
   --label-column condition \
@@ -46,4 +46,4 @@ The emitted result and observation tables include provenance columns such as
 remains separable from same-time decoding runs and from other train-window
 choices.
 
-::: reptrace.decoding.temporal_generalization
+::: neureptrace.decoding.temporal_generalization

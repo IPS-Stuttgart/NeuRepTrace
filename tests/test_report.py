@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.report import (
+from neureptrace.report import (
     build_time_decode_report,
     summarize_decoder_comparison,
     summarize_aggregate_time_decode,

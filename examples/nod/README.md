@@ -6,7 +6,7 @@ subject's epoched `.fif` file and matching events CSV.
 Prepare a binary animate/inanimate metadata file:
 
 ```bash
-python -m reptrace.metadata \
+python -m neureptrace.metadata \
   --events-csv data/nod/sub-01_events.csv \
   --source-column stim_is_animate \
   --positive-pattern "True" \
@@ -19,7 +19,7 @@ python -m reptrace.metadata \
 Run time-resolved decoding:
 
 ```bash
-python -m reptrace.mne_time_decode \
+python -m neureptrace.mne_time_decode \
   --epochs data/nod/sub-01_epo.fif \
   --metadata-csv data/nod/sub-01_metadata_animate.csv \
   --label-column condition \
@@ -30,7 +30,7 @@ python -m reptrace.mne_time_decode \
 Plot a subject:
 
 ```bash
-python -m reptrace.plot_time_decode \
+python -m neureptrace.plot_time_decode \
   results/nod_sub-01_animate.csv \
   --chance 0.5 \
   --out results/nod_sub-01_animate.png
@@ -39,7 +39,7 @@ python -m reptrace.plot_time_decode \
 Aggregate multiple subjects:
 
 ```bash
-python -m reptrace.results \
+python -m neureptrace.results \
   results/nod_sub-01_animate.csv \
   results/nod_sub-02_animate.csv \
   --out results/nod_animate_summary.csv
@@ -48,11 +48,11 @@ python -m reptrace.results \
 Or run the manifest:
 
 ```bash
-python -m reptrace.validate_manifest \
+python -m neureptrace.validate_manifest \
   benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \

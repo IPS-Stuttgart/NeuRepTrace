@@ -5,8 +5,8 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/reptrace/onset_detection.py"
-      - "src/reptrace/onset_workflow.py"
+      - "src/neureptrace/onset_detection.py"
+      - "src/neureptrace/onset_workflow.py"
       - "tests/test_onset_detection.py"
       - "tests/test_onset_workflow.py"
       - "docs/reference/onset-detection.md"
@@ -18,8 +18,8 @@ on:
       - ".github/workflows/onset-smoke.yml"
   pull_request:
     paths:
-      - "src/reptrace/onset_detection.py"
-      - "src/reptrace/onset_workflow.py"
+      - "src/neureptrace/onset_detection.py"
+      - "src/neureptrace/onset_workflow.py"
       - "tests/test_onset_detection.py"
       - "tests/test_onset_workflow.py"
       - "docs/reference/onset-detection.md"
@@ -56,8 +56,8 @@ jobs:
       - name: Lint onset modules
         run: |
           poetry run ruff check \
-            src/reptrace/onset_detection.py \
-            src/reptrace/onset_workflow.py \
+            src/neureptrace/onset_detection.py \
+            src/neureptrace/onset_workflow.py \
             tests/test_onset_detection.py \
             tests/test_onset_workflow.py
 

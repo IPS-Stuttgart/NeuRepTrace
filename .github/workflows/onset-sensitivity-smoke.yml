@@ -5,9 +5,9 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/reptrace/onset_detection.py"
-      - "src/reptrace/onset_workflow.py"
-      - "src/reptrace/onset_sensitivity.py"
+      - "src/neureptrace/onset_detection.py"
+      - "src/neureptrace/onset_workflow.py"
+      - "src/neureptrace/onset_sensitivity.py"
       - "tests/test_onset_detection.py"
       - "tests/test_onset_workflow.py"
       - "tests/test_onset_sensitivity.py"
@@ -21,9 +21,9 @@ on:
       - ".github/workflows/onset-sensitivity-smoke.yml"
   pull_request:
     paths:
-      - "src/reptrace/onset_detection.py"
-      - "src/reptrace/onset_workflow.py"
-      - "src/reptrace/onset_sensitivity.py"
+      - "src/neureptrace/onset_detection.py"
+      - "src/neureptrace/onset_workflow.py"
+      - "src/neureptrace/onset_sensitivity.py"
       - "tests/test_onset_detection.py"
       - "tests/test_onset_workflow.py"
       - "tests/test_onset_sensitivity.py"
@@ -66,9 +66,9 @@ jobs:
       - name: Lint onset sensitivity modules
         run: |
           poetry run ruff check \
-            src/reptrace/onset_detection.py \
-            src/reptrace/onset_workflow.py \
-            src/reptrace/onset_sensitivity.py \
+            src/neureptrace/onset_detection.py \
+            src/neureptrace/onset_workflow.py \
+            src/neureptrace/onset_sensitivity.py \
             tests/test_onset_detection.py \
             tests/test_onset_workflow.py \
             tests/test_onset_sensitivity.py

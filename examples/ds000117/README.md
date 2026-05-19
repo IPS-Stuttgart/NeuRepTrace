@@ -67,7 +67,7 @@ and a NeuRepTrace benchmark manifest:
 ```bash
 python scripts/stage_ds000117_faces.py \
   --bids-root data/ds000117 \
-  --staged-dir data/ds000117_reptrace \
+  --staged-dir data/ds000117_neureptrace \
   --manifest-out benchmarks/ds000117_faces_sub01.csv \
   --subjects 01 \
   --runs 01 02 \
@@ -89,11 +89,11 @@ on raw sub-01 smoke data it is substantially slower than logistic regression.
 ## Run Time-Resolved Decoding
 
 ```bash
-reptrace-validate-manifest \
+neureptrace-validate-manifest \
   benchmarks/ds000117_faces_sub01.csv \
   --report-out results/ds000117_faces_sub01_validation.csv
 
-reptrace-benchmark \
+neureptrace-benchmark \
   benchmarks/ds000117_faces_sub01.csv \
   --out-dir results/ds000117_faces_sub01 \
   --aggregate-out results/ds000117_faces_sub01_summary.csv \
@@ -110,7 +110,7 @@ For a post-stimulus latency benchmark, constrain detection to the expected
 post-stimulus window:
 
 ```bash
-python -m reptrace.onset_workflow \
+python -m neureptrace.onset_workflow \
   --task-dir results/ds000117_faces_sub01 \
   --threshold-window -0.190 -0.020 \
   --threshold-method max_run \
@@ -126,7 +126,7 @@ python -m reptrace.onset_workflow \
 For a false-alarm benchmark, allow the pre-stimulus interval to be scanned:
 
 ```bash
-python -m reptrace.onset_workflow \
+python -m neureptrace.onset_workflow \
   --task-dir results/ds000117_faces_sub01 \
   --threshold-window -0.190 -0.020 \
   --threshold-method max_run \
@@ -142,7 +142,7 @@ python -m reptrace.onset_workflow \
 Then sweep operating points before making any onset claim:
 
 ```bash
-python -m reptrace.onset_sensitivity \
+python -m neureptrace.onset_sensitivity \
   --task-dir results/ds000117_faces_sub01 \
   --threshold-window -0.190 -0.020 \
   --threshold-methods max_run \

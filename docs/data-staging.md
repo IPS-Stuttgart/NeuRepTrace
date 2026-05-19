@@ -184,7 +184,7 @@ Then update `benchmarks/nod_animate_sub01.csv` if the staged filenames differ.
 Run:
 
 ```bash
-python -m reptrace.validate_manifest \
+python -m neureptrace.validate_manifest \
   benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 ```
@@ -192,7 +192,7 @@ python -m reptrace.validate_manifest \
 Only run the benchmark after validation passes:
 
 ```bash
-python -m reptrace.benchmark \
+python -m neureptrace.benchmark \
   benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \

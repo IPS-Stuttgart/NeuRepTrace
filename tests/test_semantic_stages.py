@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.semantic_stages import analyze_semantic_stages, posterior_columns, read_state_traces
+from neureptrace.semantic_stages import analyze_semantic_stages, posterior_columns, read_state_traces
 
 
 def _state_trace_frame() -> pd.DataFrame:

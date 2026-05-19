@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from reptrace.plot_calibration import plot_reliability_diagram, summarize_reliability_curve
+from neureptrace.plot_calibration import plot_reliability_diagram, summarize_reliability_curve
 
 
 def test_summarize_reliability_curve_weights_by_samples():

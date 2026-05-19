@@ -1,4 +1,4 @@
-name: reptrace
+name: neureptrace
 channels:
   - conda-forge
 dependencies:

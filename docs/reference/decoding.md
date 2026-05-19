@@ -1,5 +1,5 @@
 # Decoding
 
-::: reptrace.decoding
+::: neureptrace.decoding
 
-::: reptrace.decoding.alignment_window
+::: neureptrace.decoding.alignment_window

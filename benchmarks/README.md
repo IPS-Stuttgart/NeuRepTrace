@@ -16,5 +16,5 @@ decoding.
 Validate staged files before decoding:
 
 ```bash
-python -m reptrace.validate_manifest benchmarks/nod_animate_sub01.csv
+python -m neureptrace.validate_manifest benchmarks/nod_animate_sub01.csv
 ```

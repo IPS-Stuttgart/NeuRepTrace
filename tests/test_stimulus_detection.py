@@ -5,7 +5,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from reptrace.stimulus_detection import (
+from neureptrace.stimulus_detection import (
     detect_stimulus_events,
     fit_stimulus_detection_thresholds,
     main as stimulus_detection_main,
@@ -383,7 +383,7 @@ def test_stimulus_detection_cli_writes_events_and_summary_without_annotations(tm
         sys,
         "argv",
         [
-            "reptrace-stimulus-detect",
+            "neureptrace-stimulus-detect",
             str(observations_csv),
             "--stream-column",
             "stream_id",
@@ -441,7 +441,7 @@ def test_stimulus_detection_cli_writes_events_summary_and_thresholds(tmp_path, m
         sys,
         "argv",
         [
-            "reptrace-stimulus-detect",
+            "neureptrace-stimulus-detect",
             str(observations_csv),
             "--annotations",
             str(annotations_csv),

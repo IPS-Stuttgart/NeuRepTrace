@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from reptrace.semantic_stages import summarize_category_timecourse, summarize_dominant_timecourse
+from neureptrace.semantic_stages import summarize_category_timecourse, summarize_dominant_timecourse
 
 
 def test_category_timecourse_is_subject_balanced_not_trial_weighted():

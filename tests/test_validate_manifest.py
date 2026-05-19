@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.validate_manifest import validate_manifest, validation_report_frame
+from neureptrace.validate_manifest import validate_manifest, validation_report_frame
 
 
 class FakeEpochs:
@@ -48,7 +48,7 @@ def test_validate_manifest_accepts_events_metadata(tmp_path: Path, monkeypatch):
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("reptrace.validate_manifest.mne.read_epochs", lambda *args, **kwargs: FakeEpochs(4))
+    monkeypatch.setattr("neureptrace.validate_manifest.mne.read_epochs", lambda *args, **kwargs: FakeEpochs(4))
 
     validations = validate_manifest(manifest)
 
@@ -73,7 +73,7 @@ def test_validate_manifest_reports_label_and_group_issues(tmp_path: Path, monkey
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("reptrace.validate_manifest.mne.read_epochs", lambda *args, **kwargs: FakeEpochs(3))
+    monkeypatch.setattr("neureptrace.validate_manifest.mne.read_epochs", lambda *args, **kwargs: FakeEpochs(3))
 
     validations = validate_manifest(manifest)
 

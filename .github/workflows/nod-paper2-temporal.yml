@@ -126,7 +126,7 @@ jobs:
           }
 
           REQUESTED_DATA_ROOT="${{ inputs.data_root }}"
-          CACHE_ROOT="$HOME/github-runner/.cache/datasets/reptrace/nod-eeg-full-v1"
+          CACHE_ROOT="$HOME/github-runner/.cache/datasets/neureptrace/nod-eeg-full-v1"
           CANDIDATES=(
             "$REQUESTED_DATA_ROOT"
             "$GITHUB_WORKSPACE/$REQUESTED_DATA_ROOT"
@@ -159,7 +159,7 @@ jobs:
             DATA_ROOT="$(cd "$DATA_ROOT" && pwd)"
           fi
           SUBJECT_COUNT="$(nod_subject_count "$DATA_ROOT")"
-          echo "REPTRACE_DATA_ROOT=$DATA_ROOT" >> "$GITHUB_ENV"
+          echo "NEUREPTRACE_DATA_ROOT=$DATA_ROOT" >> "$GITHUB_ENV"
           echo "Using data root: $DATA_ROOT"
           echo "Valid staged NOD-EEG subject pairs: $SUBJECT_COUNT"
           echo "Persistent NOD-EEG cache root: $CACHE_ROOT"
@@ -170,9 +170,9 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: |
-          DATA_ROOT="${REPTRACE_DATA_ROOT:-}"
+          DATA_ROOT="${NEUREPTRACE_DATA_ROOT:-}"
           if [[ -z "$DATA_ROOT" || ! -f "$DATA_ROOT/sub-01_epo.fif" || ! -f "$DATA_ROOT/sub-01_events.csv" ]]; then
-            echo "REPTRACE_DATA_ROOT is not a valid staged NOD-EEG data root: $DATA_ROOT"
+            echo "NEUREPTRACE_DATA_ROOT is not a valid staged NOD-EEG data root: $DATA_ROOT"
             exit 1
           fi
           echo "Using data root: $DATA_ROOT"
@@ -193,7 +193,7 @@ jobs:
           else
             POETRY_RUN=("$PAPER2_PYTHON_CMD" "-m" "poetry")
           fi
-          "${POETRY_RUN[@]}" run python -m reptrace.temporal_state_workflow "${WORKFLOW_ARGS[@]}"
+          "${POETRY_RUN[@]}" run python -m neureptrace.temporal_state_workflow "${WORKFLOW_ARGS[@]}"
 
       - name: Upload compact Paper 2 artifacts
         uses: actions/upload-artifact@v7

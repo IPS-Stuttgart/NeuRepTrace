@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.results import (
+from neureptrace.results import (
     aggregate_time_decode_csvs,
     aggregate_time_decode_results,
     build_provenance_table,

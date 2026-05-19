@@ -7,7 +7,7 @@
     "**/.github/workflows/**",
     "**/.pytest-tmp/**",
     "**/megalinter-reports/**",
-    "**/src/reptrace/decoding/hyperalignment.py",
-    "**/src/reptrace/decoding/mcca.py"
+    "**/src/neureptrace/decoding/hyperalignment.py",
+    "**/src/neureptrace/decoding/mcca.py"
   ]
 }

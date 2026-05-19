@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.temporal_smoothing import smooth_probability_observations
+from neureptrace.temporal_smoothing import smooth_probability_observations
 
 
 def _noisy_observation_frame() -> pd.DataFrame:

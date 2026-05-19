@@ -1,11 +1,11 @@
 # Onset Sensitivity
 
-`reptrace.onset_sensitivity` runs onset detection over a grid of threshold and persistence settings.
+`neureptrace.onset_sensitivity` runs onset detection over a grid of threshold and persistence settings.
 
 Example:
 
 ```bash
-python -m reptrace.onset_sensitivity \
+python -m neureptrace.onset_sensitivity \
   --task-dir results/nod_animate_all \
   --task-dir results/nod_superclass_canine_device_all \
   --task-dir results/nod_superclass_container_covering_all \
@@ -25,4 +25,4 @@ The workflow writes `onset_sensitivity_summary.csv` with one row per threshold m
 Use a post-stimulus `--detection-window` for latency sweeps, and use an earlier
 window start when evaluating false-alarm behavior.
 
-::: reptrace.onset_sensitivity
+::: neureptrace.onset_sensitivity

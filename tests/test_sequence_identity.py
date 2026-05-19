@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.onset_detection import detect_onsets_from_csvs
-from reptrace.temporal_model import fit_temporal_models
+from neureptrace.onset_detection import detect_onsets_from_csvs
+from neureptrace.temporal_model import fit_temporal_models
 
 
 def _frame() -> pd.DataFrame:

@@ -1,3 +1,3 @@
 # Report
 
-::: reptrace.report
+::: neureptrace.report

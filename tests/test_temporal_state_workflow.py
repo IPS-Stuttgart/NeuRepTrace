@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.benchmark import BenchmarkRun
-from reptrace.temporal_state_workflow import prepare_temporal_state_manifest, run_temporal_state_workflow
-from reptrace.validate_manifest import ManifestValidation
+from neureptrace.benchmark import BenchmarkRun
+from neureptrace.temporal_state_workflow import prepare_temporal_state_manifest, run_temporal_state_workflow
+from neureptrace.validate_manifest import ManifestValidation
 
 
 def test_prepare_temporal_state_manifest_rewrites_data_root_and_adds_decoders(tmp_path: Path):
@@ -123,10 +123,10 @@ def _fake_benchmark(manifest_csv: Path, *, out_dir: Path, aggregate_out: Path, p
 
 def test_run_temporal_state_workflow_builds_compact_outputs_and_exports(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
-        "reptrace.temporal_state_workflow.validate_manifest",
+        "neureptrace.temporal_state_workflow.validate_manifest",
         lambda manifest_csv: [ManifestValidation(subject="sub-01", ok=True, messages=[])],
     )
-    monkeypatch.setattr("reptrace.temporal_state_workflow.run_benchmark_manifest", _fake_benchmark)
+    monkeypatch.setattr("neureptrace.temporal_state_workflow.run_benchmark_manifest", _fake_benchmark)
 
     run = run_temporal_state_workflow(
         out_dir=tmp_path / "temporal_state",
@@ -136,7 +136,7 @@ def test_run_temporal_state_workflow_builds_compact_outputs_and_exports(tmp_path
         n_permutations=3,
         stay_grid_size=12,
         max_subjects=1,
-        command_line="python -m reptrace.temporal_state_workflow --task nod_animate",
+        command_line="python -m neureptrace.temporal_state_workflow --task nod_animate",
     )
 
     summary = pd.read_csv(run.temporal_state_summary_csv)

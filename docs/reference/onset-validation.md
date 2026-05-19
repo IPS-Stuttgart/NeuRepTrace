@@ -1,11 +1,11 @@
 # Onset Validation
 
-`reptrace.onset_validation` runs the onset detector inside named time chunks. Use it as a compact negative/positive control before interpreting onset latencies.
+`neureptrace.onset_validation` runs the onset detector inside named time chunks. Use it as a compact negative/positive control before interpreting onset latencies.
 
 Example:
 
 ```bash
-python -m reptrace.onset_validation \
+python -m neureptrace.onset_validation \
   results/nod_sub-01_animate_observations.csv \
   --threshold-window -0.10 0.00 \
   --threshold-quantile 0.95 \
@@ -20,4 +20,4 @@ python -m reptrace.onset_validation \
 
 Pre-stimulus chunks should show low detection rates. Post-stimulus chunks should show higher detection rates only when the decoded probability traces contain stable task-related evidence.
 
-::: reptrace.onset_validation
+::: neureptrace.onset_validation

@@ -1,6 +1,6 @@
 # Onset Detection
 
-`reptrace.onset_detection` detects the first threshold-crossing time in held-out probability-observation traces.
+`neureptrace.onset_detection` detects the first threshold-crossing time in held-out probability-observation traces.
 
 The basic detector estimates a score threshold from a baseline window, then reports the first time each trial/sequence crosses that threshold. The module also supports sustained-onset criteria and a sequence-level max-run threshold to reduce false detections from scanning many time bins.
 
@@ -9,7 +9,7 @@ The basic detector estimates a score threshold from a baseline window, then repo
 Use the following options to require a more persistent representation onset:
 
 ```bash
-python -m reptrace.onset_detection \
+python -m neureptrace.onset_detection \
   results/nod_sub-01_animate_observations.csv \
   --threshold-window -0.10 0.00 \
   --threshold-quantile 0.95 \
@@ -28,4 +28,4 @@ python -m reptrace.onset_detection \
 
 The event CSV includes the run length, run duration, run stop time, and peak score within the detection run. The summary CSV reports detection rates, false-alarm rates, post-zero detection rates, correct-at-detection rates, and median post-zero detection latencies.
 
-::: reptrace.onset_detection
+::: neureptrace.onset_detection

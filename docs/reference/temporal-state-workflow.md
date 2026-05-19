@@ -1,3 +1,3 @@
 # Temporal State Workflow
 
-::: reptrace.temporal_state_workflow
+::: neureptrace.temporal_state_workflow

@@ -4,10 +4,10 @@ import importlib.util
 import inspect
 from pathlib import Path
 
-import reptrace._stimulus_detection_public as public_stimulus_detection
-import reptrace.continuous_stimulus_scan as continuous_stimulus_scan
-import reptrace.event_detection as event_detection
-import reptrace.stimulus_detection as stimulus_detection
+import neureptrace._stimulus_detection_public as public_stimulus_detection
+import neureptrace.continuous_stimulus_scan as continuous_stimulus_scan
+import neureptrace.event_detection as event_detection
+import neureptrace.stimulus_detection as stimulus_detection
 
 
 def test_continuous_scan_uses_public_stimulus_detection_api() -> None:

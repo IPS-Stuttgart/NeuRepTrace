@@ -1,11 +1,11 @@
 # Metrics
 
-::: reptrace.metrics
+::: neureptrace.metrics
 
 ## Pre/Post Windows
 
-::: reptrace.metrics.prepost
+::: neureptrace.metrics.prepost
 
 ## Confusion Tables
 
-::: reptrace.metrics.confusion
+::: neureptrace.metrics.confusion

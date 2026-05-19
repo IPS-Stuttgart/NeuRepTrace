@@ -1,3 +1,3 @@
 # Semantic Stages
 
-::: reptrace.semantic_stages
+::: neureptrace.semantic_stages

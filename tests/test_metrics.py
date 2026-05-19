@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from reptrace.metrics import (
+from neureptrace.metrics import (
     brier_score_multiclass,
     compare_prepost_windows,
     confusion_category_enrichment,

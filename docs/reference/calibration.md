@@ -1,3 +1,3 @@
 # Calibration
 
-::: reptrace.calibration
+::: neureptrace.calibration

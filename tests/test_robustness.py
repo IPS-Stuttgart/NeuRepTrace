@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from reptrace.decoding.robustness import (
+from neureptrace.decoding.robustness import (
     RobustnessCondition,
     annotate_condition_rows,
     run_participant_robustness_conditions,

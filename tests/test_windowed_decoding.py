@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from reptrace.decoding.windowed import (
+from neureptrace.decoding.windowed import (
     fit_window_model,
     permutation_p_from_accuracy,
     predict_window_model,

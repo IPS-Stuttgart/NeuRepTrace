@@ -6,7 +6,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from reptrace.plot_calibration import plot_reliability_diagram
+from neureptrace.plot_calibration import plot_reliability_diagram
 
 
 DEFAULT_PATTERNS = (

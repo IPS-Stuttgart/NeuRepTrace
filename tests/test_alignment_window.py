@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from reptrace.decoding.alignment_window import (
+from neureptrace.decoding.alignment_window import (
     resolved_alignment_window,
     transform_with_alignment_projection,
     uses_separate_alignment_window,

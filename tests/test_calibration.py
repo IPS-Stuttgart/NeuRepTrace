@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from reptrace.calibration import aggregate_reliability_bins, build_calibration_report, summarize_calibration_metrics
+from neureptrace.calibration import aggregate_reliability_bins, build_calibration_report, summarize_calibration_metrics
 
 
 def _summary_frame() -> pd.DataFrame:
