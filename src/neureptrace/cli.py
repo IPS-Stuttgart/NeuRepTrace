@@ -27,7 +27,9 @@ COMMAND_MODULES = {
     "temporal-smoothing": "neureptrace.temporal_smoothing",
     "temporal-state-workflow": "neureptrace.temporal_state_workflow",
     "validate-manifest": "neureptrace.validate_manifest",
+    "validate-workflow": "neureptrace.validate_workflow",
     "validate-observations": "neureptrace.observation_schema",
+    "workflow": "neureptrace.workflow",
 }
 
 

@@ -23,7 +23,9 @@ neureptrace-temporal-model = "neureptrace.temporal_model:main"
 neureptrace-temporal-smoothing = "neureptrace.temporal_smoothing:main"
 neureptrace-temporal-state-workflow = "neureptrace.temporal_state_workflow:main"
 neureptrace-validate-manifest = "neureptrace.validate_manifest:main"
+neureptrace-validate-workflow = "neureptrace.validate_workflow:main"
 neureptrace-validate-observations = "neureptrace.observation_schema:main"
+neureptrace-workflow = "neureptrace.workflow:main"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

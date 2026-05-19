@@ -5,3 +5,7 @@
 ## Tables
 
 ::: neureptrace.results.tables
+
+## Result schemas
+
+::: neureptrace.results.schema

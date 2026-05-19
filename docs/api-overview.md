@@ -8,6 +8,8 @@ Key command-line modules include:
 
 - neureptrace.metadata
 - neureptrace.validate_manifest
+- neureptrace.validate_workflow
+- neureptrace.workflow
 - neureptrace.mne_time_decode
 - neureptrace.benchmark
 - neureptrace.continuous_stimulus_scan
@@ -31,6 +33,8 @@ Key command-line modules include:
 
 Reusable table-oriented APIs include:
 
+- `neureptrace.workflow_spec` for loading, validating, normalizing, and path-checking declarative JSON/YAML workflow specifications.
+- `neureptrace.features` for validated per-subject feature matrices and stacked feature arrays shared by dataset-specific loaders and cross-subject decoding workflows.
 - `neureptrace.metrics` for calibration/probabilistic scoring metrics, pre/post window comparisons, and confusion-table summaries.
 - `neureptrace.decoding.alignment_window` for applying projections fitted on one M/EEG feature window to matching-channel features from another window.
 - `neureptrace.continuous_stimulus_scan` for training an event-locked decoder on one raw run, scanning a held-out raw run, exporting long-stream class probabilities, and scoring detected events.

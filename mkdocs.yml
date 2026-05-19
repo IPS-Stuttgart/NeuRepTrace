@@ -8,6 +8,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Data Staging: data-staging.md
+  - Workflow Specs: workflow-spec.md
   - Benchmarking: benchmarking.md
   - API Overview: api-overview.md
   - Reference:
@@ -27,6 +28,7 @@ nav:
       - Onset Sensitivity: reference/onset-sensitivity.md
       - Paired Statistics: reference/paired-stats.md
       - Temporal State Workflow: reference/temporal-state-workflow.md
+      - Workflow Specs: reference/workflow.md
       - Results: reference/results.md
       - Semantic Stages: reference/semantic-stages.md
       - Temporal Generalization: reference/temporal-generalization.md

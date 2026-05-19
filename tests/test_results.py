@@ -5,9 +5,12 @@ import pandas as pd
 from neureptrace.results import (
     aggregate_time_decode_csvs,
     aggregate_time_decode_results,
+    build_result_bundle_provenance,
     build_provenance_table,
+    normalize_result_table,
     peak_metric_rows,
     summarize_metric_table,
+    write_result_bundle,
 )
 
 
@@ -265,3 +268,74 @@ def test_summarize_metric_table_can_zero_singleton_dispersion():
     row = summary.iloc[0]
     assert row["accuracy_std"] == 0.0
     assert row["accuracy_sem"] == 0.0
+
+
+def test_result_table_schema_normalizes_pymegdec_prediction_aliases():
+    frame = pd.DataFrame(
+        {
+            "outer_fold": [1, 1],
+            "test_participant": [1, 1],
+            "trial": [0, 1],
+            "true_label": [0, 1],
+            "predicted_label": [0, 2],
+            "true_stimulus": [1, 2],
+            "predicted_stimulus": [1, 3],
+            "window_center_s": [0.175, 0.175],
+            "components_pca": [64, 64],
+        }
+    )
+
+    normalized = normalize_result_table(frame, "predictions")
+
+    assert normalized.columns[:6].tolist() == [
+        "subject",
+        "true_label",
+        "predicted_label",
+        "outer_fold",
+        "trial",
+        "window_center",
+    ]
+    assert normalized["subject"].tolist() == [1, 1]
+    assert normalized["pca_components"].tolist() == [64, 64]
+    assert normalized["true_stimulus"].tolist() == [1, 2]
+
+
+def test_result_bundle_writes_manifest_and_bundle_provenance(tmp_path: Path):
+    tables = {
+        "outer_fold_scores": pd.DataFrame(
+            {
+                "outer_fold": [1, 2],
+                "test_participant": [1, 2],
+                "balanced_accuracy": [0.25, 0.375],
+                "chance_accuracy": [0.0625, 0.0625],
+                "n_test_trials": [16, 16],
+            }
+        ),
+        "inner_candidate_scores": pd.DataFrame(
+            {
+                "outer_fold": [1, 1, 2, 2],
+                "inner_fold": [2, 3, 1, 3],
+                "candidate_index": [1, 2, 1, 2],
+                "balanced_accuracy": [0.20, 0.18, 0.30, 0.28],
+            }
+        ),
+        "selected_candidates": pd.DataFrame(
+            {
+                "outer_fold": [1, 2],
+                "selected_candidate_index": [1, 1],
+                "classifier": ["multiclass-svm", "multiclass-svm"],
+            }
+        ),
+    }
+
+    manifest = write_result_bundle(tables, tmp_path, prefix="stimulus_cross_subject_nested")
+    provenance = build_result_bundle_provenance(tables, workflow="cross_subject_nested", source_files=["outer.csv"], parameters={"components_pca": 64})
+
+    assert sorted(manifest["table"].tolist()) == ["inner_candidate_scores", "outer_fold_scores", "selected_candidates"]
+    assert (tmp_path / "stimulus_cross_subject_nested_manifest.csv").exists()
+    assert (tmp_path / "stimulus_cross_subject_nested_outer_fold_scores.csv").exists()
+    assert provenance.loc[0, "n_outer_folds"] == 2
+    assert provenance.loc[0, "n_subjects"] == 2
+    assert provenance.loc[0, "n_candidates"] == 2
+    assert provenance.loc[0, "n_selected_candidates"] == 1
+    assert provenance.loc[0, "param_components_pca"] == 64

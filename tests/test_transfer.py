@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from neureptrace.decoding.transfer import (
     append_null_class_features,
@@ -33,6 +34,15 @@ def test_append_null_class_features_adds_null_rows():
     assert labels.tolist() == [1, 2, 0, 0]
 
 
+def test_append_null_class_features_rejects_null_label_collision():
+    with pytest.raises(ValueError, match="null_label=.*collides"):
+        append_null_class_features(
+            np.array([[1.0], [2.0]]),
+            np.array([0, 1]),
+            np.array([[0.1], [0.2]]),
+        )
+
+
 def test_replace_null_class_predictions_uses_least_frequent_non_null_label():
     predictions = replace_null_class_predictions(np.array([0, 1, 1, 2]))
 
@@ -50,6 +60,31 @@ def test_cross_validate_feature_decoding_replaces_all_null_predictions():
 
     assert result.predictions.tolist() == [1.0, 1.0, 1.0, 1.0]
     assert result.accuracy == 0.5
+
+
+def test_cross_validate_feature_decoding_preserves_zero_label_without_null_class():
+    result = cross_validate_feature_decoding(
+        np.array([[-2.0], [1.0], [-1.0], [2.0]]),
+        np.array([0, 0, 0, 1]),
+        n_folds=2,
+        components_pca=float("inf"),
+        fit_model=lambda _features, _labels: _ConstantClassifier(0),
+    )
+
+    assert result.predictions.tolist() == [0.0, 0.0, 0.0, 0.0]
+    assert result.accuracy == 0.75
+
+
+def test_cross_validate_feature_decoding_rejects_null_label_collision():
+    with pytest.raises(ValueError, match="null_label=0 conflicts"):
+        cross_validate_feature_decoding(
+            np.array([[-2.0], [1.0], [-1.0], [2.0]]),
+            np.array([0, 1, 0, 1]),
+            null_features=np.array([[-0.2], [0.1], [-0.1], [0.2]]),
+            n_folds=2,
+            components_pca=float("inf"),
+            fit_model=lambda _features, _labels: _ConstantClassifier(0),
+        )
 
 
 def test_cross_validate_feature_decoding_supports_binary_one_vs_rest():

@@ -65,7 +65,15 @@ def append_null_class_features(
         return stimulus_features, labels
 
     null_features = _feature_matrix(null_features, name="null_features")
+    # Match the dtype used for the appended label before checking collisions;
+    # otherwise labels such as string "0" or integer 0 can still be merged
+    # with the null class after NumPy casts null_label to labels.dtype.
     null_labels = np.full(null_features.shape[0], null_label, dtype=labels.dtype)
+    if np.any(labels == null_labels[0]):
+        raise ValueError(
+            f"null_label={null_label!r} collides with an existing stimulus label "
+            f"after conversion to labels dtype {labels.dtype!s}."
+        )
     return np.vstack([stimulus_features, null_features]), np.concatenate(
         [labels, null_labels]
     )
@@ -112,6 +120,13 @@ def cross_validate_feature_decoding(
     labels = _label_vector(
         labels, expected_length=stimulus_features.shape[0], name="labels"
     )
+    real_labels_include_null_label = bool(np.any(labels == null_label))
+    if null_features is not None and real_labels_include_null_label:
+        raise ValueError(
+            f"null_label={null_label!r} conflicts with a real stimulus label. "
+            "Choose a null_label that is absent from labels."
+        )
+
     n_trials = len(labels)
     fold_ids = sequential_fold_ids(n_trials, n_folds)
     features, augmented_labels = append_null_class_features(
@@ -133,7 +148,10 @@ def cross_validate_feature_decoding(
     class_labels = np.asarray(sorted(np.unique(labels)))
     for fold in range(1, n_folds + 1):
         train_mask = augmented_folds != fold
-        test_mask = (augmented_folds == fold) & (augmented_labels != null_label)
+        if null_features is None:
+            test_mask = augmented_folds == fold
+        else:
+            test_mask = (augmented_folds == fold) & (augmented_labels != null_label)
         train_features = features[train_mask]
         train_labels = augmented_labels[train_mask]
         test_features = features[test_mask]
@@ -161,7 +179,8 @@ def cross_validate_feature_decoding(
             fold_predictions, _ = predict_window_model(model_bundle, test_features)
         predictions[fold_ids == fold] = fold_predictions
 
-    predictions = replace_null_class_predictions(predictions, null_label=null_label)
+    if not real_labels_include_null_label:
+        predictions = replace_null_class_predictions(predictions, null_label=null_label)
     accuracy = float(np.mean(labels == predictions)) if len(labels) else np.nan
     return CrossValidationResult(
         accuracy=accuracy, predictions=predictions, fold_ids=fold_ids

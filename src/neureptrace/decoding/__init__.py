@@ -23,6 +23,39 @@ from neureptrace.decoding.classifiers import (
     get_default_classifier_param,
     train_multiclass_classifier,
 )
+from neureptrace.decoding.candidate_grid import (
+    CandidateGrid as CandidateGrid,
+    candidate_grid_rows as candidate_grid_rows,
+    expand_candidate_grid as expand_candidate_grid,
+    normalize_candidate_grid_dimensions as normalize_candidate_grid_dimensions,
+)
+from neureptrace.decoding.cross_subject import (
+    CrossSubjectCandidate as CrossSubjectCandidate,
+    CrossSubjectEvaluationResult as CrossSubjectEvaluationResult,
+    CrossSubjectFittedModel as CrossSubjectFittedModel,
+    NestedCrossSubjectEvaluationResult as NestedCrossSubjectEvaluationResult,
+    SubjectFeatureSet as SubjectFeatureSet,
+    fit_cross_subject_model as fit_cross_subject_model,
+    leave_one_subject_out_decoding as leave_one_subject_out_decoding,
+    nested_leave_one_subject_out_decoding as nested_leave_one_subject_out_decoding,
+    score_cross_subject_model as score_cross_subject_model,
+    summarize_cross_subject_folds as summarize_cross_subject_folds,
+)
+from neureptrace.decoding.normalization import (
+    DEFAULT_BASELINE_WHITENING_EIGENVALUE_FLOOR as DEFAULT_BASELINE_WHITENING_EIGENVALUE_FLOOR,
+    DEFAULT_BASELINE_WHITENING_SHRINKAGE as DEFAULT_BASELINE_WHITENING_SHRINKAGE,
+    NORMALIZATION_MODES as NORMALIZATION_MODES,
+    FeatureNormalizer as FeatureNormalizer,
+    baseline_whiten_features as baseline_whiten_features,
+    covariance_matrix as covariance_matrix,
+    fit_feature_normalizer as fit_feature_normalizer,
+    normalize_feature_normalization as normalize_feature_normalization,
+    normalize_features as normalize_features,
+    shrink_covariance as shrink_covariance,
+    trial_zscore_features as trial_zscore_features,
+    whitening_matrix as whitening_matrix,
+    whitening_matrix_from_baseline_covariance as whitening_matrix_from_baseline_covariance,
+)
 from neureptrace.decoding.sampling import (
     CLASS_LIMIT_SELECTION_MODES as CLASS_LIMIT_SELECTION_MODES,
     DEFAULT_CLASS_LIMIT_SEED as DEFAULT_CLASS_LIMIT_SEED,

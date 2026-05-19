@@ -9,6 +9,30 @@ import pandas as pd
 
 from neureptrace.metrics import expected_calibration_error
 from neureptrace.observations import probability_columns
+from neureptrace.results.schema import (
+    CONFUSION_SCHEMA,
+    OUTER_FOLD_SCORE_SCHEMA,
+    PER_CLASS_SCHEMA,
+    PREDICTION_SCHEMA,
+    PROBABILITY_OBSERVATION_SCHEMA,
+    PROVENANCE_SCHEMA,
+    RESULT_TABLE_SCHEMA_VERSION,
+    RESULT_TABLE_SCHEMAS,
+    SCHEMA_VERSION,
+    TIME_DECODE_SUMMARY_SCHEMA,
+    ColumnSpec,
+    ResultTableSchema,
+    TableSchema,
+    available_result_table_schemas,
+    build_result_bundle_provenance,
+    canonicalize_result_table,
+    get_result_table_schema,
+    normalize_result_table,
+    schema_as_frame,
+    validate_result_table,
+    write_result_bundle,
+    write_result_table,
+)
 from neureptrace.results.tables import peak_metric_rows, summarize_metric_table
 
 __all__ = [
@@ -16,6 +40,28 @@ __all__ = [
     "METRIC_COLUMNS",
     "SUMMARY_GROUP_COLUMNS",
     "WEIGHT_COLUMN",
+    "ColumnSpec",
+    "CONFUSION_SCHEMA",
+    "OUTER_FOLD_SCORE_SCHEMA",
+    "PER_CLASS_SCHEMA",
+    "PREDICTION_SCHEMA",
+    "PROBABILITY_OBSERVATION_SCHEMA",
+    "PROVENANCE_SCHEMA",
+    "RESULT_TABLE_SCHEMA_VERSION",
+    "RESULT_TABLE_SCHEMAS",
+    "SCHEMA_VERSION",
+    "TIME_DECODE_SUMMARY_SCHEMA",
+    "ResultTableSchema",
+    "TableSchema",
+    "available_result_table_schemas",
+    "build_result_bundle_provenance",
+    "canonicalize_result_table",
+    "get_result_table_schema",
+    "normalize_result_table",
+    "schema_as_frame",
+    "validate_result_table",
+    "write_result_bundle",
+    "write_result_table",
     "aggregate_time_decode_csvs",
     "aggregate_time_decode_results",
     "mean_across_folds",
@@ -611,7 +657,9 @@ def build_provenance_table(
     provenance = provenance.drop(columns=["feature_preprocessor"], errors="ignore")
     ordered = [column for column in PROVENANCE_COLUMN_ORDER if column in provenance.columns]
     extras = [column for column in provenance.columns if column not in ordered]
-    return provenance[[*ordered, *extras]].reset_index(drop=True)
+    provenance = provenance[[*ordered, *extras]].reset_index(drop=True)
+    validate_result_table(provenance, PROVENANCE_SCHEMA)
+    return provenance
 
 
 def write_provenance_table(
