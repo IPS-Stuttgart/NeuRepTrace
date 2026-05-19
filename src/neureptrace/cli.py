@@ -15,6 +15,8 @@ COMMAND_MODULES = {
     "event-detection": "neureptrace.event_detection",
     "metadata": "neureptrace.metadata",
     "mne-time-decode": "neureptrace.mne_time_decode",
+    "mne-transfer-decode": "neureptrace.mne_transfer_decode",
+    "transfer-decode": "neureptrace.mne_transfer_decode",
     "observation-ensemble": "neureptrace.observation_ensemble",
     "observation-schema": "neureptrace.observation_schema",
     "onset-detect": "neureptrace.onset_detection",
