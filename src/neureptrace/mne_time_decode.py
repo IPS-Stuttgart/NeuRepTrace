@@ -34,8 +34,25 @@ from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
 EMISSION_RUN_CHOICES = (*EMISSION_MODE_CHOICES, "both")
 FEATURE_PREPROCESSOR_RUN_CHOICES = (*FEATURE_PREPROCESSOR_CHOICES, "pca-whiten", "anova-select", "select-percentile")
+EPOCH_NORMALIZATION_CHOICES = (
+    "none",
+    "subject_z",
+    "subject_trial_z",
+    "subject_baseline_z",
+    "subject_baseline_whiten",
+)
+EPOCH_NORMALIZATION_RUN_CHOICES = (
+    *EPOCH_NORMALIZATION_CHOICES,
+    "subject-z",
+    "subject-trial-z",
+    "subject-baseline-z",
+    "subject-baseline-whiten",
+)
 RESULT_SELECTION_METRIC_CHOICES = ("accuracy", "log_loss", "brier", "ece")
 RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
+DEFAULT_BASELINE_WINDOW = (-0.35, -0.05)
+BASELINE_WHITENING_SHRINKAGE = 0.1
+BASELINE_WHITENING_EIGENVALUE_FLOOR = 1e-6
 TimeWindow = tuple[int, int, float]
 TemporalTrainWindow = tuple[float, float]
 
@@ -105,6 +122,127 @@ def _tuning_metadata(
         metadata["best_score"] = float(np.mean(scores))
         metadata["best_scores"] = json.dumps(scores, separators=(",", ":"))
     return metadata
+
+
+def normalize_epoch_normalization(name: str | None) -> str:
+    """Normalize subject-level epoch normalization names for the MNE decoder."""
+
+    normalized = "none" if name is None else str(name).strip().lower().replace("-", "_")
+    if normalized in {"identity", "raw", "no", "false"}:
+        return "none"
+    if normalized not in EPOCH_NORMALIZATION_CHOICES:
+        raise ValueError(
+            f"Unknown normalization '{name}'. Available normalizations: {', '.join(EPOCH_NORMALIZATION_CHOICES)}."
+        )
+    return normalized
+
+
+def _normalize_baseline_window(baseline_window: tuple[float, float] | list[float] | None) -> tuple[float, float]:
+    if baseline_window is None:
+        return DEFAULT_BASELINE_WINDOW
+    if len(baseline_window) != 2:
+        raise ValueError("baseline_window must contain exactly two times: start and stop.")
+    start, stop = map(float, baseline_window)
+    if stop < start:
+        raise ValueError("baseline_window stop must be greater than or equal to start.")
+    return start, stop
+
+
+def _baseline_time_mask(times: np.ndarray, baseline_window: tuple[float, float]) -> np.ndarray:
+    start, stop = baseline_window
+    tolerance = 1e-12
+    mask = (times >= start - tolerance) & (times <= stop + tolerance)
+    if not np.any(mask):
+        raise ValueError(f"baseline_window [{start}, {stop}] does not overlap the epochs time axis.")
+    return mask
+
+
+def _nonzero_std(std: np.ndarray) -> np.ndarray:
+    return np.where(std < 1e-12, 1.0, std)
+
+
+def _channel_mean_std(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    mean = values.mean(axis=(0, 2), keepdims=True)
+    std = _nonzero_std(values.std(axis=(0, 2), keepdims=True))
+    return mean, std
+
+
+def _covariance_matrix(features: np.ndarray) -> np.ndarray:
+    features = np.asarray(features, dtype=float)
+    n_features = int(features.shape[1])
+    if features.shape[0] < 2:
+        return np.eye(n_features, dtype=float)
+    covariance = np.cov(features, rowvar=False)
+    covariance = np.asarray(covariance, dtype=float)
+    if covariance.ndim == 0:
+        covariance = covariance.reshape(1, 1)
+    return 0.5 * (covariance + covariance.T)
+
+
+def _shrink_covariance(covariance: np.ndarray, *, shrinkage: float) -> np.ndarray:
+    covariance = np.asarray(covariance, dtype=float)
+    diagonal = np.diag(np.diag(covariance))
+    return (1.0 - float(shrinkage)) * covariance + float(shrinkage) * diagonal
+
+
+def _whitening_matrix(covariance: np.ndarray) -> np.ndarray:
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    eigen_floor = max(float(np.max(eigenvalues)) * BASELINE_WHITENING_EIGENVALUE_FLOOR, 1e-12)
+    inverse_sqrt = 1.0 / np.sqrt(np.maximum(eigenvalues, eigen_floor))
+    whitening = (eigenvectors * inverse_sqrt) @ eigenvectors.T
+    return 0.5 * (whitening + whitening.T)
+
+
+def _baseline_channel_whitening_matrix(data: np.ndarray, times: np.ndarray, baseline_window: tuple[float, float]) -> np.ndarray:
+    mask = _baseline_time_mask(times, baseline_window)
+    baseline_trial_means = np.mean(data[:, :, mask], axis=2)
+    covariance = _covariance_matrix(baseline_trial_means)
+    covariance = _shrink_covariance(covariance, shrinkage=BASELINE_WHITENING_SHRINKAGE)
+    return _whitening_matrix(covariance)
+
+
+def _apply_epoch_normalization(
+    data: np.ndarray,
+    times: np.ndarray,
+    normalization: str,
+    *,
+    baseline_window: tuple[float, float],
+) -> np.ndarray:
+    """Apply subject-level normalization before extracting time-window features.
+
+    ``subject_baseline_whiten`` mirrors PyMEGDec's channel-wise baseline
+    whitening: subtract the baseline channel mean and apply a shrinkage
+    covariance whitening matrix fitted from per-trial baseline channel means.
+    """
+
+    data = np.asarray(data, dtype=float)
+    normalization = normalize_epoch_normalization(normalization)
+    if normalization == "none":
+        return data
+
+    normalized = data.copy()
+    if normalization == "subject_z":
+        mean, std = _channel_mean_std(normalized)
+        return (normalized - mean) / std
+
+    if normalization == "subject_trial_z":
+        mean = normalized.mean(axis=(1, 2), keepdims=True)
+        std = _nonzero_std(normalized.std(axis=(1, 2), keepdims=True))
+        return (normalized - mean) / std
+
+    mask = _baseline_time_mask(times, baseline_window)
+    baseline = normalized[:, :, mask]
+    baseline_mean, baseline_std = _channel_mean_std(baseline)
+    if normalization == "subject_baseline_z":
+        return (normalized - baseline_mean) / baseline_std
+
+    if normalization == "subject_baseline_whiten":
+        whitening = _baseline_channel_whitening_matrix(normalized, times, baseline_window)
+        centered = normalized - baseline_mean
+        whitened = np.einsum("ntc,dc->ntd", np.transpose(centered, (0, 2, 1)), whitening)
+        return np.transpose(whitened, (0, 2, 1))
+
+    raise ValueError(f"Unsupported normalization: {normalization}")
 
 
 def _normalize_temporal_train_window(
@@ -200,14 +338,7 @@ def _align_probability_columns(
     model,
     classes: np.ndarray,
 ) -> np.ndarray:
-    """Align estimator probability columns to the global encoded class order.
-
-    Scikit-learn probability columns follow the fitted estimator's ``classes_``.
-    With grouped folds it is possible for a training split to miss one globally
-    known class. In that case the estimator emits fewer columns; downstream
-    multiclass metrics and observation CSVs still need the global label-encoder
-    order, with zero probability assigned to classes not seen by the model.
-    """
+    """Align estimator probability columns to the global encoded class order."""
 
     probabilities = np.asarray(probabilities, dtype=float)
     classes = np.asarray(classes)
@@ -256,7 +387,6 @@ def _train_window_summary(
 
 
 def _best_time_by_metric(time_summary: pd.DataFrame, metric: str) -> float:
-    """Return the best time index for a metric aggregated over folds."""
     if metric not in RESULT_SELECTION_METRIC_CHOICES:
         raise ValueError(f"Unknown selection metric '{metric}'.")
     if metric in RESULT_SELECTION_MINIMIZE_METRICS:
@@ -271,6 +401,8 @@ def _model_hash(
     max_iter: int,
     feature_preprocessor: str,
     pca_components: int | float | None,
+    normalization: str,
+    baseline_window: tuple[float, float],
     temporal_mode: str,
     temporal_train_window: TemporalTrainWindow | None,
     train_window_centers: list[float] | None = None,
@@ -287,6 +419,8 @@ def _model_hash(
         "max_iter": max_iter,
         "feature_preprocessor": feature_preprocessor,
         "pca_components": pca_components,
+        "normalization": normalization,
+        "baseline_window": baseline_window,
         "temporal_mode": temporal_mode,
         "temporal_train_window": temporal_train_window,
         "train_window_centers": train_window_centers,
@@ -324,6 +458,8 @@ def _append_decoded_outputs(
     emission_mode: str,
     feature_preprocessor_name: str,
     pca_components_value: int | float | None,
+    normalization_name: str,
+    baseline_window: tuple[float, float],
     time_window: TimeWindow,
     epochs: mne.Epochs,
     split_id: str,
@@ -344,12 +480,15 @@ def _append_decoded_outputs(
     tuning_metadata = {} if tuning_metadata is None else tuning_metadata
     start, stop, center = time_window
     predictions = probabilities.argmax(axis=1)
-    row = {
+    common = {
         "fold": fold,
         "decoder": decoder_name,
         "emission_mode": emission_mode,
         "feature_preprocessor": feature_preprocessor_name,
         "pca_components": "" if pca_components_value is None else pca_components_value,
+        "normalization": normalization_name,
+        "baseline_window_start": baseline_window[0],
+        "baseline_window_stop": baseline_window[1],
         "temporal_mode": temporal_mode,
         "temporal_train_window_start": "" if temporal_train_window is None else temporal_train_window[0],
         "temporal_train_window_stop": "" if temporal_train_window is None else temporal_train_window[1],
@@ -361,6 +500,9 @@ def _append_decoded_outputs(
         "n_train_windows": n_train_windows,
         "window_start": float(epochs.times[start]),
         "window_stop": float(epochs.times[stop - 1]),
+    }
+    row = {
+        **common,
         "accuracy": accuracy_score(test_labels, predictions),
         "log_loss": log_loss(test_labels, probabilities, labels=classes),
         "brier": brier_score_multiclass(probabilities, test_labels),
@@ -375,25 +517,7 @@ def _append_decoded_outputs(
 
     if calibration_out_path is not None:
         for bin_row in reliability_bins(probabilities, test_labels, n_bins=calibration_bins):
-            calibration_row = {
-                "fold": fold,
-                "decoder": decoder_name,
-                "emission_mode": emission_mode,
-                "feature_preprocessor": feature_preprocessor_name,
-                "pca_components": "" if pca_components_value is None else pca_components_value,
-                "temporal_mode": temporal_mode,
-                "temporal_train_window_start": "" if temporal_train_window is None else temporal_train_window[0],
-                "temporal_train_window_stop": "" if temporal_train_window is None else temporal_train_window[1],
-                "train_time": train_time,
-                "time": center,
-                "test_time": center,
-                "train_window_start": train_window_start,
-                "train_window_stop": train_window_stop,
-                "n_train_windows": n_train_windows,
-                "window_start": float(epochs.times[start]),
-                "window_stop": float(epochs.times[stop - 1]),
-                **bin_row,
-            }
+            calibration_row = {**common, **bin_row}
             calibration_row.update(tuning_metadata)
             calibration_rows.append(_add_subject(calibration_row, subject))
     if observation_out_path is not None:
@@ -401,25 +525,10 @@ def _append_decoded_outputs(
             true_label = int(test_labels[local_position])
             predicted_label = int(predictions[local_position])
             observation = {
-                "fold": fold,
+                **common,
                 "split_id": split_id,
                 "seed": 13,
-                "decoder": decoder_name,
                 "backend": "sklearn",
-                "emission_mode": emission_mode,
-                "feature_preprocessor": feature_preprocessor_name,
-                "pca_components": "" if pca_components_value is None else pca_components_value,
-                "temporal_mode": temporal_mode,
-                "temporal_train_window_start": "" if temporal_train_window is None else temporal_train_window[0],
-                "temporal_train_window_stop": "" if temporal_train_window is None else temporal_train_window[1],
-                "train_time": train_time,
-                "test_time": center,
-                "time": center,
-                "train_window_start": train_window_start,
-                "train_window_stop": train_window_stop,
-                "n_train_windows": n_train_windows,
-                "window_start": float(epochs.times[start]),
-                "window_stop": float(epochs.times[stop - 1]),
                 "sample_index": int(original_indices[filtered_index]),
                 "sequence_id": int(original_indices[filtered_index]),
                 "session": "" if session_values is None else session_values[filtered_index],
@@ -461,6 +570,8 @@ def run_time_resolved_decode(
     emission_mode: str = "calibrated",
     feature_preprocessor: str = "none",
     pca_components: int | float | str | None = None,
+    normalization: str = "none",
+    baseline_window: tuple[float, float] | None = DEFAULT_BASELINE_WINDOW,
     tune_hyperparameters: bool = False,
     tuning_cv_splits: int = 3,
     tuning_scoring: str = "accuracy",
@@ -484,6 +595,8 @@ def run_time_resolved_decode(
     decoder_name = normalize_decoder_name(decoder)
     emission_modes = list(EMISSION_MODE_CHOICES) if emission_mode == "both" else [normalize_emission_mode(emission_mode)]
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
+    normalization_name = normalize_epoch_normalization(normalization)
+    baseline_window_value = _normalize_baseline_window(baseline_window)
     if feature_preprocessor_name == "none" and pca_components is not None:
         raise ValueError(
             "pca_components can only be set when feature_preprocessor is 'pca', 'pca_whiten', or 'anova_select'."
@@ -530,6 +643,8 @@ def run_time_resolved_decode(
             "step_ms": step_ms,
             "feature_preprocessor": feature_preprocessor_name,
             "pca_components": pca_components_value,
+            "normalization": normalization_name,
+            "baseline_window": baseline_window_value,
             "temporal_train_window": normalized_temporal_train_window,
         }
     )
@@ -539,6 +654,8 @@ def run_time_resolved_decode(
         max_iter=max_iter,
         feature_preprocessor=feature_preprocessor_name,
         pca_components=pca_components_value,
+        normalization=normalization_name,
+        baseline_window=baseline_window_value,
         temporal_mode=temporal_mode,
         temporal_train_window=normalized_temporal_train_window,
         tune_hyperparameters=tune_hyperparameters,
@@ -547,11 +664,17 @@ def run_time_resolved_decode(
         tuning_c_grid=tuning_c_grid_values,
     )
 
-    data = epochs.get_data(copy=False)
+    raw_data = epochs.get_data(copy=False)
+    data = _apply_epoch_normalization(
+        raw_data,
+        epochs.times,
+        normalization_name,
+        baseline_window=baseline_window_value,
+    )
     classes = np.arange(len(encoder.classes_))
-    rows = []
-    calibration_rows = []
-    observation_rows = []
+    rows: list[dict] = []
+    calibration_rows: list[dict] = []
+    observation_rows: list[dict] = []
     windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
     selected_train_windows = _select_temporal_train_windows(windows, normalized_temporal_train_window)
     splits = list(make_cross_validator(labels, groups, n_splits))
@@ -590,12 +713,21 @@ def run_time_resolved_decode(
                         model=model,
                         classes=classes,
                     )
+                    tuning_metadata = _tuning_metadata(
+                        model,
+                        tune_hyperparameters=tune_hyperparameters,
+                        tuning_cv_splits=tuning_cv_splits,
+                        tuning_scoring=tuning_scoring,
+                        tuning_c_grid=tuning_c_grid_values,
+                    )
                     current_model_hash = _model_hash(
                         decoder_name=decoder_name,
                         emission_mode=current_emission_mode,
                         max_iter=max_iter,
                         feature_preprocessor=feature_preprocessor_name,
                         pca_components=pca_components_value,
+                        normalization=normalization_name,
+                        baseline_window=baseline_window_value,
                         temporal_mode=temporal_mode,
                         temporal_train_window=None,
                         train_window_centers=[center],
@@ -603,20 +735,7 @@ def run_time_resolved_decode(
                         tuning_cv_splits=tuning_cv_splits,
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
-                        tuning_metadata=_tuning_metadata(
-                            model,
-                            tune_hyperparameters=tune_hyperparameters,
-                            tuning_cv_splits=tuning_cv_splits,
-                            tuning_scoring=tuning_scoring,
-                            tuning_c_grid=tuning_c_grid_values,
-                        ),
-                    )
-                    tuning_metadata = _tuning_metadata(
-                        model,
-                        tune_hyperparameters=tune_hyperparameters,
-                        tuning_cv_splits=tuning_cv_splits,
-                        tuning_scoring=tuning_scoring,
-                        tuning_c_grid=tuning_c_grid_values,
+                        tuning_metadata=tuning_metadata,
                     )
                     _append_decoded_outputs(
                         rows=rows,
@@ -637,6 +756,8 @@ def run_time_resolved_decode(
                         emission_mode=current_emission_mode,
                         feature_preprocessor_name=feature_preprocessor_name,
                         pca_components_value=pca_components_value,
+                        normalization_name=normalization_name,
+                        baseline_window=baseline_window_value,
                         time_window=time_window,
                         epochs=epochs,
                         split_id=split_id,
@@ -697,12 +818,21 @@ def run_time_resolved_decode(
                             classes=classes,
                         )
 
+                tuning_metadata = _tuning_metadata(
+                    fitted_models,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv_splits=tuning_cv_splits,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                )
                 current_model_hash = _model_hash(
                     decoder_name=decoder_name,
                     emission_mode=current_emission_mode,
                     max_iter=max_iter,
                     feature_preprocessor=feature_preprocessor_name,
                     pca_components=pca_components_value,
+                    normalization=normalization_name,
+                    baseline_window=baseline_window_value,
                     temporal_mode=temporal_mode,
                     temporal_train_window=normalized_temporal_train_window,
                     train_window_centers=train_window_centers,
@@ -710,20 +840,7 @@ def run_time_resolved_decode(
                     tuning_cv_splits=tuning_cv_splits,
                     tuning_scoring=tuning_scoring,
                     tuning_c_grid=tuning_c_grid_values,
-                    tuning_metadata=_tuning_metadata(
-                        fitted_models,
-                        tune_hyperparameters=tune_hyperparameters,
-                        tuning_cv_splits=tuning_cv_splits,
-                        tuning_scoring=tuning_scoring,
-                        tuning_c_grid=tuning_c_grid_values,
-                    ),
-                )
-                tuning_metadata = _tuning_metadata(
-                    fitted_models,
-                    tune_hyperparameters=tune_hyperparameters,
-                    tuning_cv_splits=tuning_cv_splits,
-                    tuning_scoring=tuning_scoring,
-                    tuning_c_grid=tuning_c_grid_values,
+                    tuning_metadata=tuning_metadata,
                 )
                 for test_window in windows:
                     probabilities = _probability_average(probability_sums[test_window], len(selected_train_windows))
@@ -746,6 +863,8 @@ def run_time_resolved_decode(
                         emission_mode=current_emission_mode,
                         feature_preprocessor_name=feature_preprocessor_name,
                         pca_components_value=pca_components_value,
+                        normalization_name=normalization_name,
+                        baseline_window=baseline_window_value,
                         time_window=test_window,
                         epochs=epochs,
                         split_id=split_id,
@@ -810,6 +929,20 @@ def main() -> None:
             "--feature-preprocessor anova-select, this is the selected feature percentile."
         ),
     )
+    parser.add_argument(
+        "--normalization",
+        choices=EPOCH_NORMALIZATION_RUN_CHOICES,
+        default="none",
+        help="Subject-level epoch normalization applied before time-window feature extraction.",
+    )
+    parser.add_argument(
+        "--baseline-window",
+        nargs=2,
+        type=float,
+        metavar=("START", "STOP"),
+        default=DEFAULT_BASELINE_WINDOW,
+        help="Baseline time window in seconds for subject_baseline_z and subject_baseline_whiten.",
+    )
     parser.add_argument("--tune-hyperparameters", action="store_true", help="Use nested inner-CV hyperparameter selection inside each outer train fold.")
     parser.add_argument("--tuning-cv-splits", type=int, default=3, help="Maximum number of inner CV folds for --tune-hyperparameters.")
     parser.add_argument("--tuning-scoring", choices=TUNING_SCORING_CHOICES, default="accuracy", help="Inner-CV objective for --tune-hyperparameters.")
@@ -852,6 +985,8 @@ def main() -> None:
         emission_mode=args.emission_mode,
         feature_preprocessor=args.feature_preprocessor,
         pca_components=args.pca_components,
+        normalization=args.normalization,
+        baseline_window=tuple(args.baseline_window),
         tune_hyperparameters=args.tune_hyperparameters,
         tuning_cv_splits=args.tuning_cv_splits,
         tuning_scoring=args.tuning_scoring,
