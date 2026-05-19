@@ -22,6 +22,7 @@ neureptrace-stimulus-detect = "neureptrace.stimulus_detection:main"
 neureptrace-temporal-model = "neureptrace.temporal_model:main"
 neureptrace-temporal-smoothing = "neureptrace.temporal_smoothing:main"
 neureptrace-temporal-state-workflow = "neureptrace.temporal_state_workflow:main"
+neureptrace-validate-config = "neureptrace.dataset_config:main"
 neureptrace-validate-manifest = "neureptrace.validate_manifest:main"
 neureptrace-validate-observations = "neureptrace.observation_schema:main"
 
@@ -36,6 +37,7 @@ matplotlib = "*"
 mne = "*"
 numpy = "*"
 pandas = "*"
+pyyaml = "*"
 scikit-learn = "*"
 xgboost = { version = "*", optional = true }
 torch = { version = "*", optional = true }

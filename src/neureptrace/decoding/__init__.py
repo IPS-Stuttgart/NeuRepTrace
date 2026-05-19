@@ -31,6 +31,14 @@ from neureptrace.decoding.sampling import (
     normalize_class_limit_selection as normalize_class_limit_selection,
     select_class_limited_indices as select_class_limited_indices,
 )
+from neureptrace.decoding.score_rank import (
+    rank_summary_rows as rank_summary_rows,
+    score_model_classes as score_model_classes,
+    score_window_classes as score_window_classes,
+    summarize_class_ranks as summarize_class_ranks,
+    topk_rank_metrics as topk_rank_metrics,
+    true_label_ranks as true_label_ranks,
+)
 from neureptrace.metrics import brier_score_multiclass, expected_calibration_error
 
 BUILTIN_DECODER_CHOICES = (

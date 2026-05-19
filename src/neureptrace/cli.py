@@ -9,6 +9,7 @@ from importlib import import_module
 
 COMMAND_MODULES = {
     "benchmark": "neureptrace.benchmark",
+    "config": "neureptrace.dataset_config",
     "continuous-stimulus-scan": "neureptrace.continuous_stimulus_scan",
     "ensemble-observations": "neureptrace.observation_ensemble",
     "event-detect": "neureptrace.event_detection",
@@ -26,6 +27,7 @@ COMMAND_MODULES = {
     "temporal-model": "neureptrace.temporal_model",
     "temporal-smoothing": "neureptrace.temporal_smoothing",
     "temporal-state-workflow": "neureptrace.temporal_state_workflow",
+    "validate-config": "neureptrace.dataset_config",
     "validate-manifest": "neureptrace.validate_manifest",
     "validate-observations": "neureptrace.observation_schema",
 }

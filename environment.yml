@@ -8,6 +8,7 @@ dependencies:
   - mne
   - numpy
   - pandas
+  - pyyaml
   - scikit-learn
   - pytest
   - pip

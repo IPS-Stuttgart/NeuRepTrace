@@ -8,10 +8,12 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Data Staging: data-staging.md
+  - Config Manifests: config-manifest.md
   - Benchmarking: benchmarking.md
   - API Overview: api-overview.md
   - Reference:
       - Benchmark: reference/benchmark.md
+      - Dataset Config: reference/dataset-config.md
       - Calibration: reference/calibration.md
       - Continuous Stimulus Scan: reference/continuous-stimulus-scan.md
       - Decoding: reference/decoding.md
