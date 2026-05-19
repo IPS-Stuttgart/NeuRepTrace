@@ -122,6 +122,17 @@ def test_canonical_profile_accepts_standard_observations() -> None:
     assert not report.errors
 
 
+def test_canonical_profile_uses_class_columns_for_external_numeric_labels() -> None:
+    frame = _valid_canonical_observations()
+    frame["true_label"] = [101, 101]
+    frame["predicted_label"] = [202, 101]
+
+    report = validate_probability_observations(frame, profile="canonical")
+
+    assert report.is_valid
+    assert not report.errors
+
+
 def test_canonical_profile_requires_provenance_columns() -> None:
     report = validate_probability_observations(_valid_canonical_observations().drop(columns=["backend"]), profile="canonical")
 

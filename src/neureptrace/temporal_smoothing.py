@@ -9,7 +9,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, log_loss
 
 from neureptrace.metrics import brier_score_multiclass, expected_calibration_error
-from neureptrace.observations import stable_hash
+from neureptrace.observations import label_positions_for_observations, probability_label_values, stable_hash
 from neureptrace.temporal_model import (
     _class_names,
     _expand_paths,
@@ -95,16 +95,10 @@ def _smoothed_emission_mode(base_mode: object, suffix: str) -> str:
     return f"{base}_{suffix}"
 
 
-def _numeric_labels(frame: pd.DataFrame, n_classes: int) -> np.ndarray:
-    if "true_label" not in frame.columns:
-        raise ValueError("Temporal smoothing metrics require a true_label column.")
-    labels = pd.to_numeric(frame["true_label"], errors="coerce")
-    if labels.isna().any():
-        raise ValueError("true_label must be numeric and non-missing.")
-    labels_array = labels.to_numpy(dtype=int)
-    if bool(((labels_array < 0) | (labels_array >= n_classes)).any()):
-        raise ValueError("true_label values must index prob_class_* columns.")
-    return labels_array
+def _label_positions(frame: pd.DataFrame, prob_columns: list[str]) -> np.ndarray:
+    if "true_label" not in frame.columns and "true_class" not in frame.columns:
+        raise ValueError("Temporal smoothing metrics require true_label or true_class columns.")
+    return label_positions_for_observations(frame, prob_columns)
 
 
 def _with_posterior_columns(
@@ -119,7 +113,9 @@ def _with_posterior_columns(
 ) -> pd.DataFrame:
     smoothed = sequence_frame.copy()
     posterior = _normalize_probabilities(posterior)
-    predictions = posterior.argmax(axis=1)
+    prediction_positions = posterior.argmax(axis=1)
+    label_values = probability_label_values(prob_columns)
+    predicted_labels = np.asarray([label_values[int(position)] for position in prediction_positions], dtype=int)
 
     smoothed.loc[:, prob_columns] = posterior
     if "emission_mode" in smoothed.columns:
@@ -129,13 +125,13 @@ def _with_posterior_columns(
         smoothed["base_emission_mode"] = ""
         smoothed["emission_mode"] = emission_suffix
 
-    smoothed["predicted_label"] = predictions.astype(int)
-    smoothed["predicted_class"] = [class_names[int(index)] for index in predictions]
+    smoothed["predicted_label"] = predicted_labels
+    smoothed["predicted_class"] = [class_names[int(index)] for index in prediction_positions]
     smoothed["confidence"] = posterior.max(axis=1)
-    if "true_label" in smoothed.columns:
-        labels = _numeric_labels(smoothed, posterior.shape[1])
-        smoothed["probability_true_class"] = posterior[np.arange(len(smoothed)), labels]
-        smoothed["is_correct"] = predictions == labels
+    if "true_label" in smoothed.columns or "true_class" in smoothed.columns:
+        true_positions = _label_positions(smoothed, prob_columns)
+        smoothed["probability_true_class"] = posterior[np.arange(len(smoothed)), true_positions]
+        smoothed["is_correct"] = prediction_positions == true_positions
 
     smoothed["temporal_smoothing_method"] = SMOOTHING_METHOD
     smoothed["temporal_smoothing_stay_probability"] = float(stay_probability)
@@ -170,9 +166,9 @@ def metrics_from_probability_observations(observations: pd.DataFrame, *, ece_bin
 
     prob_columns = probability_columns(observations)
     n_classes = len(prob_columns)
-    labels = _numeric_labels(observations, n_classes)
+    true_positions = _label_positions(observations, prob_columns)
     working = observations.copy()
-    working["true_label"] = labels
+    working["__true_label_position"] = true_positions
     for column in prob_columns:
         working[column] = pd.to_numeric(working[column], errors="coerce")
     if working[prob_columns].isna().any().any():
@@ -186,7 +182,7 @@ def metrics_from_probability_observations(observations: pd.DataFrame, *, ece_bin
     for key, group in _iter_groups(working, group_columns):
         row = _group_values(group_columns, key)
         probabilities = _normalize_probabilities(group[prob_columns].to_numpy(dtype=float))
-        group_labels = group["true_label"].to_numpy(dtype=int)
+        group_labels = group["__true_label_position"].to_numpy(dtype=int)
         predictions = probabilities.argmax(axis=1)
         class_names = _class_names(group, prob_columns)
         row.update(

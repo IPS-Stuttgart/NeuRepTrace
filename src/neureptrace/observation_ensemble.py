@@ -11,7 +11,13 @@ from sklearn.metrics import accuracy_score, log_loss
 
 from neureptrace.metrics import brier_score_multiclass, expected_calibration_error
 from neureptrace.observation_schema import read_validated_probability_observations
-from neureptrace.observations import ProbabilityObservationTable, probability_columns, stable_hash
+from neureptrace.observations import (
+    ProbabilityObservationTable,
+    label_positions_for_observations,
+    probability_columns,
+    probability_label_values,
+    stable_hash,
+)
 
 DEFAULT_BASELINE_WINDOW = (-0.35, -0.05)
 DEFAULT_BASELINE_GROUP_COLUMNS = ("subject", "fold")
@@ -61,10 +67,7 @@ def _class_columns_for_probabilities(frame: pd.DataFrame, prob_columns: Sequence
 
 
 def _label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
-    suffixes = _class_suffixes(prob_columns)
-    if not all(suffix.isdigit() for suffix in suffixes):
-        return tuple(range(len(prob_columns)))
-    return tuple(int(suffix) for suffix in suffixes)
+    return probability_label_values(prob_columns)
 
 
 def _label_positions(labels: Sequence[object] | np.ndarray | pd.Series, label_values: Sequence[int]) -> np.ndarray:
@@ -252,16 +255,8 @@ def ensemble_probability_observations(
     label_values = _label_values(prob_columns)
     predicted_positions = probabilities.argmax(axis=1)
     predicted_labels = np.asarray([label_values[position] for position in predicted_positions], dtype=int)
-    true_labels = pd.to_numeric(output["true_label"], errors="coerce")
-    if true_labels.isna().any():
-        raise ValueError("true_label values must be numeric.")
-    true_labels_array = true_labels.astype(int).to_numpy()
-    label_to_position = {label: position for position, label in enumerate(label_values)}
-    true_probabilities = np.full(len(output), np.nan, dtype=float)
-    for row_index, true_label in enumerate(true_labels_array):
-        position = label_to_position.get(int(true_label))
-        if position is not None:
-            true_probabilities[row_index] = probabilities[row_index, position]
+    true_positions = label_positions_for_observations(output, prob_columns)
+    true_probabilities = probabilities[np.arange(len(output)), true_positions]
 
     class_columns = _class_columns_for_probabilities(output, prob_columns)
     predicted_classes: list[str] = []
@@ -283,7 +278,7 @@ def ensemble_probability_observations(
     output["predicted_class"] = predicted_classes
     output["probability_true_class"] = true_probabilities
     output["confidence"] = probabilities.max(axis=1)
-    output["is_correct"] = predicted_labels == true_labels_array
+    output["is_correct"] = predicted_positions == true_positions
     output["calibration_fold"] = "baseline_window" if baseline_window is not None else ""
     output["source_decoders"] = "|".join(decoders)
     output["source_emission_mode"] = "" if source_emission_mode is None else source_emission_mode
@@ -320,18 +315,14 @@ def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10
         if len(group_columns) == 1 and not isinstance(group_key, tuple):
             group_key = (group_key,)
         probabilities = group.loc[:, list(prob_columns)].to_numpy(dtype=float)
-        true_labels = pd.to_numeric(group["true_label"], errors="coerce")
-        if true_labels.isna().any():
-            raise ValueError("true_label values must be numeric.")
-        true_label_values = true_labels.astype(int).to_numpy()
-        true_positions = _label_positions(true_label_values, label_values)
+        true_positions = label_positions_for_observations(group, prob_columns)
         prediction_positions = probabilities.argmax(axis=1)
         predicted_label_values = np.asarray([label_values[position] for position in prediction_positions], dtype=int)
         row = dict(zip(group_columns, group_key))
         row.update(
             {
-                "accuracy": accuracy_score(true_label_values, predicted_label_values),
-                "log_loss": log_loss(true_label_values, probabilities, labels=list(label_values)),
+                "accuracy": accuracy_score(true_positions, prediction_positions),
+                "log_loss": log_loss(true_positions, probabilities, labels=np.arange(len(prob_columns))),
                 "brier": brier_score_multiclass(probabilities, true_positions),
                 "ece": expected_calibration_error(probabilities, true_positions, n_bins=ece_bins),
                 "n_train": "",

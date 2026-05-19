@@ -112,6 +112,21 @@ def test_summarize_ensemble_metrics_returns_time_resolved_rows() -> None:
     assert metrics["class_names"].tolist() == ["zero|one", "zero|one"]
 
 
+def test_ensemble_metrics_use_class_columns_for_external_numeric_labels() -> None:
+    observations = _source_observations()
+    observations["true_label"] = observations["true_class"].map({"zero": 101, "one": 202})
+
+    ensemble = ensemble_probability_observations(
+        observations,
+        baseline_window=(-0.25, -0.15),
+    )
+    metrics = summarize_ensemble_metrics(ensemble)
+
+    assert metrics["accuracy"].tolist() == [0.5, 1.0]
+    assert ensemble.loc[ensemble["time"].eq(0.10), "is_correct"].all()
+    assert ensemble.loc[ensemble["time"].eq(0.10), "probability_true_class"].gt(0.70).all()
+
+
 def test_ensemble_cli_writes_observations_and_metrics(tmp_path: Path) -> None:
     source_path = tmp_path / "source_observations.csv"
     ensemble_path = tmp_path / "ensemble_observations.csv"

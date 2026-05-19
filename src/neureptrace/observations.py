@@ -57,6 +57,115 @@ def probability_columns(frame: pd.DataFrame) -> tuple[str, ...]:
     return tuple(sorted((column for column in frame.columns if column.startswith("prob_class_")), key=_probability_sort_key))
 
 
+def probability_label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
+    """Return numeric labels encoded by probability-column suffixes.
+
+    ``prob_class_1``/``prob_class_2`` style columns carry explicit label
+    values. When suffixes are not numeric, callers should treat the
+    probability vector as position-indexed.
+    """
+    suffixes = [column.removeprefix("prob_class_") for column in prob_columns]
+    if suffixes and all(suffix.isdigit() for suffix in suffixes):
+        return tuple(int(suffix) for suffix in suffixes)
+    return tuple(range(len(prob_columns)))
+
+
+def class_columns_for_probability_columns(prob_columns: Sequence[str]) -> tuple[str, ...]:
+    """Return the ``class_*`` columns corresponding to ``prob_columns``."""
+    return tuple(f"class_{column.removeprefix('prob_class_')}" for column in prob_columns)
+
+
+def _observation_value_present(value: object) -> bool:
+    if value is None:
+        return False
+    try:
+        if bool(pd.isna(value)):
+            return False
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip() != ""
+
+
+def _observation_value_text(value: object) -> str:
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, int | np.integer):
+        return str(int(value))
+    if isinstance(value, float | np.floating):
+        value = float(value)
+        if np.isfinite(value) and value.is_integer():
+            return str(int(value))
+    return str(value).strip()
+
+
+def label_positions_for_observations(
+    frame: pd.DataFrame,
+    prob_columns: Sequence[str],
+    *,
+    label_column: str = "true_label",
+    class_column: str = "true_class",
+) -> np.ndarray:
+    """Map observation labels/classes to zero-based probability-vector positions.
+
+    Class-name columns are preferred when available, so externally supplied
+    observations can carry original labels in ``true_label``/``predicted_label``
+    while ``class_*`` still identifies which probability column each row means.
+    Numeric labels are used as a fallback and are matched to numeric
+    ``prob_class_*`` suffixes when present.
+    """
+    prob_columns = tuple(prob_columns)
+    if not prob_columns:
+        raise ValueError("At least one probability column is required.")
+
+    positions = np.full(len(frame), -1, dtype=int)
+    class_columns = class_columns_for_probability_columns(prob_columns)
+    available_class_columns = [(position, column) for position, column in enumerate(class_columns) if column in frame.columns]
+
+    if class_column in frame.columns and available_class_columns:
+        for row_position, (_, row) in enumerate(frame.iterrows()):
+            true_value = row.get(class_column)
+            if not _observation_value_present(true_value):
+                continue
+            true_text = _observation_value_text(true_value)
+            matches = [
+                class_position
+                for class_position, column in available_class_columns
+                if _observation_value_present(row.get(column))
+                and _observation_value_text(row.get(column)) == true_text
+            ]
+            if len(matches) == 1:
+                positions[row_position] = matches[0]
+            elif len(matches) > 1:
+                raise ValueError(
+                    f"{class_column} value {true_value!r} matches multiple class_* columns; "
+                    "class names must be unique per observation row."
+                )
+
+    if label_column in frame.columns:
+        label_values = probability_label_values(prob_columns)
+        label_to_position = {int(label): position for position, label in enumerate(label_values)}
+        numeric_labels = pd.to_numeric(frame[label_column], errors="coerce").to_numpy(dtype=float)
+        for row_position in np.flatnonzero(positions < 0):
+            value = numeric_labels[row_position]
+            if not np.isfinite(value):
+                continue
+            rounded = int(round(float(value)))
+            if not np.isclose(float(value), rounded):
+                raise ValueError(f"{label_column} values must be integer labels.")
+            label_position = label_to_position.get(rounded)
+            if label_position is not None:
+                positions[row_position] = label_position
+
+    missing_positions = np.flatnonzero(positions < 0)
+    if len(missing_positions):
+        examples = frame.index[missing_positions[:5]].tolist()
+        raise ValueError(
+            f"Could not map {label_column}/{class_column} values to probability columns "
+            f"{list(prob_columns)} for row(s) {examples}."
+        )
+    return positions
+
+
 def _value_at(values: Sequence[object] | np.ndarray | pd.Series | None, index: int, default: object = "") -> object:
     if values is None:
         return default

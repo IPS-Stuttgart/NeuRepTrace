@@ -11,6 +11,8 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+from neureptrace.observations import label_positions_for_observations
+
 ObservationProfile = Literal["generic", "canonical", "temporal-model", "stimulus-detection"]
 
 PROFILES: tuple[ObservationProfile, ...] = ("generic", "canonical", "temporal-model", "stimulus-detection")
@@ -432,11 +434,10 @@ def _validate_probability_consistency(
         return
     probability_values = probabilities.to_numpy(dtype=float)
     finite_row = np.isfinite(probability_values).any(axis=1)
+    finite_row_series = pd.Series(finite_row, index=frame.index)
     filled = np.where(np.isfinite(probability_values), probability_values, -np.inf)
     max_probabilities = np.nanmax(probability_values, axis=1)
     argmax_positions = filled.argmax(axis=1)
-    label_columns = _numeric_label_to_probability_columns(prob_columns)
-    ordered_labels = [int(column.removeprefix("prob_class_")) if column.removeprefix("prob_class_").isdigit() else None for column in prob_columns]
 
     if "confidence" in frame.columns:
         confidence = _numeric_series(frame, "confidence", issues, allow_nan=True)
@@ -453,60 +454,90 @@ def _validate_probability_consistency(
                 value=float(value),
             )
 
-    if "predicted_label" in frame.columns and all(label is not None for label in ordered_labels):
+    if "predicted_label" in frame.columns:
         predicted_label = _numeric_series(frame, "predicted_label", issues, allow_nan=True)
-        expected = pd.Series([ordered_labels[position] for position in argmax_positions], index=frame.index, dtype=float)
-        bad_prediction = predicted_label.notna() & finite_row & (predicted_label.astype(float) != expected)
-        for row_index, value in predicted_label.loc[bad_prediction].head(20).items():
-            _issue(
-                issues,
-                "error",
-                "predicted_label_probability_mismatch",
-                "Column 'predicted_label' must equal the argmax prob_class_* label.",
-                column="predicted_label",
-                row=int(row_index),
-                value=int(value),
-            )
+        prediction_rows = predicted_label.notna() & finite_row_series
+        if bool(prediction_rows.any()):
+            prediction_frame = frame.loc[prediction_rows].copy()
+            try:
+                predicted_positions = label_positions_for_observations(
+                    prediction_frame,
+                    prob_columns,
+                    label_column="predicted_label",
+                    class_column="predicted_class",
+                )
+            except ValueError as exc:
+                _issue(issues, "error", "predicted_label_mapping_error", str(exc), column="predicted_label")
+            else:
+                expected_positions = argmax_positions[prediction_rows.to_numpy()]
+                for row_position in np.flatnonzero(predicted_positions != expected_positions)[:20]:
+                    row = prediction_frame.iloc[row_position]
+                    _issue(
+                        issues,
+                        "error",
+                        "predicted_label_probability_mismatch",
+                        "Column 'predicted_label'/'predicted_class' must identify the argmax prob_class_* column.",
+                        column="predicted_label",
+                        row=int(prediction_frame.index[row_position]),
+                        value=row.get("predicted_label"),
+                    )
 
-    if "probability_true_class" in frame.columns and "true_label" in frame.columns and label_columns:
-        true_label = _numeric_series(frame, "true_label", issues, allow_nan=True)
+    if "probability_true_class" in frame.columns and ("true_label" in frame.columns or "true_class" in frame.columns):
         probability_true_class = _numeric_series(frame, "probability_true_class", issues, allow_nan=True)
-        for row_index, label_value in true_label.dropna().items():
-            label = int(label_value)
-            column = label_columns.get(label)
-            if column is None or pd.isna(probability_true_class.loc[row_index]):
-                continue
-            expected_probability = float(probabilities.loc[row_index, column])
-            observed_probability = float(probability_true_class.loc[row_index])
-            if abs(observed_probability - expected_probability) > tolerance:
-                _issue(
-                    issues,
-                    "error",
-                    "true_probability_mismatch",
-                    "Column 'probability_true_class' must match prob_class_<true_label> within tolerance.",
-                    column="probability_true_class",
-                    row=int(row_index),
-                    value=observed_probability,
-                )
+        truth_rows = probability_true_class.notna() & finite_row_series
+        if bool(truth_rows.any()):
+            truth_frame = frame.loc[truth_rows].copy()
+            try:
+                true_positions = label_positions_for_observations(truth_frame, prob_columns)
+            except ValueError as exc:
+                _issue(issues, "error", "true_label_mapping_error", str(exc), column="true_label")
+            else:
+                row_positions = np.flatnonzero(truth_rows.to_numpy())
+                expected_probabilities = probability_values[row_positions, true_positions]
+                observed_probabilities = probability_true_class.loc[truth_rows].to_numpy(dtype=float)
+                bad = np.abs(observed_probabilities - expected_probabilities) > tolerance
+                for row_position in np.flatnonzero(bad)[:20]:
+                    _issue(
+                        issues,
+                        "error",
+                        "true_probability_mismatch",
+                        "Column 'probability_true_class' must match the probability column identified by true_label/true_class.",
+                        column="probability_true_class",
+                        row=int(truth_frame.index[row_position]),
+                        value=float(observed_probabilities[row_position]),
+                    )
 
-    if "predicted_class" in frame.columns and "predicted_label" in frame.columns:
-        predicted_label = pd.to_numeric(frame["predicted_label"], errors="coerce")
-        for row_index, label_value in predicted_label.dropna().items():
-            class_column = f"class_{int(label_value)}"
-            if class_column not in frame.columns or pd.isna(frame.loc[row_index, "predicted_class"]):
-                continue
-            expected_class = str(frame.loc[row_index, class_column])
-            observed_class = str(frame.loc[row_index, "predicted_class"])
-            if observed_class != expected_class:
-                _issue(
-                    issues,
-                    "error",
-                    "predicted_class_mismatch",
-                    "Column 'predicted_class' must match class_<predicted_label>.",
-                    column="predicted_class",
-                    row=int(row_index),
-                    value=observed_class,
+    if "predicted_class" in frame.columns:
+        class_columns = [f"class_{column.removeprefix('prob_class_')}" for column in prob_columns]
+        prediction_rows = _present_mask(frame, "predicted_class") & finite_row_series
+        if bool(prediction_rows.any()) and any(column in frame.columns for column in class_columns):
+            prediction_frame = frame.loc[prediction_rows].copy()
+            try:
+                predicted_positions = label_positions_for_observations(
+                    prediction_frame,
+                    prob_columns,
+                    label_column="predicted_label",
+                    class_column="predicted_class",
                 )
+            except ValueError as exc:
+                _issue(issues, "error", "predicted_class_mapping_error", str(exc), column="predicted_class")
+            else:
+                for row_position, class_position in enumerate(predicted_positions):
+                    class_column = class_columns[int(class_position)]
+                    if class_column not in prediction_frame.columns:
+                        continue
+                    expected_class = str(prediction_frame.iloc[row_position][class_column])
+                    observed_class = str(prediction_frame.iloc[row_position]["predicted_class"])
+                    if observed_class != expected_class:
+                        _issue(
+                            issues,
+                            "error",
+                            "predicted_class_mismatch",
+                            "Column 'predicted_class' must match the class_* column selected by predicted_label/predicted_class.",
+                            column="predicted_class",
+                            row=int(prediction_frame.index[row_position]),
+                            value=observed_class,
+                        )
 
 
 def _validate_canonical_profile(

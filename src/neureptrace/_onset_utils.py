@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from neureptrace._onset_constants import GROUP_COLUMNS
+from neureptrace.observations import label_positions_for_observations, probability_label_values
 from neureptrace.temporal_model import probability_columns
 
 
@@ -44,15 +45,10 @@ def score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
     prob_columns = probability_columns(frame)
     if score_column == "confidence":
         return frame[prob_columns].max(axis=1)
-    if score_column == "probability_true_class" and "true_label" in frame.columns:
+    if score_column == "probability_true_class" and ("true_label" in frame.columns or "true_class" in frame.columns):
         probabilities = frame[prob_columns].to_numpy(dtype=float)
-        true_labels = pd.to_numeric(frame["true_label"], errors="coerce").to_numpy()
-        scores = np.full(len(frame), np.nan, dtype=float)
-        valid = np.isfinite(true_labels)
-        valid_indices = true_labels[valid].astype(int)
-        in_bounds = (valid_indices >= 0) & (valid_indices < probabilities.shape[1])
-        valid_positions = np.flatnonzero(valid)[in_bounds]
-        scores[valid_positions] = probabilities[valid_positions, valid_indices[in_bounds]]
+        true_positions = label_positions_for_observations(frame, prob_columns)
+        scores = probabilities[np.arange(len(frame)), true_positions]
         return pd.Series(scores, index=frame.index)
     raise ValueError(f"Score column '{score_column}' is missing and cannot be inferred.")
 
@@ -78,7 +74,9 @@ def ensure_prediction_columns(frame: pd.DataFrame) -> pd.DataFrame:
         return frame
     prob_columns = probability_columns(frame)
     probabilities = frame[prob_columns].to_numpy(dtype=float)
-    predicted_labels = probabilities.argmax(axis=1)
+    prediction_positions = probabilities.argmax(axis=1)
+    label_values = probability_label_values(prob_columns)
+    predicted_labels = np.asarray([label_values[int(position)] for position in prediction_positions], dtype=int)
     if "predicted_label" in frame.columns:
         parsed_labels = pd.to_numeric(frame["predicted_label"], errors="coerce")
         if parsed_labels.notna().all():
@@ -119,10 +117,10 @@ def sequence_identity(row: pd.Series) -> dict:
 
 
 def is_correct_detection(row: pd.Series) -> bool:
-    if "true_label" in row and "predicted_label" in row and pd.notna(row["true_label"]) and pd.notna(row["predicted_label"]):
-        return int(row["true_label"]) == int(row["predicted_label"])
     if "true_class" in row and "predicted_class" in row and pd.notna(row["true_class"]) and pd.notna(row["predicted_class"]):
         return str(row["true_class"]) == str(row["predicted_class"])
+    if "true_label" in row and "predicted_label" in row and pd.notna(row["true_label"]) and pd.notna(row["predicted_label"]):
+        return int(row["true_label"]) == int(row["predicted_label"])
     return False
 
 

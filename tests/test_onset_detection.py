@@ -53,6 +53,21 @@ def _observation_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def test_probability_true_class_score_uses_class_columns_for_external_numeric_labels():
+    frame = _observation_frame().drop(columns=["probability_true_class"])
+    frame["true_label"] = frame["true_class"].map({"class-0": 101, "class-1": 202})
+
+    thresholded = annotate_threshold_crossings(
+        frame,
+        threshold_window=(-0.20, -0.10),
+        threshold_quantile=0.875,
+        score_column="probability_true_class",
+    )
+
+    expected = np.where(frame["true_class"].eq("class-0"), frame["prob_class_0"], frame["prob_class_1"])
+    assert np.allclose(thresholded["onset_score"], expected)
+
+
 def test_detect_onsets_finds_first_threshold_crossing():
     events = detect_onsets(
         _observation_frame(),

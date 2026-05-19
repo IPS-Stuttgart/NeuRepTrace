@@ -83,3 +83,20 @@ def test_temporal_smoothing_exports_posteriors_and_metrics(tmp_path: Path):
     assert str(metric_row["tuned_hyperparameters"]).lower() == "true"
     assert metric_row["temporal_mode"] == "same_time"
     assert "temporal_smoothing_stay_probability" in metrics.columns
+
+
+def test_temporal_smoothing_uses_class_columns_for_external_numeric_labels(tmp_path: Path):
+    frame = _noisy_observation_frame()
+    frame["true_label"] = 101
+    frame["predicted_label"] = frame["predicted_class"].map({"left": 101, "right": 202})
+    csv_path = tmp_path / "external_label_observations.csv"
+    frame.to_csv(csv_path, index=False)
+
+    smoothed, metrics = smooth_probability_observations(
+        [csv_path],
+        fit_window=(0.1, 0.5),
+        stay_grid_size=40,
+    )
+
+    assert smoothed.loc[smoothed["time"].eq(0.30), "is_correct"].all()
+    assert metrics.loc[metrics["time"].eq(0.30), "accuracy"].iloc[0] == 1.0
