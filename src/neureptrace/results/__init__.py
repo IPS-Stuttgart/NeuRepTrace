@@ -9,23 +9,37 @@ import pandas as pd
 
 from neureptrace.metrics import expected_calibration_error
 from neureptrace.observations import probability_columns
+from neureptrace.results.diagnostics import (
+    DEFAULT_DIAGNOSTIC_EXPORT_FILENAMES,
+    DiagnosticTables,
+    diagnostic_summary_tables,
+    prediction_diagnostic_table,
+    rank_summary_table,
+    write_diagnostic_exports,
+)
 from neureptrace.results.tables import peak_metric_rows, summarize_metric_table
 
 __all__ = [
     "DEFAULT_ECE_BINS",
+    "DEFAULT_DIAGNOSTIC_EXPORT_FILENAMES",
+    "DiagnosticTables",
     "METRIC_COLUMNS",
     "SUMMARY_GROUP_COLUMNS",
     "WEIGHT_COLUMN",
     "aggregate_time_decode_csvs",
     "aggregate_time_decode_results",
+    "diagnostic_summary_tables",
     "mean_across_folds",
     "peak_metric_rows",
+    "prediction_diagnostic_table",
+    "rank_summary_table",
     "read_probability_observations",
     "read_time_decode_observations",
     "read_time_decode_results",
     "subject_time_metrics",
     "summarize_metric_table",
     "build_provenance_table",
+    "write_diagnostic_exports",
     "write_provenance_table",
 ]
 
