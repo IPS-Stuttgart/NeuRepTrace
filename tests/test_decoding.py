@@ -271,6 +271,31 @@ def test_tuned_elastic_net_logistic_searches_c_and_l1_ratio():
     assert model.best_params_["logisticregression__l1_ratio"] in {0.15, 0.5, 0.85}
 
 
+def test_uncalibrated_ridge_uses_score_derived_emissions():
+    rng = np.random.default_rng(23)
+    features = rng.normal(size=(30, 8))
+    labels = np.array([0, 1] * 15)
+
+    model = make_decoder("ridge-classifier", max_iter=2000, emission_mode="uncalibrated")
+    model.fit(features, labels)
+    probabilities = predict_emission_probabilities(model, features[:3], emission_mode="uncalibrated")
+
+    assert probabilities.shape == (3, 2)
+    assert probabilities.sum(axis=1).round(6).tolist() == [1.0, 1.0, 1.0]
+
+
+def test_tuned_ridge_selects_alpha_strength():
+    rng = np.random.default_rng(29)
+    features = rng.normal(size=(30, 8))
+    labels = np.array([0, 1] * 15)
+
+    model = make_decoder("ridge", max_iter=2000, tune_hyperparameters=True, tuning_cv=2)
+    model.fit(features, labels)
+
+    assert any(key.endswith("ridgeclassifier__alpha") for key in model.best_params_)
+    assert model.predict_proba(features[:3]).shape == (3, 2)
+
+
 def test_parse_c_grid_accepts_comma_separated_values():
     assert parse_c_grid("0.1,1,10") == (0.1, 1.0, 10.0)
 
@@ -299,4 +324,5 @@ def test_normalize_decoder_name_accepts_svm_alias():
     assert normalize_decoder_name("svm") == "linear_svm"
     assert normalize_decoder_name("l1-logistic") == "sparse_logistic"
     assert normalize_decoder_name("elasticnet-logistic") == "elastic_net_logistic"
+    assert normalize_decoder_name("ridge-classifier") == "ridge"
     assert normalize_decoder_name("lda-shrinkage") == "shrinkage_lda"
