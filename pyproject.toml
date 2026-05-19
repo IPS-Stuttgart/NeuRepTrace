@@ -5,7 +5,10 @@ readme = "README.md"
 authors = ["Florian Pfaff <pfaff@ias.uni-stuttgart.de>"]
 version = "0.1.1"
 license = "MIT"
-packages = [{ include = "neureptrace", from = "src" }]
+packages = [
+  { include = "neureptrace", from = "src" },
+  { include = "reptrace", from = "src" },
+]
 
 [tool.poetry.scripts]
 neureptrace = "neureptrace.cli:main"
