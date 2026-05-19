@@ -91,6 +91,68 @@ def _run_streaming_detector(
     return pd.DataFrame(events).sort_values(["onset_time", "stimulus_class"]).reset_index(drop=True)
 
 
+def test_thresholds_use_group_local_class_table_for_mixed_label_spaces():
+    frame = pd.DataFrame(
+        [
+            {
+                "subject": "sub-01",
+                "stream_id": "sub-01-run",
+                "decoder": "logistic",
+                "emission_mode": "calibrated",
+                "time": -0.50,
+                "class_0": "A",
+                "prob_class_0": 0.25,
+            },
+            {
+                "subject": "sub-01",
+                "stream_id": "sub-01-run",
+                "decoder": "logistic",
+                "emission_mode": "calibrated",
+                "time": -0.40,
+                "class_0": "A",
+                "prob_class_0": 0.50,
+            },
+            {
+                "subject": "sub-02",
+                "stream_id": "sub-02-run",
+                "decoder": "logistic",
+                "emission_mode": "calibrated",
+                "time": -0.50,
+                "class_0": "B",
+                "prob_class_0": 0.35,
+            },
+            {
+                "subject": "sub-02",
+                "stream_id": "sub-02-run",
+                "decoder": "logistic",
+                "emission_mode": "calibrated",
+                "time": -0.40,
+                "class_0": "B",
+                "prob_class_0": 0.70,
+            },
+        ]
+    )
+
+    thresholds = fit_stimulus_detection_thresholds(
+        frame,
+        stream_columns=("stream_id",),
+        threshold_window=THRESHOLD_WINDOW,
+        threshold_quantile=1.0,
+    )
+    by_subject = thresholds.set_index("subject")["stimulus_class"].to_dict()
+    assert by_subject == {"sub-01": "A", "sub-02": "B"}
+
+    b_thresholds = fit_stimulus_detection_thresholds(
+        frame,
+        stream_columns=("stream_id",),
+        target_classes=["B"],
+        threshold_window=THRESHOLD_WINDOW,
+        threshold_quantile=1.0,
+    )
+    assert b_thresholds["subject"].tolist() == ["sub-02"]
+    assert b_thresholds["stimulus_class"].tolist() == ["B"]
+
+
 def test_streaming_detector_rejects_missing_threshold_group_column():
     frame = _stream_frame(final_gap=True)
     detector = StreamingStimulusDetector(

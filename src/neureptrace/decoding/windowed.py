@@ -205,22 +205,29 @@ def _fit_pca_transform(
     features: np.ndarray,
     components_pca: int | float,
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None, float, int]:
-    actual_components = _actual_pca_components(components_pca, features)
     if components_pca == float("inf"):
-        return features, None, None, np.nan, actual_components
+        return features, None, None, np.nan, int(features.shape[1])
 
+    pca_components = _pca_n_components_argument(components_pca, features)
     feature_mean = np.mean(features, axis=0)
     centered = features - feature_mean
-    pca = PCA(n_components=actual_components)
+    pca = PCA(n_components=pca_components)
     transformed = pca.fit_transform(centered)
+    actual_components = int(pca.components_.shape[0])
     explained_variance = float(np.sum(pca.explained_variance_ratio_) * 100.0)
     return transformed, pca.components_.T, feature_mean, explained_variance, actual_components
 
 
-def _actual_pca_components(components_pca: int | float, features: np.ndarray) -> int:
-    if components_pca == float("inf"):
-        return int(features.shape[1])
-    return min(int(components_pca), int(features.shape[0]), int(features.shape[1]))
+def _pca_n_components_argument(components_pca: int | float, features: np.ndarray) -> int | float:
+    """Return the PCA n_components argument while preserving variance fractions."""
+
+    if isinstance(components_pca, float) and 0.0 < components_pca < 1.0:
+        return float(components_pca)
+
+    requested_components = int(components_pca)
+    if requested_components < 1:
+        raise ValueError("components_pca must be positive, a variance fraction in (0, 1), or inf.")
+    return min(requested_components, int(features.shape[0]), int(features.shape[1]))
 
 
 def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:

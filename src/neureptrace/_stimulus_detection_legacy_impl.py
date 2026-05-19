@@ -105,14 +105,19 @@ def _class_table(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _target_class_table(frame: pd.DataFrame, target_classes: Sequence[str | int] | None) -> pd.DataFrame:
+def _target_class_table(
+    frame: pd.DataFrame,
+    target_classes: Sequence[str | int] | None,
+    *,
+    require_match: bool = True,
+) -> pd.DataFrame:
     classes = _class_table(frame)
     if target_classes is None:
         return classes
     requested = {str(value) for value in target_classes}
     keep = classes["stimulus_label"].astype(str).isin(requested) | classes["stimulus_class"].astype(str).isin(requested)
     selected = classes.loc[keep].reset_index(drop=True)
-    if selected.empty:
+    if selected.empty and require_match:
         raise ValueError(f"No target classes matched {list(target_classes)!r}.")
     return selected
 
@@ -322,12 +327,14 @@ def fit_stimulus_detection_thresholds(
 
     groups = _group_columns(observations, group_columns)
     streams = _stream_columns(observations, stream_columns)
-    classes = _target_class_table(observations, target_classes)
     rows = []
     grouped = observations.groupby(groups, sort=True) if groups else [((), observations)]
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(groups, key_values, strict=True))
+        classes = _target_class_table(group_frame, target_classes, require_match=False)
+        if classes.empty:
+            continue
         for _, class_row in classes.iterrows():
             scored = group_frame.copy()
             scored["_stimulus_score"] = _score_values(
@@ -362,6 +369,8 @@ def fit_stimulus_detection_thresholds(
                     "min_duration": np.nan if min_duration is None else min_duration,
                 }
             )
+    if not rows and target_classes is not None:
+        raise ValueError(f"No target classes matched {list(target_classes)!r}.")
     return pd.DataFrame(rows)
 
 

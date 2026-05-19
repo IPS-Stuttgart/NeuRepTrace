@@ -161,7 +161,9 @@ def cross_validate_feature_decoding(
             fold_predictions, _ = predict_window_model(model_bundle, test_features)
         predictions[fold_ids == fold] = fold_predictions
 
-    predictions = replace_null_class_predictions(predictions, null_label=null_label)
+    # Keep null predictions as model outputs. For stimulus-only validation trials,
+    # predicting the training-only null class is a false prediction, not a class to
+    # remap post hoc. This keeps cross-validation semantics aligned with transfer.
     accuracy = float(np.mean(labels == predictions)) if len(labels) else np.nan
     return CrossValidationResult(
         accuracy=accuracy, predictions=predictions, fold_ids=fold_ids
@@ -249,12 +251,9 @@ def _one_vs_rest_predictions(
             components_pca=components_pca,
         )
         transformed_test = transform_window_features(binary_bundle, test_features)
-        if classifier in ("lasso", "svm-binary", "binary-svm"):
-            all_scores[:, class_index] = positive_class_score(
-                binary_bundle.model, transformed_test
-            )
-        else:
-            all_scores[:, class_index] = binary_bundle.model.predict(transformed_test)
+        all_scores[:, class_index] = positive_class_score(
+            binary_bundle.model, transformed_test
+        )
     return class_labels[np.argmax(all_scores, axis=1)]
 
 

@@ -67,6 +67,29 @@ def test_fit_window_model_applies_pca_and_predicts_validation_features():
     assert model_bundle.explained_variance_percent == pytest.approx(100.0)
 
 
+def test_fit_window_model_accepts_fractional_pca_components():
+    train_axis = np.array([-3.0, -2.0, -1.0, 1.0, 2.0, 3.0])
+    train_features = np.column_stack((train_axis, 2.0 * train_axis))
+    train_labels = np.array([0, 0, 0, 1, 1, 1])
+
+    model_bundle = fit_window_model(
+        train_features,
+        train_labels,
+        fit_model=_fit_sign_classifier,
+        components_pca=0.95,
+    )
+    predictions, scores = predict_window_model(
+        model_bundle,
+        np.array([[-1.5, -3.0], [1.5, 3.0]]),
+    )
+
+    assert predictions.tolist() == [0, 1]
+    assert scores.shape == (2,)
+    assert model_bundle.actual_components_pca == 1
+    assert model_bundle.pca_coeff.shape == (2, 1)
+    assert model_bundle.explained_variance_percent == pytest.approx(100.0)
+
+
 def test_score_windowed_decoding_returns_accuracy_predictions_and_permutation_p():
     result = score_windowed_decoding(
         train_features=np.array([[-2.0], [-1.0], [1.0], [2.0]]),
