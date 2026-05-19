@@ -10,6 +10,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.feature_selection import SelectPercentile, f_classif
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold, StratifiedKFold
+from sklearn.naive_bayes import GaussianNB
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
@@ -28,6 +29,7 @@ DECODER_CHOICES = (
     "sparse_logistic",
     "elastic_net_logistic",
     "ridge",
+    "gaussian_nb",
     "lda",
     "shrinkage_lda",
     "linear_svm",
@@ -41,6 +43,7 @@ ANOVA_SELECT_PERCENTILE_GRID = (10, 20, 40, 60)
 DEFAULT_ELASTIC_NET_L1_RATIO = 0.5
 ELASTIC_NET_L1_RATIO_GRID = (0.15, 0.5, 0.85)
 DEFAULT_TUNING_ALPHA_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
+DEFAULT_TUNING_VAR_SMOOTHING_GRID = (1e-12, 1e-10, 1e-9, 1e-8, 1e-6)
 
 
 def make_logistic_decoder(
@@ -130,6 +133,12 @@ def make_decoder(
                 solver="saga",
             ),
         )
+    if normalized == "gaussian_nb":
+        return make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            GaussianNB(),
+        )
     if normalized == "lda":
         return make_pipeline(
             StandardScaler(),
@@ -192,7 +201,8 @@ def make_tuned_decoder(
     Logistic regression, sparse logistic regression, and linear SVM tune the
     regularization strength ``C``. Elastic-net logistic regression tunes both
     ``C`` and the L1/L2 mixing ratio. Ridge tunes the L2 penalty strength
-    ``alpha``. LDA compares the default SVD solver with shrinkage LDA
+    ``alpha``. Gaussian NB tunes variance smoothing. LDA compares the default
+    SVD solver with shrinkage LDA
     (``solver='lsqr', shrinkage='auto'``), which is often better conditioned for
     high-dimensional M/EEG windows.
     """
@@ -244,6 +254,14 @@ def make_tuned_decoder(
             "logisticregression__C": c_grid,
             "logisticregression__l1_ratio": ELASTIC_NET_L1_RATIO_GRID,
         }
+        param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
+    elif normalized == "gaussian_nb":
+        estimator = make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            GaussianNB(),
+        )
+        param_grid = {"gaussiannb__var_smoothing": DEFAULT_TUNING_VAR_SMOOTHING_GRID}
         param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
     elif normalized == "lda":
         estimator = make_pipeline(
@@ -378,6 +396,8 @@ def normalize_tuning_scoring(scoring: str) -> str:
 def normalize_decoder_name(name: str) -> str:
     """Normalize decoder aliases to the names used in result tables."""
     normalized = name.lower().replace("-", "_")
+    if normalized in {"nb", "naive_bayes", "gaussian_naive_bayes"}:
+        return "gaussian_nb"
     if normalized == "svm":
         return "linear_svm"
     if normalized in {"l1_logistic", "logistic_l1", "sparse_logreg"}:
