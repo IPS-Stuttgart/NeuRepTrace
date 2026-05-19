@@ -9,6 +9,7 @@ import pandas as pd
 
 from neureptrace.temporal_model import (
     SEQUENCE_KEY_COLUMN_CANDIDATES,
+    model_group_columns,
     probability_columns,
     read_probability_observations,
     sequence_key_columns,
@@ -19,7 +20,6 @@ DEFAULT_THRESHOLD_WINDOW = (-0.35, -0.05)
 DEFAULT_DETECTION_WINDOW = (0.0, float("inf"))
 DEFAULT_THRESHOLD_QUANTILE = 0.95
 THRESHOLD_METHODS = ("point", "max_run")
-GROUP_COLUMNS = ("subject", "decoder", "emission_mode")
 
 
 def _expand_paths(patterns: list[str]) -> list[Path]:
@@ -34,7 +34,7 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
 
 
 def _group_columns(frame: pd.DataFrame) -> list[str]:
-    return [column for column in GROUP_COLUMNS if column in frame.columns]
+    return model_group_columns(frame)
 
 
 def _sequence_columns(frame: pd.DataFrame) -> list[str]:
@@ -486,7 +486,11 @@ def annotate_threshold_crossings(
     observations = _ensure_prediction_columns(observations)
     group_columns = _group_columns(observations)
     frames = []
-    grouped = observations.groupby(group_columns, sort=True) if group_columns else [((), observations)]
+    grouped = (
+        observations.groupby(group_columns, sort=True, dropna=False)
+        if group_columns
+        else [((), observations)]
+    )
     for _, group_frame in grouped:
         frames.append(
             _annotate_group_threshold(
@@ -657,7 +661,11 @@ def summarize_threshold_crossings(
     group_columns = _group_columns(thresholded_observations)
     sequence_columns = _sequence_columns(thresholded_observations)
     rows = []
-    grouped = thresholded_observations.groupby(group_columns, sort=True) if group_columns else [((), thresholded_observations)]
+    grouped = (
+        thresholded_observations.groupby(group_columns, sort=True, dropna=False)
+        if group_columns
+        else [((), thresholded_observations)]
+    )
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(group_columns, key_values, strict=True))
@@ -738,7 +746,11 @@ def detect_onsets(
     sequence_columns = _sequence_columns(observations)
     event_rows = []
 
-    grouped = observations.groupby(group_columns, sort=True) if group_columns else [((), observations)]
+    grouped = (
+        observations.groupby(group_columns, sort=True, dropna=False)
+        if group_columns
+        else [((), observations)]
+    )
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(group_columns, key_values, strict=True))
@@ -797,7 +809,11 @@ def summarize_onset_events(events: pd.DataFrame) -> pd.DataFrame:
 
     group_columns = _group_columns(events)
     rows = []
-    grouped = events.groupby(group_columns, sort=True) if group_columns else [((), events)]
+    grouped = (
+        events.groupby(group_columns, sort=True, dropna=False)
+        if group_columns
+        else [((), events)]
+    )
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(group_columns, key_values, strict=True))

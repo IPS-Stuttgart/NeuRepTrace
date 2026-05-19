@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from neureptrace.temporal_model import probability_columns
+from neureptrace.temporal_model import model_group_columns, probability_columns
 
 DEFAULT_THRESHOLD_WINDOW = (-0.35, -0.05)
 DEFAULT_THRESHOLD_QUANTILE = 0.95
@@ -68,7 +68,7 @@ def _present_columns(frame: pd.DataFrame, columns: Sequence[str]) -> list[str]:
 
 
 def _group_columns(frame: pd.DataFrame, group_columns: Sequence[str] | None = None) -> list[str]:
-    columns = DEFAULT_GROUP_COLUMNS if group_columns is None else group_columns
+    columns = model_group_columns(frame) if group_columns is None else group_columns
     return _present_columns(frame, columns)
 
 
@@ -324,7 +324,11 @@ def fit_stimulus_detection_thresholds(
     streams = _stream_columns(observations, stream_columns)
     classes = _target_class_table(observations, target_classes)
     rows = []
-    grouped = observations.groupby(groups, sort=True) if groups else [((), observations)]
+    grouped = (
+        observations.groupby(groups, sort=True, dropna=False)
+        if groups
+        else [((), observations)]
+    )
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(groups, key_values, strict=True))
@@ -486,14 +490,21 @@ def detect_stimulus_events(
             scored = scored.loc[_window_mask(scored, detection_window)]
         if scored.empty:
             continue
-        grouped_streams = scored.groupby(streams, sort=True) if streams else [((), scored)]
+        grouped_streams = (
+            scored.groupby(streams, sort=True, dropna=False)
+            if streams
+            else [((), scored)]
+        )
         for stream_key, stream_frame in grouped_streams:
             key_values = stream_key if isinstance(stream_key, tuple) else (stream_key,)
             stream_values = dict(zip(streams, key_values, strict=True))
             runs = _contiguous_runs(stream_frame, threshold=float(threshold_row["score_threshold"]))
             runs = _merge_close_runs(runs, merge_gap=merge_gap)
             runs = [run for run in runs if _valid_run(run, min_consecutive=min_consecutive, min_duration=min_duration)]
-            stream_counter_key = tuple(stream_values[column] for column in streams)
+            stream_counter_key = (
+                *(group_values[column] for column in threshold_group_columns),
+                *(stream_values[column] for column in streams),
+            )
             last_onset: float | None = None
             for run in runs:
                 onset = float(run.iloc[0]["time"])
@@ -594,7 +605,11 @@ def summarize_stimulus_events(
     """Summarize event-level detection quality."""
     groups = _group_columns(events, group_columns) if not events.empty else list(group_columns or [])
     rows = []
-    grouped = events.groupby(groups, sort=True) if groups and not events.empty else [((), events)]
+    grouped = (
+        events.groupby(groups, sort=True, dropna=False)
+        if groups and not events.empty
+        else [((), events)]
+    )
     for keys, group_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(groups, key_values, strict=True))

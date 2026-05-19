@@ -2,13 +2,43 @@ from __future__ import annotations
 
 import argparse
 import glob
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 EPSILON = 1e-12
-MODEL_GROUP_COLUMNS = ("decoder", "emission_mode")
+MODEL_GROUP_COLUMNS = (
+    "subject",
+    "decoder",
+    "backend",
+    "emission_mode",
+    "feature_preprocessor",
+    "pca_components",
+    "temporal_mode",
+    "temporal_train_window_start",
+    "temporal_train_window_stop",
+    "n_train_windows",
+    "split_id",
+    "seed",
+    "tuned_hyperparameters",
+    "tuning_cv_splits",
+    "tuning_scoring",
+    "tuning_c_grid",
+    "preprocessing_hash",
+)
+CONDITIONAL_MODEL_GROUP_COLUMNS = (
+    "train_time",
+    "train_window_start",
+    "train_window_stop",
+    "best_params",
+    "model_hash",
+)
+MODEL_METADATA_COLUMNS = (
+    *MODEL_GROUP_COLUMNS,
+    *CONDITIONAL_MODEL_GROUP_COLUMNS,
+)
 SEQUENCE_KEY_COLUMN_CANDIDATES = (
     "source_path",
     "source_file",
@@ -16,6 +46,7 @@ SEQUENCE_KEY_COLUMN_CANDIDATES = (
     "session",
     "run",
     "fold",
+    "stream_id",
     "sequence_id",
 )
 
@@ -144,8 +175,54 @@ def _sequence_key_columns(frame: pd.DataFrame) -> list[str]:
     return sequence_key_columns(frame)
 
 
+def _present_columns(frame: pd.DataFrame, columns: Sequence[str]) -> list[str]:
+    return [column for column in columns if column in frame.columns]
+
+
+def _is_trace_constant_column(frame: pd.DataFrame, column: str) -> bool:
+    """Return whether a metadata column is constant inside every sequence.
+
+    Some model identifiers emitted by time-resolved decoding are intentionally
+    time-varying in ``same_time`` mode because a different classifier is trained
+    for each time window. Those columns must not become default trace-grouping
+    keys, otherwise onset and temporal analyses would fragment a time course into
+    one-bin groups. They are still safe and useful grouping keys when they are
+    constant over each stream/sequence, e.g. fixed train-window ensembles.
+    """
+
+    if column not in frame.columns or frame.empty:
+        return False
+    try:
+        key_columns = sequence_key_columns(frame, require_sequence_id=False)
+    except ValueError:
+        return True
+    if column in key_columns:
+        return True
+    for _, sequence_frame in frame.groupby(key_columns, sort=False, dropna=False):
+        if sequence_frame[column].nunique(dropna=False) > 1:
+            return False
+    return True
+
+
+def model_group_columns(frame: pd.DataFrame) -> list[str]:
+    """Return metadata columns that define one comparable probability trace.
+
+    The default grouping keeps incompatible preprocessing/decoder/emission
+    variants separate while avoiding time-varying model identifiers that would
+    split a valid trace into single-time-bin groups.
+    """
+
+    columns = _present_columns(frame, MODEL_GROUP_COLUMNS)
+    conditional = [
+        column
+        for column in CONDITIONAL_MODEL_GROUP_COLUMNS
+        if _is_trace_constant_column(frame, column)
+    ]
+    return [*columns, *[column for column in conditional if column not in columns]]
+
+
 def _model_group_columns(frame: pd.DataFrame) -> list[str]:
-    return [column for column in MODEL_GROUP_COLUMNS if column in frame.columns]
+    return model_group_columns(frame)
 
 
 def _sequences_from_frame(frame: pd.DataFrame, prob_columns: list[str]) -> list[np.ndarray]:
@@ -375,7 +452,16 @@ def build_state_trace(frame: pd.DataFrame, *, stay_probability: float, class_nam
                 "viterbi_class": class_names[state],
                 "viterbi_posterior": float(posterior[row_index, state]),
             }
-            for optional_column in ("source_path", "source_file", "session", "run", "sample_index", "true_class", "predicted_class"):
+            for optional_column in (
+                *MODEL_METADATA_COLUMNS,
+                "source_path",
+                "source_file",
+                "session",
+                "run",
+                "sample_index",
+                "true_class",
+                "predicted_class",
+            ):
                 if optional_column in observation:
                     row[optional_column] = observation[optional_column]
             for state_index, class_name in enumerate(class_names):
@@ -403,7 +489,12 @@ def fit_temporal_models(
     state_frames = []
 
     group_columns = _model_group_columns(observations)
-    for keys, decoder_frame in observations.groupby(group_columns, sort=True):
+    grouped = (
+        observations.groupby(group_columns, sort=True, dropna=False)
+        if group_columns
+        else [((), observations)]
+    )
+    for keys, decoder_frame in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(group_columns, map(str, key_values), strict=True))
         class_names = _class_names(decoder_frame, prob_columns)

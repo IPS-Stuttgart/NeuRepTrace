@@ -141,6 +141,48 @@ def test_max_run_threshold_uses_sequence_level_baseline_maxima():
     assert max_run["threshold_method"].iloc[0] == "max_run"
 
 
+def test_thresholds_are_fit_per_preprocessing_variant():
+    rows = []
+    for preprocessing_hash, baseline_confidence, post_confidence in (
+        ("prep-low-baseline", 0.40, 0.50),
+        ("prep-high-baseline", 0.90, 0.50),
+    ):
+        for sequence_id in range(2):
+            for time, confidence in ((-0.20, baseline_confidence), (0.10, post_confidence)):
+                rows.append(
+                    {
+                        "subject": "sub-01",
+                        "decoder": "logistic",
+                        "emission_mode": "calibrated",
+                        "feature_preprocessor": "none",
+                        "preprocessing_hash": preprocessing_hash,
+                        "time": time,
+                        "sequence_id": sequence_id,
+                        "confidence": confidence,
+                        "prob_class_0": confidence,
+                        "prob_class_1": 1.0 - confidence,
+                    }
+                )
+    frame = pd.DataFrame(rows)
+
+    thresholded = annotate_threshold_crossings(
+        frame,
+        threshold_window=(-0.20, -0.20),
+        threshold_quantile=1.0,
+    )
+    summary = summarize_threshold_crossings(
+        thresholded,
+        baseline_window=(-0.20, -0.20),
+        detection_window=(0.0, float("inf")),
+    )
+
+    by_hash = summary.set_index("preprocessing_hash")
+    assert by_hash.loc["prep-low-baseline", "score_threshold"] == 0.40
+    assert by_hash.loc["prep-high-baseline", "score_threshold"] == 0.90
+    assert by_hash.loc["prep-low-baseline", "post_stimulus_detection_count"] == 2
+    assert by_hash.loc["prep-high-baseline", "post_stimulus_detection_count"] == 0
+
+
 def test_min_consecutive_requires_sustained_threshold_crossing():
     events = detect_onsets(
         _observation_frame(),

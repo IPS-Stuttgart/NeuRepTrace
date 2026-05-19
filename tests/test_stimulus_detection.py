@@ -145,6 +145,37 @@ def test_fit_thresholds_can_be_reused_for_detection():
     assert events["score_threshold"].notna().all()
 
 
+def test_fit_thresholds_keeps_preprocessing_variants_separate_by_default():
+    rows = []
+    for preprocessing_hash, baseline_probability in (
+        ("prep-low-baseline", 0.40),
+        ("prep-high-baseline", 0.90),
+    ):
+        variant_rows = [
+            _row("run-1", -0.20, (baseline_probability, 1.0 - baseline_probability, 0.0)),
+            _row("run-1", 0.10, (0.50, 0.50, 0.0)),
+        ]
+        for row in variant_rows:
+            row["feature_preprocessor"] = "none"
+            row["preprocessing_hash"] = preprocessing_hash
+        rows.extend(variant_rows)
+    frame = pd.DataFrame(rows)
+
+    thresholds = fit_stimulus_detection_thresholds(
+        frame,
+        stream_columns=("stream_id",),
+        target_classes=["A"],
+        threshold_window=(-0.20, -0.20),
+        threshold_quantile=1.0,
+    )
+
+    by_hash = thresholds.set_index("preprocessing_hash")
+
+    assert set(by_hash.index) == {"prep-low-baseline", "prep-high-baseline"}
+    assert by_hash.loc["prep-low-baseline", "score_threshold"] == 0.40
+    assert by_hash.loc["prep-high-baseline", "score_threshold"] == 0.90
+
+
 def test_predicted_class_confidence_only_scores_matching_winning_class():
     frame = pd.DataFrame(
         [

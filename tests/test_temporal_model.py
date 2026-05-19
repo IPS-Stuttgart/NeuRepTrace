@@ -77,3 +77,36 @@ def test_fit_temporal_models_compares_observed_to_controls(tmp_path: Path):
     assert states is not None
     assert {"viterbi_state", "viterbi_class", "posterior_state_0", "posterior_state_1"}.issubset(states.columns)
     assert states[["posterior_state_0", "posterior_state_1"]].sum(axis=1).round(6).eq(1.0).all()
+
+
+def test_fit_temporal_models_keeps_preprocessing_variants_separate(tmp_path: Path):
+    variants = []
+    for preprocessing_hash, feature_preprocessor, pca_components in (
+        ("prep-none", "none", ""),
+        ("prep-pca", "pca", 2),
+    ):
+        variant = _observation_frame().copy()
+        variant["feature_preprocessor"] = feature_preprocessor
+        variant["pca_components"] = pca_components
+        variant["temporal_mode"] = "train_window_ensemble"
+        variant["temporal_train_window_start"] = 0.10
+        variant["temporal_train_window_stop"] = 0.40
+        variant["n_train_windows"] = 3
+        variant["split_id"] = "stratified-kfold-5"
+        variant["preprocessing_hash"] = preprocessing_hash
+        variants.append(variant)
+    csv_path = tmp_path / "combined_variants.csv"
+    pd.concat(variants, ignore_index=True).to_csv(csv_path, index=False)
+
+    summary, _ = fit_temporal_models(
+        [csv_path],
+        effect_window=(0.1, 0.4),
+        baseline_window=(-0.1, 0.0),
+        n_permutations=0,
+        stay_grid_size=30,
+    )
+
+    observed = summary.loc[summary["condition"] == "observed_effect"]
+
+    assert len(observed) == 2
+    assert set(observed["preprocessing_hash"]) == {"prep-none", "prep-pca"}
