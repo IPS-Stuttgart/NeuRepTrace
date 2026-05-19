@@ -81,10 +81,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - name: Check out RepTrace
+      - name: Check out NeuRepTrace
         uses: actions/checkout@v6
         with:
-          path: RepTrace
+          path: NeuRepTrace
 
       - name: Check out PyMEGDec
         uses: actions/checkout@v6
@@ -97,9 +97,9 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install RepTrace and PyMEGDec smoke dependencies
+      - name: Install NeuRepTrace and PyMEGDec smoke dependencies
         run: |
-          cd RepTrace
+          cd NeuRepTrace
           python -m pip install --upgrade pip
           python -m pip install poetry
           poetry env use python
@@ -109,14 +109,14 @@ jobs:
 
       - name: Run mocked PyMEGDec downstream smoke tests
         run: |
-          REPTRACE_PYTHON="$(cd RepTrace && poetry env info --path)/bin/python"
+          REPTRACE_PYTHON="$(cd NeuRepTrace && poetry env info --path)/bin/python"
           cd PyMEGDec
           "$REPTRACE_PYTHON" -m unittest \
             tests.test_stimulus_decoding.TestStimulusDecoding.test_evaluate_participant_time_resolved_stimulus_transfer \
             tests.test_stimulus_decoding.TestStimulusDecoding.test_evaluate_participant_stimulus_temporal_generalization \
             tests.test_stimulus_decoding.TestStimulusDecoding.test_evaluate_participant_stimulus_onset_scan
         env:
-          PYTHONPATH: ${{ github.workspace }}/RepTrace/src:${{ github.workspace }}/PyMEGDec/src:${{ github.workspace }}/PyMEGDec
+          PYTHONPATH: ${{ github.workspace }}/NeuRepTrace/src:${{ github.workspace }}/PyMEGDec/src:${{ github.workspace }}/PyMEGDec
 
   publish-results:
     needs: test

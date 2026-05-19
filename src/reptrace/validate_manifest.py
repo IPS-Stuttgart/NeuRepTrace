@@ -188,7 +188,7 @@ def validation_report_frame(validations: list[ManifestValidation]) -> pd.DataFra
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Validate files and metadata referenced by a RepTrace benchmark manifest."
+        description="Validate files and metadata referenced by a NeuRepTrace benchmark manifest."
     )
     parser.add_argument("manifest_csv", type=Path)
     parser.add_argument("--label-column")

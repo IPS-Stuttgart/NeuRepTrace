@@ -1,10 +1,10 @@
-"""Target-subject projection helpers for RepTrace M-CCA models.
+"""Target-subject projection helpers for NeuRepTrace M-CCA models.
 
 These utilities cover the common held-out-subject calibration case: a multiset
 CCA model is fitted on training subjects, a small row-aligned calibration matrix
 is available for a target subject, and the target features should be projected
 into the learned M-CCA component space without adding dataset-specific loading or
-windowing assumptions to RepTrace.
+windowing assumptions to NeuRepTrace.
 """
 
 from __future__ import annotations

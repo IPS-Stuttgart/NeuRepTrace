@@ -265,7 +265,7 @@ def _threshold_for_scores(
 def read_stimulus_probability_observations(csv_paths: Sequence[str | Path]) -> pd.DataFrame:
     """Read probability observations for stream-level stimulus detection.
 
-    This reader accepts the usual RepTrace probability-observation columns but is
+    This reader accepts the usual NeuRepTrace probability-observation columns but is
     intentionally slightly more permissive than the trial-oriented temporal
     model reader: a long stream may identify itself with ``stream_id`` instead of
     ``sequence_id``.

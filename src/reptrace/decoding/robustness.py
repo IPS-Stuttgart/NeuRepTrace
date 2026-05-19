@@ -29,7 +29,7 @@ def annotate_condition_rows(
 ) -> list[dict[str, object]]:
     """Attach robustness condition metadata to row dictionaries.
 
-    Dataset-specific projects can emit plain result rows while RepTrace keeps
+    Dataset-specific projects can emit plain result rows while NeuRepTrace keeps
     condition labeling consistent across accuracy, prediction, and summary
     artifacts.
     """

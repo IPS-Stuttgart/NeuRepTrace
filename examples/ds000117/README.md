@@ -5,7 +5,7 @@ OpenNeuro. It is a good next onset benchmark because the task has a clean
 time-locked visual contrast and the MNE-BIDS-Pipeline already uses it for
 time-by-time and temporal-generalization decoding examples.
 
-The first RepTrace target is a conservative single-subject smoke test:
+The first NeuRepTrace target is a conservative single-subject smoke test:
 
 - `face`: `Famous` and `Unfamiliar`
 - `scrambled`: `Scrambled`
@@ -59,10 +59,10 @@ python scripts/print_ds000117_download_commands.py \
   --target-dir data/ds000117
 ```
 
-## Stage RepTrace Epochs
+## Stage NeuRepTrace Epochs
 
 Convert the downloaded BIDS-style FIF and events files into an MNE epochs file
-and a RepTrace benchmark manifest:
+and a NeuRepTrace benchmark manifest:
 
 ```bash
 python scripts/stage_ds000117_faces.py \
@@ -162,5 +162,5 @@ for NOD. The useful comparison is:
 
 - PyMEGDec: hard stress test where naive point detection false-alarms badly.
 - `ds000117`: cleaner visual face-vs-scrambled test where onset should be easier.
-- NOD: semantic natural-image benchmark that connects back to the main RepTrace
+- NOD: semantic natural-image benchmark that connects back to the main NeuRepTrace
   calibration story.

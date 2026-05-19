@@ -1,4 +1,4 @@
-"""Export compact RepTrace result artifacts into a paper repository."""
+"""Export compact NeuRepTrace result artifacts into a paper repository."""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ def export_artifacts(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source_dir", type=Path, help="RepTrace result directory to export from.")
+    parser.add_argument("source_dir", type=Path, help="NeuRepTrace result directory to export from.")
     parser.add_argument("destination_dir", type=Path, help="Paper-repo result directory to copy into.")
     parser.add_argument("--max-mb", type=float, default=50.0)
     parser.add_argument("--dry-run", action="store_true")

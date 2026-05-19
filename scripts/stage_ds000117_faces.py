@@ -1,4 +1,4 @@
-"""Stage OpenNeuro ds000117 face-recognition MEG data for RepTrace."""
+"""Stage OpenNeuro ds000117 face-recognition MEG data for NeuRepTrace."""
 
 from __future__ import annotations
 
@@ -384,7 +384,7 @@ def main() -> None:
         n_splits=args.n_splits,
         max_iter=args.max_iter,
     )
-    print(f"Wrote ds000117 RepTrace manifest: {args.manifest_out}")
+    print(f"Wrote ds000117 NeuRepTrace manifest: {args.manifest_out}")
 
 
 if __name__ == "__main__":

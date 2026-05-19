@@ -1,6 +1,6 @@
 # THINGS-EEG2 comparison workflow
 
-RepTrace can run its calibration-first decoder comparison on THINGS-EEG2 after
+NeuRepTrace can run its calibration-first decoder comparison on THINGS-EEG2 after
 the author-preprocessed arrays have been staged locally.  The workflow does not
 download THINGS-EEG2 automatically because the dataset is large; use the THINGS,
 OpenNeuro/NeMAR, OSF, or local lab mirror route to stage the data first.
@@ -29,7 +29,7 @@ Each numpy file must contain the original dictionary keys
 
 ## Label map
 
-RepTrace's current benchmark runner evaluates supervised decoding labels.  For a
+NeuRepTrace's current benchmark runner evaluates supervised decoding labels.  For a
 NOD-style semantic comparison, provide a CSV mapping THINGS-EEG2 image-condition
 IDs to the labels you want to decode.  For a binary animate/inanimate task:
 
@@ -61,7 +61,7 @@ classes.
 
 ```bash
 gh workflow run things-eeg2-comparison.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/things_eeg2 \
   -f label_map_csv=../data/things_eeg2/things_eeg2_label_map.csv \
@@ -74,7 +74,7 @@ For a smoke test, cap the number of conditions and repetitions:
 
 ```bash
 gh workflow run things-eeg2-comparison.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/things_eeg2 \
   -f label_map_csv=../data/things_eeg2/things_eeg2_label_map.csv \
@@ -87,7 +87,7 @@ gh workflow run things-eeg2-comparison.yml \
 ## Outputs
 
 The workflow stages each subject into an MNE Epochs FIF file and metadata CSV,
-writes a RepTrace manifest, then runs the existing benchmark, calibration,
+writes a NeuRepTrace manifest, then runs the existing benchmark, calibration,
 paired-statistics, and inference reports.  Compact uploaded artifacts include
 `summary.csv`, `summary.png`, reliability outputs, paired statistics, inference
 CSV files, and the staged metadata CSVs.  Large staged FIF files are not uploaded.

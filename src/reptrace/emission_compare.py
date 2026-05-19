@@ -96,7 +96,7 @@ def _format_float(value: float, digits: int = 4) -> str:
 def build_emission_comparison_report(comparison: pd.DataFrame, *, summary_csv: Path) -> str:
     """Build a compact Markdown report for calibrated-vs-uncalibrated emissions."""
     lines = [
-        "# RepTrace Emission Calibration Comparison",
+        "# NeuRepTrace Emission Calibration Comparison",
         "",
         f"- Temporal-model summary: `{summary_csv}`",
         "",
@@ -151,7 +151,7 @@ def compare_temporal_summary(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare calibrated versus uncalibrated emissions in RepTrace temporal-model summaries."
+        description="Compare calibrated versus uncalibrated emissions in NeuRepTrace temporal-model summaries."
     )
     parser.add_argument("summary_csv", type=Path)
     parser.add_argument("--out-csv", type=Path, required=True)

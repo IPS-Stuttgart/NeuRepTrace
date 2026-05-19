@@ -626,7 +626,7 @@ def run_temporal_state_workflow(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the RepTrace calibration-aware temporal-state workflow.")
+    parser = argparse.ArgumentParser(description="Run the NeuRepTrace calibration-aware temporal-state workflow.")
     parser.add_argument("--out-dir", type=Path, default=Path("results/temporal_state_inference"))
     parser.add_argument("--data-root", type=Path, help="Directory containing staged NOD sub-*_epo.fif and sub-*_events.csv files.")
     parser.add_argument("--compact-export-dir", type=Path, help="Optional directory for compact exported artifacts.")

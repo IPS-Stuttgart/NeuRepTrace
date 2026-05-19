@@ -113,7 +113,7 @@ def plot_reliability_diagram(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot reliability diagrams from RepTrace calibration bins.")
+    parser = argparse.ArgumentParser(description="Plot reliability diagrams from NeuRepTrace calibration bins.")
     parser.add_argument("reliability_bins_csv", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--time-window", type=float, nargs=2, metavar=("START", "STOP"))

@@ -134,7 +134,7 @@ def build_calibration_report(
     )
     has_emission_mode = "emission_mode" in summary.columns
     lines = [
-        "# RepTrace Calibration Report",
+        "# NeuRepTrace Calibration Report",
         "",
         f"- Summary CSV: `{summary_csv}`",
         f"- Baseline window: {_format_float(baseline_window[0])} to {_format_float(baseline_window[1])} s",
@@ -168,7 +168,7 @@ def build_calibration_report(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Create calibration-focused summaries from RepTrace benchmark outputs."
+        description="Create calibration-focused summaries from NeuRepTrace benchmark outputs."
     )
     parser.add_argument("summary_csv", type=Path)
     parser.add_argument("calibration_csv", nargs="*", help="Optional reliability-bin CSVs or glob patterns.")

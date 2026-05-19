@@ -5,7 +5,7 @@ into a single reproducible workflow:
 
 1. train an event-locked decoder on labeled events from one raw run;
 2. scan a held-out raw run with the same window and preprocessing;
-3. export `P(class | time)` as RepTrace stream observations;
+3. export `P(class | time)` as NeuRepTrace stream observations;
 4. run `reptrace.stimulus_detection`; and
 5. write event-level precision, recall, F1, latency, and false-alarm summaries.
 

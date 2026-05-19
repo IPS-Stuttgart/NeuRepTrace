@@ -1,6 +1,6 @@
 # Benchmarking
 
-The first intended public benchmark is NOD-MEG/NOD-EEG. RepTrace does not
+The first intended public benchmark is NOD-MEG/NOD-EEG. NeuRepTrace does not
 download large public datasets automatically; stage the relevant subject epochs
 and metadata locally first.
 
@@ -350,7 +350,7 @@ python -m reptrace.plot_calibration \
 
 ## Decoder Comparison
 
-RepTrace supports standard probability-producing decoders with the `decoder`
+NeuRepTrace supports standard probability-producing decoders with the `decoder`
 manifest column or `--decoder` CLI option:
 
 - `logistic`: balanced multinomial logistic regression;
@@ -569,7 +569,7 @@ runner:
 
 ```bash
 gh workflow run nod-decoder-all.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
   -f manifest_csv=benchmarks/nod_animate_decoders_all.csv \
@@ -589,7 +589,7 @@ The same workflow can run the tuned PCA-whitened logistic manifest:
 
 ```bash
 gh workflow run nod-decoder-all.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
   -f manifest_csv=benchmarks/nod_animate_logistic_tuned_pca_whiten_all.csv \
@@ -601,7 +601,7 @@ Or run the tuned ANOVA feature-selection logistic manifest:
 
 ```bash
 gh workflow run nod-decoder-all.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
   -f manifest_csv=benchmarks/nod_animate_logistic_tuned_anova_select_all.csv \
@@ -613,7 +613,7 @@ Or run the tuned temporal train-window ensemble:
 
 ```bash
 gh workflow run nod-decoder-all.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
   -f manifest_csv=benchmarks/nod_animate_logistic_tuned_temporal_ensemble_all.csv \
@@ -625,7 +625,7 @@ Or run the shrinkage-LDA manifest:
 
 ```bash
 gh workflow run nod-decoder-all.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
   -f manifest_csv=benchmarks/nod_animate_shrinkage_lda_all.csv \
@@ -637,7 +637,7 @@ Or run the elastic-net logistic manifest:
 
 ```bash
 gh workflow run nod-decoder-all.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
   -f manifest_csv=benchmarks/nod_animate_elastic_net_logistic_all.csv \
@@ -649,7 +649,7 @@ Or run the raw-versus-smoothed posterior comparison:
 
 ```bash
 gh workflow run nod-decoder-all.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
   -f manifest_csv=benchmarks/nod_animate_logistic_temporal_smoothing_all.csv \
@@ -665,7 +665,7 @@ Or run the sparse logistic L1 decoder:
 
 ```bash
 gh workflow run nod-decoder-all.yml \
-  --repo IPS-Stuttgart/RepTrace \
+  --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
   -f manifest_csv=benchmarks/nod_animate_sparse_logistic_all.csv \
@@ -679,7 +679,7 @@ paper-safe artifacts into the compact export directory:
 ```bash
 python scripts/export_paper_results.py \
   results/nod_animate_decoders_all \
-  ../2026-05-RepTrace-Paper/results/nod_animate_decoders_all \
+  ../NeuRepTrace-Paper/results/nod_animate_decoders_all \
   --max-mb 50 \
   --plot-reliability \
   --reliability-window 0.1 0.8
@@ -691,7 +691,7 @@ The first useful milestone is not just above-chance accuracy. The benchmark
 should produce stable probability traces and calibration metrics that can be
 compared across subjects, sessions, and decoder variants.
 
-For interrupted runs, rerun the same command with `--resume`. RepTrace will keep
+For interrupted runs, rerun the same command with `--resume`. NeuRepTrace will keep
 complete existing rows, regenerate missing rows, and rebuild the aggregate
 summary and plot from the combined output set.
 
@@ -743,7 +743,7 @@ stages, and writes compact artifacts for the compact export directory.
 python -m reptrace.temporal_state_workflow \
   --data-root data/nod \
   --out-dir results/temporal_state_inference \
-  --compact-export-dir ../RepTrace-Compact-Results/results/temporal_state_inference \
+  --compact-export-dir ../NeuRepTrace-Compact-Results/results/temporal_state_inference \
   --decoders logistic linear_svm \
   --n-permutations 100
 ```

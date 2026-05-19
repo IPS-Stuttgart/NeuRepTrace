@@ -938,12 +938,12 @@ def detect_onsets_from_csvs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Detect representation onsets from RepTrace probability observation CSVs."
+        description="Detect representation onsets from NeuRepTrace probability observation CSVs."
     )
     parser.add_argument(
         "observation_csv",
         nargs="+",
-        help="Observation CSVs or glob patterns emitted by RepTrace/PyMEGDec adapters.",
+        help="Observation CSVs or glob patterns emitted by NeuRepTrace/PyMEGDec adapters.",
     )
     parser.add_argument("--out-events", type=Path, required=True)
     parser.add_argument("--out-summary", type=Path, required=True)

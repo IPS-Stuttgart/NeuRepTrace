@@ -1,4 +1,4 @@
-"""Grouped command-line interface for RepTrace workflows."""
+"""Grouped command-line interface for NeuRepTrace workflows."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ COMMAND_MODULES = {
 
 
 def _run_module_main(command: str, argv: Sequence[str]) -> int:
-    """Run a RepTrace module-level ``main`` as a grouped subcommand."""
+    """Run a NeuRepTrace module-level ``main`` as a grouped subcommand."""
     module = import_module(COMMAND_MODULES[command])
     module_main = getattr(module, "main", None)
     if module_main is None:
@@ -49,11 +49,11 @@ def _run_module_main(command: str, argv: Sequence[str]) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Dispatch installed RepTrace subcommands."""
+    """Dispatch installed NeuRepTrace subcommands."""
     if argv is None:
         argv = sys.argv[1:]
 
-    parser = argparse.ArgumentParser(description="RepTrace command-line interface.")
+    parser = argparse.ArgumentParser(description="NeuRepTrace command-line interface.")
     parser.add_argument(
         "command",
         nargs="?",

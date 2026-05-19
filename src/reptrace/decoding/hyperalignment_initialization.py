@@ -43,7 +43,7 @@ def fit_hyperalignment(
 ) -> HyperalignmentModel:
     """Fit Procrustes hyperalignment with a selectable template initialization.
 
-    ``initialization="pca"`` delegates to RepTrace's original implementation.
+    ``initialization="pca"`` delegates to NeuRepTrace's original implementation.
     ``initialization="mean"`` initializes the common template from the grand
     mean of the centered alignment matrices before iterative Procrustes updates.
     Mean initialization requires equal feature dimensionality across subjects.

@@ -437,7 +437,7 @@ def build_time_decode_report(
                 "---:",
             ]
         lines = [
-            "# RepTrace Decoder Comparison Report",
+            "# NeuRepTrace Decoder Comparison Report",
             "",
             f"- Summary CSV: `{summary_csv}`",
             f"- Baseline window: {_format_float(baseline_window[0])} to {_format_float(baseline_window[1])} s",
@@ -491,7 +491,7 @@ def build_time_decode_report(
     )
 
     lines = [
-        "# RepTrace Time-Decoding Report",
+        "# NeuRepTrace Time-Decoding Report",
         "",
         f"- Summary CSV: `{summary_csv}`",
         f"- Subjects: {int(aggregate['n_subjects'])}",

@@ -279,7 +279,7 @@ def _duration_values(raw_values: list[float] | None) -> list[float | None] | Non
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run RepTrace onset sensitivity sweeps across task directories.")
+    parser = argparse.ArgumentParser(description="Run NeuRepTrace onset sensitivity sweeps across task directories.")
     parser.add_argument("--task-dir", action="append", required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--observations-glob", default=DEFAULT_OBSERVATIONS_GLOB)

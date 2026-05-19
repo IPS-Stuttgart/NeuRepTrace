@@ -31,7 +31,7 @@ on:
           - test
           - training
       decoders:
-        description: "Space-separated RepTrace decoders"
+        description: "Space-separated NeuRepTrace decoders"
         required: true
         default: "logistic lda linear_svm"
       label_column:
@@ -43,7 +43,7 @@ on:
         required: true
         default: "image_condition"
       label_map_label_column:
-        description: "Label-map column containing labels for RepTrace decoding"
+        description: "Label-map column containing labels for NeuRepTrace decoding"
         required: true
         default: "label"
       label_map_partition_column:

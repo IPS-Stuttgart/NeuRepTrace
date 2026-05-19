@@ -59,7 +59,7 @@ class ObservationValidationIssue:
 
 @dataclass(frozen=True)
 class ObservationValidationReport:
-    """Validation result for a RepTrace probability-observation table."""
+    """Validation result for a NeuRepTrace probability-observation table."""
 
     profile: ObservationProfile
     n_rows: int
@@ -586,7 +586,7 @@ def validate_probability_observations(
     group_columns: Sequence[str] | None = None,
     stream_columns: Sequence[str] | None = None,
 ) -> ObservationValidationReport:
-    """Validate a RepTrace probability-observation table.
+    """Validate a NeuRepTrace probability-observation table.
 
     Structural problems that prevent downstream interpretation are reported as
     errors. Reproducibility or quality concerns that current readers can often
@@ -731,9 +731,9 @@ def _write_frame(path: Path | None, frame: pd.DataFrame) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Command-line entry point for probability-observation schema validation."""
-    parser = argparse.ArgumentParser(description="Validate RepTrace probability-observation CSV files.")
+    parser = argparse.ArgumentParser(description="Validate NeuRepTrace probability-observation CSV files.")
     parser.add_argument("observation_csv", nargs="+", help="Observation CSVs or glob patterns with time and prob_class_* columns.")
-    parser.add_argument("--profile", choices=PROFILES, default="generic", help="Validation profile for a downstream RepTrace workflow.")
+    parser.add_argument("--profile", choices=PROFILES, default="generic", help="Validation profile for a downstream NeuRepTrace workflow.")
     parser.add_argument("--probability-tolerance", type=float, default=DEFAULT_PROBABILITY_TOLERANCE)
     parser.add_argument("--require-normalized", action="store_true", help="Treat probability row-sum deviations as errors instead of warnings.")
     parser.add_argument("--group-column", action="append", dest="group_columns", help="Column required for downstream grouping. May be repeated.")

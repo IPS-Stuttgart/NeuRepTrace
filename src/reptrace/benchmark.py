@@ -400,7 +400,7 @@ def run_benchmark_manifest(
             aggregate_out,
             out_path=plot_out,
             chance=chance,
-            title=f"RepTrace benchmark ({int(provenance['n_subjects'].max())} subject(s))",
+            title=f"NeuRepTrace benchmark ({int(provenance['n_subjects'].max())} subject(s))",
         )
         plot_path = plot_out
 
@@ -419,7 +419,7 @@ def run_benchmark_manifest(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run a manifest-defined RepTrace benchmark."
+        description="Run a manifest-defined NeuRepTrace benchmark."
     )
     parser.add_argument("manifest_csv", type=Path)
     parser.add_argument("--out-dir", type=Path, required=True)

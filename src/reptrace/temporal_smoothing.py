@@ -225,7 +225,7 @@ def smooth_probability_observations(
 
     The sticky transition probability is fit without labels from held-out probability observations within
     ``fit_window`` for each decoder/emission group, then applied to every complete sequence in that group.
-    The returned observation table preserves the RepTrace probability-observation schema but changes
+    The returned observation table preserves the NeuRepTrace probability-observation schema but changes
     ``prob_class_*`` to temporally smoothed posterior probabilities and updates prediction columns.
     """
 
@@ -278,7 +278,7 @@ def smooth_probability_observations(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Apply sticky temporal-model forward-backward smoothing to RepTrace probability observation CSVs."
+        description="Apply sticky temporal-model forward-backward smoothing to NeuRepTrace probability observation CSVs."
     )
     parser.add_argument("observation_csv", nargs="+", help="Observation CSVs or glob patterns emitted by --observations-out/--observation-dir.")
     parser.add_argument("--out-observations", type=Path, required=True, help="CSV path for temporally smoothed probability observations.")

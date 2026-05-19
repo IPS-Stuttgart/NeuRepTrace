@@ -33,7 +33,7 @@ def compute_temporal_generalization_matrix(
 ) -> pd.DataFrame:
     """Compute a train-time by test-time temporal-generalization score table.
 
-    RepTrace owns the dataset-independent orchestration and scoring: train one
+    NeuRepTrace owns the dataset-independent orchestration and scoring: train one
     model per train window, evaluate it on every test window, and emit a compact
     figure-independent table. Dataset-specific projects remain responsible for
     loading data and constructing ``TemporalFeatureWindow`` objects.

@@ -1,6 +1,6 @@
 # Temporal Generalization
 
-RepTrace supports temporal generalization in two complementary ways:
+NeuRepTrace supports temporal generalization in two complementary ways:
 
 1. a dataset-independent matrix API for training at one time and testing at all
    other times; and
@@ -9,7 +9,7 @@ RepTrace supports temporal generalization in two complementary ways:
 
 For the MNE workflow, pass `--temporal-train-window START STOP` to train one
 model for each decoding-window center inside the selected interval. Each model
-is evaluated at every test time, and RepTrace averages the resulting class
+is evaluated at every test time, and NeuRepTrace averages the resulting class
 probabilities before computing accuracy, log loss, Brier score, ECE,
 calibration bins, and probability-observation exports.
 

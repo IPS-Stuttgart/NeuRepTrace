@@ -16,7 +16,7 @@ def synthetic_probability_observations(
 ) -> pd.DataFrame:
     """Build deterministic held-out probability observations for benchmark tests.
 
-    The generated frame follows the observation schema emitted by RepTrace time
+    The generated frame follows the observation schema emitted by NeuRepTrace time
     decoding: each row is one sequence/time observation with class-probability
     columns, class labels, fold metadata, and onset-friendly confidence scores.
     """

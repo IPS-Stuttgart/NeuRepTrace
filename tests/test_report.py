@@ -158,7 +158,7 @@ def test_build_time_decode_report_writes_markdown_summary(tmp_path: Path):
 
     report = build_time_decode_report(summary_csv, subject_csvs=[subject_csv])
 
-    assert "# RepTrace Time-Decoding Report" in report
+    assert "# NeuRepTrace Time-Decoding Report" in report
     assert "| Peak aggregate accuracy | 0.610 |" in report
     assert "| sub-01 | 0.150 | 0.610 | 0.600 |" in report
 
@@ -190,7 +190,7 @@ def test_build_time_decode_report_handles_multi_decoder_summary(tmp_path: Path):
 
     report = build_time_decode_report(summary_csv)
 
-    assert "# RepTrace Decoder Comparison Report" in report
+    assert "# NeuRepTrace Decoder Comparison Report" in report
     assert "| logistic | 2 | 0.150 | 0.610 | 0.490 | 0.595 | 0.105 |" in report
 
 
@@ -229,7 +229,7 @@ def test_build_time_decode_report_treats_single_decoder_as_time_report(tmp_path:
 
     report = build_time_decode_report(summary_csv)
 
-    assert "# RepTrace Time-Decoding Report" in report
+    assert "# NeuRepTrace Time-Decoding Report" in report
     assert "| Peak aggregate accuracy | 0.610 |" in report
 
 
@@ -249,7 +249,7 @@ def test_build_time_decode_report_filters_subject_rows_to_single_summary_decoder
 
     report = build_time_decode_report(summary_csv, subject_csvs=[subject_csv])
 
-    assert "# RepTrace Time-Decoding Report" in report
+    assert "# NeuRepTrace Time-Decoding Report" in report
     assert "| Decoder | Subject | Peak time (s) | Peak accuracy | Effect-window mean accuracy |" in report
     assert "| logistic | sub-01 | 0.150 | 0.610 | 0.600 |" in report
     assert "| lda | sub-01" not in report
