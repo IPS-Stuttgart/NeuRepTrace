@@ -901,6 +901,7 @@ def summarize_onset_events(
         false_alarm = group_frame["detected_before_zero"].astype(bool)
         correct = group_frame["is_correct_at_detection"].astype(bool)
         post_detected = detected & ~false_alarm
+        post_correct = post_detected & correct
         latencies = pd.to_numeric(group_frame.loc[post_detected, "detection_latency"], errors="coerce").dropna()
         run_durations = pd.to_numeric(
             group_frame.loc[post_detected, "detection_run_duration"],
@@ -920,8 +921,8 @@ def summarize_onset_events(
                 "false_alarm_rate": float(false_alarm.mean()) if len(false_alarm) else np.nan,
                 "post_zero_detected_count": int(post_detected.sum()),
                 "post_zero_detected_rate": float(post_detected.mean()) if len(post_detected) else np.nan,
-                "correct_detection_count": int((detected & correct).sum()),
-                "correct_detection_rate": float((detected & correct).mean()) if len(correct) else np.nan,
+                "correct_detection_count": int(post_correct.sum()),
+                "correct_detection_rate": float(post_correct.mean()) if len(post_correct) else np.nan,
                 "post_detection_latency_mean": float(latencies.mean()) if not latencies.empty else np.nan,
                 "post_detection_latency_median": float(latencies.median()) if not latencies.empty else np.nan,
                 "post_detection_run_duration_mean": float(run_durations.mean()) if not run_durations.empty else np.nan,

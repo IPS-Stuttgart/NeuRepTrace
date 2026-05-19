@@ -153,6 +153,49 @@ def test_confusion_pair_summary_reports_bidirectional_lift_and_metadata():
     assert pair["pair_confusion_lift"] > 1.0
 
 
+def test_confusion_metadata_matches_id_alias_when_display_column_is_present():
+    predictions = pd.DataFrame(
+        {
+            "participant": ["p1", "p2"],
+            "true_stimulus": [1, 3],
+            "predicted_stimulus": [2, 4],
+        }
+    )
+    metadata = pd.DataFrame(
+        {
+            "stimulus": ["cat", "dog", "cup", "bottle"],
+            "stimulus_id": [1, 2, 3, 4],
+            "semantic_category": ["animal", "animal", "object", "object"],
+        }
+    )
+
+    pairs = confusion_pair_summary(
+        predictions,
+        true_column="true_stimulus",
+        predicted_column="predicted_stimulus",
+        participant_column="participant",
+        metadata_frame=metadata,
+        metadata_label_columns=("stimulus", "stimulus_id"),
+        label_prefix="stimulus",
+    )
+    pair = pairs[(pairs["stimulus_a"] == 1) & (pairs["stimulus_b"] == 2)].iloc[0]
+    assert bool(pair["same_semantic_category"]) is True
+
+    enrichment = confusion_category_enrichment(
+        predictions,
+        metadata_frame=metadata,
+        true_column="true_stimulus",
+        predicted_column="predicted_stimulus",
+        category_columns=("semantic_category",),
+        participant_column="participant",
+        metadata_label_columns=("stimulus", "stimulus_id"),
+        n_permutations=0,
+    )
+    row = enrichment.iloc[0]
+    assert row["n_errors_with_category"] == 2
+    assert row["same_category_errors"] == 2
+
+
 def test_confusion_category_enrichment_and_matrix_use_error_marginals():
     predictions = pd.DataFrame(
         {

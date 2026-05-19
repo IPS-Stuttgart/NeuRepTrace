@@ -286,7 +286,8 @@ def test_summarize_onset_events_reports_detection_rates():
     assert row["n_sequences"] == 4
     assert row["detected_count"] == 3
     assert row["false_alarm_count"] == 1
-    assert row["correct_detection_count"] == 3
+    assert row["correct_detection_count"] == 2
+    assert row["correct_detection_rate"] == 0.5
     assert row["post_detection_latency_median"] == 0.10
     assert row["post_detection_run_length_median"] == 2.5
 

@@ -129,3 +129,52 @@ def test_continuous_stimulus_scan_trains_scans_and_summarizes_events(tmp_path: P
     assert result.summary.iloc[0]["recall"] == 1.0
     assert (tmp_path / "scan_results" / "stream_observations.csv").is_file()
     assert (tmp_path / "scan_results" / "stimulus_summary.csv").is_file()
+
+
+def test_continuous_stimulus_scan_defaults_to_all_trained_classes(tmp_path: Path) -> None:
+    train_events = pd.DataFrame(
+        [
+            {"onset": 1.0, "stimulus_class": "A"},
+            {"onset": 2.0, "stimulus_class": "B"},
+            {"onset": 3.0, "stimulus_class": "A"},
+            {"onset": 4.0, "stimulus_class": "B"},
+            {"onset": 5.0, "stimulus_class": "A"},
+            {"onset": 6.0, "stimulus_class": "B"},
+        ]
+    )
+    scan_events = pd.DataFrame(
+        [
+            {"onset": 2.0, "stimulus_class": "A"},
+            {"onset": 4.0, "stimulus_class": "B"},
+            {"onset": 6.0, "stimulus_class": "A"},
+        ]
+    )
+    train_raw = tmp_path / "train_all_targets_raw.fif"
+    scan_raw = tmp_path / "scan_all_targets_raw.fif"
+    _write_raw(train_raw, train_events)
+    _write_raw(scan_raw, scan_events)
+
+    result = run_continuous_stimulus_scan(
+        train_raw=train_raw,
+        train_events=train_events,
+        scan_raw=scan_raw,
+        scan_events=scan_events,
+        out_dir=tmp_path / "scan_results",
+        train_window=(0.10, 0.20),
+        picks="eeg",
+        decoder="logistic",
+        max_iter=1000,
+        scan_step=0.05,
+        scan_start=0.0,
+        scan_stop=8.0,
+        threshold_window=(0.0, 1.0),
+        detection_window=(1.0, 8.0),
+        min_consecutive=1,
+        merge_gap=0.10,
+        refractory=0.50,
+        match_tolerance=0.20,
+        annotation_latency=0.15,
+    )
+
+    assert result.annotations["stimulus_class"].tolist() == ["A", "B", "A"]
+    assert set(result.thresholds["stimulus_class"]) == {"A", "B"}

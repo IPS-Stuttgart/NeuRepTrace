@@ -29,21 +29,162 @@ from neureptrace.decoding import (
     predict_emission_probabilities,
     time_windows,
 )
-from neureptrace.metrics import brier_score_multiclass, expected_calibration_error, reliability_bins
+from neureptrace.metrics import (
+    brier_score_multiclass,
+    confusion_counts,
+    expected_calibration_error,
+    per_class_accuracy,
+    rank_class_scores,
+    reliability_bins,
+)
 from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
 EMISSION_RUN_CHOICES = (*EMISSION_MODE_CHOICES, "both")
 FEATURE_PREPROCESSOR_RUN_CHOICES = (*FEATURE_PREPROCESSOR_CHOICES, "pca-whiten", "anova-select", "select-percentile")
-RESULT_SELECTION_METRIC_CHOICES = ("accuracy", "log_loss", "brier", "ece")
-RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
+RESULT_SELECTION_METRIC_CHOICES = (
+    "accuracy",
+    "top_2_accuracy",
+    "top_3_accuracy",
+    "mean_true_label_rank",
+    "median_true_label_rank",
+    "log_loss",
+    "brier",
+    "ece",
+)
+RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece", "mean_true_label_rank", "median_true_label_rank"}
 TimeWindow = tuple[int, int, float]
 TemporalTrainWindow = tuple[float, float]
+DEFAULT_RANKING_TOP_K = (2, 3)
+DEFAULT_RANKING_ROW_TOP_K = 3
 
 
 def _add_subject(row: dict, subject: str | None) -> dict:
     if subject is not None:
         row = {"subject": subject, **row}
     return row
+
+
+def _parse_positive_int_list(
+    value: Sequence[int] | str | None,
+    *,
+    default: Sequence[int],
+) -> tuple[int, ...]:
+    if value is None:
+        values = tuple(default)
+    elif isinstance(value, str):
+        values = tuple(part.strip() for part in value.split(",") if part.strip())
+        if not values:
+            values = tuple(default)
+    else:
+        values = tuple(value)
+
+    parsed = tuple(dict.fromkeys(int(item) for item in values))
+    if not parsed:
+        raise ValueError("At least one top-k value must be provided.")
+    if any(item < 1 for item in parsed):
+        raise ValueError("top-k values must be positive integers.")
+    return parsed
+
+
+def _ranking_diagnostics(
+    probabilities: np.ndarray,
+    test_labels: np.ndarray,
+    *,
+    classes: np.ndarray,
+    class_names: np.ndarray,
+    ranking_top_k: Sequence[int],
+    ranking_row_top_k: int,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    ranking = rank_class_scores(
+        probabilities,
+        classes,
+        test_labels,
+        top_k=ranking_top_k,
+        row_top_k=ranking_row_top_k,
+        class_column="label",
+    )
+    summary: dict[str, object] = {
+        "mean_true_label_rank": ranking["mean_true_label_rank"],
+        "median_true_label_rank": ranking["median_true_label_rank"],
+    }
+    summary.update(
+        {f"top_{top_k}_accuracy": value for top_k, value in ranking["top_k_accuracy"].items()}
+    )
+
+    row_diagnostics: list[dict[str, object]] = []
+    for rank_row in ranking["rows"]:
+        row: dict[str, object] = {
+            "true_label_rank": rank_row.get("true_label_rank", np.nan),
+            "true_label_score": rank_row.get("true_label_score", np.nan),
+        }
+        for position in range(1, ranking_row_top_k + 1):
+            label_key = f"rank{position}_label"
+            score_key = f"rank{position}_score"
+            if label_key not in rank_row:
+                continue
+            label = int(rank_row[label_key])
+            row[label_key] = label
+            row[f"rank{position}_class"] = str(class_names[label])
+            row[score_key] = float(rank_row[score_key])
+        row_diagnostics.append(row)
+    return summary, row_diagnostics
+
+
+def _available_columns(frame: pd.DataFrame, columns: Sequence[str]) -> tuple[str, ...]:
+    return tuple(column for column in columns if column in frame.columns)
+
+
+def _write_prediction_diagnostic_tables(
+    observation_rows: Sequence[dict],
+    *,
+    confusion_out_path: Path | None,
+    per_class_out_path: Path | None,
+) -> None:
+    if confusion_out_path is None and per_class_out_path is None:
+        return
+
+    observations = pd.DataFrame(observation_rows)
+    group_columns = _available_columns(
+        observations,
+        (
+            "subject",
+            "fold",
+            "decoder",
+            "emission_mode",
+            "feature_preprocessor",
+            "pca_components",
+            "temporal_mode",
+            "train_time",
+            "test_time",
+            "time",
+        ),
+    )
+
+    if confusion_out_path is not None:
+        confusion_out_path.parent.mkdir(parents=True, exist_ok=True)
+        if observations.empty:
+            confusion = pd.DataFrame(columns=[*group_columns, "true_label", "predicted_label", "count"])
+        else:
+            confusion = confusion_counts(
+                observations,
+                true_column="true_class",
+                predicted_column="predicted_class",
+                group_columns=group_columns,
+            )
+        confusion.to_csv(confusion_out_path, index=False)
+
+    if per_class_out_path is not None:
+        per_class_out_path.parent.mkdir(parents=True, exist_ok=True)
+        if observations.empty:
+            per_class = pd.DataFrame(columns=[*group_columns, "true_label", "n_trials", "n_correct", "accuracy"])
+        else:
+            per_class = per_class_accuracy(
+                observations,
+                true_column="true_class",
+                predicted_column="predicted_class",
+                group_columns=group_columns,
+            )
+        per_class.to_csv(per_class_out_path, index=False)
 
 
 def _load_epochs_and_metadata(
@@ -175,6 +316,162 @@ def _best_time_by_metric(time_summary: pd.DataFrame, metric: str) -> float:
     return float(time_summary[metric].idxmax())
 
 
+def _metric_value(labels: np.ndarray, probabilities: np.ndarray, classes: np.ndarray, metric: str) -> float:
+    predictions = probabilities.argmax(axis=1)
+    if metric == "accuracy":
+        return float(accuracy_score(labels, predictions))
+    if metric == "log_loss":
+        return float(log_loss(labels, probabilities, labels=classes))
+    if metric == "brier":
+        return float(brier_score_multiclass(probabilities, labels))
+    if metric == "ece":
+        return float(expected_calibration_error(probabilities, labels))
+    raise ValueError(f"Unknown temporal selection metric '{metric}'.")
+
+
+def _rank_temporal_scores(scores: list[dict[str, object]], metric: str) -> list[dict[str, object]]:
+    reverse = metric not in RESULT_SELECTION_MINIMIZE_METRICS
+    return sorted(
+        scores,
+        key=lambda score: (float(score["score"]), -float(score["center"])),
+        reverse=reverse,
+    )
+
+
+def _compact_float(value: float) -> str:
+    return f"{float(value):.9g}"
+
+
+def _temporal_selection_metadata(
+    *,
+    temporal_selection_window: TemporalTrainWindow | None,
+    temporal_selection_metric: str,
+    temporal_selection_cv_splits: int,
+    temporal_selection_top_k: int,
+    selected_train_windows: list[TimeWindow] | None = None,
+    scores: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    if temporal_selection_window is None:
+        return {
+            "temporal_selection_window_start": "",
+            "temporal_selection_window_stop": "",
+            "temporal_selection_metric": "",
+            "temporal_selection_cv_splits": "",
+            "temporal_selection_top_k": "",
+            "temporal_selected_train_times": "",
+            "temporal_selection_scores": "",
+        }
+    selected_centers = [] if selected_train_windows is None else [window[2] for window in selected_train_windows]
+    return {
+        "temporal_selection_window_start": temporal_selection_window[0],
+        "temporal_selection_window_stop": temporal_selection_window[1],
+        "temporal_selection_metric": temporal_selection_metric,
+        "temporal_selection_cv_splits": temporal_selection_cv_splits,
+        "temporal_selection_top_k": temporal_selection_top_k,
+        "temporal_selected_train_times": "|".join(_compact_float(center) for center in selected_centers),
+        "temporal_selection_scores": "" if not scores else "|".join(
+            f"{_compact_float(float(score['center']))}:{_compact_float(float(score['score']))}" for score in scores
+        ),
+    }
+
+
+def _select_temporal_train_windows_nested_cv(
+    *,
+    feature_cache: dict[TimeWindow, np.ndarray],
+    candidate_windows: list[TimeWindow],
+    labels: np.ndarray,
+    groups: np.ndarray | None,
+    train_idx: np.ndarray,
+    classes: np.ndarray,
+    decoder_name: str,
+    current_emission_mode: str,
+    max_iter: int,
+    feature_preprocessor_name: str,
+    pca_components_value: int | float | None,
+    tune_hyperparameters: bool,
+    tuning_cv_splits: int,
+    tuning_scoring: str,
+    tuning_c_grid_values: Sequence[float],
+    temporal_selection_cv_splits: int,
+    temporal_selection_metric: str,
+    temporal_selection_top_k: int,
+) -> tuple[list[TimeWindow], list[dict[str, object]]]:
+    if temporal_selection_top_k < 1:
+        raise ValueError("temporal_selection_top_k must be at least 1.")
+    if temporal_selection_cv_splits < 2:
+        raise ValueError("temporal_selection_cv_splits must be at least 2.")
+    if not candidate_windows:
+        raise ValueError("At least one temporal-selection candidate window is required.")
+
+    train_idx = np.asarray(train_idx)
+    inner_groups = None if groups is None else groups[train_idx]
+    inner_splits = list(make_tuning_cross_validator(labels[train_idx], inner_groups, temporal_selection_cv_splits))
+    if not inner_splits:
+        raise ValueError("Temporal selection requires at least one valid inner-CV split.")
+
+    window_scores: list[dict[str, object]] = []
+    for candidate_window in candidate_windows:
+        features = feature_cache[candidate_window]
+        fold_scores: list[float] = []
+        for inner_train_local, inner_validation_local in inner_splits:
+            inner_train_idx = train_idx[inner_train_local]
+            inner_validation_idx = train_idx[inner_validation_local]
+            inner_tuning_cv = (
+                make_tuning_cross_validator(
+                    labels[inner_train_idx],
+                    None if groups is None else groups[inner_train_idx],
+                    tuning_cv_splits,
+                )
+                if tune_hyperparameters
+                else 3
+            )
+            model = make_decoder(
+                decoder_name,
+                max_iter=max_iter,
+                emission_mode=current_emission_mode,
+                feature_preprocessor=feature_preprocessor_name,
+                pca_components=pca_components_value,
+                tune_hyperparameters=tune_hyperparameters,
+                tuning_cv=inner_tuning_cv,
+                tuning_scoring=tuning_scoring,
+                tuning_c_grid=tuning_c_grid_values,
+            )
+            model.fit(features[inner_train_idx], labels[inner_train_idx])
+            probabilities = predict_emission_probabilities(
+                model,
+                features[inner_validation_idx],
+                emission_mode=current_emission_mode,
+            )
+            fold_scores.append(
+                _metric_value(
+                    labels[inner_validation_idx],
+                    probabilities,
+                    classes,
+                    temporal_selection_metric,
+                )
+            )
+        window_scores.append(
+            {
+                "center": float(candidate_window[2]),
+                "score": float(np.mean(fold_scores)),
+                "scores": [float(score) for score in fold_scores],
+            }
+        )
+
+    ranked_scores = _rank_temporal_scores(window_scores, temporal_selection_metric)
+    score_by_center = {float(score["center"]): score for score in ranked_scores}
+    selected_windows = [
+        candidate_window
+        for candidate_window in candidate_windows
+        if float(candidate_window[2]) in {float(score["center"]) for score in ranked_scores[:temporal_selection_top_k]}
+    ]
+    selected_windows = sorted(
+        selected_windows,
+        key=lambda window: ranked_scores.index(score_by_center[float(window[2])]),
+    )
+    return selected_windows, ranked_scores
+
+
 def _model_hash(
     *,
     decoder_name: str,
@@ -184,6 +481,10 @@ def _model_hash(
     pca_components: int | float | None,
     temporal_mode: str,
     temporal_train_window: TemporalTrainWindow | None,
+    temporal_selection_window: TemporalTrainWindow | None = None,
+    temporal_selection_metric: str | None = None,
+    temporal_selection_cv_splits: int | None = None,
+    temporal_selection_top_k: int | None = None,
     train_window_centers: list[float] | None = None,
     tune_hyperparameters: bool = False,
     tuning_cv_splits: int | None = None,
@@ -200,6 +501,10 @@ def _model_hash(
         "pca_components": pca_components,
         "temporal_mode": temporal_mode,
         "temporal_train_window": temporal_train_window,
+        "temporal_selection_window": temporal_selection_window,
+        "temporal_selection_metric": temporal_selection_metric,
+        "temporal_selection_cv_splits": temporal_selection_cv_splits,
+        "temporal_selection_top_k": temporal_selection_top_k,
         "train_window_centers": train_window_centers,
     }
     if tune_hyperparameters:
@@ -250,11 +555,22 @@ def _append_decoded_outputs(
     calibration_bins: int,
     observation_out_path: Path | None,
     subject: str | None,
+    collect_prediction_diagnostics: bool = False,
+    ranking_top_k: Sequence[int] = DEFAULT_RANKING_TOP_K,
+    ranking_row_top_k: int = DEFAULT_RANKING_ROW_TOP_K,
     tuning_metadata: dict[str, object] | None = None,
 ) -> None:
     tuning_metadata = {} if tuning_metadata is None else tuning_metadata
     start, stop, center = time_window
     predictions = probabilities.argmax(axis=1)
+    ranking_summary, ranking_rows = _ranking_diagnostics(
+        probabilities,
+        test_labels,
+        classes=classes,
+        class_names=class_names,
+        ranking_top_k=ranking_top_k,
+        ranking_row_top_k=ranking_row_top_k,
+    )
     row = {
         "fold": fold,
         "decoder": decoder_name,
@@ -276,6 +592,7 @@ def _append_decoded_outputs(
         "log_loss": log_loss(test_labels, probabilities, labels=classes),
         "brier": brier_score_multiclass(probabilities, test_labels),
         "ece": expected_calibration_error(probabilities, test_labels),
+        **ranking_summary,
         "n_train": n_train,
         "n_test": len(test_idx),
         "n_classes": len(classes),
@@ -307,7 +624,7 @@ def _append_decoded_outputs(
             }
             calibration_row.update(tuning_metadata)
             calibration_rows.append(_add_subject(calibration_row, subject))
-    if observation_out_path is not None:
+    if observation_out_path is not None or collect_prediction_diagnostics:
         for local_position, filtered_index in enumerate(test_idx):
             true_label = int(test_labels[local_position])
             predicted_label = int(predictions[local_position])
@@ -344,6 +661,7 @@ def _append_decoded_outputs(
                 "calibration_fold": "",
                 "preprocessing_hash": preprocessing_hash,
                 "model_hash": model_hash,
+                **ranking_rows[local_position],
             }
             if group_column is not None:
                 observation["group"] = groups[filtered_index] if groups is not None else ""
@@ -381,6 +699,14 @@ def run_time_resolved_decode(
     observation_out_path: Path | None = None,
     subject: str | None = None,
     temporal_train_window: tuple[float, float] | None = None,
+    temporal_selection_window: tuple[float, float] | None = None,
+    temporal_selection_metric: str = "accuracy",
+    temporal_selection_cv_splits: int = 3,
+    temporal_selection_top_k: int = 1,
+    ranking_top_k: Sequence[int] | str | None = DEFAULT_RANKING_TOP_K,
+    ranking_row_top_k: int = DEFAULT_RANKING_ROW_TOP_K,
+    confusion_out_path: Path | None = None,
+    per_class_out_path: Path | None = None,
 ) -> pd.DataFrame:
     """Run time-resolved decoding on an MNE epochs file and save metrics as CSV.
 
@@ -390,6 +716,13 @@ def run_time_resolved_decode(
     models, turning temporal generalization into a direct result-improving
     train-window ensemble. Without the option, the historical diagonal
     train-time == test-time decoding path is used.
+
+    If ``temporal_selection_window`` is set, train-time windows inside that
+    interval are selected independently inside each outer train fold using
+    nested cross-validation on training trials only. The selected top-k windows
+    are then refit on the full outer train fold and probability-ensembled across
+    all test times. ``temporal_train_window`` and ``temporal_selection_window``
+    are mutually exclusive.
     """
     epochs, metadata = _load_epochs_and_metadata(epochs_path, metadata_csv)
     decoder_name = normalize_decoder_name(decoder)
@@ -407,7 +740,24 @@ def run_time_resolved_decode(
         pca_components_value = None
     tuning_scoring = normalize_tuning_scoring(tuning_scoring)
     tuning_c_grid_values = parse_c_grid(tuning_c_grid)
+    temporal_selection_metric = str(temporal_selection_metric).strip()
+    if temporal_selection_metric not in RESULT_SELECTION_METRIC_CHOICES:
+        raise ValueError(f"Unknown temporal_selection_metric '{temporal_selection_metric}'.")
+    if temporal_selection_top_k < 1:
+        raise ValueError("temporal_selection_top_k must be at least 1.")
+    if temporal_selection_cv_splits < 2:
+        raise ValueError("temporal_selection_cv_splits must be at least 2.")
     normalized_temporal_train_window = _normalize_temporal_train_window(temporal_train_window)
+    normalized_temporal_selection_window = _normalize_temporal_train_window(temporal_selection_window)
+    if normalized_temporal_train_window is not None and normalized_temporal_selection_window is not None:
+        raise ValueError("temporal_train_window and temporal_selection_window are mutually exclusive.")
+    ranking_top_k_values = _parse_positive_int_list(ranking_top_k, default=DEFAULT_RANKING_TOP_K)
+    ranking_row_top_k = int(ranking_row_top_k)
+    if ranking_row_top_k < 0:
+        raise ValueError("ranking_row_top_k must be non-negative.")
+    collect_prediction_diagnostics = (
+        observation_out_path is not None or confusion_out_path is not None or per_class_out_path is not None
+    )
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
@@ -431,7 +781,12 @@ def run_time_resolved_decode(
     session_values = metadata["session"].to_numpy() if "session" in metadata.columns else groups
     splitter_name = "stratified-group-kfold" if groups is not None else "stratified-kfold"
     split_id = f"{splitter_name}-{n_splits}"
-    temporal_mode = "same_time" if normalized_temporal_train_window is None else "train_window_ensemble"
+    if normalized_temporal_selection_window is not None:
+        temporal_mode = "nested_train_window_selection"
+    elif normalized_temporal_train_window is not None:
+        temporal_mode = "train_window_ensemble"
+    else:
+        temporal_mode = "same_time"
     preprocessing_hash = stable_hash(
         {
             "picks": picks,
@@ -442,6 +797,10 @@ def run_time_resolved_decode(
             "feature_preprocessor": feature_preprocessor_name,
             "pca_components": pca_components_value,
             "temporal_train_window": normalized_temporal_train_window,
+            "temporal_selection_window": normalized_temporal_selection_window,
+            "temporal_selection_metric": temporal_selection_metric,
+            "temporal_selection_cv_splits": temporal_selection_cv_splits,
+            "temporal_selection_top_k": temporal_selection_top_k,
         }
     )
     default_model_hash = _model_hash(
@@ -452,6 +811,10 @@ def run_time_resolved_decode(
         pca_components=pca_components_value,
         temporal_mode=temporal_mode,
         temporal_train_window=normalized_temporal_train_window,
+        temporal_selection_window=normalized_temporal_selection_window,
+        temporal_selection_metric=temporal_selection_metric,
+        temporal_selection_cv_splits=temporal_selection_cv_splits,
+        temporal_selection_top_k=temporal_selection_top_k,
         tune_hyperparameters=tune_hyperparameters,
         tuning_cv_splits=tuning_cv_splits,
         tuning_scoring=tuning_scoring,
@@ -465,9 +828,15 @@ def run_time_resolved_decode(
     observation_rows = []
     windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
     selected_train_windows = _select_temporal_train_windows(windows, normalized_temporal_train_window)
+    candidate_selection_windows = _select_temporal_train_windows(windows, normalized_temporal_selection_window)
+    if candidate_selection_windows is not None and temporal_selection_top_k > len(candidate_selection_windows):
+        raise ValueError(
+            "temporal_selection_top_k cannot exceed the number of temporal-selection candidate windows "
+            f"({len(candidate_selection_windows)})."
+        )
     splits = list(make_cross_validator(labels, groups, n_splits))
 
-    if selected_train_windows is None:
+    if selected_train_windows is None and candidate_selection_windows is None:
         for time_window in windows:
             features = _features_for_window(data, time_window)
             start, stop, center = time_window
@@ -497,6 +866,22 @@ def run_time_resolved_decode(
                         features[test_idx],
                         emission_mode=current_emission_mode,
                     )
+                    tuning_metadata = _tuning_metadata(
+                        model,
+                        tune_hyperparameters=tune_hyperparameters,
+                        tuning_cv_splits=tuning_cv_splits,
+                        tuning_scoring=tuning_scoring,
+                        tuning_c_grid=tuning_c_grid_values,
+                    )
+                    row_metadata = {
+                        **tuning_metadata,
+                        **_temporal_selection_metadata(
+                            temporal_selection_window=None,
+                            temporal_selection_metric=temporal_selection_metric,
+                            temporal_selection_cv_splits=temporal_selection_cv_splits,
+                            temporal_selection_top_k=temporal_selection_top_k,
+                        ),
+                    }
                     current_model_hash = _model_hash(
                         decoder_name=decoder_name,
                         emission_mode=current_emission_mode,
@@ -505,25 +890,13 @@ def run_time_resolved_decode(
                         pca_components=pca_components_value,
                         temporal_mode=temporal_mode,
                         temporal_train_window=None,
+                        temporal_selection_window=None,
                         train_window_centers=[center],
                         tune_hyperparameters=tune_hyperparameters,
                         tuning_cv_splits=tuning_cv_splits,
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
-                        tuning_metadata=_tuning_metadata(
-                            model,
-                            tune_hyperparameters=tune_hyperparameters,
-                            tuning_cv_splits=tuning_cv_splits,
-                            tuning_scoring=tuning_scoring,
-                            tuning_c_grid=tuning_c_grid_values,
-                        ),
-                    )
-                    tuning_metadata = _tuning_metadata(
-                        model,
-                        tune_hyperparameters=tune_hyperparameters,
-                        tuning_cv_splits=tuning_cv_splits,
-                        tuning_scoring=tuning_scoring,
-                        tuning_c_grid=tuning_c_grid_values,
+                        tuning_metadata=tuning_metadata,
                     )
                     _append_decoded_outputs(
                         rows=rows,
@@ -558,16 +931,44 @@ def run_time_resolved_decode(
                         calibration_out_path=calibration_out_path,
                         calibration_bins=calibration_bins,
                         observation_out_path=observation_out_path,
+                        collect_prediction_diagnostics=collect_prediction_diagnostics,
+                        ranking_top_k=ranking_top_k_values,
+                        ranking_row_top_k=ranking_row_top_k,
                         subject=subject,
-                        tuning_metadata=tuning_metadata,
+                        tuning_metadata=row_metadata,
                     )
     else:
         feature_cache = {time_window: _features_for_window(data, time_window) for time_window in windows}
-        train_time, train_window_start, train_window_stop = _train_window_summary(epochs, selected_train_windows)
-        train_window_centers = [window[2] for window in selected_train_windows]
         for fold, (train_idx, test_idx) in enumerate(splits):
             test_labels = labels[test_idx]
             for current_emission_mode in emission_modes:
+                if candidate_selection_windows is not None:
+                    current_train_windows, selection_scores = _select_temporal_train_windows_nested_cv(
+                        feature_cache=feature_cache,
+                        candidate_windows=candidate_selection_windows,
+                        labels=labels,
+                        groups=groups,
+                        train_idx=train_idx,
+                        classes=classes,
+                        decoder_name=decoder_name,
+                        current_emission_mode=current_emission_mode,
+                        max_iter=max_iter,
+                        feature_preprocessor_name=feature_preprocessor_name,
+                        pca_components_value=pca_components_value,
+                        tune_hyperparameters=tune_hyperparameters,
+                        tuning_cv_splits=tuning_cv_splits,
+                        tuning_scoring=tuning_scoring,
+                        tuning_c_grid_values=tuning_c_grid_values,
+                        temporal_selection_cv_splits=temporal_selection_cv_splits,
+                        temporal_selection_metric=temporal_selection_metric,
+                        temporal_selection_top_k=temporal_selection_top_k,
+                    )
+                else:
+                    current_train_windows = selected_train_windows or []
+                    selection_scores = []
+
+                train_time, train_window_start, train_window_stop = _train_window_summary(epochs, current_train_windows)
+                train_window_centers = [window[2] for window in current_train_windows]
                 tuning_cv = (
                     make_tuning_cross_validator(labels[train_idx], None if groups is None else groups[train_idx], tuning_cv_splits)
                     if tune_hyperparameters
@@ -578,7 +979,7 @@ def run_time_resolved_decode(
                     time_window: np.zeros((len(test_idx), len(classes)), dtype=float)
                     for time_window in windows
                 }
-                for train_window in selected_train_windows:
+                for train_window in current_train_windows:
                     train_features = feature_cache[train_window]
                     model = make_decoder(
                         decoder_name,
@@ -600,6 +1001,24 @@ def run_time_resolved_decode(
                             emission_mode=current_emission_mode,
                         )
 
+                tuning_metadata = _tuning_metadata(
+                    fitted_models,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv_splits=tuning_cv_splits,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                )
+                row_metadata = {
+                    **tuning_metadata,
+                    **_temporal_selection_metadata(
+                        temporal_selection_window=normalized_temporal_selection_window,
+                        temporal_selection_metric=temporal_selection_metric,
+                        temporal_selection_cv_splits=temporal_selection_cv_splits,
+                        temporal_selection_top_k=temporal_selection_top_k,
+                        selected_train_windows=current_train_windows,
+                        scores=selection_scores,
+                    ),
+                }
                 current_model_hash = _model_hash(
                     decoder_name=decoder_name,
                     emission_mode=current_emission_mode,
@@ -608,28 +1027,19 @@ def run_time_resolved_decode(
                     pca_components=pca_components_value,
                     temporal_mode=temporal_mode,
                     temporal_train_window=normalized_temporal_train_window,
+                    temporal_selection_window=normalized_temporal_selection_window,
+                    temporal_selection_metric=temporal_selection_metric,
+                    temporal_selection_cv_splits=temporal_selection_cv_splits,
+                    temporal_selection_top_k=temporal_selection_top_k,
                     train_window_centers=train_window_centers,
                     tune_hyperparameters=tune_hyperparameters,
                     tuning_cv_splits=tuning_cv_splits,
                     tuning_scoring=tuning_scoring,
                     tuning_c_grid=tuning_c_grid_values,
-                    tuning_metadata=_tuning_metadata(
-                        fitted_models,
-                        tune_hyperparameters=tune_hyperparameters,
-                        tuning_cv_splits=tuning_cv_splits,
-                        tuning_scoring=tuning_scoring,
-                        tuning_c_grid=tuning_c_grid_values,
-                    ),
-                )
-                tuning_metadata = _tuning_metadata(
-                    fitted_models,
-                    tune_hyperparameters=tune_hyperparameters,
-                    tuning_cv_splits=tuning_cv_splits,
-                    tuning_scoring=tuning_scoring,
-                    tuning_c_grid=tuning_c_grid_values,
+                    tuning_metadata=tuning_metadata,
                 )
                 for test_window in windows:
-                    probabilities = _probability_average(probability_sums[test_window], len(selected_train_windows))
+                    probabilities = _probability_average(probability_sums[test_window], len(current_train_windows))
                     _append_decoded_outputs(
                         rows=rows,
                         calibration_rows=calibration_rows,
@@ -659,12 +1069,15 @@ def run_time_resolved_decode(
                         train_time=train_time,
                         train_window_start=train_window_start,
                         train_window_stop=train_window_stop,
-                        n_train_windows=len(selected_train_windows),
+                        n_train_windows=len(current_train_windows),
                         calibration_out_path=calibration_out_path,
                         calibration_bins=calibration_bins,
                         observation_out_path=observation_out_path,
+                        collect_prediction_diagnostics=collect_prediction_diagnostics,
+                        ranking_top_k=ranking_top_k_values,
+                        ranking_row_top_k=ranking_row_top_k,
                         subject=subject,
-                        tuning_metadata=tuning_metadata,
+                        tuning_metadata=row_metadata,
                     )
 
     results = pd.DataFrame(rows)
@@ -684,6 +1097,11 @@ def run_time_resolved_decode(
                 "model_hash": default_model_hash,
             }
         ).to_csv(observation_out_path)
+    _write_prediction_diagnostic_tables(
+        observation_rows,
+        confusion_out_path=confusion_out_path,
+        per_class_out_path=per_class_out_path,
+    )
     return results
 
 
@@ -717,6 +1135,13 @@ def main() -> None:
     parser.add_argument("--tuning-cv-splits", type=int, default=3, help="Maximum number of inner CV folds for --tune-hyperparameters.")
     parser.add_argument("--tuning-scoring", choices=TUNING_SCORING_CHOICES, default="accuracy", help="Inner-CV objective for --tune-hyperparameters.")
     parser.add_argument("--selection-metric", choices=RESULT_SELECTION_METRIC_CHOICES, default="accuracy", help="Metric used only for the console 'best time' summary.")
+    parser.add_argument("--top-k", default="2,3", help="Comma-separated top-k values to report, for example '2,3,5'.")
+    parser.add_argument(
+        "--rank-row-top-k",
+        type=int,
+        default=DEFAULT_RANKING_ROW_TOP_K,
+        help="Number of ranked class alternatives to include in per-trial observation rows.",
+    )
     parser.add_argument(
         "--tuning-c-grid",
         default=",".join(str(value) for value in parse_c_grid(None)),
@@ -725,6 +1150,8 @@ def main() -> None:
     parser.add_argument("--calibration-out", type=Path)
     parser.add_argument("--calibration-bins", type=int, default=10)
     parser.add_argument("--observations-out", type=Path, help="Optional held-out trial/time probability observation CSV.")
+    parser.add_argument("--confusion-out", type=Path, help="Optional true/predicted class-pair count CSV.")
+    parser.add_argument("--per-class-out", type=Path, help="Optional per-class recall/accuracy CSV.")
     parser.add_argument("--subject", help="Optional subject identifier to include in output CSVs.")
     parser.add_argument(
         "--temporal-train-window",
@@ -735,6 +1162,34 @@ def main() -> None:
             "Train one model per time-window center in START..STOP seconds, "
             "evaluate each model at every test time, and average probabilities."
         ),
+    )
+    parser.add_argument(
+        "--temporal-selection-window",
+        nargs=2,
+        type=float,
+        metavar=("START", "STOP"),
+        help=(
+            "Select train-time windows within START..STOP seconds by inner CV on each outer train fold, "
+            "then refit the selected top-k train-time models and average probabilities at every test time."
+        ),
+    )
+    parser.add_argument(
+        "--temporal-selection-metric",
+        choices=RESULT_SELECTION_METRIC_CHOICES,
+        default="accuracy",
+        help="Inner-CV metric used to rank candidate train-time windows for --temporal-selection-window.",
+    )
+    parser.add_argument(
+        "--temporal-selection-cv-splits",
+        type=int,
+        default=3,
+        help="Maximum number of inner CV folds used to select train-time windows.",
+    )
+    parser.add_argument(
+        "--temporal-selection-top-k",
+        type=int,
+        default=1,
+        help="Number of selected train-time windows to refit and probability-ensemble per outer fold.",
     )
     args = parser.parse_args()
 
@@ -764,12 +1219,28 @@ def main() -> None:
         observation_out_path=args.observations_out,
         subject=args.subject,
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
+        temporal_selection_window=tuple(args.temporal_selection_window) if args.temporal_selection_window is not None else None,
+        temporal_selection_metric=args.temporal_selection_metric,
+        temporal_selection_cv_splits=args.temporal_selection_cv_splits,
+        temporal_selection_top_k=args.temporal_selection_top_k,
+        ranking_top_k=args.top_k,
+        ranking_row_top_k=args.rank_row_top_k,
+        confusion_out_path=args.confusion_out,
+        per_class_out_path=args.per_class_out,
     )
     print(f"Wrote {args.out}")
     if args.observations_out is not None:
         print(f"Wrote probability observations: {args.observations_out}")
+    if args.confusion_out is not None:
+        print(f"Wrote confusion counts: {args.confusion_out}")
+    if args.per_class_out is not None:
+        print(f"Wrote per-class accuracy: {args.per_class_out}")
     for emission_mode_name, summary in results.groupby("emission_mode", sort=True):
-        time_summary = summary.groupby("time")[["accuracy", "log_loss", "brier", "ece"]].mean()
+        summary_metrics = [column for column in RESULT_SELECTION_METRIC_CHOICES if column in summary.columns]
+        time_summary = summary.groupby("time")[summary_metrics].mean()
+        if args.selection_metric not in time_summary.columns:
+            available = ", ".join(time_summary.columns)
+            raise ValueError(f"Selection metric '{args.selection_metric}' is unavailable. Available metrics: {available}")
         best_time = _best_time_by_metric(time_summary, args.selection_metric)
         best_value = time_summary.loc[best_time, args.selection_metric]
         direction = "lowest" if args.selection_metric in RESULT_SELECTION_MINIMIZE_METRICS else "highest"

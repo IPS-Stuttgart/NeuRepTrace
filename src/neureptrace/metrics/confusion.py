@@ -6,7 +6,16 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-DEFAULT_METADATA_LABEL_COLUMNS = ("label", "label_id", "class", "class_id", "true_label", "stimulus", "stimulus_id", "image_id")
+DEFAULT_METADATA_LABEL_COLUMNS = (
+    "label_id",
+    "class_id",
+    "stimulus_id",
+    "image_id",
+    "label",
+    "class",
+    "true_label",
+    "stimulus",
+)
 _TRUE_LABEL = "__neureptrace_true_label"
 _PREDICTED_LABEL = "__neureptrace_predicted_label"
 _PARTICIPANT = "__neureptrace_participant"
@@ -564,20 +573,34 @@ def _metadata_by_label(metadata_frame: pd.DataFrame | None, metadata_label_colum
         return metadata_by_label
     label_columns = _normalize_columns(metadata_label_columns)
     for _, metadata_row in metadata_frame.iterrows():
-        label = _metadata_label_id(metadata_row, label_columns)
-        if label is not None:
-            metadata_by_label[label] = metadata_row.to_dict()
+        metadata = metadata_row.to_dict()
+        for label in _metadata_label_ids(metadata_row, label_columns):
+            metadata_by_label.setdefault(label, metadata)
     return metadata_by_label
 
 
-def _metadata_label_id(metadata_row: pd.Series, label_columns: Sequence[str]) -> object | None:
+def _metadata_label_ids(metadata_row: pd.Series, label_columns: Sequence[str]) -> tuple[object, ...]:
+    label_ids: list[object] = []
     for column in label_columns:
         if column not in metadata_row:
             continue
         value = metadata_row.get(column)
-        if not _is_blank(value):
-            return value
-    return None
+        if _is_blank(value):
+            continue
+        if not _contains_label_id(label_ids, value):
+            label_ids.append(value)
+    return tuple(label_ids)
+
+
+def _contains_label_id(label_ids: Sequence[object], value: object) -> bool:
+    return any(_label_ids_equal(existing, value) for existing in label_ids)
+
+
+def _label_ids_equal(first: object, second: object) -> bool:
+    try:
+        return bool(first == second)
+    except (TypeError, ValueError):
+        return False
 
 
 def _normalize_category_columns(metadata_frame: pd.DataFrame, category_columns: Sequence[str] | str | None, metadata_label_columns: Sequence[str]) -> tuple[str, ...]:

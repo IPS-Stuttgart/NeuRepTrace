@@ -557,7 +557,7 @@ def run_continuous_stimulus_scan(
         max_iter=max_iter,
         demean_window=demean_window,
     )
-    targets = list(target_classes or [str(encoder.classes_[0])])
+    targets = [str(class_name) for class_name in (target_classes if target_classes is not None else encoder.classes_)]
     latency = float(np.mean(train_window)) if annotation_latency is None else annotation_latency
     split_id = _continuous_split_id(train_raw=train_raw, scan_raw=scan_raw, slice_seed=slice_seed)
     preprocessing_hash = _continuous_preprocessing_hash(
