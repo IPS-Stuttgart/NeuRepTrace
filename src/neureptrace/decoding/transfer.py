@@ -36,6 +36,7 @@ class CrossValidationResult:
     accuracy: float
     predictions: np.ndarray
     fold_ids: np.ndarray
+    null_prediction_rate: float = 0.0
 
 
 def sequential_fold_ids(n_trials: int, n_folds: int) -> np.ndarray:
@@ -105,8 +106,14 @@ def cross_validate_feature_decoding(
     random_state: int | None = None,
     fit_model: Callable[[np.ndarray, np.ndarray], Any] | None = None,
     null_label: int | float = 0,
+    replace_null_predictions: bool = False,
 ) -> CrossValidationResult:
-    """Run contiguous-fold decoding on precomputed stimulus/null feature matrices."""
+    """Run contiguous-fold decoding on precomputed stimulus/null feature matrices.
+
+    Null-class predictions are scored as produced by the classifier by default.
+    Set ``replace_null_predictions=True`` to reproduce the legacy behavior of
+    mapping predicted null labels to a non-null fallback class before scoring.
+    """
 
     stimulus_features = _feature_matrix(stimulus_features, name="stimulus_features")
     labels = _label_vector(
@@ -161,10 +168,17 @@ def cross_validate_feature_decoding(
             fold_predictions, _ = predict_window_model(model_bundle, test_features)
         predictions[fold_ids == fold] = fold_predictions
 
-    predictions = replace_null_class_predictions(predictions, null_label=null_label)
+    null_prediction_rate = (
+        float(np.mean(predictions == null_label)) if len(predictions) else np.nan
+    )
+    if replace_null_predictions:
+        predictions = replace_null_class_predictions(predictions, null_label=null_label)
     accuracy = float(np.mean(labels == predictions)) if len(labels) else np.nan
     return CrossValidationResult(
-        accuracy=accuracy, predictions=predictions, fold_ids=fold_ids
+        accuracy=accuracy,
+        predictions=predictions,
+        fold_ids=fold_ids,
+        null_prediction_rate=null_prediction_rate,
     )
 
 

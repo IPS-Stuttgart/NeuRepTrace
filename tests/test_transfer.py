@@ -39,7 +39,7 @@ def test_replace_null_class_predictions_uses_least_frequent_non_null_label():
     assert predictions.tolist() == [2, 1, 1, 2]
 
 
-def test_cross_validate_feature_decoding_replaces_all_null_predictions():
+def test_cross_validate_feature_decoding_counts_null_predictions_as_wrong_by_default():
     result = cross_validate_feature_decoding(
         np.array([[-2.0], [1.0], [-1.0], [2.0]]),
         np.array([1, 2, 1, 2]),
@@ -48,8 +48,24 @@ def test_cross_validate_feature_decoding_replaces_all_null_predictions():
         fit_model=lambda _features, _labels: _ConstantClassifier(0),
     )
 
+    assert result.predictions.tolist() == [0.0, 0.0, 0.0, 0.0]
+    assert result.accuracy == 0.0
+    assert result.null_prediction_rate == 1.0
+
+
+def test_cross_validate_feature_decoding_can_reproduce_legacy_null_replacement():
+    result = cross_validate_feature_decoding(
+        np.array([[-2.0], [1.0], [-1.0], [2.0]]),
+        np.array([1, 2, 1, 2]),
+        n_folds=2,
+        components_pca=float("inf"),
+        fit_model=lambda _features, _labels: _ConstantClassifier(0),
+        replace_null_predictions=True,
+    )
+
     assert result.predictions.tolist() == [1.0, 1.0, 1.0, 1.0]
     assert result.accuracy == 0.5
+    assert result.null_prediction_rate == 1.0
 
 
 def test_cross_validate_feature_decoding_supports_binary_one_vs_rest():

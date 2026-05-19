@@ -9,6 +9,17 @@ import pandas as pd
 
 from neureptrace.metrics import expected_calibration_error
 from neureptrace.observations import probability_columns
+from neureptrace.results.diagnostics import (
+    add_rank_diagnostics,
+    augment_prediction_ranks,
+    build_prediction_diagnostics,
+    category_confusion_summary,
+    confusion_counts,
+    metadata_conditioned_confusion_enrichment,
+    per_class_recall,
+    ranked_label_metrics,
+    true_label_ranks,
+)
 from neureptrace.results.tables import peak_metric_rows, summarize_metric_table
 
 __all__ = [
@@ -18,14 +29,23 @@ __all__ = [
     "WEIGHT_COLUMN",
     "aggregate_time_decode_csvs",
     "aggregate_time_decode_results",
+    "add_rank_diagnostics",
+    "augment_prediction_ranks",
+    "build_prediction_diagnostics",
+    "category_confusion_summary",
+    "confusion_counts",
+    "metadata_conditioned_confusion_enrichment",
     "mean_across_folds",
+    "per_class_recall",
     "peak_metric_rows",
+    "ranked_label_metrics",
     "read_probability_observations",
     "read_time_decode_observations",
     "read_time_decode_results",
     "subject_time_metrics",
     "summarize_metric_table",
     "build_provenance_table",
+    "true_label_ranks",
     "write_provenance_table",
 ]
 

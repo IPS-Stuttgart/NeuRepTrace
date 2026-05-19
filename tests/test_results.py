@@ -5,9 +5,16 @@ import pandas as pd
 from neureptrace.results import (
     aggregate_time_decode_csvs,
     aggregate_time_decode_results,
+    add_rank_diagnostics,
     build_provenance_table,
+    category_confusion_summary,
+    confusion_counts,
+    metadata_conditioned_confusion_enrichment,
     peak_metric_rows,
+    per_class_recall,
+    ranked_label_metrics,
     summarize_metric_table,
+    true_label_ranks,
 )
 
 
@@ -265,3 +272,78 @@ def test_summarize_metric_table_can_zero_singleton_dispersion():
     row = summary.iloc[0]
     assert row["accuracy_std"] == 0.0
     assert row["accuracy_sem"] == 0.0
+
+
+def _prediction_diagnostic_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "subject": ["s1", "s1", "s1", "s1", "s1", "s2", "s2", "s2"],
+            "true_class": ["cat", "dog", "cat", "bird", "dog", "cat", "bird", "bird"],
+            "predicted_class": ["cat", "cat", "dog", "bird", "dog", "cat", "cat", "bird"],
+            "rank1": ["cat", "cat", "dog", "bird", "dog", "cat", "cat", "bird"],
+            "rank2": ["dog", "dog", "cat", "cat", "cat", "dog", "bird", "cat"],
+            "rank3": ["bird", "bird", "bird", "dog", "bird", "bird", "dog", "dog"],
+        }
+    )
+
+
+def test_prediction_diagnostics_report_confusion_recall_and_rank_metrics():
+    frame = _prediction_diagnostic_frame()
+
+    confusions = confusion_counts(frame, group_columns="subject")
+    recall = per_class_recall(frame, group_columns="subject")
+    ranks = ranked_label_metrics(
+        frame,
+        ranked_columns=("rank1", "rank2", "rank3"),
+        group_columns="subject",
+        top_ks=(1, 2, 3),
+    )
+    annotated = add_rank_diagnostics(frame, ranked_columns=("rank1", "rank2", "rank3"), top_ks=(1, 2))
+
+    assert int(confusions["n"].sum()) == len(frame)
+    cat_recall = recall.loc[(recall["subject"] == "s1") & (recall["class_id"] == "cat")].iloc[0]
+    assert int(cat_recall["n_true"]) == 2
+    assert int(cat_recall["n_correct"]) == 1
+    assert round(float(cat_recall["recall"]), 3) == 0.5
+    assert ranks.loc[ranks["subject"] == "s1", "top_2_accuracy"].iloc[0] == 1.0
+    assert annotated["true_rank"].tolist() == [1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 2.0, 1.0]
+    assert annotated["true_in_top_1"].tolist() == [True, False, False, True, True, True, False, True]
+
+
+def test_prediction_diagnostics_derive_ranks_from_scores_and_enrich_metadata():
+    score_frame = pd.DataFrame(
+        {
+            "true_class": [0, 1, 2],
+            "prob_class_0": [0.7, 0.2, 0.1],
+            "prob_class_1": [0.2, 0.6, 0.3],
+            "prob_class_2": [0.1, 0.2, 0.6],
+        }
+    )
+    ranks = true_label_ranks(score_frame, score_columns=("prob_class_0", "prob_class_1", "prob_class_2"))
+
+    assert ranks.tolist() == [1.0, 1.0, 1.0]
+
+    confusions = confusion_counts(_prediction_diagnostic_frame(), group_columns="subject")
+    metadata = pd.DataFrame(
+        {
+            "class_id": ["cat", "dog", "bird"],
+            "category": ["animal", "animal", "animal"],
+            "supercategory": ["mammal", "mammal", "bird"],
+        }
+    )
+    enriched = metadata_conditioned_confusion_enrichment(
+        confusions,
+        metadata,
+        category_columns=("category", "supercategory"),
+        group_columns="subject",
+    )
+    category_summary = category_confusion_summary(confusions, metadata, category_column="supercategory", group_columns="subject")
+
+    assert "same_supercategory" in enriched.columns
+    assert "category_row_fraction" in category_summary.columns
+    bird_row = category_summary.loc[
+        (category_summary["subject"] == "s2")
+        & (category_summary["true_supercategory"] == "bird")
+        & (category_summary["predicted_supercategory"] == "bird")
+    ].iloc[0]
+    assert round(float(bird_row["category_row_fraction"]), 3) == 0.5
