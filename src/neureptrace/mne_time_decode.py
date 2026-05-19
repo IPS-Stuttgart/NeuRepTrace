@@ -155,6 +155,95 @@ def _probability_average(probability_sum: np.ndarray, n_models: int) -> np.ndarr
     return probabilities / row_sums
 
 
+def _model_probability_classes(model) -> np.ndarray | None:
+    """Return the class order that corresponds to a model's probability columns."""
+
+    classes = getattr(model, "classes_", None)
+    if classes is not None:
+        return np.asarray(classes)
+
+    best_estimator = getattr(model, "best_estimator_", None)
+    if best_estimator is not None:
+        return _model_probability_classes(best_estimator)
+
+    steps = getattr(model, "steps", None)
+    if steps:
+        return _model_probability_classes(steps[-1][1])
+
+    for attribute in ("estimator", "base_estimator"):
+        nested = getattr(model, attribute, None)
+        if nested is not None:
+            nested_classes = _model_probability_classes(nested)
+            if nested_classes is not None:
+                return nested_classes
+
+    return None
+
+
+def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
+    probabilities = np.asarray(probabilities, dtype=float)
+    if probabilities.ndim != 2:
+        raise ValueError("Predicted probabilities must be a two-dimensional array.")
+    if not np.all(np.isfinite(probabilities)):
+        raise ValueError("Predicted probabilities must be finite.")
+    if np.any(probabilities < 0.0):
+        raise ValueError("Predicted probabilities must be non-negative.")
+    row_sums = probabilities.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("Predicted probabilities must have positive row sums.")
+    return probabilities / row_sums
+
+
+def _align_probability_columns(
+    probabilities: np.ndarray,
+    *,
+    model,
+    classes: np.ndarray,
+) -> np.ndarray:
+    """Align estimator probability columns to the global encoded class order.
+
+    Scikit-learn probability columns follow the fitted estimator's ``classes_``.
+    With grouped folds it is possible for a training split to miss one globally
+    known class. In that case the estimator emits fewer columns; downstream
+    multiclass metrics and observation CSVs still need the global label-encoder
+    order, with zero probability assigned to classes not seen by the model.
+    """
+
+    probabilities = np.asarray(probabilities, dtype=float)
+    classes = np.asarray(classes)
+    if probabilities.ndim != 2:
+        raise ValueError("Predicted probabilities must be a two-dimensional array.")
+
+    model_classes = _model_probability_classes(model)
+    if model_classes is None:
+        if probabilities.shape[1] != len(classes):
+            raise ValueError(
+                "Cannot align probability columns because the fitted model does not expose classes_ "
+                f"and emitted {probabilities.shape[1]} columns for {len(classes)} global classes."
+            )
+        return _normalize_probability_rows(probabilities)
+
+    model_classes = np.asarray(model_classes)
+    if len(model_classes) != probabilities.shape[1]:
+        raise ValueError(
+            f"Fitted model reports {len(model_classes)} classes but emitted "
+            f"{probabilities.shape[1]} probability columns."
+        )
+    if len(np.unique(model_classes)) != len(model_classes):
+        raise ValueError("Fitted model reports duplicate classes; probability columns are ambiguous.")
+
+    class_to_column = {class_label: class_index for class_index, class_label in enumerate(classes.tolist())}
+    aligned = np.zeros((probabilities.shape[0], len(classes)), dtype=float)
+    for source_column, class_label in enumerate(model_classes.tolist()):
+        try:
+            target_column = class_to_column[class_label]
+        except KeyError as exc:
+            raise ValueError(f"Fitted model emitted unknown class {class_label!r}.") from exc
+        aligned[:, target_column] = probabilities[:, source_column]
+
+    return _normalize_probability_rows(aligned)
+
+
 def _train_window_summary(
     epochs: mne.Epochs,
     train_windows: list[TimeWindow],
@@ -492,10 +581,14 @@ def run_time_resolved_decode(
                     )
                     model.fit(features[train_idx], labels[train_idx])
 
-                    probabilities = predict_emission_probabilities(
-                        model,
-                        features[test_idx],
-                        emission_mode=current_emission_mode,
+                    probabilities = _align_probability_columns(
+                        predict_emission_probabilities(
+                            model,
+                            features[test_idx],
+                            emission_mode=current_emission_mode,
+                        ),
+                        model=model,
+                        classes=classes,
                     )
                     current_model_hash = _model_hash(
                         decoder_name=decoder_name,
@@ -594,10 +687,14 @@ def run_time_resolved_decode(
                     model.fit(train_features[train_idx], labels[train_idx])
                     fitted_models.append(model)
                     for test_window in windows:
-                        probability_sums[test_window] += predict_emission_probabilities(
-                            model,
-                            feature_cache[test_window][test_idx],
-                            emission_mode=current_emission_mode,
+                        probability_sums[test_window] += _align_probability_columns(
+                            predict_emission_probabilities(
+                                model,
+                                feature_cache[test_window][test_idx],
+                                emission_mode=current_emission_mode,
+                            ),
+                            model=model,
+                            classes=classes,
                         )
 
                 current_model_hash = _model_hash(
