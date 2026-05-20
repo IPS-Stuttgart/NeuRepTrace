@@ -9,7 +9,7 @@ import pandas as pd
 
 from neureptrace.metadata import prepare_binary_metadata
 from neureptrace.mne_time_decode import (
-    DEFAULT_BASELINE_WINDOW as DEFAULT_EPOCH_BASELINE_WINDOW,
+    DEFAULT_BASELINE_WINDOW as DEFAULT_DECODE_BASELINE_WINDOW,
     EPOCH_NORMALIZATION_RUN_CHOICES,
     normalize_epoch_normalization,
     run_time_resolved_decode,
@@ -110,7 +110,7 @@ def _temporal_train_window_value(
 
 def _baseline_window_value(
     row: pd.Series,
-    default: tuple[float, float] | None = DEFAULT_EPOCH_BASELINE_WINDOW,
+    default: tuple[float, float] | None = DEFAULT_DECODE_BASELINE_WINDOW,
 ) -> tuple[float, float] | None:
     start = _float_value(row, "baseline_window_start")
     stop = _float_value(row, "baseline_window_stop")
@@ -177,7 +177,7 @@ def _output_stem(
     tuning_scoring: str = "accuracy",
     temporal_train_window: TemporalTrainWindow | None = None,
     normalization: str = "none",
-    baseline_window: tuple[float, float] | None = DEFAULT_EPOCH_BASELINE_WINDOW,
+    baseline_window: tuple[float, float] | None = DEFAULT_DECODE_BASELINE_WINDOW,
     has_feature_preprocessor_column: bool = False,
     has_pca_components_column: bool = False,
     has_tune_hyperparameters_column: bool = False,
@@ -202,12 +202,12 @@ def _output_stem(
         parts.append("tuned" if tune_hyperparameters else "untuned")
     if has_tuning_scoring_column and tune_hyperparameters:
         parts.append(_safe_name(tuning_scoring))
-    if has_temporal_train_window_column and temporal_train_window is not None:
-        parts.append(_safe_window_name(temporal_train_window))
     if has_normalization_column:
         parts.append(_safe_name(normalization))
     if has_baseline_window_column and baseline_window is not None:
-        parts.append(f"basewin{_safe_name(f'{baseline_window[0]:g}')}_{_safe_name(f'{baseline_window[1]:g}')}")
+        parts.append(f"base{_safe_name(f'{baseline_window[0]:g}')}_{_safe_name(f'{baseline_window[1]:g}')}")
+    if has_temporal_train_window_column and temporal_train_window is not None:
+        parts.append(_safe_window_name(temporal_train_window))
     return "_".join(parts)
 
 
@@ -314,13 +314,13 @@ def run_benchmark_manifest(
     default_emission_mode: str = "calibrated",
     default_feature_preprocessor: str = "none",
     default_pca_components: str | None = None,
+    default_normalization: str = "none",
+    default_baseline_window: tuple[float, float] | None = DEFAULT_DECODE_BASELINE_WINDOW,
     default_tune_hyperparameters: bool = False,
     default_tuning_cv_splits: int = 3,
     default_tuning_scoring: str = "accuracy",
     default_tuning_c_grid: str | None = None,
     default_temporal_train_window: TemporalTrainWindow | None = None,
-    default_normalization: str = "none",
-    default_baseline_window: tuple[float, float] | None = DEFAULT_EPOCH_BASELINE_WINDOW,
     calibration_dir: Path | None = None,
     calibration_bins: int = 10,
     observation_dir: Path | None = None,
@@ -369,14 +369,14 @@ def run_benchmark_manifest(
         )
         pca_components = _string_value(row, "pca_components", default_pca_components)
         tune_hyperparameters = _bool_value(row, "tune_hyperparameters", default_tune_hyperparameters)
+        normalization = normalize_epoch_normalization(_string_value(row, "normalization", default_normalization) or default_normalization)
+        baseline_window = _baseline_window_value(row, default_baseline_window)
         tuning_cv_splits = _int_value(row, "tuning_cv_splits", default_tuning_cv_splits)
         tuning_scoring = normalize_tuning_scoring(
             _string_value(row, "tuning_scoring", default_tuning_scoring) or default_tuning_scoring
         )
         tuning_c_grid = _string_value(row, "tuning_c_grid", default_tuning_c_grid)
         temporal_train_window = _temporal_train_window_value(row, default_temporal_train_window)
-        normalization = normalize_epoch_normalization(_string_value(row, "normalization", default_normalization))
-        baseline_window = _baseline_window_value(row, default_baseline_window)
         output_stem = _output_stem(
             subject,
             decoder,
@@ -395,14 +395,14 @@ def run_benchmark_manifest(
             has_pca_components_column="pca_components" in manifest.columns,
             has_tune_hyperparameters_column="tune_hyperparameters" in manifest.columns,
             has_tuning_scoring_column="tuning_scoring" in manifest.columns,
-            has_temporal_train_window_column=bool(
-                {"temporal_train_window", "temporal_train_window_start", "temporal_train_window_stop"}.intersection(
-                    manifest.columns
-                )
-            ),
             has_normalization_column="normalization" in manifest.columns,
             has_baseline_window_column=bool(
                 {"baseline_window", "baseline_window_start", "baseline_window_stop"}.intersection(
+                    manifest.columns
+                )
+            ),
+            has_temporal_train_window_column=bool(
+                {"temporal_train_window", "temporal_train_window_start", "temporal_train_window_stop"}.intersection(
                     manifest.columns
                 )
             ),
@@ -587,13 +587,25 @@ def main() -> None:
             "--feature-preprocessor anova-select, this is the selected feature percentile."
         ),
     )
+    parser.add_argument(
+        "--normalization",
+        choices=EPOCH_NORMALIZATION_RUN_CHOICES,
+        default="none",
+        help="Default subject-level epoch normalization unless overridden by a manifest normalization column.",
+    )
+    parser.add_argument(
+        "--baseline-window",
+        type=float,
+        nargs=2,
+        default=DEFAULT_DECODE_BASELINE_WINDOW,
+        metavar=("START", "STOP"),
+        help="Default baseline window in seconds for subject_baseline_z and subject_baseline_whiten.",
+    )
     parser.add_argument("--tune-hyperparameters", action="store_true")
     parser.add_argument("--tuning-cv-splits", type=int, default=3)
     parser.add_argument("--tuning-scoring", choices=TUNING_SCORING_CHOICES, default="accuracy")
     parser.add_argument("--tuning-c-grid", default=",".join(str(value) for value in parse_c_grid(None)))
     parser.add_argument("--temporal-train-window", type=float, nargs=2, metavar=("START", "STOP"))
-    parser.add_argument("--normalization", choices=EPOCH_NORMALIZATION_RUN_CHOICES, default="none")
-    parser.add_argument("--baseline-window", type=float, nargs=2, default=DEFAULT_EPOCH_BASELINE_WINDOW, metavar=("START", "STOP"))
     parser.add_argument("--calibration-dir", type=Path)
     parser.add_argument("--calibration-bins", type=int, default=10)
     parser.add_argument("--observation-dir", type=Path, help="Optional directory for held-out trial/time probability observation CSVs.")
@@ -656,13 +668,13 @@ def main() -> None:
         default_emission_mode=args.emission_mode,
         default_feature_preprocessor=args.feature_preprocessor,
         default_pca_components=args.pca_components,
+        default_normalization=args.normalization,
+        default_baseline_window=tuple(args.baseline_window),
         default_tune_hyperparameters=args.tune_hyperparameters,
         default_tuning_cv_splits=args.tuning_cv_splits,
         default_tuning_scoring=args.tuning_scoring,
         default_tuning_c_grid=args.tuning_c_grid,
         default_temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
-        default_normalization=args.normalization,
-        default_baseline_window=tuple(args.baseline_window) if args.baseline_window is not None else None,
         calibration_dir=args.calibration_dir,
         calibration_bins=args.calibration_bins,
         observation_dir=args.observation_dir,
