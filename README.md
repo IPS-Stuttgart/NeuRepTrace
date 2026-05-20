@@ -55,7 +55,7 @@ paper-facing export scripts for the MEG dataset it was developed around.
 
 ## Installation
 
-NeuRepTrace requires Python 3.11 or newer and earlier than Python 3.14.
+NeuRepTrace requires Python 3.11 or newer and earlier than Python 3.15.
 
 For development from a source checkout, use Poetry:
 
