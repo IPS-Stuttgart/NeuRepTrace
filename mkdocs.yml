@@ -8,12 +8,17 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Data Staging: data-staging.md
+  - Dataset Configuration: dataset-config.md
+  - Dataset Specs: dataset-specs.md
+  - Migrating from PyMEGDec: migrating-from-pymegdec.md
+  - Transfer from Config: transfer-from-config.md
   - Benchmarking: benchmarking.md
   - API Overview: api-overview.md
   - Reference:
       - Benchmark: reference/benchmark.md
       - Calibration: reference/calibration.md
       - Continuous Stimulus Scan: reference/continuous-stimulus-scan.md
+      - Dataset Specs: reference/dataset-spec.md
       - Decoding: reference/decoding.md
       - Emission Compare: reference/emission-compare.md
       - Inference: reference/inference.md

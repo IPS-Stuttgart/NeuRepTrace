@@ -15,6 +15,8 @@ sequences.
 NeuRepTrace currently provides tools for:
 
 - time-resolved decoding from MNE `Epochs` files;
+- config-driven dataset loading from MNE `Epochs` files and FieldTrip-like
+  MATLAB `.mat` files;
 - held-out trial/time probability observation exports for downstream state
   models;
 - onset-detection summaries from probability traces, with baseline-window
@@ -39,7 +41,7 @@ NeuRepTrace currently provides tools for:
 - CSV aggregation, plotting, reporting, and subject-level inference for
   downstream interpretation.
 
-## Project boundary with PyMEGDec
+## Dataset configuration and PyMEGDec migration
 
 NeuRepTrace owns the dataset-independent M/EEG decoding layer. Keep reusable
 feature-matrix decoding, classifier calibration, temporal generalization,
@@ -47,11 +49,35 @@ onset/state inference, confusion and per-class metrics, MNE `Epochs` decoding,
 and generic summary-table/reporting helpers here.
 
 Dataset-specific projects should adapt their own file formats and experimental
-conventions into NeuRepTrace's feature-matrix and probability-observation
-interfaces. In particular, PyMEGDec owns the MATLAB `.mat` loaders, the
-`Part*Data.mat` / `Part*CueData.mat` participant-file conventions, CTF sensor
-geometry handling, alpha analyses, stimulus-specific defaults, and
-paper-facing export scripts for the MEG dataset it was developed around.
+conventions into NeuRepTrace's feature-matrix, MNE `Epochs`, and
+probability-observation interfaces. Generic FieldTrip-style MATLAB loading is
+available in `neureptrace.io.fieldtrip_mat`; dataset-specific filename
+templates such as `Part{participant}Data.mat` and
+`Part{participant}CueData.mat` should be supplied by config files or thin
+project wrappers rather than hard-coded in NeuRepTrace. PyMEGDec-style
+paper-specific alpha analyses, stimulus defaults, and export scripts remain
+outside the core package unless they are generalized into reusable workflows.
+
+Dataset-specific file naming and metadata conventions can also be expressed as
+versioned YAML or JSON dataset specs. Specs describe data roots, participant
+selection, split path templates, metadata files, labels, and workflow defaults;
+loader code remains normal Python. This makes the PyMEGDec `Part*Data.mat` and
+`Part*CueData.mat` conventions portable while PyMEGDec remains a compatibility
+wrapper for paper-specific alpha, CTF geometry, and legacy export scripts.
+
+## Config-driven dataset specs
+
+Dataset specs can be validated and expanded from the grouped CLI:
+
+```bash
+neureptrace dataset validate examples/configs/pymegdec_bushmeg.yml
+neureptrace dataset manifest examples/configs/pymegdec_bushmeg.yml \
+  --workflow stimulus_transfer \
+  --out results/bushmeg_stimulus_manifest.csv
+```
+
+Use YAML for hand-written configs and JSON for generated or CI-controlled
+configs. See `docs/dataset-specs.md` for the schema and loader contract.
 
 ## Installation
 
@@ -71,6 +97,7 @@ python -m pip install -e .
 
 Installed environments expose both a grouped `neureptrace` command and focused
 workflow commands such as `neureptrace-benchmark`, `neureptrace-mne-time-decode`,
+`neureptrace-decode-from-config`, `neureptrace-validate-dataset-config`,
 `neureptrace-onset-detect`, `neureptrace-continuous-stimulus-scan`,
 `neureptrace-stimulus-detect`, and
 `neureptrace-temporal-model`. The equivalent `python -m neureptrace.<module>` forms
@@ -118,6 +145,13 @@ neureptrace-mne-time-decode \
   --group-column session \
   --out results/nod_sub-01_animate.csv \
   --observations-out results/nod_sub-01_animate_observations.csv
+```
+
+Run the same style of workflow from a dataset config:
+
+```bash
+neureptrace-validate-dataset-config configs/bush_meg/stimulus_decoding.yml
+neureptrace-decode-from-config configs/bush_meg/stimulus_decoding.yml
 ```
 
 Plot the resulting time course:

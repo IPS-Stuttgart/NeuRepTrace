@@ -1,0 +1,66 @@
+{
+  "schema_version": "neureptrace.dataset.v1",
+  "dataset_id": "bushmeg",
+  "description": "PyMEGDec-style MEG participant files described declaratively.",
+  "root": {
+    "env": "PYMEGDEC_DATA_DIR",
+    "fallback_file": ".pymegdec-data-dir"
+  },
+  "subjects": {
+    "include": "1-4,6,8,9,10,13-27"
+  },
+  "splits": {
+    "main": {
+      "loader": "matlab_fieldtrip",
+      "path_template": "Part{subject}Data.mat",
+      "mat_key": "data",
+      "trial_key": "trial",
+      "time_key": "time",
+      "channel_key": "label",
+      "label_key": "trialinfo",
+      "label_index_base": 1,
+      "trial_layout": "channels_by_time"
+    },
+    "cue": {
+      "loader": "matlab_fieldtrip",
+      "path_template": "Part{subject}CueData.mat",
+      "mat_key": "data",
+      "trial_key": "trial",
+      "time_key": "time",
+      "channel_key": "label",
+      "label_key": "trialinfo",
+      "label_index_base": 1,
+      "trial_layout": "channels_by_time"
+    }
+  },
+  "labels": {
+    "chance_classes": 16,
+    "index_base": 1,
+    "subtract_one_when_no_null_class": true
+  },
+  "preprocessing_defaults": {
+    "frequency_range_hz": [0.0, "Infinity"],
+    "window_size_s": 0.1,
+    "train_window_center_s": 0.2,
+    "null_window_center_s": null,
+    "resample_hz": null,
+    "pca_components": 100
+  },
+  "workflows": {
+    "stimulus_transfer": {
+      "split": "main",
+      "manifest": {
+        "paired_split": "cue",
+        "transfer_direction": "main-to-cue",
+        "classifier": "multiclass-svm",
+        "chance": 0.0625,
+        "window_start_s": -0.2,
+        "window_stop_s": 0.6,
+        "window_step_s": 0.05
+      }
+    }
+  },
+  "outputs": {
+    "default_dir": "outputs"
+  }
+}

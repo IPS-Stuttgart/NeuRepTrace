@@ -814,7 +814,19 @@ def predict_emission_probabilities(model, features: np.ndarray, *, emission_mode
     if emission_mode == "uncalibrated" and hasattr(model, "decision_function"):
         return score_to_probabilities(model.decision_function(features))
     if hasattr(model, "predict_proba"):
-        return np.asarray(model.predict_proba(features), dtype=float)
+        probabilities = np.asarray(model.predict_proba(features), dtype=float)
+        if np.all(np.isfinite(probabilities)):
+            return probabilities
+        if hasattr(model, "predict") and hasattr(model, "classes_"):
+            predictions = np.asarray(model.predict(features))
+            model_classes = np.asarray(model.classes_)
+            fallback = np.zeros((len(predictions), len(model_classes)), dtype=float)
+            class_indices = {label: index for index, label in enumerate(model_classes)}
+            for row_index, label in enumerate(predictions):
+                fallback[row_index, class_indices[label]] = 1.0
+            invalid_rows = ~np.all(np.isfinite(probabilities), axis=1)
+            probabilities[invalid_rows] = fallback[invalid_rows]
+        return probabilities
     if hasattr(model, "decision_function"):
         return score_to_probabilities(model.decision_function(features))
     raise ValueError("Decoder does not provide predict_proba or decision_function.")

@@ -451,6 +451,39 @@ def test_run_benchmark_manifest_supports_tuned_temporal_train_window(tmp_path: P
     assert summary["tuned_hyperparameters"].unique().tolist() == [True]
 
 
+def test_run_benchmark_manifest_passes_normalization_and_baseline_window(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "subject,epochs,metadata_csv,label_column,normalization,baseline_window_start,baseline_window_stop\n"
+        "sub-01,data/sub-01_epo.fif,data/sub-01_metadata.csv,condition,subject-baseline-whiten,-0.5,0.0\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_decode(**kwargs):
+        calls.append(kwargs)
+        return _fake_decode(**kwargs)
+
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", fake_decode)
+
+    run = run_benchmark_manifest(manifest, out_dir=tmp_path / "results")
+
+    assert calls[0]["normalization"] == "subject_baseline_whiten"
+    assert calls[0]["baseline_window"] == (-0.5, 0.0)
+    assert run.result_csvs[0].name == "sub-01_subject_baseline_whiten_basewin-0p5_0_time_decode.csv"
+
+
+def test_run_benchmark_manifest_supports_baseline_window_string(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "subject,epochs,metadata_csv,label_column,baseline_window\n"
+        "sub-01,data/sub-01_epo.fif,data/sub-01_metadata.csv,condition,\"-0.35,-0.05\"\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("neureptrace.benchmark.run_time_resolved_decode", _fake_decode)
+    run_benchmark_manifest(manifest, out_dir=tmp_path / "results")
+
+
 def test_run_benchmark_manifest_resume_skips_complete_existing_rows(tmp_path: Path, monkeypatch):
     manifest = tmp_path / "manifest.csv"
     manifest.write_text(

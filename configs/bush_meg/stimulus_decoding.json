@@ -1,0 +1,51 @@
+{
+  "$schema": "https://ips-stuttgart.github.io/NeuRepTrace/schemas/time-decode-recipe.schema.json",
+  "schema_version": 1,
+  "dataset_recipe": "configs/bush_meg/dataset.json",
+  "workflow": {
+    "name": "bush_meg_stimulus_decoding",
+    "type": "mne_time_decode"
+  },
+  "inputs": {
+    "epochs_glob": "results/bush_meg/epochs/sub-*_epo.fif",
+    "metadata_glob": "results/bush_meg/metadata/sub-*_trials.csv"
+  },
+  "target": {
+    "label_column": "stimulus_class",
+    "group_column": "participant"
+  },
+  "time_windows": {
+    "start": -0.5,
+    "stop": 1.5,
+    "width": 0.1,
+    "step": 0.05
+  },
+  "decoding": {
+    "decoder": "calibrated-linear-svm",
+    "emission_mode": "calibrated",
+    "feature_preprocessor": "pca",
+    "pca_components": 100,
+    "cv_splits": 5,
+    "tune_hyperparameters": false
+  },
+  "normalization": {
+    "epoch_normalization": "subject_baseline_whiten",
+    "baseline_window": [
+      -0.35,
+      -0.05
+    ]
+  },
+  "metrics": {
+    "include_accuracy": true,
+    "include_log_loss": true,
+    "include_brier": true,
+    "include_ece": true,
+    "reliability_bins": 10
+  },
+  "outputs": {
+    "summary_csv": "results/bush_meg/stimulus_time_decode.csv",
+    "observations_csv": "results/bush_meg/stimulus_observations.csv",
+    "reliability_csv": "results/bush_meg/stimulus_reliability.csv",
+    "plot_png": "results/bush_meg/stimulus_time_decode.png"
+  }
+}

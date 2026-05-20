@@ -1,0 +1,104 @@
+{
+  "$schema": "https://ips-stuttgart.github.io/NeuRepTrace/schemas/dataset-recipe.schema.json",
+  "schema_version": 1,
+  "dataset": {
+    "name": "bush_meg",
+    "description": "MEG participant-file conventions originally handled by PyMEGDec.",
+    "root_env": "BUSH_MEG_DATA_DIR",
+    "loader": "fieldtrip_mat"
+  },
+  "participants": {
+    "ids": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      8,
+      9,
+      10,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27
+    ],
+    "zero_pad": 0,
+    "main_file_template": "Part{participant}Data.mat",
+    "cue_file_template": "Part{participant}CueData.mat"
+  },
+  "matlab": {
+    "struct_candidates": [
+      "data",
+      "Data",
+      "timelock",
+      "epochs"
+    ],
+    "trial_field": "trial",
+    "time_field": "time",
+    "label_field": "label",
+    "trialinfo_field": "trialinfo",
+    "sampleinfo_field": "sampleinfo",
+    "sensor_geometry_field": "grad"
+  },
+  "validation": {
+    "require_files": true,
+    "require_equal_trial_time_lengths": true,
+    "require_trialinfo_rows_equal_trials": true,
+    "trim_channel_labels_to_data": true,
+    "warn_on_channel_label_trim": true,
+    "warn_on_missing_sensor_geometry": true
+  },
+  "metadata": {
+    "source": "trialinfo",
+    "columns": [
+      {
+        "name": "stimulus_class",
+        "index": 0,
+        "dtype": "category",
+        "required": true
+      },
+      {
+        "name": "condition",
+        "index": 1,
+        "dtype": "category",
+        "required": false
+      },
+      {
+        "name": "reaction_time",
+        "index": 2,
+        "dtype": "float",
+        "required": false
+      }
+    ],
+    "add_columns": {
+      "participant": "{participant}",
+      "source_file": "{file}"
+    }
+  },
+  "preprocessing": {
+    "tmin": -0.5,
+    "tmax": 1.5,
+    "baseline_window": [
+      -0.35,
+      -0.05
+    ],
+    "epoch_normalization": "subject_baseline_whiten"
+  },
+  "outputs": {
+    "epochs_dir": "results/bush_meg/epochs",
+    "metadata_dir": "results/bush_meg/metadata",
+    "observations_csv": "results/bush_meg/stimulus_observations.csv",
+    "summary_csv": "results/bush_meg/stimulus_time_decode.csv"
+  }
+}
