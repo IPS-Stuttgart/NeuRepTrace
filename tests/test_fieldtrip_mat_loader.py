@@ -57,6 +57,31 @@ def test_load_fieldtrip_mat_epochs_maps_trialinfo_columns(tmp_path: Path):
     assert dataset.metadata["participant"].tolist() == [2, 2]
 
 
+def test_load_fieldtrip_mat_epochs_applies_metadata_maps_and_filters(tmp_path: Path):
+    mat_path = tmp_path / "Part2Data.mat"
+    _write_fieldtrip_mat(mat_path)
+
+    dataset = load_fieldtrip_mat_epochs(
+        mat_path,
+        {
+            "variable": "data",
+            "metadata": {
+                "columns": [
+                    {"name": "stimulus_class", "index": 0},
+                    {"name": "condition", "index": 1},
+                ],
+                "maps": {"stimulus_class": {1: "face", 2: "object"}},
+                "filters": [{"column": "stimulus_class", "include": ["face"]}],
+            },
+        },
+        extra_metadata={"participant": 2},
+    )
+
+    assert dataset.data.shape == (1, 2, 3)
+    assert dataset.metadata["stimulus_class"].tolist() == ["face"]
+    assert dataset.metadata["participant"].tolist() == [2]
+
+
 def test_load_epoch_dataset_from_yaml_config(tmp_path: Path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()

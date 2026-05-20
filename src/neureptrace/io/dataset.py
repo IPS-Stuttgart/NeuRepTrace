@@ -56,9 +56,60 @@ class EpochDataset:
 
         return self.data
 
+    def with_channels(self, channel_names: list[str]) -> Self:
+        """Return a dataset view containing channels in the requested order."""
+
+        index_by_name = {channel_name: index for index, channel_name in enumerate(self.channel_names)}
+        missing = [channel_name for channel_name in channel_names if channel_name not in index_by_name]
+        if missing:
+            raise ValueError(f"Cannot select missing channels: {missing}.")
+        indices = [index_by_name[channel_name] for channel_name in channel_names]
+        provenance = dict(self.provenance)
+        provenance["selected_channels"] = channel_names
+        return type(self)(
+            data=self.data[:, indices, :],
+            times=self.times.copy(),
+            channel_names=list(channel_names),
+            metadata=self.metadata.copy(),
+            name=self.name,
+            sensor_geometry=self.sensor_geometry,
+            provenance=provenance,
+        )
+
+    @staticmethod
+    def _aligned_datasets(datasets: list[Self], channel_policy: str) -> tuple[list[Self], list[str], list[str]]:
+        reference = datasets[0]
+        if channel_policy == "exact":
+            for dataset in datasets[1:]:
+                if reference.channel_names != dataset.channel_names:
+                    raise ValueError("Cannot concatenate datasets with different channel names or channel order.")
+            return datasets, list(reference.channel_names), []
+
+        if channel_policy == "first_dataset":
+            target = list(reference.channel_names)
+        elif channel_policy == "intersection":
+            common = set(reference.channel_names)
+            for dataset in datasets[1:]:
+                common &= set(dataset.channel_names)
+            target = [channel_name for channel_name in reference.channel_names if channel_name in common]
+        else:
+            raise ValueError("channel_policy must be 'exact', 'intersection', or 'first_dataset'.")
+
+        if not target:
+            raise ValueError("No common channels remain after applying channel alignment policy.")
+        aligned = [dataset.with_channels(target) for dataset in datasets]
+        dropped = sorted({channel for dataset in datasets for channel in dataset.channel_names if channel not in target})
+        return aligned, target, dropped
+
     @classmethod
-    def concatenate(cls, datasets: list[Self], *, name: str = "dataset") -> Self:
-        """Concatenate compatible epoch datasets along the epoch axis."""
+    def concatenate(cls, datasets: list[Self], *, name: str = "dataset", channel_policy: str = "exact") -> Self:
+        """Concatenate compatible epoch datasets along the epoch axis.
+
+        ``channel_policy='exact'`` is the safest default. ``intersection`` keeps
+        the channel intersection in the first dataset's order. ``first_dataset``
+        requires every later dataset to contain all first-dataset channels and
+        drops any additional later-dataset channels.
+        """
 
         if not datasets:
             raise ValueError("At least one dataset is required for concatenation.")
@@ -67,18 +118,19 @@ class EpochDataset:
         for dataset in datasets[1:]:
             if not np.allclose(reference.times, dataset.times, rtol=0.0, atol=1e-9):
                 raise ValueError("Cannot concatenate datasets with different time axes.")
-            if reference.channel_names != dataset.channel_names:
-                raise ValueError("Cannot concatenate datasets with different channel names or channel order.")
 
+        aligned, channel_names, dropped_channels = cls._aligned_datasets(datasets, channel_policy)
         provenance = {
             "sources": [dataset.provenance for dataset in datasets],
             "dataset_names": [dataset.name for dataset in datasets],
+            "channel_policy": channel_policy,
+            "dropped_channels": dropped_channels,
         }
         return cls(
-            data=np.concatenate([dataset.data for dataset in datasets], axis=0),
+            data=np.concatenate([dataset.data for dataset in aligned], axis=0),
             times=reference.times.copy(),
-            channel_names=list(reference.channel_names),
-            metadata=pd.concat([dataset.metadata for dataset in datasets], ignore_index=True),
+            channel_names=channel_names,
+            metadata=pd.concat([dataset.metadata for dataset in aligned], ignore_index=True),
             name=name,
             sensor_geometry=reference.sensor_geometry,
             provenance=provenance,

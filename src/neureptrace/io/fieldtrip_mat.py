@@ -351,13 +351,96 @@ def _metadata_columns_from_config(config: Mapping[str, Any]) -> tuple[MetadataCo
     return tuple(specs)
 
 
+def _metadata_maps(config: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = config.get("metadata", {}) or {}
+    if not isinstance(metadata, Mapping):
+        return {}
+    return dict(metadata.get("maps", {}) or {})
+
+
+def _metadata_filters(config: Mapping[str, Any]) -> list[dict[str, Any]]:
+    metadata = config.get("metadata", {}) or {}
+    if not isinstance(metadata, Mapping):
+        return []
+    return list(metadata.get("filters", []) or [])
+
+
+def _lookup_mapping(mapping: Mapping[Any, Any], value: Any) -> Any:
+    if value in mapping:
+        return mapping[value]
+    text = str(value)
+    if text in mapping:
+        return mapping[text]
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        numeric = None
+    if numeric is not None and numeric in mapping:
+        return mapping[numeric]
+    return value
+
+
+def _apply_metadata_maps(metadata: pd.DataFrame, maps: Mapping[str, Any]) -> pd.DataFrame:
+    if not maps:
+        return metadata
+    mapped = metadata.copy()
+    for column_name, mapping in maps.items():
+        if column_name not in mapped.columns:
+            raise ValueError(f"metadata.maps configured unknown column '{column_name}'.")
+        if not isinstance(mapping, Mapping):
+            raise ValueError(f"metadata.maps.{column_name} must be a mapping.")
+        mapped[column_name] = mapped[column_name].map(
+            lambda value, mapping=mapping: _lookup_mapping(mapping, value)
+        )
+    return mapped
+
+
+def _filter_mask(metadata: pd.DataFrame, filters: list[dict[str, Any]]) -> np.ndarray:
+    mask = np.ones(len(metadata), dtype=bool)
+    for filter_spec in filters:
+        column_name = str(filter_spec["column"])
+        if column_name not in metadata.columns:
+            raise ValueError(f"metadata.filters configured unknown column '{column_name}'.")
+        values = metadata[column_name]
+        if "include" in filter_spec:
+            include = filter_spec["include"]
+            if not isinstance(include, list):
+                include = [include]
+            mask &= values.isin(include).to_numpy()
+        if "exclude" in filter_spec:
+            exclude = filter_spec["exclude"]
+            if not isinstance(exclude, list):
+                exclude = [exclude]
+            mask &= ~values.isin(exclude).to_numpy()
+    return mask
+
+
+def _apply_metadata_transforms(
+    metadata: pd.DataFrame,
+    data: np.ndarray,
+    config: Mapping[str, Any],
+) -> tuple[pd.DataFrame, np.ndarray]:
+    transformed = _apply_metadata_maps(metadata, _metadata_maps(config))
+    filters = _metadata_filters(config)
+    if not filters:
+        return transformed, data
+    mask = _filter_mask(transformed, filters)
+    if not np.any(mask):
+        raise ValueError("metadata.filters removed all trials.")
+    return transformed.loc[mask].reset_index(drop=True), data[mask]
+
+
 def load_fieldtrip_mat_epochs(
     path: str | Path,
     config: Mapping[str, Any] | None = None,
     *,
     extra_metadata: Mapping[str, Any] | None = None,
 ) -> EpochDataset:
-    """Load a FieldTrip MATLAB file into the neutral ``EpochDataset`` form."""
+    """Load a FieldTrip MATLAB file into the neutral ``EpochDataset`` form.
+
+    ``metadata.maps`` and ``metadata.filters`` can recode and select trials
+    without Python code in project-specific call sites.
+    """
 
     config = dict(config or {})
     fields = config.get("fields", {}) or {}
@@ -395,12 +478,13 @@ def load_fieldtrip_mat_epochs(
     )
     epochs, metadata = load_fieldtrip_mat(path, spec)
     metadata = metadata.reset_index(drop=True).copy()
+    data = epochs.get_data(copy=True)
+    metadata, data = _apply_metadata_transforms(metadata, data, config)
     for key, value in dict(extra_metadata or {}).items():
         if key not in metadata:
             metadata[key] = value
-    epochs.metadata = metadata
     return EpochDataset(
-        data=epochs.get_data(copy=True),
+        data=data,
         times=epochs.times.copy(),
         channel_names=list(epochs.ch_names),
         metadata=metadata,

@@ -33,6 +33,7 @@ COMMAND_MODULES = {
     "temporal-smoothing": "neureptrace.temporal_smoothing",
     "temporal-state-workflow": "neureptrace.temporal_state_workflow",
     "transfer-decode": "neureptrace.epoch_transfer_decode",
+    "transfer-from-config": "neureptrace.transfer_from_config",
     "time-transfer-decode": "neureptrace.time_transfer_decode",
     "validate-dataset-config": "neureptrace.dataset_config",
     "validate-manifest": "neureptrace.validate_manifest",

@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
 from neureptrace.dataset_config import (
     apply_overrides,
+    effective_config,
     expand_path,
     load_config,
     load_epoch_dataset_from_config,
+    provenance_payload,
 )
-from neureptrace.mne_time_decode import DEFAULT_BASELINE_WINDOW, run_time_resolved_decode
+from neureptrace import mne_time_decode
+from neureptrace.mne_time_decode import DEFAULT_BASELINE_WINDOW
 
 
 def _section(config: Mapping[str, Any], name: str) -> dict[str, Any]:
@@ -38,10 +41,43 @@ def _window_ms(
     return default
 
 
+def _find_project_root(start: Path) -> Path:
+    """Find a repository-like project root, falling back to the current directory."""
+
+    for candidate in (start, *start.parents):
+        if (candidate / "pyproject.toml").exists() or (candidate / ".git").exists():
+            return candidate
+    return Path.cwd()
+
+
+def _base_for_policy(config: Mapping[str, Any], *, config_dir: Path) -> Path:
+    paths = _section(config, "paths")
+    policy = str(
+        paths.get("base", paths.get("relative_to", "cwd"))
+    ).strip().lower().replace("-", "_")
+    if policy in {"cwd", "current_working_directory"}:
+        return Path.cwd()
+    if policy == "config_dir":
+        return config_dir
+    if policy == "project_root":
+        return _find_project_root(config_dir)
+    raise ValueError("paths.base must be one of: cwd, config_dir, project_root.")
+
+
+def _output_base_dir(config: Mapping[str, Any], *, config_dir: Path) -> Path:
+    outputs = _section(config, "outputs")
+    policy_base = _base_for_policy(config, config_dir=config_dir)
+    base_dir = outputs.get("base_dir") or outputs.get("dir")
+    if base_dir in {None, ""}:
+        return policy_base
+    dataset_name = str(_section(config, "dataset").get("name", "dataset"))
+    return expand_path(str(base_dir).format(dataset=dataset_name), base_dir=policy_base)
+
+
 def _resolve_output(
     config: Mapping[str, Any],
     *,
-    base_dir: Path,
+    config_dir: Path,
     key: str,
     default: str | None = None,
 ) -> Path | None:
@@ -51,10 +87,13 @@ def _resolve_output(
         return None
     dataset_name = str(_section(config, "dataset").get("name", "dataset"))
     formatted = str(value).format(dataset=dataset_name)
-    return expand_path(formatted, base_dir=base_dir)
+    path = Path(formatted)
+    if path.is_absolute():
+        return path
+    return _output_base_dir(config, config_dir=config_dir) / path
 
 
-def _decode_kwargs(config: Mapping[str, Any], *, base_dir: Path) -> dict[str, Any]:
+def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, Any]:
     preprocessing = _section(config, "preprocessing")
     decoding = _section(config, "decoding") or _section(config, "workflow")
     if "label_column" not in decoding:
@@ -71,7 +110,7 @@ def _decode_kwargs(config: Mapping[str, Any], *, base_dir: Path) -> dict[str, An
         "group_column": decoding.get("group_column"),
         "out_path": _resolve_output(
             config,
-            base_dir=base_dir,
+            config_dir=config_dir,
             key="summary_csv",
             default="results/{dataset}_summary.csv",
         ),
@@ -110,13 +149,13 @@ def _decode_kwargs(config: Mapping[str, Any], *, base_dir: Path) -> dict[str, An
         "tuning_c_grid": decoding.get("tuning_c_grid"),
         "calibration_out_path": _resolve_output(
             config,
-            base_dir=base_dir,
+            config_dir=config_dir,
             key="calibration_csv",
         ),
         "calibration_bins": int(decoding.get("calibration_bins", 10)),
         "observation_out_path": _resolve_output(
             config,
-            base_dir=base_dir,
+            config_dir=config_dir,
             key="observations_csv",
         ),
         "subject": decoding.get("subject"),
@@ -126,32 +165,88 @@ def _decode_kwargs(config: Mapping[str, Any], *, base_dir: Path) -> dict[str, An
     }
 
 
+def _output_paths_from_kwargs(kwargs: Mapping[str, Any]) -> list[Path]:
+    paths: list[Path] = []
+    for key in ("out_path", "calibration_out_path", "observation_out_path"):
+        value = kwargs.get(key)
+        if value is not None:
+            paths.append(Path(value))
+    return paths
+
+
+def _write_provenance_sidecars(
+    config: Mapping[str, Any],
+    *,
+    config_path: Path,
+    config_dir: Path,
+    output_paths: Sequence[Path],
+) -> None:
+    outputs = _section(config, "outputs")
+    if not bool(outputs.get("provenance", True)):
+        return
+    payload = provenance_payload(
+        config,
+        config_path=config_path,
+        base_dir=config_dir,
+        include_file_hashes=bool(outputs.get("hash_input_files", True)),
+    )
+    for output_path in output_paths:
+        sidecar = Path(str(output_path) + ".provenance.json")
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.write_text(
+            json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",
+            encoding="utf-8",
+        )
+
+
+def _run_time_decode_in_memory(dataset, *, channel_type: str, kwargs: dict[str, Any]):
+    """Run the existing MNE decoder without writing a temporary FIF file."""
+
+    epochs = dataset.to_mne_epochs(channel_type=channel_type)
+    metadata = dataset.metadata.reset_index(drop=True).copy()
+    original_loader = mne_time_decode._load_epochs_and_metadata
+
+    def _configured_loader(_epochs_path, _metadata_csv, **_kwargs):
+        return epochs, metadata
+
+    mne_time_decode._load_epochs_and_metadata = _configured_loader
+    try:
+        return mne_time_decode.run_time_resolved_decode(
+            epochs_path=Path("<configured-in-memory-epochs>"),
+            metadata_csv=None,
+            **kwargs,
+        )
+    finally:
+        mne_time_decode._load_epochs_and_metadata = original_loader
+
+
 def run_decode_from_config(
     config_path: str | Path,
     *,
     overrides: Sequence[str] | None = None,
+    write_provenance: bool | None = None,
 ):
     """Load a dataset config and run the configured time-resolved decoder."""
 
     config_path = Path(config_path)
     config = apply_overrides(load_config(config_path), overrides)
+    if write_provenance is not None:
+        config.setdefault("outputs", {})["provenance"] = bool(write_provenance)
     dataset = load_epoch_dataset_from_config(
         config,
         base_dir=config_path.parent,
         check_files=True,
     )
     channel_type = str(_section(config, "dataset").get("channel_type", "mag"))
-    epochs = dataset.to_mne_epochs(channel_type=channel_type)
-    kwargs = _decode_kwargs(config, base_dir=config_path.parent)
-
-    with TemporaryDirectory(prefix="neureptrace-config-") as tmpdir:
-        epochs_path = Path(tmpdir) / "configured-epo.fif"
-        epochs.save(epochs_path, overwrite=True, verbose="error")
-        return run_time_resolved_decode(
-            epochs_path=epochs_path,
-            metadata_csv=None,
-            **kwargs,
-        )
+    kwargs = _decode_kwargs(config, config_dir=config_path.parent)
+    results = _run_time_decode_in_memory(dataset, channel_type=channel_type, kwargs=kwargs)
+    _write_provenance_sidecars(
+        config,
+        config_path=config_path,
+        config_dir=config_path.parent,
+        output_paths=_output_paths_from_kwargs(kwargs),
+    )
+    return results
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -166,9 +261,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=[],
         help="Override a dotted config key, e.g. --set decoding.classifier=lda.",
     )
+    parser.add_argument(
+        "--print-effective-config",
+        action="store_true",
+        help="Print the effective config and exit without decoding.",
+    )
+    parser.add_argument(
+        "--no-provenance",
+        action="store_true",
+        help="Do not write .provenance.json sidecars next to output CSVs.",
+    )
     args = parser.parse_args(argv)
 
-    results = run_decode_from_config(args.config, overrides=args.overrides)
+    config = apply_overrides(load_config(args.config), args.overrides)
+    if args.print_effective_config:
+        print(
+            json.dumps(
+                effective_config(config, base_dir=args.config.parent),
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+        )
+        return 0
+
+    results = run_decode_from_config(
+        args.config,
+        overrides=args.overrides,
+        write_provenance=not args.no_provenance,
+    )
     print(f"Wrote {len(results)} decoding rows from {args.config}")
     return 0
 

@@ -10,6 +10,7 @@ nav:
   - Data Staging: data-staging.md
   - Dataset Configuration: dataset-config.md
   - Migrating from PyMEGDec: migrating-from-pymegdec.md
+  - Transfer from Config: transfer-from-config.md
   - Benchmarking: benchmarking.md
   - API Overview: api-overview.md
   - Reference:

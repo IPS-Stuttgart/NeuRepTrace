@@ -7,6 +7,7 @@ import copy
 import json
 import os
 from collections.abc import Iterable, Mapping, Sequence
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from neureptrace.io.fieldtrip_mat import load_fieldtrip_mat_epochs
 
 SUPPORTED_DATASET_TYPES = {"fieldtrip_mat", "mne_epochs"}
 DEFAULT_SCHEMA_VERSION = "neureptrace.dataset.v1"
+CHANNEL_POLICIES = {"exact", "intersection", "first_dataset"}
 
 
 class ConfigValidationError(ValueError):
@@ -150,11 +152,76 @@ def expand_path(value: str | Path, *, base_dir: str | Path, root: str | Path | N
     return Path(base_dir) / path
 
 
+def _normalize_path_for_json(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _normalize_path_for_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_path_for_json(item) for item in value]
+    if isinstance(value, tuple):
+        return [_normalize_path_for_json(item) for item in value]
+    return value
+
+
+def stable_config_hash(config: Mapping[str, Any]) -> str:
+    """Return a stable SHA-256 hash for a JSON/YAML config mapping."""
+
+    payload = json.dumps(_normalize_path_for_json(dict(config)), sort_keys=True, default=str, separators=(",", ":"))
+    return "sha256:" + sha256(payload.encode("utf-8")).hexdigest()
+
+
+def file_sha256(path: str | Path, *, chunk_size: int = 1024 * 1024) -> str:
+    """Return a SHA-256 hash for a file."""
+
+    digest = sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(chunk_size), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def effective_config(
+    config: Mapping[str, Any],
+    *,
+    base_dir: str | Path = ".",
+    include_resolved_files: bool = True,
+) -> dict[str, Any]:
+    """Return a printable config with defaults, expanded participants, and resolved input files."""
+
+    rendered = copy.deepcopy(dict(config))
+    rendered.setdefault("schema_version", DEFAULT_SCHEMA_VERSION)
+    participants = rendered.setdefault("participants", {})
+    if isinstance(participants, dict) and "ids" in participants:
+        participants["expanded_ids"] = parse_participant_ids(participants.get("ids"))
+    if include_resolved_files:
+        try:
+            rendered["resolved_input_files"] = [str(path) for path in iter_dataset_files(rendered, base_dir=base_dir)]
+        except Exception as exc:  # pragma: no cover - best-effort diagnostic rendering
+            rendered["resolved_input_files_error"] = str(exc)
+    rendered["effective_config_hash"] = stable_config_hash(rendered)
+    return rendered
+
+
 def _dataset_section(config: Mapping[str, Any]) -> dict[str, Any]:
     dataset = config.get("dataset")
     if not isinstance(dataset, dict):
         raise ConfigValidationError("Config must contain a 'dataset' mapping.")
     return dataset
+
+
+def _metadata_section(config: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = config.get("metadata", {}) or {}
+    if not isinstance(metadata, dict):
+        raise ConfigValidationError("Config section 'metadata' must be a mapping.")
+    return metadata
+
+
+def _validation_section(config: Mapping[str, Any]) -> dict[str, Any]:
+    validation = config.get("validation", {}) or {}
+    if not isinstance(validation, dict):
+        raise ConfigValidationError("Config section 'validation' must be a mapping.")
+    return validation
 
 
 def validate_dataset_config(
@@ -189,6 +256,20 @@ def validate_dataset_config(
         if has_participant_template and not parse_participant_ids(participants.get("ids")):
             raise ConfigValidationError("fieldtrip_mat participant templates require participants.ids.")
 
+    metadata = _metadata_section(config)
+    for column in metadata.get("columns", []) or []:
+        if not isinstance(column, dict) or "name" not in column or "index" not in column:
+            raise ConfigValidationError("metadata.columns entries must contain name and index.")
+    for filter_spec in metadata.get("filters", []) or []:
+        if not isinstance(filter_spec, dict) or "column" not in filter_spec:
+            raise ConfigValidationError("metadata.filters entries must contain a column.")
+        if "include" not in filter_spec and "exclude" not in filter_spec:
+            raise ConfigValidationError("metadata.filters entries must contain include or exclude.")
+
+    channel_policy = str(_validation_section(config).get("channel_policy", "exact"))
+    if channel_policy not in CHANNEL_POLICIES:
+        raise ConfigValidationError(f"validation.channel_policy must be one of {sorted(CHANNEL_POLICIES)}.")
+
     decoding = config.get("decoding", {}) or config.get("workflow", {}) or {}
     if isinstance(decoding, dict) and "label_column" not in decoding:
         warnings.append("No decoding.label_column was configured; decode-from-config will require one.")
@@ -207,7 +288,11 @@ def iter_dataset_files(config: Mapping[str, Any], *, base_dir: str | Path = ".")
     dataset_type = dataset.get("type")
     root = dataset.get("root")
     if dataset_type == "mne_epochs":
-        return [expand_path(dataset.get("epochs") or dataset.get("epochs_file"), base_dir=base_dir, root=root)]
+        files = [expand_path(dataset.get("epochs") or dataset.get("epochs_file"), base_dir=base_dir, root=root)]
+        metadata_csv = dataset.get("metadata_csv")
+        if metadata_csv:
+            files.append(expand_path(metadata_csv, base_dir=base_dir, root=root))
+        return files
 
     if dataset_type != "fieldtrip_mat":
         return []
@@ -316,9 +401,34 @@ def load_epoch_dataset_from_config(
             for path, extra_metadata in _fieldtrip_file_specs(config, base_dir=effective_base_dir)
         ]
         name = str(dataset.get("name") or "fieldtrip_mat")
-        return loaded[0] if len(loaded) == 1 else EpochDataset.concatenate(loaded, name=name)
+        channel_policy = str(_validation_section(config).get("channel_policy", "exact"))
+        return loaded[0] if len(loaded) == 1 else EpochDataset.concatenate(loaded, name=name, channel_policy=channel_policy)
 
     raise ConfigValidationError(f"Unsupported dataset.type: {dataset_type}")
+
+
+def provenance_payload(
+    config: Mapping[str, Any],
+    *,
+    config_path: str | Path,
+    base_dir: str | Path,
+    include_file_hashes: bool = True,
+) -> dict[str, Any]:
+    """Build a reproducibility payload for config-driven outputs."""
+
+    inputs = []
+    for path in iter_dataset_files(config, base_dir=base_dir):
+        entry = {"path": str(path)}
+        if include_file_hashes and path.exists():
+            entry["sha256"] = file_sha256(path)
+        inputs.append(entry)
+    return {
+        "schema_version": config.get("schema_version", DEFAULT_SCHEMA_VERSION),
+        "config_path": str(config_path),
+        "effective_config_hash": stable_config_hash(config),
+        "input_files": inputs,
+        "random_seed": 13,
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -327,11 +437,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate a NeuRepTrace dataset config.")
     parser.add_argument("config", type=Path)
     parser.add_argument("--check-files", action="store_true", help="Require configured input files to exist.")
+    parser.add_argument("--print-effective-config", action="store_true", help="Print the config after overrides, defaults, participant expansion, and input-file resolution.")
     parser.add_argument("--set", dest="overrides", action="append", default=[], help="Override a dotted config key, e.g. --set participants.ids='[2,3]'.")
     args = parser.parse_args(argv)
 
     config = apply_overrides(load_config(args.config), args.overrides)
     warnings = validate_dataset_config(config, base_dir=args.config.parent, check_files=args.check_files)
+    if args.print_effective_config:
+        print(json.dumps(effective_config(config, base_dir=args.config.parent), indent=2, sort_keys=True, default=str))
     print(f"Validated {args.config}")
     for warning in warnings:
         print(f"Warning: {warning}")
