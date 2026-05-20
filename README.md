@@ -47,11 +47,14 @@ onset/state inference, confusion and per-class metrics, MNE `Epochs` decoding,
 and generic summary-table/reporting helpers here.
 
 Dataset-specific projects should adapt their own file formats and experimental
-conventions into NeuRepTrace's feature-matrix and probability-observation
-interfaces. In particular, PyMEGDec owns the MATLAB `.mat` loaders, the
-`Part*Data.mat` / `Part*CueData.mat` participant-file conventions, CTF sensor
-geometry handling, alpha analyses, stimulus-specific defaults, and
-paper-facing export scripts for the MEG dataset it was developed around.
+conventions into NeuRepTrace's feature-matrix, MNE `Epochs`, and
+probability-observation interfaces. Generic FieldTrip-style MATLAB loading is
+available in `neureptrace.io.fieldtrip_mat`; dataset-specific filename
+templates such as `Part{participant}Data.mat` and
+`Part{participant}CueData.mat` should be supplied by config files or thin
+project wrappers rather than hard-coded in NeuRepTrace. PyMEGDec-style
+paper-specific alpha analyses, stimulus defaults, and export scripts remain
+outside the core package unless they are generalized into reusable workflows.
 
 ## Installation
 

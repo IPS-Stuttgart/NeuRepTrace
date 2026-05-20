@@ -10,6 +10,7 @@ from importlib import import_module
 COMMAND_MODULES = {
     "benchmark": "neureptrace.benchmark",
     "continuous-stimulus-scan": "neureptrace.continuous_stimulus_scan",
+    "decode-from-config": "neureptrace.decode_from_config",
     "dataset-manifest": "neureptrace.dataset_manifest",
     "epoch-transfer-decode": "neureptrace.epoch_transfer_decode",
     "ensemble-observations": "neureptrace.observation_ensemble",
@@ -32,6 +33,7 @@ COMMAND_MODULES = {
     "temporal-state-workflow": "neureptrace.temporal_state_workflow",
     "transfer-decode": "neureptrace.epoch_transfer_decode",
     "time-transfer-decode": "neureptrace.time_transfer_decode",
+    "validate-dataset-config": "neureptrace.validate_dataset_config",
     "validate-manifest": "neureptrace.validate_manifest",
     "validate-observations": "neureptrace.observation_schema",
 }

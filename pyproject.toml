@@ -13,6 +13,7 @@ packages = [
 [tool.poetry.scripts]
 neureptrace = "neureptrace.cli:main"
 neureptrace-benchmark = "neureptrace.benchmark:main"
+neureptrace-decode-from-config = "neureptrace.decode_from_config:main"
 neureptrace-dataset-manifest = "neureptrace.dataset_manifest:main"
 neureptrace-epoch-transfer-decode = "neureptrace.epoch_transfer_decode:main"
 neureptrace-fieldtrip-to-mne = "neureptrace.fieldtrip_mat:main"
@@ -29,6 +30,7 @@ neureptrace-temporal-model = "neureptrace.temporal_model:main"
 neureptrace-temporal-smoothing = "neureptrace.temporal_smoothing:main"
 neureptrace-temporal-state-workflow = "neureptrace.temporal_state_workflow:main"
 neureptrace-time-transfer-decode = "neureptrace.time_transfer_decode:main"
+neureptrace-validate-dataset-config = "neureptrace.validate_dataset_config:main"
 neureptrace-validate-manifest = "neureptrace.validate_manifest:main"
 neureptrace-validate-observations = "neureptrace.observation_schema:main"
 
