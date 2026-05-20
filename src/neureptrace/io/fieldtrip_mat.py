@@ -23,6 +23,8 @@ import mne
 import numpy as np
 import pandas as pd
 
+from neureptrace.io.dataset import EpochDataset
+
 
 @dataclass(frozen=True)
 class MetadataColumnSpec:
@@ -330,6 +332,81 @@ def load_fieldtrip_mat(path: str | Path, spec: FieldTripMatSpec | None = None) -
     metadata = _metadata_with_constants(metadata, participant=spec.participant, condition=spec.condition)
     epochs.metadata = metadata
     return epochs, metadata
+
+
+def _metadata_columns_from_config(config: Mapping[str, Any]) -> tuple[MetadataColumnSpec, ...]:
+    metadata_config = config.get("metadata", {}) or {}
+    columns = metadata_config.get("columns", []) if isinstance(metadata_config, Mapping) else []
+    specs: list[MetadataColumnSpec] = []
+    for column in columns:
+        if not isinstance(column, Mapping):
+            raise ValueError("metadata.columns entries must be mappings")
+        specs.append(
+            MetadataColumnSpec(
+                name=str(column["name"]),
+                index=int(column["index"]),
+                optional=bool(column.get("optional", False)),
+            )
+        )
+    return tuple(specs)
+
+
+def load_fieldtrip_mat_epochs(
+    path: str | Path,
+    config: Mapping[str, Any] | None = None,
+    *,
+    extra_metadata: Mapping[str, Any] | None = None,
+) -> EpochDataset:
+    """Load a FieldTrip MATLAB file into the neutral ``EpochDataset`` form."""
+
+    config = dict(config or {})
+    fields = config.get("fields", {}) or {}
+    if not isinstance(fields, Mapping):
+        raise ValueError("fields must be a mapping when provided")
+    validation = config.get("validation", {}) or {}
+    if not isinstance(validation, Mapping):
+        raise ValueError("validation must be a mapping when provided")
+    spec = FieldTripMatSpec(
+        variable=config.get("variable"),
+        trial_field=str(fields.get("trial", config.get("trial_field", "trial"))),
+        time_field=str(fields.get("time", config.get("time_field", "time"))),
+        label_field=str(fields.get("label", config.get("label_field", "label"))),
+        trialinfo_field=fields.get(
+            "trialinfo", config.get("trialinfo_field", "trialinfo")
+        ),
+        sensor_geometry_field=fields.get(
+            "sensor_geometry", config.get("sensor_geometry_field", "grad")
+        ),
+        metadata_columns=_metadata_columns_from_config(config),
+        ch_types=config.get("channel_type", config.get("ch_types", "mag")),
+        trim_channel_labels_to_data=bool(
+            validation.get(
+                "trim_channel_labels_to_data",
+                config.get("trim_channel_labels_to_data", True),
+            )
+        ),
+        require_equal_trial_time_lengths=bool(
+            validation.get("require_equal_trial_time_lengths", True)
+        ),
+        require_trialinfo_rows_equal_trials=bool(
+            validation.get("require_trialinfo_rows_equal_trials", True)
+        ),
+        condition=config.get("condition"),
+    )
+    epochs, metadata = load_fieldtrip_mat(path, spec)
+    metadata = metadata.reset_index(drop=True).copy()
+    for key, value in dict(extra_metadata or {}).items():
+        if key not in metadata:
+            metadata[key] = value
+    epochs.metadata = metadata
+    return EpochDataset(
+        data=epochs.get_data(copy=True),
+        times=epochs.times.copy(),
+        channel_names=list(epochs.ch_names),
+        metadata=metadata,
+        name=str(config.get("name") or Path(path).stem),
+        provenance={"path": str(path), "loader": "fieldtrip_mat"},
+    )
 
 
 def _expand_participants(participants: Iterable[str | int] | None) -> list[str] | None:

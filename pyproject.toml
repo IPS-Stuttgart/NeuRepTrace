@@ -30,7 +30,7 @@ neureptrace-temporal-model = "neureptrace.temporal_model:main"
 neureptrace-temporal-smoothing = "neureptrace.temporal_smoothing:main"
 neureptrace-temporal-state-workflow = "neureptrace.temporal_state_workflow:main"
 neureptrace-time-transfer-decode = "neureptrace.time_transfer_decode:main"
-neureptrace-validate-dataset-config = "neureptrace.validate_dataset_config:main"
+neureptrace-validate-dataset-config = "neureptrace.dataset_config:main"
 neureptrace-validate-manifest = "neureptrace.validate_manifest:main"
 neureptrace-validate-observations = "neureptrace.observation_schema:main"
 

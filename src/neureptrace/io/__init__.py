@@ -7,18 +7,22 @@ files or thin project repositories that call these adapters.
 
 from __future__ import annotations
 
+from neureptrace.io.dataset import EpochDataset
 from neureptrace.io.fieldtrip_mat import (
     FieldTripMatSpec,
     MetadataColumnSpec,
     ParticipantMatFiles,
     discover_participant_mat_files,
     load_fieldtrip_mat,
+    load_fieldtrip_mat_epochs,
 )
 
 __all__ = [
+    "EpochDataset",
     "FieldTripMatSpec",
     "MetadataColumnSpec",
     "ParticipantMatFiles",
     "discover_participant_mat_files",
     "load_fieldtrip_mat",
+    "load_fieldtrip_mat_epochs",
 ]

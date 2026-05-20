@@ -15,6 +15,8 @@ sequences.
 NeuRepTrace currently provides tools for:
 
 - time-resolved decoding from MNE `Epochs` files;
+- config-driven dataset loading from MNE `Epochs` files and FieldTrip-like
+  MATLAB `.mat` files;
 - held-out trial/time probability observation exports for downstream state
   models;
 - onset-detection summaries from probability traces, with baseline-window
@@ -39,7 +41,7 @@ NeuRepTrace currently provides tools for:
 - CSV aggregation, plotting, reporting, and subject-level inference for
   downstream interpretation.
 
-## Project boundary with PyMEGDec
+## Dataset configuration and PyMEGDec migration
 
 NeuRepTrace owns the dataset-independent M/EEG decoding layer. Keep reusable
 feature-matrix decoding, classifier calibration, temporal generalization,
@@ -74,6 +76,7 @@ python -m pip install -e .
 
 Installed environments expose both a grouped `neureptrace` command and focused
 workflow commands such as `neureptrace-benchmark`, `neureptrace-mne-time-decode`,
+`neureptrace-decode-from-config`, `neureptrace-validate-dataset-config`,
 `neureptrace-onset-detect`, `neureptrace-continuous-stimulus-scan`,
 `neureptrace-stimulus-detect`, and
 `neureptrace-temporal-model`. The equivalent `python -m neureptrace.<module>` forms
@@ -121,6 +124,13 @@ neureptrace-mne-time-decode \
   --group-column session \
   --out results/nod_sub-01_animate.csv \
   --observations-out results/nod_sub-01_animate_observations.csv
+```
+
+Run the same style of workflow from a dataset config:
+
+```bash
+neureptrace-validate-dataset-config configs/bush_meg/stimulus_decoding.yml
+neureptrace-decode-from-config configs/bush_meg/stimulus_decoding.yml
 ```
 
 Plot the resulting time course:
