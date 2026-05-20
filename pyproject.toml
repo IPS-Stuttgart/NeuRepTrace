@@ -41,7 +41,7 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.14"
+python = ">=3.11,<3.15"
 joblib = "*"
 matplotlib = "*"
 mne = "*"
@@ -87,7 +87,7 @@ markers = [
 ]
 
 [tool.pylint.MAIN]
-py-version = "3.13"
+py-version = "3.14"
 fail-under = 10
 ignore = ["CVS"]
 

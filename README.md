@@ -81,7 +81,7 @@ configs. See `docs/dataset-specs.md` for the schema and loader contract.
 
 ## Installation
 
-NeuRepTrace requires Python 3.11 or newer and earlier than Python 3.14.
+NeuRepTrace requires Python 3.11 or newer and earlier than Python 3.15.
 
 For development from a source checkout, use Poetry:
 
