@@ -33,7 +33,6 @@ from neureptrace.fieldtrip_mat import INPUT_FORMAT_CHOICES, load_fieldtrip_raw_m
 from neureptrace.metrics import brier_score_multiclass, expected_calibration_error, reliability_bins
 from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
-INPUT_FORMAT_CHOICES = ("mne-epochs", "fieldtrip-mat")
 FIELDTRIP_DEFAULT_ROOT_PATH = ("data", 0)
 EMISSION_RUN_CHOICES = (*EMISSION_MODE_CHOICES, "both")
 FEATURE_PREPROCESSOR_RUN_CHOICES = (*FEATURE_PREPROCESSOR_CHOICES, "pca-whiten", "anova-select", "select-percentile")

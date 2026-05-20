@@ -12,7 +12,6 @@ from sklearn.preprocessing import LabelEncoder
 from neureptrace.decoding import (
     DECODER_CLI_CHOICES,
     EMISSION_MODE_CHOICES,
-    FEATURE_PREPROCESSOR_CHOICES,
     TUNING_SCORING_CHOICES,
     make_decoder,
     normalize_anova_select_percentile,
@@ -127,7 +126,6 @@ def _load_transfer_inputs(
 
     train_keep, train_labels, encoder = _encoded_labels(train_metadata, label_column=label_column)
     validation_keep, validation_labels, encoder = _encoded_labels(validation_metadata, label_column=label_column, encoder=encoder)
-    train_original_indices = np.arange(len(train_metadata))[train_keep]
     validation_original_indices = np.arange(len(validation_metadata))[validation_keep]
 
     train_epochs = train_epochs[train_keep]

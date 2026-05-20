@@ -203,17 +203,18 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_path: Path) -> dict[str,
     }
 
 
-def _validate_static_config(config: Mapping[str, Any], *, config_path: Path) -> list[str]:
+def _validate_static_config(config: Mapping[str, Any], *, config_path: Path, check_files: bool = True) -> list[str]:
     problems: list[str] = []
     try:
         kwargs = _decode_kwargs(config, config_path=config_path)
     except DatasetConfigError as exc:
         return [str(exc)]
 
-    if kwargs["metadata_csv"] is not None and not kwargs["metadata_csv"].exists():
-        problems.append(f"metadata_csv does not exist: {kwargs['metadata_csv']}")
-    if not kwargs["epochs_path"].exists():
-        problems.append(f"epochs file does not exist: {kwargs['epochs_path']}")
+    if check_files:
+        if kwargs["metadata_csv"] is not None and not kwargs["metadata_csv"].exists():
+            problems.append(f"metadata_csv does not exist: {kwargs['metadata_csv']}")
+        if not kwargs["epochs_path"].exists():
+            problems.append(f"epochs file does not exist: {kwargs['epochs_path']}")
 
     output_paths = [
         kwargs["out_path"],
@@ -235,7 +236,7 @@ def validate_dataset_config(
     """Return validation problems for a config. An empty list means valid."""
 
     config = load_dataset_config(config_path)
-    problems = _validate_static_config(config, config_path=config_path)
+    problems = _validate_static_config(config, config_path=config_path, check_files=check_files)
     if problems or not check_files:
         return problems
 

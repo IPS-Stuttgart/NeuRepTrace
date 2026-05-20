@@ -47,7 +47,7 @@ def test_manifest_passes_normalization_and_baseline_window(monkeypatch, tmp_path
         out_dir=tmp_path / "out",
     )
 
-    assert run.result_csvs == [tmp_path / "out" / "S1_subject_baseline_whiten_base-0p5_0_time_decode.csv"]
+    assert run.result_csvs == [tmp_path / "out" / "S1_subject_baseline_whiten_basewin-0p5_0_time_decode.csv"]
     assert captured["normalization"] == "subject_baseline_whiten"
     assert captured["baseline_window"] == (-0.5, 0.0)
 

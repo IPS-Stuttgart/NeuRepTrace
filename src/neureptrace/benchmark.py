@@ -155,8 +155,12 @@ def _safe_name(value: str) -> str:
     return value.lower().replace("-", "_").replace(" ", "_").replace(".", "p").replace("|", "_")
 
 
+def _safe_float_name(value: float) -> str:
+    return f"{value:g}".replace(".", "p").replace("+", "")
+
+
 def _safe_window_name(window: TemporalTrainWindow) -> str:
-    return f"trainwin{_safe_name(f'{window[0]:g}')}_{_safe_name(f'{window[1]:g}')}"
+    return f"trainwin{_safe_float_name(window[0])}_{_safe_float_name(window[1])}"
 
 
 def _decoder_output_stem(subject: str, decoder: str, has_decoder_column: bool) -> str:
@@ -205,7 +209,7 @@ def _output_stem(
     if has_normalization_column:
         parts.append(_safe_name(normalization))
     if has_baseline_window_column and baseline_window is not None:
-        parts.append(f"base{_safe_name(f'{baseline_window[0]:g}')}_{_safe_name(f'{baseline_window[1]:g}')}")
+        parts.append(f"basewin{_safe_float_name(baseline_window[0])}_{_safe_float_name(baseline_window[1])}")
     if has_temporal_train_window_column and temporal_train_window is not None:
         parts.append(_safe_window_name(temporal_train_window))
     return "_".join(parts)
