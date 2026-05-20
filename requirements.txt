@@ -3,4 +3,6 @@ matplotlib
 mne
 numpy
 pandas
+PyYAML
 scikit-learn
+scipy

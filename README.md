@@ -58,6 +58,27 @@ project wrappers rather than hard-coded in NeuRepTrace. PyMEGDec-style
 paper-specific alpha analyses, stimulus defaults, and export scripts remain
 outside the core package unless they are generalized into reusable workflows.
 
+Dataset-specific file naming and metadata conventions can also be expressed as
+versioned YAML or JSON dataset specs. Specs describe data roots, participant
+selection, split path templates, metadata files, labels, and workflow defaults;
+loader code remains normal Python. This makes the PyMEGDec `Part*Data.mat` and
+`Part*CueData.mat` conventions portable while PyMEGDec remains a compatibility
+wrapper for paper-specific alpha, CTF geometry, and legacy export scripts.
+
+## Config-driven dataset specs
+
+Dataset specs can be validated and expanded from the grouped CLI:
+
+```bash
+neureptrace dataset validate examples/configs/pymegdec_bushmeg.yml
+neureptrace dataset manifest examples/configs/pymegdec_bushmeg.yml \
+  --workflow stimulus_transfer \
+  --out results/bushmeg_stimulus_manifest.csv
+```
+
+Use YAML for hand-written configs and JSON for generated or CI-controlled
+configs. See `docs/dataset-specs.md` for the schema and loader contract.
+
 ## Installation
 
 NeuRepTrace requires Python 3.11 or newer and earlier than Python 3.14.
