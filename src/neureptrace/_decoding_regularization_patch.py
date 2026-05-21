@@ -8,7 +8,7 @@ removed once the overridden functions are folded directly into
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -47,6 +47,7 @@ def install() -> None:
                 *feature_steps,
                 LogisticRegression(
                     class_weight="balanced",
+                    l1_ratio=1.0,
                     max_iter=max_iter,
                     penalty="l1",
                     random_state=random_state,
@@ -131,7 +132,6 @@ def install() -> None:
         classifier_param: Any = None,
         random_state: int | None = 13,
     ):
-        del classifier_param
         normalized = decoding.normalize_decoder_name(name)
         if normalized not in {"sparse_logistic", "elastic_net_logistic"}:
             return original_make_tuned_decoder(
@@ -143,6 +143,7 @@ def install() -> None:
                 cv=cv,
                 scoring=scoring,
                 c_grid=c_grid,
+                classifier_param=classifier_param,
                 random_state=random_state,
             )
 
