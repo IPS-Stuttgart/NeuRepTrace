@@ -52,6 +52,34 @@ def test_false_alarm_rate_uses_stream_fallback_duration() -> None:
     assert np.isclose(summary.loc[0, "false_alarms_per_minute"], 30.0)
 
 
+def test_empty_grouped_stimulus_summary_reports_zero_detections() -> None:
+    events = pd.DataFrame(columns=["subject", "onset_time", "stimulus_class"])
+    annotations = pd.DataFrame(
+        [
+            {"subject": "subject1", "stream_id": "run1", "annotation_id": 1, "onset_time": 0.1, "stimulus_class": "target"},
+            {"subject": "subject2", "stream_id": "run1", "annotation_id": 1, "onset_time": 0.1, "stimulus_class": "target"},
+        ]
+    )
+    observations = pd.DataFrame(
+        {
+            "subject": ["subject1", "subject1", "subject2", "subject2"],
+            "stream_id": ["run1", "run1", "run1", "run1"],
+            "time": [0.0, 1.0, 0.0, 1.0],
+        }
+    )
+
+    summary = summarize_stimulus_events(
+        events,
+        annotations=annotations,
+        observations=observations,
+        group_columns=("subject",),
+    )
+
+    assert summary["subject"].tolist() == ["subject1", "subject2"]
+    assert summary["n_detections"].tolist() == [0, 0]
+    assert summary["false_negatives"].tolist() == [1, 1]
+
+
 def test_streaming_event_indices_restart_for_each_group_stream_partition() -> None:
     thresholds = pd.DataFrame(
         [
