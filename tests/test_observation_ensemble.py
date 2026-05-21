@@ -98,7 +98,7 @@ def test_ensemble_probability_observations_baseline_debiases_bias() -> None:
     assert effect["probability_true_class"].gt(0.70).all()
 
 
-def test_ensemble_probability_observations_accepts_decoder_aliases() -> None:
+def test_ensemble_probability_observations_accepts_hyphenated_decoder_aliases() -> None:
     observations = _source_observations().replace({"decoder": {"logistic": "multinomial_logistic"}})
 
     ensemble = ensemble_probability_observations(
