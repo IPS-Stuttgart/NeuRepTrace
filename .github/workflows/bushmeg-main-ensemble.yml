@@ -7,6 +7,10 @@ on:
         description: "Participant ids/ranges to include"
         default: "1-4,6,8,9,10,13-27"
         required: true
+      data_root:
+        description: "Directory containing Part*Data.mat files, or empty to auto-detect/download"
+        default: "/home/github-runner/.cache/datasets/Bush_MEG-Data/MEG-Data"
+        required: false
       n_splits:
         description: "Outer grouped CV splits"
         default: "23"
@@ -45,15 +49,14 @@ on:
 
 jobs:
   bushmeg-main-ensemble:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 720
     env:
-      BUSHMEG_DATA_DIR: ${{ github.workspace }}/.cache/bushmeg
-      BUSH_MEG_DATA_DIR: ${{ github.workspace }}/.cache/bushmeg
       BUSHMEG_WEBDAV_URL: ${{ secrets.BUSHMEG_WEBDAV_URL }}
       BUSHMEG_DATA_KEY: ${{ secrets.BUSHMEG_DATA_KEY }}
       BUSHMEG_DATA_PASSWORD: ${{ secrets.BUSHMEG_DATA_PASSWORD }}
       PARTICIPANTS: ${{ github.event.inputs.participants || '1-4,6,8,9,10,13-27' }}
+      REQUESTED_DATA_ROOT: ${{ github.event.inputs.data_root || '/home/github-runner/.cache/datasets/Bush_MEG-Data/MEG-Data' }}
       N_SPLITS: ${{ github.event.inputs.n_splits || '23' }}
       PCA_COMPONENTS: ${{ github.event.inputs.pca_components || '128' }}
       TMIN: ${{ github.event.inputs.tmin || '-0.35' }}
@@ -66,35 +69,119 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Restore BUSH-MEG data cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .cache/bushmeg
-          key: bushmeg-data-v1
-          restore-keys: |
-            bushmeg-data-
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
       - name: Install NeuRepTrace
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
+          set -euo pipefail
+          PYTHON_CMD=""
+          for CANDIDATE in python3.12 python3.13 python3.11 python3 python; do
+            if command -v "$CANDIDATE" >/dev/null 2>&1 && "$CANDIDATE" - <<'PY'
+          import sys
+          raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)
+          PY
+            then
+              PYTHON_CMD="$CANDIDATE"
+              break
+            fi
+          done
+          if [[ -z "$PYTHON_CMD" ]]; then
+            echo "No supported Python found. NeuRepTrace needs Python >=3.11,<3.15." >&2
+            exit 1
+          fi
+          "$PYTHON_CMD" --version
+          "$PYTHON_CMD" -m venv "$GITHUB_WORKSPACE/.workflow-venv"
+          "$GITHUB_WORKSPACE/.workflow-venv/bin/python" -m pip install --upgrade pip
+          "$GITHUB_WORKSPACE/.workflow-venv/bin/python" -m pip install -e .
+          echo "NEUREPTRACE_PYTHON=$GITHUB_WORKSPACE/.workflow-venv/bin/python" >> "$GITHUB_ENV"
 
-      - name: Prepare BUSH-MEG main files
+      - name: Resolve BUSH-MEG main files
+        shell: bash
         run: |
-          python -m neureptrace.bushmeg_data prepare-smoke \
+          set -euo pipefail
+          "$NEUREPTRACE_PYTHON" - <<'PY'
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+
+          from neureptrace.dataset_config import parse_participant_ids
+
+          participants = parse_participant_ids(os.environ["PARTICIPANTS"])
+          candidates = [
+              os.environ.get("REQUESTED_DATA_ROOT", ""),
+              "/home/github-runner/.cache/datasets/Bush_MEG-Data/MEG-Data",
+              "/home/github-runner/.cache/datasets/Bush_MEG-Data",
+              "/home/github-runner/.cache/datasets/bushmeg",
+              "/home/github-runner/.cache/datasets/neureptrace/bushmeg",
+              str(Path(os.environ["GITHUB_WORKSPACE"]) / ".cache" / "bushmeg"),
+          ]
+
+          def present_count(root: Path) -> int:
+              return sum((root / f"Part{participant}Data.mat").is_file() for participant in participants)
+
+          selected = None
+          reports = []
+          for candidate in dict.fromkeys(candidate for candidate in candidates if candidate):
+              root = Path(candidate).expanduser()
+              count = present_count(root) if root.is_dir() else 0
+              reports.append((root, count))
+              if count == len(participants):
+                  selected = root.resolve()
+                  break
+
+          if selected is None and participants:
+              cache_root = Path("/home/github-runner/.cache/datasets")
+              if cache_root.is_dir():
+                  seen = {str(root) for root, _count in reports}
+                  for match in cache_root.rglob(f"Part{participants[0]}Data.mat"):
+                      root = match.parent
+                      if str(root) in seen:
+                          continue
+                      count = present_count(root)
+                      reports.append((root, count))
+                      seen.add(str(root))
+                      if count == len(participants):
+                          selected = root.resolve()
+                          break
+
+          print("BUSH-MEG data-root candidates:")
+          for root, count in reports:
+              print(f"  {root}: {count}/{len(participants)} main files")
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          if selected is not None:
+              with github_env.open("a", encoding="utf-8") as handle:
+                  handle.write(f"BUSHMEG_DATA_DIR={selected}\n")
+                  handle.write(f"BUSH_MEG_DATA_DIR={selected}\n")
+                  handle.write("BUSHMEG_DATA_SOURCE=staged\n")
+              print(f"Using staged BUSH-MEG data: {selected}")
+              raise SystemExit(0)
+
+          download_root = Path(os.environ["GITHUB_WORKSPACE"]) / ".cache" / "bushmeg"
+          with github_env.open("a", encoding="utf-8") as handle:
+              handle.write(f"BUSHMEG_DATA_DIR={download_root}\n")
+              handle.write(f"BUSH_MEG_DATA_DIR={download_root}\n")
+              handle.write("BUSHMEG_DATA_SOURCE=download\n")
+          print(f"No complete staged data root found; will try WebDAV download into {download_root}.")
+          PY
+
+      - name: Download BUSH-MEG main files if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${BUSHMEG_DATA_SOURCE:-}" != "download" ]]; then
+            echo "Using staged BUSH-MEG data at $BUSHMEG_DATA_DIR; download step skipped."
+            exit 0
+          fi
+          "$NEUREPTRACE_PYTHON" -m neureptrace.bushmeg_data prepare-smoke \
             --data-dir "$BUSHMEG_DATA_DIR" \
             --participants "$PARTICIPANTS" \
             --roles main
 
       - name: Run direct NeuRepTrace main-task ensemble
+        shell: bash
         run: |
-          python - <<'PY'
+          "$NEUREPTRACE_PYTHON" - <<'PY'
           from __future__ import annotations
 
           import json
