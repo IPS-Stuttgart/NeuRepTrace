@@ -16,8 +16,8 @@ from neureptrace.mne_time_decode import (
     RESULT_SELECTION_METRIC_CHOICES,
     RESULT_SELECTION_MINIMIZE_METRICS,
     _best_time_by_metric,
-    run_time_resolved_decode as _run_time_resolved_decode,
 )
+from neureptrace.mne_time_decode_foldlocal import run_time_resolved_decode as _run_time_resolved_decode
 from neureptrace.observation_ensemble import (
     DEFAULT_BASELINE_GROUP_COLUMNS as DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS,
     DEFAULT_BASELINE_WINDOW as DEFAULT_ENSEMBLE_BASELINE_WINDOW,
