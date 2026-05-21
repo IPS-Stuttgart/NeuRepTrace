@@ -22,8 +22,8 @@ COMMAND_MODULES = {
     "fieldtrip-to-mne": "neureptrace.fieldtrip_mat",
     "metadata": "neureptrace.metadata",
     "mne-transfer-decode": "neureptrace.epoch_transfer_decode",
-    "mne-time-decode": "neureptrace.mne_time_decode_foldlocal",
-    "mne-time-decode-base": "neureptrace.mne_time_decode",
+    "mne-time-decode": "neureptrace.mne_time_decode_foldlocal_cli",
+    "mne-time-decode-base": "neureptrace.mne_time_decode_cli",
     "mne-time-decode-ensemble": "neureptrace.mne_time_decode_ensemble",
     "observation-ensemble": "neureptrace.observation_ensemble",
     "observation-schema": "neureptrace.observation_schema",
@@ -66,6 +66,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Dispatch installed NeuRepTrace subcommands."""
     if argv is None:
         argv = sys.argv[1:]
+
+    if argv and argv[0] in COMMAND_MODULES:
+        return _run_module_main(argv[0], argv[1:])
 
     parser = argparse.ArgumentParser(description="NeuRepTrace command-line interface.")
     parser.add_argument(
