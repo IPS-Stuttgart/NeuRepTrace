@@ -12,7 +12,7 @@ COMMAND_MODULES = {
     "continuous-stimulus-scan": "neureptrace.continuous_stimulus_scan",
     "dataset": "neureptrace.dataset_spec_cli",
     "dataset-config": "neureptrace.dataset_config",
-    "dataset-spec": "neureptrace.dataset_spec_cli",
+    "dataset-spec": "neureptrace.datasets.spec",
     "decode-from-config": "neureptrace.decode_from_config",
     "dataset-manifest": "neureptrace.dataset_manifest",
     "epoch-transfer-decode": "neureptrace.epoch_transfer_decode",

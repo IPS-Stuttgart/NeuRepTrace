@@ -9,6 +9,11 @@ import pytest
 from scipy.io import savemat
 
 from neureptrace.dataset_spec import expand_manifest, load_dataset_spec, load_split_dataset, parse_subjects, resolve_split, validate_dataset_spec
+from neureptrace.datasets.spec import (
+    build_dataset_file_table as build_dataset_file_table_v1,
+    expand_participant_ids,
+    validate_dataset_spec as validate_dataset_spec_v1,
+)
 
 
 def _write_spec(path: Path, root: Path) -> Path:
@@ -126,3 +131,78 @@ def test_matlab_fieldtrip_loader_returns_trial_dataset(tmp_path: Path) -> None:
     assert dataset.labels is not None
     assert dataset.labels.tolist() == [0, 1]
     assert dataset.channels == ("MEG001", "MEG002")
+
+
+def test_expand_participant_ids_supports_ranges_and_deduplication() -> None:
+    ids = expand_participant_ids(["1-3", 3, 6, {"range": ["08", "10"]}, {"id": "13"}])
+
+    assert ids == ("1", "2", "3", "6", "08", "09", "10", "13")
+
+
+def test_v1_dataset_spec_resolves_env_root_and_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data_dir = tmp_path / "meg"
+    data_dir.mkdir()
+    (data_dir / "Part2Data.mat").write_text("placeholder", encoding="utf-8")
+    (data_dir / "Part2CueData.mat").write_text("placeholder", encoding="utf-8")
+    monkeypatch.setenv("PYMEGDEC_DATA_DIR", str(data_dir))
+
+    spec_path = tmp_path / "dataset.json"
+    spec_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "dataset": {"id": "pymegdec_meg", "root": "${PYMEGDEC_DATA_DIR}", "format": "matlab_struct"},
+                "participants": {"ids": [2], "files": {"main": "Part{participant}Data.mat", "cue": "Part{participant}CueData.mat"}},
+                "roles": {"train": {"file_role": "main"}, "validation": {"file_role": "cue"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validations = validate_dataset_spec_v1(spec_path)
+    table = build_dataset_file_table_v1(spec_path)
+
+    assert all(validation.ok for validation in validations)
+    assert list(table["role"]) == ["train", "validation"]
+    assert table["exists"].all()
+
+
+def test_v1_dataset_spec_reports_bad_role_reference(tmp_path: Path) -> None:
+    data_dir = tmp_path / "meg"
+    data_dir.mkdir()
+    spec_path = tmp_path / "dataset.json"
+    spec_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "dataset": {"id": "example", "root": str(data_dir), "format": "matlab_struct"},
+                "participants": {"ids": [1], "files": {"main": "Part{participant}Data.mat"}},
+                "roles": {"validation": {"file_role": "cue"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validations = validate_dataset_spec_v1(spec_path, check_exists=False)
+    role_validation = next(validation for validation in validations if validation.scope == "roles")
+
+    assert not role_validation.ok
+    assert "not defined in participants.files" in " ".join(role_validation.messages)
+
+
+def test_v1_dataset_spec_can_skip_existence_checks(tmp_path: Path) -> None:
+    spec_path = tmp_path / "dataset.json"
+    spec_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "dataset": {"id": "example", "root": str(tmp_path), "format": "matlab_struct"},
+                "participants": {"ids": ["1-2"], "files": {"main": "Part{participant}Data.mat"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validations = validate_dataset_spec_v1(spec_path, check_exists=False)
+
+    assert all(validation.ok for validation in validations)
