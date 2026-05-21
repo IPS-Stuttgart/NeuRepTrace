@@ -293,7 +293,8 @@ def make_decoder(
                 class_weight="balanced",
                 l1_ratio=1.0,
                 max_iter=max_iter,
-                random_state=13,
+                penalty="l1",
+                random_state=random_state,
                 solver="saga",
             ),
         )
@@ -305,7 +306,8 @@ def make_decoder(
                 class_weight="balanced",
                 l1_ratio=DEFAULT_ELASTIC_NET_L1_RATIO,
                 max_iter=max_iter,
-                random_state=13,
+                penalty="elasticnet",
+                random_state=random_state,
                 solver="saga",
             ),
         )
@@ -426,7 +428,8 @@ def make_tuned_decoder(
                 class_weight="balanced",
                 l1_ratio=1.0,
                 max_iter=max_iter,
-                random_state=13,
+                penalty="l1",
+                random_state=random_state,
                 solver="saga",
             ),
         )
@@ -440,7 +443,8 @@ def make_tuned_decoder(
                 class_weight="balanced",
                 l1_ratio=DEFAULT_ELASTIC_NET_L1_RATIO,
                 max_iter=max_iter,
-                random_state=13,
+                penalty="elasticnet",
+                random_state=random_state,
                 solver="saga",
             ),
         )
