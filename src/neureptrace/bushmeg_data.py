@@ -168,6 +168,7 @@ def prepare_bushmeg_smoke_data(
     username: str | None = None,
     password: str | None = None,
     prefer_existing: bool = True,
+    allow_missing: bool = False,
     timeout: float = 120.0,
 ) -> list[BushMegFile]:
     """Ensure that a small set of BUSH-MEG files exists locally.
@@ -194,19 +195,28 @@ def prepare_bushmeg_smoke_data(
         username=username,
         password=password,
     )
-    resolved_url, resolved_username, resolved_password = _require_credentials(resolved_url, resolved_username, resolved_password)
+    try:
+        resolved_url, resolved_username, resolved_password = _require_credentials(resolved_url, resolved_username, resolved_password)
+    except RuntimeError:
+        if allow_missing:
+            return files
+        raise
 
     for file in missing:
         if prefer_existing and file.local_path.exists():
             continue
-        _download_webdav_file(
-            base_url=resolved_url,
-            username=resolved_username,
-            password=resolved_password,
-            relative_path=file.relative_path,
-            output_path=file.local_path,
-            timeout=timeout,
-        )
+        try:
+            _download_webdav_file(
+                base_url=resolved_url,
+                username=resolved_username,
+                password=resolved_password,
+                relative_path=file.relative_path,
+                output_path=file.local_path,
+                timeout=timeout,
+            )
+        except Exception:
+            if not allow_missing:
+                raise
     return expected_bushmeg_files(
         data_root,
         participants=participants,
@@ -240,6 +250,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     prepare.add_argument("--webdav-url", default=None, help=f"Override {BUSHMEG_WEBDAV_URL_ENV}.")
     prepare.add_argument("--username", default=None, help=f"Override {BUSHMEG_DATA_KEY_ENV}.")
     prepare.add_argument("--password", default=None, help=f"Override {BUSHMEG_DATA_PASSWORD_ENV}. Prefer the environment variable in CI.")
+    prepare.add_argument("--allow-missing", action="store_true", help="Exit successfully even when requested private files cannot be downloaded.")
     prepare.add_argument("--timeout", type=float, default=120.0)
 
     list_files = subparsers.add_parser("list-smoke-files", help="List the local smoke-test files without downloading.")
@@ -258,10 +269,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             webdav_url=args.webdav_url,
             username=args.username,
             password=args.password,
+            allow_missing=args.allow_missing,
             timeout=args.timeout,
         )
         _print_file_report(files)
-        return 0 if all(file.exists for file in files) else 1
+        return 0 if args.allow_missing or all(file.exists for file in files) else 1
 
     if args.command == "list-smoke-files":
         files = expected_bushmeg_files(args.data_dir, participants=args.participants, roles=args.roles, max_files=args.max_files)

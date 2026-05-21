@@ -72,7 +72,8 @@ jobs:
             --data-dir "$BUSHMEG_DATA_DIR" \
             --participants 2 \
             --roles main cue \
-            --max-files 2
+            --max-files 2 \
+            --allow-missing
 
       - name: Re-check smoke data availability
         id: bushmeg_ready
@@ -88,7 +89,7 @@ jobs:
       - name: Explain skipped private-data smoke
         if: steps.bushmeg_ready.outputs.ready != 'true'
         run: |
-          echo "Skipping private BUSH-MEG smoke: Part2Data.mat/Part2CueData.mat are not cached and WebDAV credentials are unavailable."
+          echo "Skipping private BUSH-MEG smoke: Part2Data.mat/Part2CueData.mat are not cached or could not be downloaded."
 
       - name: Run NeuRepTrace BUSH-MEG transfer smoke
         if: steps.bushmeg_ready.outputs.ready == 'true'
