@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -57,6 +58,36 @@ def test_load_fieldtrip_mat_epochs_maps_trialinfo_columns(tmp_path: Path):
     assert dataset.metadata["participant"].tolist() == [2, 2]
 
 
+def test_load_fieldtrip_mat_epochs_normalizes_matlab_char_array_labels(tmp_path: Path):
+    mat_path = tmp_path / "char_labels.mat"
+    data = {
+        "trial": np.array(
+            [np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])],
+            dtype=object,
+        ),
+        "time": np.array([np.array([0.0, 0.01, 0.02])], dtype=object),
+        "label": np.array(
+            [
+                np.array(list("MEG001")),
+                np.array(list("MEG002")),
+            ],
+            dtype=object,
+        ),
+        "trialinfo": np.array([[1, 10]]),
+    }
+    savemat(mat_path, {"data": data})
+
+    dataset = load_fieldtrip_mat_epochs(
+        mat_path,
+        {
+            "variable": "data",
+            "metadata": {"columns": [{"name": "stimulus_class", "index": 0}]},
+        },
+    )
+
+    assert dataset.channel_names == ["MEG001", "MEG002"]
+
+
 def test_load_fieldtrip_mat_epochs_applies_metadata_maps_and_filters(tmp_path: Path):
     mat_path = tmp_path / "Part2Data.mat"
     _write_fieldtrip_mat(mat_path)
@@ -82,29 +113,27 @@ def test_load_fieldtrip_mat_epochs_applies_metadata_maps_and_filters(tmp_path: P
     assert dataset.metadata["participant"].tolist() == [2]
 
 
-def test_load_epoch_dataset_from_yaml_config(tmp_path: Path):
+def test_load_epoch_dataset_from_json_config(tmp_path: Path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     _write_fieldtrip_mat(data_dir / "Part2Data.mat")
 
-    config_path = tmp_path / "config.yml"
+    config_path = tmp_path / "config.json"
     config_path.write_text(
-        """
-schema_version: neureptrace.dataset.v1
-dataset:
-  type: fieldtrip_mat
-  root: data
-  participant_file: "Part{participant}Data.mat"
-  variable: data
-participants:
-  ids: 2
-metadata:
-  columns:
-    - name: stimulus_class
-      index: 0
-decoding:
-  label_column: stimulus_class
-""",
+        json.dumps(
+            {
+                "schema_version": "neureptrace.dataset.v1",
+                "dataset": {
+                    "type": "fieldtrip_mat",
+                    "root": "data",
+                    "participant_file": "Part{participant}Data.mat",
+                    "variable": "data",
+                },
+                "participants": {"ids": 2},
+                "metadata": {"columns": [{"name": "stimulus_class", "index": 0}]},
+                "decoding": {"label_column": "stimulus_class"},
+            }
+        ),
         encoding="utf-8",
     )
 
