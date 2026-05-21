@@ -183,10 +183,11 @@ def _normalize_trials(trials: Any) -> list[np.ndarray]:
 def _normalize_times(times: Any, n_trials: int) -> list[np.ndarray]:
     """Return one time vector per trial."""
 
-    if isinstance(times, np.ndarray) and times.ndim == 1:
-        return [np.asarray(times, dtype=float) for _ in range(n_trials)]
-    if isinstance(times, np.ndarray) and times.ndim == 2:
-        return [np.asarray(row, dtype=float).ravel() for row in times]
+    if isinstance(times, np.ndarray) and times.dtype != object:
+        if times.ndim == 1:
+            return [np.asarray(times, dtype=float) for _ in range(n_trials)]
+        if times.ndim == 2:
+            return [np.asarray(row, dtype=float).ravel() for row in times]
 
     normalized = [np.asarray(time, dtype=float).ravel() for time in _as_sequence(times)]
     if len(normalized) == 1 and n_trials > 1:
