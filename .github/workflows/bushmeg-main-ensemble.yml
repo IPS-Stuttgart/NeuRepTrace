@@ -1,0 +1,231 @@
+name: BUSH-MEG main ensemble
+
+on:
+  workflow_dispatch:
+    inputs:
+      participants:
+        description: "Participant ids/ranges to include"
+        default: "1-4,6,8,9,10,13-27"
+        required: true
+      n_splits:
+        description: "Outer grouped CV splits"
+        default: "23"
+        required: true
+      pca_components:
+        description: "PCA components"
+        default: "128"
+        required: true
+      tmin:
+        description: "Crop start in seconds; must include baseline for subject_baseline_whiten"
+        default: "-0.35"
+        required: true
+      tmax:
+        description: "Crop stop in seconds"
+        default: "0.25"
+        required: true
+      window_ms:
+        description: "Decode window size in milliseconds"
+        default: "100"
+        required: true
+      step_ms:
+        description: "Decode step size in milliseconds"
+        default: "25"
+        required: true
+      summary_min_time:
+        description: "Earliest time, in seconds, included in the reported best-window summary"
+        default: "0.10"
+        required: true
+  push:
+    branches:
+      - codex/run-bushmeg-neureptrace-ensemble
+    paths:
+      - ".github/workflows/bushmeg-main-ensemble.yml"
+      - "configs/bush_meg/stimulus_decoding.yml"
+      - "src/neureptrace/**"
+
+jobs:
+  bushmeg-main-ensemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      BUSHMEG_DATA_DIR: ${{ github.workspace }}/.cache/bushmeg
+      BUSH_MEG_DATA_DIR: ${{ github.workspace }}/.cache/bushmeg
+      BUSHMEG_WEBDAV_URL: ${{ secrets.BUSHMEG_WEBDAV_URL }}
+      BUSHMEG_DATA_KEY: ${{ secrets.BUSHMEG_DATA_KEY }}
+      BUSHMEG_DATA_PASSWORD: ${{ secrets.BUSHMEG_DATA_PASSWORD }}
+      PARTICIPANTS: ${{ github.event.inputs.participants || '1-4,6,8,9,10,13-27' }}
+      N_SPLITS: ${{ github.event.inputs.n_splits || '23' }}
+      PCA_COMPONENTS: ${{ github.event.inputs.pca_components || '128' }}
+      TMIN: ${{ github.event.inputs.tmin || '-0.35' }}
+      TMAX: ${{ github.event.inputs.tmax || '0.25' }}
+      WINDOW_MS: ${{ github.event.inputs.window_ms || '100' }}
+      STEP_MS: ${{ github.event.inputs.step_ms || '25' }}
+      SUMMARY_MIN_TIME: ${{ github.event.inputs.summary_min_time || '0.10' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Restore BUSH-MEG data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/bushmeg
+          key: bushmeg-data-v1
+          restore-keys: |
+            bushmeg-data-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install NeuRepTrace
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Prepare BUSH-MEG main files
+        run: |
+          python -m neureptrace.bushmeg_data prepare-smoke \
+            --data-dir "$BUSHMEG_DATA_DIR" \
+            --participants "$PARTICIPANTS" \
+            --roles main
+
+      - name: Run direct NeuRepTrace main-task ensemble
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+
+          from neureptrace import mne_time_decode as base_decode
+          from neureptrace.dataset_config import apply_overrides, load_config, load_epoch_dataset_from_config
+          from neureptrace.decode_from_config import _decode_kwargs, _output_paths_from_kwargs, _write_provenance_sidecars
+          from neureptrace.mne_time_decode_ensemble import run_time_resolved_decode
+
+          config_path = Path("configs/bush_meg/stimulus_decoding.yml")
+          output_dir = Path("outputs/bushmeg_main_ensemble")
+          overrides = [
+              f"participants.ids={json.dumps(os.environ['PARTICIPANTS'])}",
+              f"decoding.n_splits={int(os.environ['N_SPLITS'])}",
+              "decoding.classifier=logistic-svm-ensemble",
+              "decoding.emission_mode=calibrated",
+              f"preprocessing.tmin={float(os.environ['TMIN'])}",
+              f"preprocessing.tmax={float(os.environ['TMAX'])}",
+              f"preprocessing.window_size={float(os.environ['WINDOW_MS']) / 1000.0}",
+              f"preprocessing.window_step={float(os.environ['STEP_MS']) / 1000.0}",
+              "preprocessing.normalization=subject_baseline_whiten",
+              "preprocessing.baseline_window=[-0.35,-0.05]",
+              "preprocessing.feature_preprocessor=pca",
+              f"preprocessing.pca_components={int(os.environ['PCA_COMPONENTS'])}",
+              f"outputs.base_dir={output_dir.as_posix()}",
+              "outputs.summary_csv=bushmeg_main_ensemble_metrics.csv",
+              "outputs.observations_csv=bushmeg_main_ensemble_observations.csv",
+              "outputs.calibration_csv=bushmeg_main_ensemble_calibration.csv",
+              "outputs.hash_input_files=false",
+          ]
+          config = apply_overrides(load_config(config_path), overrides)
+          dataset = load_epoch_dataset_from_config(config, base_dir=config_path.parent, check_files=True)
+          epochs = dataset.to_mne_epochs(channel_type=str(config["dataset"].get("channel_type", "mag")))
+          metadata = dataset.metadata.reset_index(drop=True).copy()
+          kwargs = _decode_kwargs(config, config_dir=config_path.parent)
+          kwargs["decoder"] = "logistic-svm-ensemble"
+
+          original_loader = base_decode._load_epochs_and_metadata
+
+          def configured_loader(_epochs_path, _metadata_csv, **_unused):
+              return epochs, metadata
+
+          base_decode._load_epochs_and_metadata = configured_loader
+          try:
+              results = run_time_resolved_decode(
+                  epochs_path=Path("<configured-bushmeg-fieldtrip>"),
+                  metadata_csv=None,
+                  **kwargs,
+              )
+          finally:
+              base_decode._load_epochs_and_metadata = original_loader
+
+          _write_provenance_sidecars(
+              config,
+              config_path=config_path,
+              config_dir=config_path.parent,
+              output_paths=_output_paths_from_kwargs(kwargs),
+          )
+
+          observations = pd.read_csv(kwargs["observation_out_path"])
+          summary_min_time = float(os.environ["SUMMARY_MIN_TIME"])
+          summary_observations = observations[
+              pd.to_numeric(observations["time"], errors="raise") >= summary_min_time
+          ].copy()
+          if summary_observations.empty:
+              raise ValueError(f"No observations are at or after SUMMARY_MIN_TIME={summary_min_time}.")
+          probability_columns = sorted(
+              [column for column in observations.columns if column.startswith("prob_class_")],
+              key=lambda column: int(column.removeprefix("prob_class_")),
+          )
+          label_values = np.asarray([int(column.removeprefix("prob_class_")) for column in probability_columns])
+
+          rows = []
+          for (time, fold), group in summary_observations.groupby(["time", "fold"], sort=True):
+              probabilities = group[probability_columns].to_numpy(dtype=float)
+              true_labels = pd.to_numeric(group["true_label"], errors="raise").astype(int).to_numpy()
+              order = np.argsort(probabilities, axis=1)[:, ::-1]
+              predicted = label_values[order[:, 0]]
+              class_scores = []
+              for label in np.unique(true_labels):
+                  mask = true_labels == label
+                  class_scores.append(float(np.mean(predicted[mask] == label)))
+              rows.append(
+                  {
+                      "time": float(time),
+                      "fold": int(fold),
+                      "accuracy": float(np.mean(predicted == true_labels)),
+                      "balanced_accuracy": float(np.mean(class_scores)),
+                      "top2_accuracy": float(np.mean([true_labels[index] in label_values[order[index, :2]] for index in range(len(true_labels))])),
+                      "top3_accuracy": float(np.mean([true_labels[index] in label_values[order[index, :3]] for index in range(len(true_labels))])),
+                      "n_test": int(len(group)),
+                  }
+              )
+
+          fold_summary = pd.DataFrame(rows)
+          time_summary = (
+              fold_summary.groupby("time", as_index=False)
+              .agg(
+                  accuracy_mean=("accuracy", "mean"),
+                  accuracy_sem=("accuracy", "sem"),
+                  balanced_accuracy_mean=("balanced_accuracy", "mean"),
+                  balanced_accuracy_sem=("balanced_accuracy", "sem"),
+                  top2_accuracy_mean=("top2_accuracy", "mean"),
+                  top2_accuracy_sem=("top2_accuracy", "sem"),
+                  top3_accuracy_mean=("top3_accuracy", "mean"),
+                  top3_accuracy_sem=("top3_accuracy", "sem"),
+                  n_outer_folds=("fold", "nunique"),
+                  n_test=("n_test", "sum"),
+              )
+          )
+          best = time_summary.sort_values(["balanced_accuracy_mean", "top3_accuracy_mean"], ascending=[False, False]).head(1).copy()
+          for frame in (time_summary, best):
+              for column in [column for column in frame.columns if column.endswith("_accuracy_mean") or column.endswith("_accuracy_sem")]:
+                  frame[column.replace("_accuracy_", "_percent_")] = frame[column] * 100.0
+          time_summary.to_csv(output_dir / "bushmeg_main_ensemble_time_summary.csv", index=False)
+          best.to_csv(output_dir / "bushmeg_main_ensemble_best_summary.csv", index=False)
+
+          print("Effective config:")
+          print(json.dumps(config, indent=2, sort_keys=True, default=str))
+          print("Best time summary:")
+          print(best.to_string(index=False))
+          print(f"Wrote {len(results)} metric rows and {len(observations)} observation rows.")
+          PY
+
+      - name: Upload BUSH-MEG main ensemble outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: bushmeg-main-ensemble-outputs
+          path: outputs/bushmeg_main_ensemble/**
