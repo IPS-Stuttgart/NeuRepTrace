@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import tomllib
 import types
 from pathlib import Path
@@ -10,23 +9,27 @@ from neureptrace import cli
 
 def test_grouped_cli_dispatches_to_module_main(monkeypatch):
     calls = []
-    fake_module = types.ModuleType("fake_neureptrace_command")
+    module_name = "fake_neureptrace_command"
+    command_name = "fake"
 
     def fake_main():
-        calls.append(tuple(sys.argv))
+        calls.append(tuple(cli.sys.argv))
         return None
 
-    fake_module.main = fake_main
-    monkeypatch.setitem(sys.modules, "fake_neureptrace_command", fake_module)
-    monkeypatch.setitem(cli.COMMAND_MODULES, "fake", "fake_neureptrace_command")
+    def fake_import_module(name: str):
+        assert name == module_name
+        return types.SimpleNamespace(main=fake_main)
 
-    assert cli.main(["fake", "--value", "42"]) == 0
+    monkeypatch.setattr(cli, "import_module", fake_import_module)
+    monkeypatch.setitem(cli.COMMAND_MODULES, command_name, module_name)
+
+    assert cli.main([command_name, "--value", "42"]) == 0
     assert calls == [("neureptrace fake", "--value", "42")]
 
 
 def test_grouped_cli_exposes_mne_decoder_variants():
-    assert cli.COMMAND_MODULES["mne-time-decode"] == "neureptrace.mne_time_decode_foldlocal"
-    assert cli.COMMAND_MODULES["mne-time-decode-base"] == "neureptrace.mne_time_decode"
+    assert cli.COMMAND_MODULES["mne-time-decode"] == "neureptrace.mne_time_decode_foldlocal_cli"
+    assert cli.COMMAND_MODULES["mne-time-decode-base"] == "neureptrace.mne_time_decode_cli"
     assert cli.COMMAND_MODULES["mne-time-decode-ensemble"] == "neureptrace.mne_time_decode_ensemble"
 
 
