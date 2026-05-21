@@ -65,6 +65,9 @@ jobs:
           poetry env use python
           poetry install --with dev
 
+      - name: Run Ruff
+        run: poetry run ruff check .
+
       - name: Run tests
         run: poetry run python -m pytest --rootdir . -v --strict-config --junitxml=junit_test_results.xml ./tests
         env:
