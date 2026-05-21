@@ -1,0 +1,111 @@
+name: BUSH-MEG smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/bushmeg-smoke.yml"
+      - "examples/configs/bushmeg_transfer*.yml"
+      - "src/neureptrace/bushmeg_data.py"
+      - "src/neureptrace/dataset_config.py"
+      - "src/neureptrace/io/**"
+      - "src/neureptrace/transfer_from_config.py"
+      - "tests/test_bushmeg_data.py"
+      - "tests/test_dataset_config_file_templates.py"
+
+jobs:
+  bushmeg-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BUSHMEG_DATA_DIR: ${{ github.workspace }}/.cache/bushmeg
+      BUSHMEG_WEBDAV_URL: ${{ secrets.BUSHMEG_WEBDAV_URL }}
+      BUSHMEG_DATA_KEY: ${{ secrets.BUSHMEG_DATA_KEY }}
+      BUSHMEG_DATA_PASSWORD: ${{ secrets.BUSHMEG_DATA_PASSWORD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Restore existing BUSH-MEG data cache only
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/bushmeg
+          key: bushmeg-data-v1
+          restore-keys: |
+            bushmeg-data-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install NeuRepTrace
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+
+      - name: Run non-private smoke helper tests
+        run: |
+          pytest -q tests/test_bushmeg_data.py tests/test_dataset_config_file_templates.py
+
+      - name: Check cached files and credentials
+        id: bushmeg_inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$BUSHMEG_DATA_DIR/Part2Data.mat" && -f "$BUSHMEG_DATA_DIR/Part2CueData.mat" ]]; then
+            echo "files_present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "files_present=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${BUSHMEG_WEBDAV_URL:-}" && -n "${BUSHMEG_DATA_KEY:-}" && -n "${BUSHMEG_DATA_PASSWORD:-}" ]]; then
+            echo "credentials_present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "credentials_present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download only the requested BUSH-MEG smoke files
+        if: steps.bushmeg_inputs.outputs.files_present != 'true' && steps.bushmeg_inputs.outputs.credentials_present == 'true'
+        run: |
+          python -m neureptrace.bushmeg_data prepare-smoke \
+            --data-dir "$BUSHMEG_DATA_DIR" \
+            --participants 2 \
+            --roles main cue \
+            --max-files 2
+
+      - name: Re-check smoke data availability
+        id: bushmeg_ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$BUSHMEG_DATA_DIR/Part2Data.mat" && -f "$BUSHMEG_DATA_DIR/Part2CueData.mat" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Explain skipped private-data smoke
+        if: steps.bushmeg_ready.outputs.ready != 'true'
+        run: |
+          echo "Skipping private BUSH-MEG smoke: Part2Data.mat/Part2CueData.mat are not cached and WebDAV credentials are unavailable."
+
+      - name: Run NeuRepTrace BUSH-MEG transfer smoke
+        if: steps.bushmeg_ready.outputs.ready == 'true'
+        run: |
+          python -m neureptrace.dataset_config examples/configs/bushmeg_transfer_smoke.yml --check-files --print-effective-config
+          python -m neureptrace.transfer_from_config examples/configs/bushmeg_transfer_smoke.yml --no-provenance
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          summary = Path("outputs/bushmeg_smoke/transfer_summary.csv")
+          observations = Path("outputs/bushmeg_smoke/transfer_observations.csv")
+          assert summary.exists() and summary.stat().st_size > 0, summary
+          assert observations.exists() and observations.stat().st_size > 0, observations
+          rows = pd.read_csv(summary)
+          assert len(rows) > 0
+          assert rows["n_train"].min() > 0
+          assert rows["n_test"].min() > 0
+          assert rows["n_classes"].min() >= 2
+          PY
