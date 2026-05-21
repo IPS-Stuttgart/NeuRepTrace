@@ -349,6 +349,39 @@ def _latency_sd(latencies: pd.Series) -> float:
     return np.nan
 
 
+def _empty_group_values(
+    groups: Sequence[str],
+    *,
+    annotations: pd.DataFrame | None,
+    observations: pd.DataFrame | None,
+) -> list[dict[str, object]]:
+    if not groups:
+        return [{}]
+    for source in (annotations, observations):
+        if source is None or source.empty:
+            continue
+        present_groups = [column for column in groups if column in source.columns]
+        if not present_groups:
+            continue
+        rows: list[dict[str, object]] = []
+        grouped = source.groupby(present_groups, sort=True, dropna=False)
+        for keys, _group in grouped:
+            key_values = keys if isinstance(keys, tuple) else (keys,)
+            rows.append(dict(zip(present_groups, key_values, strict=True)))
+        return rows or [{}]
+    return [{}]
+
+
+def _event_groups(events: pd.DataFrame, groups: Sequence[str]) -> list[tuple[dict[str, object], pd.DataFrame]]:
+    if not groups:
+        return [({}, events)]
+    rows: list[tuple[dict[str, object], pd.DataFrame]] = []
+    for keys, group_frame in events.groupby(list(groups), sort=True, dropna=False):
+        key_values = keys if isinstance(keys, tuple) else (keys,)
+        rows.append((dict(zip(groups, key_values, strict=True)), group_frame))
+    return rows
+
+
 def summarize_stimulus_events(
     events: pd.DataFrame,
     *,
@@ -359,11 +392,13 @@ def summarize_stimulus_events(
 ) -> pd.DataFrame:
     """Summarize event-level detection quality."""
     groups = _group_columns(events, group_columns) if not events.empty else list(group_columns or [])
+    grouped = (
+        [(group_values, events) for group_values in _empty_group_values(groups, annotations=annotations, observations=observations)]
+        if events.empty
+        else _event_groups(events, groups)
+    )
     rows = []
-    grouped = events.groupby(groups, sort=True) if groups and not events.empty else [((), events)]
-    for keys, group_frame in grouped:
-        key_values = keys if isinstance(keys, tuple) else (keys,)
-        group_values = dict(zip(groups, key_values, strict=True))
+    for group_values, group_frame in grouped:
         detected = len(group_frame)
         if "is_true_positive" in group_frame.columns:
             true_positives = int(group_frame["is_true_positive"].fillna(False).astype(bool).sum())
