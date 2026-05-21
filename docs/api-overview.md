@@ -8,7 +8,9 @@ Key command-line modules include:
 
 - neureptrace.metadata
 - neureptrace.validate_manifest
+- neureptrace.mne_time_decode_foldlocal
 - neureptrace.mne_time_decode
+- neureptrace.mne_time_decode_ensemble
 - neureptrace.benchmark
 - neureptrace.continuous_stimulus_scan
 - neureptrace.results
@@ -28,6 +30,15 @@ Key command-line modules include:
 - neureptrace.emission_compare
 - neureptrace.semantic_stages
 - neureptrace.temporal_state_workflow
+
+MNE time decoding is exposed in three command flavors. The installed
+`neureptrace-mne-time-decode` command and grouped `neureptrace mne-time-decode`
+subcommand use `neureptrace.mne_time_decode_foldlocal`, which fits subject-level
+normalization inside each outer cross-validation train fold. The historical base
+implementation remains available as `neureptrace-mne-time-decode-base` and
+`neureptrace mne-time-decode-base`. Calibrated logistic/linear-SVM probability
+ensembling is available as `neureptrace-mne-time-decode-ensemble` and
+`neureptrace mne-time-decode-ensemble`.
 
 Reusable table-oriented APIs include:
 
