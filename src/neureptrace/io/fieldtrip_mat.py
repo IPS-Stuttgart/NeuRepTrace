@@ -146,7 +146,11 @@ def _normalize_string(value: Any) -> str:
         if value.dtype.kind in {"U", "S"}:
             if value.ndim == 0:
                 return str(value.item())
-            return "".join(str(part) for part in value.tolist())
+            return "".join(str(part) for part in value.ravel(order="C").tolist()).rstrip()
+        if value.dtype == object:
+            if value.size == 1:
+                return _normalize_string(value.reshape(-1)[0])
+            return "".join(_normalize_string(item) for item in value.ravel(order="C")).rstrip()
         if value.ndim == 0:
             return _normalize_string(value.item())
     return str(value)
@@ -157,7 +161,17 @@ def _normalize_labels(labels: Any) -> list[str]:
 
     if isinstance(labels, np.ndarray) and labels.dtype.kind in {"U", "S"} and labels.ndim == 1:
         return [_normalize_string(label) for label in labels]
+    if isinstance(labels, np.ndarray) and labels.ndim == 2 and labels.dtype.kind in {"O", "U", "S"}:
+        return ["".join(_normalize_string(part) for part in row).rstrip() for row in labels]
     return [_normalize_string(label) for label in _as_sequence(labels)]
+
+
+def _numeric_matrix_or_none(value: np.ndarray) -> np.ndarray | None:
+    try:
+        matrix = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    return matrix if matrix.ndim == 2 else None
 
 
 def _normalize_trials(trials: Any) -> list[np.ndarray]:
@@ -172,6 +186,11 @@ def _normalize_trials(trials: Any) -> list[np.ndarray]:
         if stacked.shape[0] <= stacked.shape[-1]:
             return [np.asarray(trial, dtype=float) for trial in stacked]
         return [np.asarray(stacked[:, :, idx], dtype=float) for idx in range(stacked.shape[2])]
+
+    if isinstance(trials, np.ndarray) and trials.ndim == 2:
+        matrix = _numeric_matrix_or_none(trials)
+        if matrix is not None:
+            return [matrix]
 
     normalized = [np.asarray(trial, dtype=float) for trial in _as_sequence(trials)]
     for idx, trial in enumerate(normalized):
@@ -259,7 +278,7 @@ def _trialinfo_to_frame(
         if values.ndim == 0:
             values = values.reshape(1, 1)
         elif values.ndim == 1:
-            values = values.reshape(-1, 1)
+            values = values.reshape(1, -1) if n_trials == 1 else values.reshape(-1, 1)
 
         if require_rows_equal_trials and values.shape[0] != n_trials:
             raise ValueError(f"trialinfo has {values.shape[0]} rows but FieldTrip data contains {n_trials} trials.")
