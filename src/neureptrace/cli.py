@@ -24,6 +24,7 @@ COMMAND_MODULES = {
     "mne-transfer-decode": "neureptrace.epoch_transfer_decode",
     "mne-time-decode": "neureptrace.mne_time_decode_foldlocal",
     "mne-time-decode-base": "neureptrace.mne_time_decode",
+    "mne-time-decode-ensemble": "neureptrace.mne_time_decode_ensemble",
     "observation-ensemble": "neureptrace.observation_ensemble",
     "observation-schema": "neureptrace.observation_schema",
     "onset-detect": "neureptrace.onset_detection",
