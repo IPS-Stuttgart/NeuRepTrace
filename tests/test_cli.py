@@ -22,6 +22,12 @@ def test_grouped_cli_dispatches_to_module_main(monkeypatch):
     assert calls == [("neureptrace fake", "--value", "42")]
 
 
+def test_grouped_cli_exposes_mne_decoder_variants():
+    assert cli.COMMAND_MODULES["mne-time-decode"] == "neureptrace.mne_time_decode_foldlocal"
+    assert cli.COMMAND_MODULES["mne-time-decode-base"] == "neureptrace.mne_time_decode"
+    assert cli.COMMAND_MODULES["mne-time-decode-ensemble"] == "neureptrace.mne_time_decode_ensemble"
+
+
 def test_grouped_cli_without_command_prints_help(capsys):
     assert cli.main([]) == 0
     captured = capsys.readouterr()
