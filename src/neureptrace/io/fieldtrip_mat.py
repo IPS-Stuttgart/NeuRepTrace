@@ -146,7 +146,11 @@ def _normalize_string(value: Any) -> str:
         if value.dtype.kind in {"U", "S"}:
             if value.ndim == 0:
                 return str(value.item())
-            return "".join(str(part) for part in value.tolist())
+            return "".join(str(part) for part in value.ravel(order="C").tolist()).rstrip()
+        if value.dtype == object:
+            if value.size == 1:
+                return _normalize_string(value.reshape(-1)[0])
+            return "".join(_normalize_string(item) for item in value.ravel(order="C")).rstrip()
         if value.ndim == 0:
             return _normalize_string(value.item())
     return str(value)
