@@ -164,6 +164,14 @@ def _normalize_labels(labels: Any) -> list[str]:
     return [_normalize_string(label) for label in _as_sequence(labels)]
 
 
+def _numeric_matrix_or_none(value: np.ndarray) -> np.ndarray | None:
+    try:
+        matrix = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    return matrix if matrix.ndim == 2 else None
+
+
 def _normalize_trials(trials: Any) -> list[np.ndarray]:
     """Return trials as ``n_channels x n_times`` float arrays."""
 
@@ -176,6 +184,11 @@ def _normalize_trials(trials: Any) -> list[np.ndarray]:
         if stacked.shape[0] <= stacked.shape[-1]:
             return [np.asarray(trial, dtype=float) for trial in stacked]
         return [np.asarray(stacked[:, :, idx], dtype=float) for idx in range(stacked.shape[2])]
+
+    if isinstance(trials, np.ndarray) and trials.ndim == 2:
+        matrix = _numeric_matrix_or_none(trials)
+        if matrix is not None:
+            return [matrix]
 
     normalized = [np.asarray(trial, dtype=float) for trial in _as_sequence(trials)]
     for idx, trial in enumerate(normalized):
