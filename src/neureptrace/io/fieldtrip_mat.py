@@ -161,6 +161,8 @@ def _normalize_labels(labels: Any) -> list[str]:
 
     if isinstance(labels, np.ndarray) and labels.dtype.kind in {"U", "S"} and labels.ndim == 1:
         return [_normalize_string(label) for label in labels]
+    if isinstance(labels, np.ndarray) and labels.ndim == 2 and labels.dtype.kind in {"O", "U", "S"}:
+        return ["".join(_normalize_string(part) for part in row).rstrip() for row in labels]
     return [_normalize_string(label) for label in _as_sequence(labels)]
 
 
@@ -276,7 +278,7 @@ def _trialinfo_to_frame(
         if values.ndim == 0:
             values = values.reshape(1, 1)
         elif values.ndim == 1:
-            values = values.reshape(-1, 1)
+            values = values.reshape(1, -1) if n_trials == 1 else values.reshape(-1, 1)
 
         if require_rows_equal_trials and values.shape[0] != n_trials:
             raise ValueError(f"trialinfo has {values.shape[0]} rows but FieldTrip data contains {n_trials} trials.")
