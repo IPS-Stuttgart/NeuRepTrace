@@ -249,12 +249,17 @@ def validate_dataset_config(
             raise ConfigValidationError("mne_epochs configs require dataset.epochs or dataset.epochs_file.")
     if dataset_type == "fieldtrip_mat":
         participants = config.get("participants", {}) or {}
-        has_participant_template = bool(dataset.get("participant_file") or dataset.get("file_template"))
+        has_participant_template = bool(
+            dataset.get("participant_file")
+            or dataset.get("file_template")
+            or dataset.get("file_templates")
+            or dataset.get("participant_files")
+        )
         has_files = bool(dataset.get("files"))
         if not has_files and not has_participant_template:
-            raise ConfigValidationError("fieldtrip_mat configs require dataset.files or dataset.participant_file.")
+            raise ConfigValidationError("fieldtrip_mat configs require dataset.files, dataset.file_templates, or dataset.participant_file.")
         if has_participant_template and not parse_participant_ids(participants.get("ids")):
-            raise ConfigValidationError("fieldtrip_mat participant templates require participants.ids.")
+            raise ConfigValidationError("fieldtrip_mat participant templates and file_templates require participants.ids.")
 
     metadata = _metadata_section(config)
     for column in metadata.get("columns", []) or []:
@@ -310,6 +315,11 @@ def iter_dataset_files(config: Mapping[str, Any], *, base_dir: str | Path = ".")
             resolved.append(expand_path(value, base_dir=base_dir, root=root))
         return resolved
 
+    template_specs = _participant_file_templates(dataset)
+    if template_specs:
+        participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
+        return [expand_path(template.format(**_format_values_for_participant(participant)), base_dir=base_dir, root=root) for participant in participants for _role, template, _extra in template_specs]
+
     participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
     template = dataset.get("participant_file") or dataset.get("file_template")
     return [expand_path(str(template).format(participant=participant), base_dir=base_dir, root=root) for participant in participants]
@@ -358,12 +368,71 @@ def _fieldtrip_file_specs(config: Mapping[str, Any], *, base_dir: str | Path) ->
             specs.append((expand_path(value, base_dir=base_dir, root=root), extra))
         return specs
 
+    template_specs = _participant_file_templates(dataset)
+    if template_specs:
+        participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
+        specs = []
+        for participant in participants:
+            format_values = _format_values_for_participant(participant)
+            for _role, template, extra in template_specs:
+                path = expand_path(template.format(**format_values), base_dir=base_dir, root=root)
+                specs.append((path, {"participant": str(participant), **extra}))
+        return specs
+
     participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
     template = dataset.get("participant_file") or dataset.get("file_template")
     specs = []
     for participant in participants:
         path = expand_path(str(template).format(participant=participant), base_dir=base_dir, root=root)
         specs.append((path, {"participant": participant}))
+    return specs
+
+
+def _format_values_for_participant(participant: int | str) -> dict[str, Any]:
+    """Return path-template values for a participant token."""
+
+    text = str(participant)
+    values: dict[str, Any] = {
+        "participant": text,
+        "subject": text,
+    }
+    try:
+        number = int(text)
+    except ValueError:
+        return values
+    values.update(
+        {
+            "participant_int": number,
+            "subject_int": number,
+            "participant02d": f"{number:02d}",
+            "subject02d": f"{number:02d}",
+        }
+    )
+    return values
+
+
+def _participant_file_templates(dataset: Mapping[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
+    """Return participant-expanded FieldTrip file templates with per-file metadata."""
+
+    raw_templates = dataset.get("file_templates") or dataset.get("participant_files")
+    if raw_templates is None:
+        return []
+    if not isinstance(raw_templates, Mapping):
+        raise ConfigValidationError("dataset.file_templates must be a mapping from split/role name to path template.")
+
+    specs: list[tuple[str, str, dict[str, Any]]] = []
+    for role, value in raw_templates.items():
+        if isinstance(value, Mapping):
+            template = value.get("path") or value.get("file") or value.get("template")
+            extra = {str(key): item for key, item in value.items() if key not in {"path", "file", "template"}}
+        else:
+            template = value
+            extra = {}
+        if template is None or str(template).strip() == "":
+            raise ConfigValidationError(f"dataset.file_templates.{role} must contain a path template.")
+        metadata = {"split": str(role), "file_role": str(role)}
+        metadata.update(extra)
+        specs.append((str(role), str(template), metadata))
     return specs
 
 

@@ -111,6 +111,24 @@ label_index_base: 1
 trial_layout: channels_by_time
 ```
 
+For private datasets with paired participant files, `dataset_config` also
+supports a participant-expanded mapping of logical file roles to templates:
+
+```yaml
+dataset:
+  type: fieldtrip_mat
+  root: ${BUSHMEG_DATA_DIR}
+  file_templates:
+    main: "Part{participant}Data.mat"
+    cue: "Part{participant}CueData.mat"
+participants:
+  ids: "1-4,6,8,9,10,13-27"
+```
+
+Each loaded file receives `participant`, `split`, and `file_role` metadata so
+train/test transfer configs can select `split: main` and `split: cue` without a
+dataset-specific Python wrapper.
+
 ### `csv_feature_matrix`
 
 Use for a wide numeric CSV where rows are trials and numeric columns are features. A configured `label_column` is removed from the feature matrix and returned as labels.

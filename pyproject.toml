@@ -13,6 +13,7 @@ packages = [
 [tool.poetry.scripts]
 neureptrace = "neureptrace.cli:main"
 neureptrace-benchmark = "neureptrace.benchmark:main"
+neureptrace-bushmeg-data = "neureptrace.bushmeg_data:main"
 neureptrace-decode-from-config = "neureptrace.decode_from_config:main"
 neureptrace-dataset = "neureptrace.dataset_spec_cli:main"
 neureptrace-dataset-spec = "neureptrace.datasets.spec:main"
