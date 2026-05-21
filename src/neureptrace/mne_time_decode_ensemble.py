@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from neureptrace.decoding import DECODER_CLI_CHOICES, TUNING_SCORING_CHOICES, normalize_feature_preprocessor
+from neureptrace.decoding import DECODER_CLI_CHOICES, TUNING_SCORING_CHOICES, normalize_decoder_name, normalize_feature_preprocessor
 from neureptrace.mne_time_decode import (
     DEFAULT_BASELINE_WINDOW as DEFAULT_EPOCH_BASELINE_WINDOW,
     EMISSION_RUN_CHOICES,
@@ -42,7 +42,8 @@ ENSEMBLE_DECODER_ALIASES = (
 )
 ENSEMBLE_DECODER_CLI_CHOICES = tuple(dict.fromkeys((*DECODER_CLI_CHOICES, *ENSEMBLE_DECODER_ALIASES)))
 ENSEMBLE_OUTPUT_EMISSION_MODE = "baseline_debiased_calibrated_ensemble"
-_SOURCE_DECODERS = ("multinomial-logistic", "linear_svm")
+_SOURCE_DECODER_REQUESTS = ("multinomial-logistic", "linear_svm")
+_SOURCE_DECODERS = tuple(normalize_decoder_name(decoder) for decoder in _SOURCE_DECODER_REQUESTS)
 
 
 def normalize_time_decode_decoder_name(decoder: str) -> str:
@@ -150,9 +151,9 @@ def run_time_resolved_decode(
         tmp_dir = Path(tmp_dir_name)
         source_observation_paths: list[Path] = []
         source_metric_frames: list[pd.DataFrame] = []
-        for source_decoder in _SOURCE_DECODERS:
-            source_out = tmp_dir / f"{source_decoder.replace('-', '_')}_time_decode.csv"
-            source_observations = tmp_dir / f"{source_decoder.replace('-', '_')}_observations.csv"
+        for source_decoder in _SOURCE_DECODER_REQUESTS:
+            source_out = tmp_dir / f"{normalize_decoder_name(source_decoder)}_time_decode.csv"
+            source_observations = tmp_dir / f"{normalize_decoder_name(source_decoder)}_observations.csv"
             source_metric_frames.append(
                 _run_time_resolved_decode(
                     epochs_path=epochs_path,
