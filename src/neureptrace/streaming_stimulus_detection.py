@@ -32,7 +32,7 @@ class _RunState:
     threshold_index: int
     group_values: dict[str, object]
     stream_values: dict[str, object]
-    stream_counter_key: tuple[object, ...]
+    event_counter_key: tuple[object, ...]
     current_run_start_time: float | None = None
     current_run_rows: list[dict[str, object]] = field(default_factory=list)
     last_event_time: float | None = None
@@ -153,6 +153,10 @@ def _valid_run(run: pd.DataFrame, *, config: StimulusDetectionConfig) -> bool:
     return not (config.min_duration is not None and _run_duration(run) < config.min_duration)
 
 
+def _partition_key(values: Mapping[str, object], columns: Sequence[str]) -> tuple[tuple[str, str], ...]:
+    return tuple((column, str(values[column])) for column in columns)
+
+
 class StreamingStimulusDetector:
     """Stateful online detector for stream-level stimulus events.
 
@@ -252,15 +256,18 @@ class StreamingStimulusDetector:
         threshold_row: pd.Series,
         stream_values: dict[str, object],
     ) -> _RunState:
-        stream_counter_key = tuple(stream_values.values())
-        state_key = (threshold_index, *stream_counter_key)
+        group_values = {column: threshold_row[column] for column in self._group_columns}
+        event_counter_key = (
+            *_partition_key(group_values, self._group_columns),
+            *_partition_key(stream_values, tuple(stream_values)),
+        )
+        state_key = (threshold_index, *event_counter_key)
         if state_key not in self._states:
-            group_values = {column: threshold_row[column] for column in self._group_columns}
             self._states[state_key] = _RunState(
                 threshold_index=threshold_index,
                 group_values=group_values,
                 stream_values=dict(stream_values),
-                stream_counter_key=stream_counter_key,
+                event_counter_key=event_counter_key,
             )
         return self._states[state_key]
 
@@ -352,7 +359,7 @@ class StreamingStimulusDetector:
         onset = float(run.iloc[0]["time"])
         if self._is_refractory_duplicate(state, onset):
             return None
-        event_index = self._event_counters.get(state.stream_counter_key, 0)
+        event_index = self._event_counters.get(state.event_counter_key, 0)
         event = _event_row(
             group_values=state.group_values,
             stream_values=state.stream_values,
@@ -365,7 +372,7 @@ class StreamingStimulusDetector:
             refractory=self.config.refractory,
         )
         event["detection_confirmed_time"] = emitted_at
-        self._event_counters[state.stream_counter_key] = event_index + 1
+        self._event_counters[state.event_counter_key] = event_index + 1
         state.last_event_time = onset
         return event
 

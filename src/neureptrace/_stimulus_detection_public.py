@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-from collections.abc import Sequence
-from pathlib import Path
 import sys
+from collections.abc import Hashable, Sequence
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -66,7 +66,7 @@ def _ranked_events(events: pd.DataFrame) -> pd.DataFrame:
     return ranked
 
 
-def _best_event_index(events: pd.DataFrame) -> object:
+def _best_event_index(events: pd.DataFrame) -> Hashable:
     return _ranked_events(events).sort_values(
         ["_rank_peak_score", "_rank_onset_time", "_rank_stimulus_class"],
         ascending=[False, True, True],
@@ -80,8 +80,8 @@ def _events_overlap(left: pd.Series, right: pd.Series) -> bool:
 
 def _resolve_winner_take_all(events: pd.DataFrame) -> pd.DataFrame:
     ordered = events.sort_values(["onset_time", "offset_time", "stimulus_class"], kind="mergesort")
-    selected: list[object] = []
-    cluster: list[object] = []
+    selected: list[Hashable] = []
+    cluster: list[Hashable] = []
     cluster_stop = -np.inf
     for index, event in ordered.iterrows():
         onset = float(event["onset_time"])
@@ -104,7 +104,7 @@ def _resolve_non_max_suppression(events: pd.DataFrame) -> pd.DataFrame:
         ascending=[False, True, True],
         kind="mergesort",
     )
-    kept: list[object] = []
+    kept: list[Hashable] = []
     for index, event in ordered.iterrows():
         if any(_events_overlap(event, events.loc[kept_index]) for kept_index in kept):
             continue
@@ -216,6 +216,11 @@ def _add_annotation_candidate_columns(events: pd.DataFrame) -> pd.DataFrame:
     return events
 
 
+def _annotation_match_key(annotation: pd.Series, streams: Sequence[str]) -> tuple[object, ...]:
+    stream_key = tuple((column, str(annotation[column])) for column in streams if column in annotation.index and pd.notna(annotation[column]))
+    return (*stream_key, annotation["_annotation_id"])
+
+
 def match_stimulus_annotations(
     events: pd.DataFrame,
     annotations: pd.DataFrame,
@@ -226,11 +231,9 @@ def match_stimulus_annotations(
 ) -> pd.DataFrame:
     """Greedily match detected events to annotated stimulus onsets.
 
-    Besides the one-to-one true-positive assignment, the matcher records the
-    nearest within-tolerance annotation candidate for each event. If that
-    candidate has already been claimed, the event is marked as a duplicate
-    detection, which lets summaries distinguish duplicates from ordinary false
-    alarms.
+    Annotation IDs are treated as unique within their stream identity, not
+    globally. This supports common event tables where annotation_id or event_id
+    restarts from one for every run/session/stream.
     """
     if match_tolerance < 0:
         raise ValueError("match_tolerance must be non-negative.")
@@ -240,7 +243,7 @@ def match_stimulus_annotations(
     streams = _stream_columns(events, stream_columns)
     if "onset_time" not in annotations.columns:
         raise ValueError("Annotation rows must contain onset_time.")
-    used: set[object] = set()
+    used: set[tuple[object, ...]] = set()
 
     for event_index, event in matched.sort_values("onset_time").iterrows():
         candidates = annotations.copy()
@@ -256,6 +259,7 @@ def match_stimulus_annotations(
             continue
         candidates = candidates.copy()
         candidates["_annotation_id"] = [_annotation_id(row, index) for index, row in candidates.iterrows()]
+        candidates["_annotation_match_key"] = [_annotation_match_key(row, streams) for _, row in candidates.iterrows()]
         candidates["_latency"] = float(event["onset_time"]) - pd.to_numeric(candidates["onset_time"], errors="coerce")
         candidates["_abs_latency"] = candidates["_latency"].abs()
         candidates = candidates.loc[candidates["_abs_latency"] <= match_tolerance].sort_values("_abs_latency")
@@ -263,23 +267,22 @@ def match_stimulus_annotations(
             continue
 
         nearest = candidates.iloc[0]
-        nearest_id = nearest["_annotation_id"]
-        matched.loc[event_index, "candidate_annotation_id"] = nearest_id
+        matched.loc[event_index, "candidate_annotation_id"] = nearest["_annotation_id"]
         matched.loc[event_index, "candidate_annotation_onset_time"] = float(nearest["onset_time"])
         matched.loc[event_index, "candidate_annotation_class"] = _annotation_value(nearest, "stimulus_class", default="")
         matched.loc[event_index, "candidate_annotation_label"] = _annotation_value(nearest, "stimulus_label", default=np.nan)
         matched.loc[event_index, "candidate_latency"] = float(nearest["_latency"])
 
-        available = candidates.loc[~candidates["_annotation_id"].isin(used)]
+        available = candidates.loc[~candidates["_annotation_match_key"].isin(used)]
         if available.empty:
             matched.loc[event_index, "is_duplicate_detection"] = True
             continue
 
         annotation = available.iloc[0]
-        annotation_id = annotation["_annotation_id"]
-        used.add(annotation_id)
+        annotation_key = annotation["_annotation_match_key"]
+        used.add(annotation_key)
         latency = float(annotation["_latency"])
-        matched.loc[event_index, "matched_annotation_id"] = annotation_id
+        matched.loc[event_index, "matched_annotation_id"] = annotation["_annotation_id"]
         matched.loc[event_index, "matched_annotation_onset_time"] = float(annotation["onset_time"])
         matched.loc[event_index, "matched_annotation_class"] = _annotation_value(annotation, "stimulus_class", default="")
         matched.loc[event_index, "matched_annotation_label"] = _annotation_value(annotation, "stimulus_label", default=np.nan)
@@ -303,7 +306,13 @@ def _duration_minutes(
     if frame.empty:
         return np.nan
 
-    streams = _present_columns(frame, stream_columns or [])
+    if stream_columns is None:
+        try:
+            streams = _stream_columns(frame, None)
+        except ValueError:
+            streams = []
+    else:
+        streams = _stream_columns(frame, stream_columns)
     grouped = frame.groupby(streams, sort=False) if streams else [((), frame)]
     seconds = 0.0
     for _, stream_frame in grouped:
@@ -348,12 +357,7 @@ def summarize_stimulus_events(
     group_columns: Sequence[str] | None = None,
     stream_columns: Sequence[str] | None = None,
 ) -> pd.DataFrame:
-    """Summarize event-level detection quality.
-
-    The summary exposes both the original ``*_count``/``latency_*`` columns and
-    checklist-oriented aliases such as ``true_positives`` and
-    ``onset_latency_mean`` for downstream compatibility.
-    """
+    """Summarize event-level detection quality."""
     groups = _group_columns(events, group_columns) if not events.empty else list(group_columns or [])
     rows = []
     grouped = events.groupby(groups, sort=True) if groups and not events.empty else [((), events)]
@@ -381,11 +385,7 @@ def summarize_stimulus_events(
         f1 = 2.0 * precision * recall / (precision + recall) if np.isfinite(precision) and np.isfinite(recall) and precision + recall > 0 else np.nan
         duration_minutes = _duration_minutes(observations, group_values=group_values, stream_columns=stream_columns)
         false_alarms_per_minute = false_positives / duration_minutes if np.isfinite(duration_minutes) and duration_minutes > 0 else np.nan
-        duplicate_detections = (
-            int(group_frame["is_duplicate_detection"].fillna(False).astype(bool).sum())
-            if "is_duplicate_detection" in group_frame.columns
-            else 0
-        )
+        duplicate_detections = int(group_frame["is_duplicate_detection"].fillna(False).astype(bool).sum()) if "is_duplicate_detection" in group_frame.columns else 0
         latencies = pd.to_numeric(group_frame.get("latency", pd.Series(dtype=float)), errors="coerce").dropna()
         latency_mean = float(latencies.mean()) if not latencies.empty else np.nan
         latency_median = float(latencies.median()) if not latencies.empty else np.nan
