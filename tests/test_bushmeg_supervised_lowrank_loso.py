@@ -36,7 +36,7 @@ def _synthetic_subjects() -> dict[str, SubjectEpochs]:
         subject_offset = rng.normal(scale=0.05, size=(n_channels, 1))
         data += subject_offset
         for trial_index, label in enumerate(labels):
-            data[trial_index, :, signal_mask] += class_patterns[label, :, None]
+            data[trial_index, :, signal_mask] += class_patterns[label][None, :]
         metadata = pd.DataFrame(
             {
                 "participant": f"s{subject_index}",
