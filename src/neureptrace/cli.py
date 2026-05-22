@@ -38,6 +38,7 @@ COMMAND_MODULES = {
     "results": "neureptrace.results",
     "stimulus-detect": "neureptrace.stimulus_detection",
     "stimulus-detection": "neureptrace.stimulus_detection",
+    "temporal-decision-decode": "neureptrace.temporal_decision_decode",
     "temporal-model": "neureptrace.temporal_model",
     "temporal-smoothing": "neureptrace.temporal_smoothing",
     "temporal-state-workflow": "neureptrace.temporal_state_workflow",
