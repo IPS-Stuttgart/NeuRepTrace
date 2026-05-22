@@ -50,6 +50,18 @@ on:
         required: true
         type: boolean
         default: false
+      decoder:
+        description: "Override decoder/classifier, or leave empty for the dataset config default"
+        required: false
+        default: ""
+      time_decode_backend:
+        description: "Same-time decoder backend for non-ensemble decoders"
+        required: true
+        type: choice
+        options:
+          - sklearn
+          - mne
+        default: sklearn
 
 jobs:
   openneuro-meg-loso:
@@ -66,6 +78,8 @@ jobs:
       MAX_EVENTS_PER_LABEL_INPUT: ${{ inputs.max_events_per_label }}
       RUN_DECODE: ${{ inputs.run_decode }}
       NO_DOWNLOAD: ${{ inputs.no_download }}
+      DECODER_INPUT: ${{ inputs.decoder }}
+      TIME_DECODE_BACKEND: ${{ inputs.time_decode_backend }}
 
     steps:
       - name: Check out repository
@@ -240,10 +254,17 @@ jobs:
             ds004330) CONFIG="configs/openneuro/ds004330_object_drawing.yml" ;;
             *) echo "Unknown dataset: $DATASET" >&2; exit 1 ;;
           esac
-          python -m neureptrace.decode_from_config "$CONFIG" \
-            --set "participants.ids=$OPENNEURO_SUBJECTS" \
-            --set "decoding.n_splits=$OPENNEURO_N_SPLITS" \
+          args=(
+            "$CONFIG"
+            --set "participants.ids=$OPENNEURO_SUBJECTS"
+            --set "decoding.n_splits=$OPENNEURO_N_SPLITS"
+            --set "decoding.time_decode_backend=$TIME_DECODE_BACKEND"
             --set "outputs.base_dir=$OPENNEURO_OUTPUT_DIR/decode"
+          )
+          if [[ -n "$DECODER_INPUT" ]]; then
+            args+=(--set "decoding.classifier=$DECODER_INPUT")
+          fi
+          python -m neureptrace.decode_from_config "${args[@]}"
 
       - name: Summarize LOSO decode
         if: env.RUN_DECODE == 'true'
