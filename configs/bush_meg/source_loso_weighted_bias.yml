@@ -1,7 +1,8 @@
-# jscpd:ignore-start
 schema_version: neureptrace.dataset.v1
+
 paths:
   base: cwd
+
 dataset:
   name: bush_meg
   type: fieldtrip_mat
@@ -15,11 +16,14 @@ dataset:
     label: label
     trialinfo: trialinfo
     sensor_geometry: grad
+
 participants:
   ids: "1-4,6,8,9,10,13-27"
+
 validation:
   trim_channel_labels_to_data: true
   channel_policy: exact
+
 metadata:
   columns:
     - name: stimulus_class
@@ -27,34 +31,45 @@ metadata:
     - name: condition
       index: 1
       optional: true
+
 preprocessing:
+  # Strict source-only BUSH-MEG main-task preprocessing. Cue files are not read.
   tmin: -0.35
   tmax: 0.25
   normalization: subject_baseline_whiten
   baseline_window: [-0.35, -0.05]
   feature_preprocessor: pca
-  pca_components: 96
+  pca_components: 128
   window_size: 0.100
+
 decoding:
   label_column: stimulus_class
   group_column: participant
   classifier: multinomial-logistic
   emission_mode: uncalibrated
-  max_iter: 2500
-# jscpd:ignore-end
+  max_iter: 2000
+
 source_loso:
   group_column: participant
   selection_metric: balanced_accuracy
-  ensemble_top_k: 5
-  ensemble_weighting: softmax
-  ensemble_temperature: 0.01
   candidate_grid:
+    # Same order of size as the existing source_loso_decoding.yml grid, but
+    # focused on the previously strongest multinomial-logistic/PCA-128 setting.
     temporal_bins: [4]
-    decoders: [multinomial-logistic, linear_svm]
-    emission_modes: [uncalibrated]
-    feature_preprocessors: [pca]
-    pca_components: [64, 128]
+    decoders:
+      - multinomial-logistic
+    emission_modes:
+      - uncalibrated
+    feature_preprocessors:
+      - pca
+    pca_components: [128]
     c_grid: [0.1, 1.0, 10.0]
+    sample_weightings:
+      - none
+      - subject_class_balanced
+    class_bias_modes:
+      - none
+      - balanced_accuracy
     window_sets:
       - name: single_150ms
         centers: [0.150]
@@ -68,11 +83,11 @@ source_loso:
       - name: triplet_150_200ms
         centers: [0.150, 0.175, 0.200]
         window_size: 0.100
+
 outputs:
-  base_dir: results/{dataset}/source_loso_ensemble
-  source_loso_ensemble_summary_csv: source_loso_ensemble_summary.csv
-  source_loso_ensemble_inner_cv_csv: source_loso_ensemble_inner_cv.csv
-  source_loso_ensemble_candidate_summary_csv: source_loso_ensemble_candidate_summary.csv
-  source_loso_ensemble_predictions_csv: source_loso_ensemble_predictions.csv
+  base_dir: results/{dataset}
+  source_loso_summary_csv: source_loso_weighted_bias_summary.csv
+  source_loso_inner_cv_csv: source_loso_weighted_bias_inner_cv.csv
+  source_loso_predictions_csv: source_loso_weighted_bias_predictions.csv
   provenance: true
   hash_input_files: true
