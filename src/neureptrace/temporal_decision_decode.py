@@ -62,7 +62,8 @@ def _windows(times: np.ndarray, *, window_ms: float, step_ms: float, tmin: Any, 
     upper = np.inf if tmax is None else float(tmax)
     windows = [window for window in time_windows(times, window_ms=window_ms, step_ms=step_ms) if lower <= window[2] <= upper]
     if decision_window is not None:
-        windows = [window for window in windows if decision_window[0] <= window[2] <= decision_window[1]]
+        eps = 1.0e-12
+        windows = [window for window in windows if decision_window[0] - eps <= window[2] <= decision_window[1] + eps]
     if not windows:
         raise ValueError("No temporal decision windows are available after filtering.")
     return windows

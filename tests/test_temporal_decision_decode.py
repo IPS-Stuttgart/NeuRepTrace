@@ -25,7 +25,7 @@ def _synthetic_grouped_dataset() -> EpochDataset:
     decision_mask = (times >= 0.05) & (times <= 0.2)
     patterns = np.eye(n_classes, n_channels)
     for trial_index, class_label in enumerate(labels):
-        data[trial_index, :, decision_mask] += patterns[class_label, :, None] * 1.5
+        data[trial_index, :, decision_mask] += patterns[class_label] * 1.5
     return EpochDataset(
         data=data,
         times=times,
