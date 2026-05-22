@@ -188,6 +188,29 @@ def check_raw_files(dataset_id: str, *, bids_root: Path, subjects: str | Iterabl
     return missing
 
 
+def invalid_raw_fif_files(
+    dataset_id: str,
+    *,
+    bids_root: Path,
+    subjects: str | Iterable[str | int] | None = None,
+    runs: str | Iterable[str] | None = None,
+) -> list[tuple[Path, str]]:
+    """Return selected raw FIF files that exist but cannot be opened by MNE."""
+    spec = DATASET_SPECS[normalize_dataset_id(dataset_id)]
+    invalid: list[tuple[Path, str]] = []
+    for subject in parse_subjects(spec, subjects):
+        for run in parse_runs(spec, runs):
+            raw_path = run_files(spec, bids_root, subject, run).raw_path
+            if not raw_path.is_file():
+                continue
+            try:
+                raw = mne.io.read_raw_fif(raw_path, preload=False, verbose="error")
+                raw.close()
+            except Exception as exc:  # pragma: no cover - exercised by workflow cache recovery
+                invalid.append((raw_path, str(exc)))
+    return invalid
+
+
 def _baseline(value: str) -> tuple[float | None, float | None] | None:
     text = str(value).strip().lower()
     if text in {"none", "off", "false"}:
@@ -546,6 +569,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     check_parser = subparsers.add_parser("check-raw", help="Check whether selected raw BIDS files exist locally.")
     _add_dataset_subject_run_args(check_parser)
     check_parser.add_argument("--bids-root", type=Path, required=True)
+    check_parser.add_argument("--validate-readable", action="store_true", help="Also verify that selected raw FIF files can be opened by MNE.")
+    check_parser.add_argument("--delete-invalid", action="store_true", help="Delete unreadable selected raw FIF files so they can be downloaded again.")
     check_parser.set_defaults(func=_main_check_raw)
 
     stage_parser = subparsers.add_parser("stage", help="Stage selected raw BIDS MEG files into per-subject MNE Epochs FIF files.")
@@ -586,12 +611,27 @@ def _main_print_download_includes(args) -> int:
 
 def _main_check_raw(args) -> int:
     missing = check_raw_files(args.dataset, bids_root=args.bids_root, subjects=args.subjects, runs=args.runs)
-    if not missing:
+    invalid: list[tuple[Path, str]] = []
+    if args.validate_readable:
+        invalid = invalid_raw_fif_files(args.dataset, bids_root=args.bids_root, subjects=args.subjects, runs=args.runs)
+        if args.delete_invalid:
+            for path, _reason in invalid:
+                path.unlink(missing_ok=True)
+            missing = check_raw_files(args.dataset, bids_root=args.bids_root, subjects=args.subjects, runs=args.runs)
+    if not missing and not invalid:
         print(f"All selected {args.dataset} raw files are present under {args.bids_root}.")
+        if args.validate_readable:
+            print("All selected raw FIF files are readable.")
         return 0
-    print(f"Missing {len(missing)} selected {args.dataset} raw file(s):")
-    for path in missing:
-        print(path)
+    if missing:
+        print(f"Missing {len(missing)} selected {args.dataset} raw file(s):")
+        for path in missing:
+            print(path)
+    if invalid:
+        action = "Deleted" if args.delete_invalid else "Unreadable"
+        print(f"{action} {len(invalid)} selected {args.dataset} raw FIF file(s):")
+        for path, reason in invalid:
+            print(f"{path}: {reason}")
     return 1
 
 

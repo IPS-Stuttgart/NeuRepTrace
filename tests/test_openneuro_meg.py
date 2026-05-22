@@ -13,6 +13,7 @@ from neureptrace.openneuro_meg import (
     _drop_non_epochable_metadata,
     _filter_metadata,
     expected_relative_files,
+    invalid_raw_fif_files,
     parse_runs,
     parse_subjects,
     run_files,
@@ -147,3 +148,13 @@ def test_openneuro_subject_and_path_formatting():
     files = run_files(DATASET_SPECS["ds004276"], Path("root"), 1, None)
     assert files.raw_path == Path("root/sub-001/meg/sub-001_task-words_meg.fif")
     assert files.behavior_path == Path("root/sub-001/beh/sub-001_task-words_beh.tsv")
+
+
+def test_invalid_raw_fif_files_reports_unreadable_cache_entry(tmp_path: Path):
+    files = run_files(DATASET_SPECS["ds006629"], tmp_path, 1, "0")
+    files.raw_path.parent.mkdir(parents=True)
+    files.raw_path.write_bytes(b"not a fif file")
+
+    invalid = invalid_raw_fif_files("ds006629", bids_root=tmp_path, subjects="1", runs="0")
+
+    assert [path for path, _reason in invalid] == [files.raw_path]
