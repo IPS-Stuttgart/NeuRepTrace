@@ -30,6 +30,7 @@ COMMAND_MODULES = {
     "observation-schema": "neureptrace.observation_schema",
     "onset-detect": "neureptrace.onset_detection",
     "onset-detection": "neureptrace.onset_detection",
+    "openneuro-meg": "neureptrace.openneuro_meg",
     "plot-time-decode": "neureptrace.plot_time_decode",
     "results": "neureptrace.results",
     "stimulus-detect": "neureptrace.stimulus_detection",
