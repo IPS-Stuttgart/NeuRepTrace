@@ -91,6 +91,11 @@ def _alignment_columns(frame: pd.DataFrame, prob_columns: Sequence[str]) -> list
     return ordered
 
 
+def _decoder_aliases(decoder: str) -> tuple[str, ...]:
+    text = str(decoder)
+    return tuple(dict.fromkeys((text, text.replace("-", "_"), text.replace("_", "-"))))
+
+
 def _source_frames(
     observations: pd.DataFrame,
     *,
@@ -110,8 +115,11 @@ def _source_frames(
             raise ValueError(f"No observation rows remain after filtering emission_mode == {source_emission_mode!r}.")
 
     sources: dict[str, pd.DataFrame] = {}
+    decoder_values = working["decoder"].astype(str)
     for decoder in decoders:
-        subset = working.loc[working["decoder"] == decoder].copy()
+        subset = working.loc[decoder_values == decoder].copy()
+        if subset.empty:
+            subset = working.loc[decoder_values.isin(_decoder_aliases(str(decoder)))].copy()
         if subset.empty:
             raise ValueError(f"No observations found for decoder {decoder!r}.")
         sources[decoder] = subset
