@@ -50,6 +50,7 @@ class FieldTripMatSpec:
     """Schema for converting one FieldTrip-style MATLAB struct to MNE epochs."""
 
     variable: str | None = None
+    variable_candidates: tuple[str, ...] = field(default_factory=tuple)
     trial_field: str = "trial"
     time_field: str = "time"
     label_field: str = "label"
@@ -88,7 +89,7 @@ def _public_mat_variables(mat: Mapping[str, Any]) -> list[str]:
     return [name for name in mat if not name.startswith("__")]
 
 
-def _select_mat_variable(mat: Mapping[str, Any], variable: str | None) -> Any:
+def _select_mat_variable(mat: Mapping[str, Any], variable: str | None, variable_candidates: Sequence[str] = ()) -> Any:
     """Return the requested MATLAB variable or infer the only public variable."""
 
     if variable is not None:
@@ -98,12 +99,16 @@ def _select_mat_variable(mat: Mapping[str, Any], variable: str | None) -> Any:
             public = ", ".join(_public_mat_variables(mat)) or "<none>"
             raise KeyError(f"MATLAB variable '{variable}' not found. Available public variables: {public}.") from exc
 
+    for candidate in variable_candidates:
+        if candidate in mat:
+            return mat[candidate]
+
     public = _public_mat_variables(mat)
     if len(public) != 1:
         raise ValueError(
             "Could not infer MATLAB data variable because the file contains "
             f"{len(public)} public variables ({', '.join(public) or '<none>'}). "
-            "Set FieldTripMatSpec.variable explicitly."
+            "Set FieldTripMatSpec.variable explicitly or provide variable_candidates."
         )
     return mat[public[0]]
 
@@ -328,7 +333,7 @@ def load_fieldtrip_mat(path: str | Path, spec: FieldTripMatSpec | None = None) -
 
     spec = FieldTripMatSpec() if spec is None else spec
     mat_path = Path(path)
-    data_struct = _select_mat_variable(_loadmat(mat_path), spec.variable)
+    data_struct = _select_mat_variable(_loadmat(mat_path), spec.variable, spec.variable_candidates)
 
     trials = _normalize_trials(_get_field(data_struct, spec.trial_field))
     times = _normalize_times(_get_field(data_struct, spec.time_field), len(trials))
@@ -358,6 +363,14 @@ def load_fieldtrip_mat(path: str | Path, spec: FieldTripMatSpec | None = None) -
     metadata = _metadata_with_constants(metadata, participant=spec.participant, condition=spec.condition)
     epochs.metadata = metadata
     return epochs, metadata
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)):
+        return (str(value),)
+    return tuple(str(item) for item in value)
 
 
 def _metadata_columns_from_config(config: Mapping[str, Any]) -> tuple[MetadataColumnSpec, ...]:
@@ -477,6 +490,7 @@ def load_fieldtrip_mat_epochs(
         raise ValueError("validation must be a mapping when provided")
     spec = FieldTripMatSpec(
         variable=config.get("variable"),
+        variable_candidates=_string_tuple(config.get("variable_candidates", config.get("struct_candidates"))),
         trial_field=str(fields.get("trial", config.get("trial_field", "trial"))),
         time_field=str(fields.get("time", config.get("time_field", "time"))),
         label_field=str(fields.get("label", config.get("label_field", "label"))),

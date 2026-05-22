@@ -12,8 +12,10 @@ from neureptrace.bushmeg_source_loso import (
     WindowSpec,
     _apply_class_bias,
     _candidate_metrics,
+    _class_prototype_similarity_features,
     _fit_candidate_model,
     _fit_class_bias,
+    _preprocessing_normalization_name,
     _prepare_window_train_test_features,
     _sample_weights_for_training,
     _select_candidate,
@@ -123,6 +125,38 @@ def test_window_feature_kinds_add_logvar_and_covariance_branches():
     assert evoked_covariance.shape == (2, 9)
     assert np.all(np.isfinite(logvar))
     assert np.all(np.isfinite(covariance))
+
+
+def test_preprocessing_normalization_accepts_epoch_normalization_alias():
+    assert _preprocessing_normalization_name({"epoch_normalization": "subject_baseline_whiten"}) == "subject_baseline_whiten"
+    assert _preprocessing_normalization_name({"normalization": "subject_z", "epoch_normalization": "subject_baseline_whiten"}) == "subject_z"
+
+
+def test_class_prototype_similarity_features_separates_matched_classes():
+    train_features = np.array(
+        [
+            [1.0, 0.0],
+            [0.9, 0.1],
+            [-1.0, 0.0],
+            [-0.9, -0.1],
+        ],
+        dtype=np.float32,
+    )
+    test_features = np.array([[1.0, 0.0], [-1.0, 0.0]], dtype=np.float32)
+    labels = np.array([0, 0, 1, 1])
+
+    train_proto, test_proto = _class_prototype_similarity_features(
+        train_features,
+        test_features,
+        labels,
+        n_classes=2,
+    )
+
+    assert train_proto.shape == (4, 4)
+    assert test_proto.shape == (2, 4)
+    assert test_proto[0, 0] > test_proto[0, 1]  # cosine to class 0 beats class 1
+    assert test_proto[0, 2] > test_proto[0, 3]  # distance score to class 0 beats class 1
+    assert np.all(np.isfinite(train_proto))
 
 
 def test_candidate_metrics_report_multiclass_topk():

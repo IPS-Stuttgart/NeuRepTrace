@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -69,10 +69,31 @@ FEATURE_KIND_CHOICES = (
     "covariance",
     "evoked_logvar",
     "evoked_covariance",
+    "prototype",
+    "evoked_prototype",
+    "logvar_prototype",
+    "evoked_logvar_prototype",
     "xdawn",
+    "xdawn_prototype",
 )
 DEFAULT_XDAWN_COMPONENTS = 8
 DEFAULT_COVARIANCE_MAX_CHANNELS = 64
+PROTOTYPE_FEATURE_KINDS = frozenset(
+    {
+        "prototype",
+        "evoked_prototype",
+        "logvar_prototype",
+        "evoked_logvar_prototype",
+        "xdawn_prototype",
+    }
+)
+SUPERVISED_FEATURE_KINDS = PROTOTYPE_FEATURE_KINDS | {"xdawn"}
+PROTOTYPE_BASE_FEATURE_KINDS = {
+    "prototype": "evoked",
+    "evoked_prototype": "evoked",
+    "logvar_prototype": "logvar",
+    "evoked_logvar_prototype": "evoked_logvar",
+}
 
 
 @dataclass(slots=True)
@@ -287,6 +308,14 @@ def _window_size_seconds(preprocessing: Mapping[str, Any], default: float = 0.10
     return float(default)
 
 
+def _preprocessing_normalization_name(preprocessing: Mapping[str, Any]) -> str:
+    """Return the configured subject-level normalization, accepting legacy aliases."""
+
+    if "normalization" in preprocessing:
+        return str(preprocessing["normalization"])
+    return str(preprocessing.get("epoch_normalization", "none"))
+
+
 def _resolve_output(config: Mapping[str, Any], *, config_dir: Path, key: str, default: str) -> Path:
     outputs = _section(config, "outputs")
     value = outputs.get(key, default)
@@ -354,17 +383,18 @@ def _load_subjects_from_config(
         raise ValueError("bushmeg-source-loso currently expects dataset.type='fieldtrip_mat'.")
 
     metadata_config = _section(config, "metadata")
+    matlab_config = _section(config, "matlab")
     preprocessing = _section(config, "preprocessing")
     decoding = _section(config, "decoding") or _section(config, "workflow")
     source_loso = _section(config, "source_loso")
     label_column = str(decoding.get("label_column", "stimulus_class"))
     group_column = str(source_loso.get("group_column", decoding.get("group_column", "participant")))
     baseline_window = tuple(preprocessing.get("baseline_window", _base.DEFAULT_BASELINE_WINDOW))
-    normalization = str(preprocessing.get("normalization", "none"))
+    normalization = _preprocessing_normalization_name(preprocessing)
     tmin = preprocessing.get("tmin")
     tmax = preprocessing.get("tmax")
 
-    loader_config: dict[str, Any] = {**dataset, "metadata": metadata_config}
+    loader_config: dict[str, Any] = {**matlab_config, **dataset, "metadata": metadata_config}
     if "validation" in config:
         loader_config["validation"] = _validation_section(config)
 
@@ -462,6 +492,108 @@ def _template_similarity_features(features: np.ndarray, templates: np.ndarray) -
     return np.clip(similarities, -1.0, 1.0).astype(np.float32, copy=False)
 
 
+def _train_standardized_features(
+    train_features: np.ndarray, test_features: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Standardize train/test features with source-train statistics only."""
+
+    train = np.asarray(train_features, dtype=np.float64)
+    test = np.asarray(test_features, dtype=np.float64)
+    mean = train.mean(axis=0, keepdims=True)
+    scale = _base._nonzero_std(train.std(axis=0, keepdims=True))
+    return (train - mean) / scale, (test - mean) / scale
+
+
+def _class_means(
+    features: np.ndarray, labels: np.ndarray, *, n_classes: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if features.shape[0] != labels.shape[0]:
+        raise ValueError("Prototype features and labels have incompatible lengths.")
+    class_sums = np.zeros((int(n_classes), features.shape[1]), dtype=np.float64)
+    np.add.at(class_sums, labels, features)
+    counts = np.bincount(labels, minlength=int(n_classes)).astype(
+        np.float64, copy=False
+    )
+    means = np.zeros_like(class_sums)
+    valid = counts > 0.0
+    means[valid] = class_sums[valid] / counts[valid, None]
+    return means, class_sums, counts
+
+
+def _prototype_score_matrix(
+    features: np.ndarray, prototypes: np.ndarray, *, epsilon: float = 1e-12
+) -> np.ndarray:
+    """Return cosine and negative-squared-distance scores to each class prototype."""
+
+    features = np.asarray(features, dtype=np.float64)
+    prototypes = np.asarray(prototypes, dtype=np.float64)
+    dot = features @ prototypes.T
+    feature_norm = np.maximum(np.linalg.norm(features, axis=1, keepdims=True), epsilon)
+    prototype_norm = np.maximum(
+        np.linalg.norm(prototypes, axis=1, keepdims=True).T, epsilon
+    )
+    cosine = dot / (feature_norm * prototype_norm)
+    feature_sq = np.sum(features * features, axis=1, keepdims=True)
+    prototype_sq = np.sum(prototypes * prototypes, axis=1, keepdims=True).T
+    squared_distance = np.maximum(feature_sq + prototype_sq - 2.0 * dot, 0.0)
+    distance_score = -squared_distance / float(max(features.shape[1], 1))
+    return np.concatenate([cosine, distance_score], axis=1)
+
+
+def _paired_prototype_scores(
+    features: np.ndarray, prototypes: np.ndarray, *, epsilon: float = 1e-12
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return paired cosine and distance scores for row-wise leave-one-out prototypes."""
+
+    dot = np.sum(features * prototypes, axis=1)
+    feature_norm = np.maximum(np.linalg.norm(features, axis=1), epsilon)
+    prototype_norm = np.maximum(np.linalg.norm(prototypes, axis=1), epsilon)
+    cosine = dot / (feature_norm * prototype_norm)
+    distance_score = -np.sum((features - prototypes) ** 2, axis=1) / float(
+        max(features.shape[1], 1)
+    )
+    return cosine, distance_score
+
+
+def _class_prototype_similarity_features(
+    train_features: np.ndarray,
+    test_features: np.ndarray,
+    train_labels: np.ndarray,
+    *,
+    n_classes: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build train-source-only class-prototype features for a candidate window."""
+
+    train_z, test_z = _train_standardized_features(train_features, test_features)
+    train_labels = np.asarray(train_labels, dtype=int).reshape(-1)
+    prototypes, class_sums, counts = _class_means(
+        train_z, train_labels, n_classes=int(n_classes)
+    )
+    train_scores = _prototype_score_matrix(train_z, prototypes)
+    test_scores = _prototype_score_matrix(test_z, prototypes)
+    for class_idx in np.unique(train_labels):
+        class_idx = int(class_idx)
+        row_indices = np.flatnonzero(train_labels == class_idx)
+        if counts[class_idx] > 1.0:
+            loo_prototypes = (
+                class_sums[class_idx][None, :] - train_z[row_indices]
+            ) / (counts[class_idx] - 1.0)
+            loo_cosine, loo_distance = _paired_prototype_scores(
+                train_z[row_indices], loo_prototypes
+            )
+        else:
+            loo_cosine = np.zeros(row_indices.shape[0], dtype=np.float64)
+            loo_distance = -np.sum(
+                train_z[row_indices] * train_z[row_indices], axis=1
+            ) / float(max(train_z.shape[1], 1))
+        train_scores[row_indices, class_idx] = loo_cosine
+        train_scores[row_indices, int(n_classes) + class_idx] = loo_distance
+    return train_scores.astype(np.float32, copy=False), test_scores.astype(
+        np.float32, copy=False
+    )
+
+
 def _class_template_features(
     cache: FeatureCache,
     subjects: Mapping[str, SubjectEpochs],
@@ -520,6 +652,35 @@ def _prepare_window_train_test_features(
 
     feature_family = normalize_source_feature_family(candidate.feature_family)
     feature_kind = normalize_source_feature_kind(candidate.feature_kind)
+    if feature_kind in PROTOTYPE_FEATURE_KINDS:
+        base_feature_kind = PROTOTYPE_BASE_FEATURE_KINDS.get(feature_kind, "evoked")
+        train_features, test_features = _prepare_window_train_test_features(
+            subjects=subjects,
+            cache=cache,
+            candidate=replace(candidate, feature_kind=base_feature_kind),
+            train_subjects=train_subjects,
+            test_subject=test_subject,
+            window=window,
+            n_classes=n_classes,
+        )
+        prototype_train_features, prototype_test_features = (
+            _class_prototype_similarity_features(
+                train_features,
+                test_features,
+                _stack_subject_labels(subjects, train_subjects),
+                n_classes=n_classes,
+            )
+        )
+        if feature_kind == "prototype":
+            return prototype_train_features, prototype_test_features
+        return (
+            np.concatenate([train_features, prototype_train_features], axis=1).astype(
+                np.float32, copy=False
+            ),
+            np.concatenate([test_features, prototype_test_features], axis=1).astype(
+                np.float32, copy=False
+            ),
+        )
     if feature_family == "bin_means":
         return (
             _stack_subject_features(
@@ -668,8 +829,8 @@ def _window_features(
     """Return source-LOSO features for one subject/window."""
 
     feature_kind = normalize_source_feature_kind(feature_kind)
-    if feature_kind == "xdawn":
-        raise ValueError("xDawn features are supervised and must be fitted inside _predict_candidate.")
+    if feature_kind in SUPERVISED_FEATURE_KINDS:
+        raise ValueError(f"{feature_kind} features are supervised and must be fitted inside _predict_candidate.")
     evoked = None
     if feature_kind in {"evoked", "evoked_logvar", "evoked_covariance"}:
         evoked = _window_bin_mean_features(data, times, window, temporal_bins=temporal_bins)
@@ -1005,7 +1166,7 @@ def _predict_candidate(
     classes = np.arange(n_classes)
     feature_kind = normalize_source_feature_kind(candidate.feature_kind)
     for window in candidate.windows:
-        if feature_kind == "xdawn":
+        if feature_kind in {"xdawn", "xdawn_prototype"}:
             train_features, test_features = _xdawn_train_test_features(
                 subjects=subjects,
                 train_subjects=train_subjects,
@@ -1015,6 +1176,21 @@ def _predict_candidate(
                 temporal_bins=candidate.temporal_bins,
                 n_components=candidate.xdawn_components,
             )
+            if feature_kind == "xdawn_prototype":
+                prototype_train_features, prototype_test_features = (
+                    _class_prototype_similarity_features(
+                        train_features,
+                        test_features,
+                        train_labels,
+                        n_classes=n_classes,
+                    )
+                )
+                train_features = np.concatenate(
+                    [train_features, prototype_train_features], axis=1
+                ).astype(np.float32, copy=False)
+                test_features = np.concatenate(
+                    [test_features, prototype_test_features], axis=1
+                ).astype(np.float32, copy=False)
         else:
             train_features, test_features = _prepare_window_train_test_features(
                 subjects=subjects,
@@ -1252,11 +1428,19 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                             for temporal_bins in temporal_bins_values:
                                 for feature_kind in feature_kinds:
                                     xdawn_component_grid = (
-                                        xdawn_components_values if feature_kind == "xdawn" else [None]
+                                        xdawn_components_values
+                                        if feature_kind in {"xdawn", "xdawn_prototype"}
+                                        else [None]
+                                    )
+                                    covariance_feature_kind = (
+                                        PROTOTYPE_BASE_FEATURE_KINDS.get(
+                                            feature_kind, feature_kind
+                                        )
                                     )
                                     covariance_channel_grid = (
                                         covariance_max_channels_values
-                                        if feature_kind in {"covariance", "evoked_covariance"}
+                                        if covariance_feature_kind
+                                        in {"covariance", "evoked_covariance"}
                                         else [DEFAULT_COVARIANCE_MAX_CHANNELS]
                                     )
                                     for xdawn_components in xdawn_component_grid:
@@ -1442,6 +1626,9 @@ def run_bushmeg_source_loso(
             "n_candidates": len(candidates),
             "feature_families": sorted({normalize_source_feature_family(candidate.feature_family) for candidate in candidates}),
             "normalization_scope": "subject_unlabeled_baseline",
+            "epoch_normalization": _base.normalize_epoch_normalization(
+                _preprocessing_normalization_name(_section(config, "preprocessing"))
+            ),
             "sample_weighting_modes": sorted({candidate.sample_weighting for candidate in candidates}),
             "class_bias_modes": sorted({candidate.class_bias for candidate in candidates}),
             "cue_files_used": False,
