@@ -9,7 +9,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 from sklearn.preprocessing import LabelEncoder
 
 from neureptrace.dataset_config import apply_overrides, effective_config, load_config, load_epoch_dataset_from_config
@@ -30,6 +30,7 @@ from neureptrace.mne_time_decode import (
     _apply_epoch_normalization,
     _features_for_window,
     _normalize_baseline_window,
+    _top_k_accuracy,
 )
 from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
@@ -235,6 +236,9 @@ def run_transfer_from_config(
                 "window_start": float(dataset.times[start]),
                 "window_stop": float(dataset.times[stop - 1]),
                 "accuracy": accuracy_score(labels[test_indices], predictions),
+                "balanced_accuracy": balanced_accuracy_score(labels[test_indices], predictions),
+                "top2_accuracy": _top_k_accuracy(probabilities, labels[test_indices], k=2),
+                "top3_accuracy": _top_k_accuracy(probabilities, labels[test_indices], k=3),
                 "log_loss": log_loss(labels[test_indices], probabilities, labels=classes),
                 "brier": brier_score_multiclass(probabilities, labels[test_indices]),
                 "ece": expected_calibration_error(probabilities, labels[test_indices]),

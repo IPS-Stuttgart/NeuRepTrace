@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 
 from neureptrace.metrics import brier_score_multiclass, expected_calibration_error
 from neureptrace.observation_schema import read_validated_probability_observations
@@ -314,6 +314,33 @@ def ensemble_probability_observations(
     return ProbabilityObservationTable(output).standardized(defaults={"backend": "ensemble", "decoder": output_decoder, "emission_mode": output_emission_mode}).frame
 
 
+def _top_k_accuracy_from_label_values(
+    probabilities: np.ndarray,
+    true_labels: np.ndarray,
+    label_values: Sequence[int],
+    *,
+    k: int,
+) -> float:
+    """Return top-k accuracy when probability columns use arbitrary label ids."""
+
+    probabilities = np.asarray(probabilities, dtype=float)
+    true_labels = np.asarray(true_labels, dtype=int).reshape(-1)
+    label_values_array = np.asarray(label_values, dtype=int)
+    if probabilities.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional array.")
+    if probabilities.shape[0] != true_labels.shape[0]:
+        raise ValueError("probabilities and true_labels must contain the same number of rows.")
+    if probabilities.shape[1] != label_values_array.shape[0]:
+        raise ValueError("label_values must contain one label per probability column.")
+    if k < 1:
+        raise ValueError("k must be at least one.")
+
+    effective_k = min(int(k), probabilities.shape[1])
+    top_positions = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
+    top_labels = label_values_array[top_positions]
+    return float(np.mean(np.any(top_labels == true_labels[:, None], axis=1)))
+
+
 def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10) -> pd.DataFrame:
     """Summarize ensemble observation rows as time-resolved result metrics."""
     if ece_bins < 1:
@@ -339,6 +366,9 @@ def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10
         row.update(
             {
                 "accuracy": accuracy_score(true_label_values, predicted_label_values),
+                "balanced_accuracy": balanced_accuracy_score(true_label_values, predicted_label_values),
+                "top2_accuracy": _top_k_accuracy_from_label_values(probabilities, true_label_values, label_values, k=2),
+                "top3_accuracy": _top_k_accuracy_from_label_values(probabilities, true_label_values, label_values, k=3),
                 "log_loss": log_loss(true_label_values, probabilities, labels=list(label_values)),
                 "brier": brier_score_multiclass(probabilities, true_positions),
                 "ece": expected_calibration_error(probabilities, true_positions, n_bins=ece_bins),
