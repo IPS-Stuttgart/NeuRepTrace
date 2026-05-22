@@ -9,6 +9,8 @@ that matter for BUSH-MEG:
 
 * temporal features are compact per-channel bin means rather than very large
   sensor-by-sample windows;
+* optional source-class template-similarity features turn each trial into a
+  low-dimensional vector of leave-source-subject-out class-prototype scores;
 * a candidate may average probabilities from several nearby post-stimulus
   windows, giving a strict source-only temporal bagging baseline.
 """
@@ -51,7 +53,16 @@ from neureptrace.io.fieldtrip_mat import load_fieldtrip_mat_epochs
 DEFAULT_SELECTION_METRIC = "balanced_accuracy"
 DEFAULT_RANDOM_SEED = 13
 SUPPORTED_SELECTION_METRICS = {"balanced_accuracy", "accuracy", "log_loss"}
+SOURCE_FEATURE_FAMILIES = (
+    "bin_means",
+    "template_similarity",
+    "template_similarity_plus_bin_means",
+)
 MINIMIZE_SELECTION_METRICS = {"log_loss"}
+SAMPLE_WEIGHTING_MODES = {"none", "class_balanced", "subject_balanced", "subject_class_balanced"}
+CLASS_BIAS_MODES = {"none", "log_prior", "balanced_accuracy"}
+DEFAULT_CLASS_BIAS_DELTAS = (-2.0, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 2.0)
+DEFAULT_CLASS_BIAS_ROUNDS = 2
 FEATURE_KIND_CHOICES = (
     "evoked",
     "logvar",
@@ -106,6 +117,9 @@ class CandidateSpec:
     feature_kind: str = "evoked"
     xdawn_components: int | None = None
     covariance_max_channels: int = DEFAULT_COVARIANCE_MAX_CHANNELS
+    feature_family: str = "bin_means"
+    sample_weighting: str = "none"
+    class_bias: str = "none"
 
     @property
     def window_centers(self) -> tuple[float, ...]:
@@ -122,6 +136,7 @@ class FeatureCache:
     def __init__(self, subjects: Mapping[str, SubjectEpochs]):
         self._subjects = dict(subjects)
         self._cache: dict[tuple[str, WindowSpec, int, str, int], np.ndarray] = {}
+        self._template_cache: dict[tuple[tuple[str, ...], WindowSpec, int, str, int, int], np.ndarray] = {}
 
     def get(
         self,
@@ -146,6 +161,43 @@ class FeatureCache:
             )
         return self._cache[key]
 
+    def class_templates(
+        self,
+        reference_subjects: Sequence[str],
+        window: WindowSpec,
+        temporal_bins: int,
+        n_classes: int,
+        *,
+        feature_kind: str = "evoked",
+        covariance_max_channels: int = DEFAULT_COVARIANCE_MAX_CHANNELS,
+    ) -> np.ndarray:
+        """Return subject-balanced class templates for a source-subject set."""
+
+        reference_key = tuple(sorted(str(subject) for subject in reference_subjects))
+        if not reference_key:
+            raise ValueError("At least one reference subject is required for template-similarity features.")
+        normalized_feature_kind = normalize_source_feature_kind(feature_kind)
+        key = (
+            reference_key,
+            window,
+            int(temporal_bins),
+            normalized_feature_kind,
+            int(covariance_max_channels),
+            int(n_classes),
+        )
+        if key not in self._template_cache:
+            self._template_cache[key] = _class_template_features(
+                self,
+                self._subjects,
+                reference_key,
+                window,
+                int(temporal_bins),
+                int(n_classes),
+                feature_kind=normalized_feature_kind,
+                covariance_max_channels=int(covariance_max_channels),
+            )
+        return self._template_cache[key]
+
 
 def _section(config: Mapping[str, Any], name: str) -> dict[str, Any]:
     value = config.get(name, {}) or {}
@@ -162,6 +214,59 @@ def _list_value(value: Any, default: Sequence[Any]) -> list[Any]:
     if isinstance(value, Sequence):
         return list(value)
     return [value]
+
+
+def normalize_source_feature_family(value: Any) -> str:
+    """Normalize source-only BUSH-MEG feature-family names."""
+
+    normalized = "bin_means" if value is None else str(value).strip().lower().replace("-", "_")
+    aliases = {
+        "sensor_bin_means": "bin_means",
+        "bin_mean": "bin_means",
+        "binmean": "bin_means",
+        "templates": "template_similarity",
+        "template_corr": "template_similarity",
+        "template_correlation": "template_similarity",
+        "prototype_similarity": "template_similarity",
+        "prototypes": "template_similarity",
+        "source_templates": "template_similarity",
+        "template_similarity_augmented": "template_similarity_plus_bin_means",
+        "template_corr_plus_bin_means": "template_similarity_plus_bin_means",
+        "templates_plus_bin_means": "template_similarity_plus_bin_means",
+        "hybrid_template_similarity": "template_similarity_plus_bin_means",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in SOURCE_FEATURE_FAMILIES:
+        raise ValueError(f"Unknown source feature family '{value}'. Available families: {', '.join(SOURCE_FEATURE_FAMILIES)}.")
+    return normalized
+
+
+def _normalize_sample_weighting(value: str | None) -> str:
+    normalized = "none" if value is None else str(value).strip().lower().replace("-", "_")
+    if normalized in {"", "false", "off", "no", "unweighted"}:
+        return "none"
+    if normalized in {"class", "classes", "class_weight", "class_weights", "balanced"}:
+        return "class_balanced"
+    if normalized in {"subject", "subjects", "subject_weight", "subject_weights"}:
+        return "subject_balanced"
+    if normalized in {"subject_class", "class_subject", "subject_class_weight", "subject_class_weights"}:
+        return "subject_class_balanced"
+    if normalized not in SAMPLE_WEIGHTING_MODES:
+        raise ValueError(f"Unknown sample weighting mode '{value}'. Available modes: {sorted(SAMPLE_WEIGHTING_MODES)}.")
+    return normalized
+
+
+def _normalize_class_bias(value: str | None) -> str:
+    normalized = "none" if value is None else str(value).strip().lower().replace("-", "_")
+    if normalized in {"", "false", "off", "no", "unbiased"}:
+        return "none"
+    if normalized in {"prior", "class_prior", "logprior", "inverse_prior", "inverse_class_prior"}:
+        return "log_prior"
+    if normalized in {"balanced_acc", "train_balanced_accuracy", "source_balanced_accuracy", "source_loso_balanced_accuracy"}:
+        return "balanced_accuracy"
+    if normalized not in CLASS_BIAS_MODES:
+        raise ValueError(f"Unknown class-bias mode '{value}'. Available modes: {sorted(CLASS_BIAS_MODES)}.")
+    return normalized
 
 
 def normalize_source_feature_kind(feature_kind: str) -> str:
@@ -341,6 +446,150 @@ def _window_bin_mean_features(
     return np.concatenate(features, axis=1).astype(np.float32, copy=False)
 
 
+def _row_center_unit_scale(features: np.ndarray) -> np.ndarray:
+    """Center each feature vector and scale it to unit Euclidean norm."""
+
+    features = np.asarray(features, dtype=np.float64)
+    centered = features - features.mean(axis=1, keepdims=True)
+    norms = np.linalg.norm(centered, axis=1, keepdims=True)
+    return centered / np.where(norms < 1e-12, 1.0, norms)
+
+
+def _template_similarity_features(features: np.ndarray, templates: np.ndarray) -> np.ndarray:
+    """Return centered-cosine similarities from trials to class templates."""
+
+    similarities = _row_center_unit_scale(features) @ _row_center_unit_scale(templates).T
+    return np.clip(similarities, -1.0, 1.0).astype(np.float32, copy=False)
+
+
+def _class_template_features(
+    cache: FeatureCache,
+    subjects: Mapping[str, SubjectEpochs],
+    reference_subjects: Sequence[str],
+    window: WindowSpec,
+    temporal_bins: int,
+    n_classes: int,
+    *,
+    feature_kind: str = "evoked",
+    covariance_max_channels: int = DEFAULT_COVARIANCE_MAX_CHANNELS,
+) -> np.ndarray:
+    """Build subject-balanced class prototypes from source subjects only."""
+
+    reference_subjects = tuple(reference_subjects)
+    if not reference_subjects:
+        raise ValueError("At least one reference subject is required for template-similarity features.")
+    features_by_subject = {
+        subject_id: cache.get(
+            subject_id,
+            window,
+            temporal_bins,
+            feature_kind=feature_kind,
+            covariance_max_channels=covariance_max_channels,
+        )
+        for subject_id in reference_subjects
+    }
+    labels_by_subject = {subject_id: subjects[subject_id].labels for subject_id in reference_subjects}
+    fallback_template = np.mean(
+        np.vstack([features.mean(axis=0, dtype=np.float64) for features in features_by_subject.values()]),
+        axis=0,
+    )
+
+    templates: list[np.ndarray] = []
+    for class_idx in range(int(n_classes)):
+        subject_means = []
+        for subject_id in reference_subjects:
+            labels = labels_by_subject[subject_id]
+            mask = labels == class_idx
+            if np.any(mask):
+                subject_means.append(features_by_subject[subject_id][mask].mean(axis=0, dtype=np.float64))
+        templates.append(np.mean(np.vstack(subject_means), axis=0) if subject_means else fallback_template)
+    return np.vstack(templates).astype(np.float32, copy=False)
+
+
+def _prepare_window_train_test_features(
+    *,
+    subjects: Mapping[str, SubjectEpochs],
+    cache: FeatureCache,
+    candidate: CandidateSpec,
+    train_subjects: Sequence[str],
+    test_subject: str,
+    window: WindowSpec,
+    n_classes: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return fold-local features for one candidate/window."""
+
+    feature_family = normalize_source_feature_family(candidate.feature_family)
+    feature_kind = normalize_source_feature_kind(candidate.feature_kind)
+    if feature_family == "bin_means":
+        return (
+            _stack_subject_features(
+                cache,
+                subjects,
+                train_subjects,
+                window,
+                candidate.temporal_bins,
+                feature_kind=feature_kind,
+                covariance_max_channels=candidate.covariance_max_channels,
+            ),
+            cache.get(
+                test_subject,
+                window,
+                candidate.temporal_bins,
+                feature_kind=feature_kind,
+                covariance_max_channels=candidate.covariance_max_channels,
+            ),
+        )
+
+    train_features_by_subject: list[np.ndarray] = []
+    for subject_id in train_subjects:
+        subject_features = cache.get(
+            subject_id,
+            window,
+            candidate.temporal_bins,
+            feature_kind=feature_kind,
+            covariance_max_channels=candidate.covariance_max_channels,
+        )
+        reference_subjects = [candidate_subject for candidate_subject in train_subjects if candidate_subject != subject_id]
+        if not reference_subjects:
+            reference_subjects = list(train_subjects)
+        similarities = _template_similarity_features(
+            subject_features,
+            cache.class_templates(
+                reference_subjects,
+                window,
+                candidate.temporal_bins,
+                n_classes,
+                feature_kind=feature_kind,
+                covariance_max_channels=candidate.covariance_max_channels,
+            ),
+        )
+        if feature_family == "template_similarity_plus_bin_means":
+            similarities = np.concatenate([subject_features, similarities], axis=1).astype(np.float32, copy=False)
+        train_features_by_subject.append(similarities)
+
+    test_features = cache.get(
+        test_subject,
+        window,
+        candidate.temporal_bins,
+        feature_kind=feature_kind,
+        covariance_max_channels=candidate.covariance_max_channels,
+    )
+    test_similarities = _template_similarity_features(
+        test_features,
+        cache.class_templates(
+            train_subjects,
+            window,
+            candidate.temporal_bins,
+            n_classes,
+            feature_kind=feature_kind,
+            covariance_max_channels=candidate.covariance_max_channels,
+        ),
+    )
+    if feature_family == "template_similarity_plus_bin_means":
+        test_similarities = np.concatenate([test_features, test_similarities], axis=1).astype(np.float32, copy=False)
+    return np.concatenate(train_features_by_subject, axis=0), test_similarities
+
+
 def _window_log_variance_features(
     data: np.ndarray,
     times: np.ndarray,
@@ -485,6 +734,125 @@ def _stack_subject_labels(subjects: Mapping[str, SubjectEpochs], subject_ids: Se
     return np.concatenate([subjects[subject_id].labels for subject_id in subject_ids], axis=0)
 
 
+def _stack_subject_ids(subjects: Mapping[str, SubjectEpochs], subject_ids: Sequence[str]) -> np.ndarray:
+    return np.concatenate([np.full(len(subjects[subject_id].labels), subject_id, dtype=object) for subject_id in subject_ids], axis=0)
+
+
+def _sample_weights_for_training(
+    subjects: Mapping[str, SubjectEpochs],
+    subject_ids: Sequence[str],
+    labels: np.ndarray,
+    mode: str,
+) -> np.ndarray | None:
+    """Return mean-one training weights for class/subject-balanced fitting."""
+
+    mode = _normalize_sample_weighting(mode)
+    if mode == "none":
+        return None
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    sample_subjects = _stack_subject_ids(subjects, subject_ids)
+    if mode == "class_balanced":
+        keys = [(int(label),) for label in labels]
+    elif mode == "subject_balanced":
+        keys = [(str(subject),) for subject in sample_subjects]
+    elif mode == "subject_class_balanced":
+        keys = [(str(subject), int(label)) for subject, label in zip(sample_subjects, labels, strict=True)]
+    else:  # pragma: no cover - guarded by _normalize_sample_weighting
+        raise ValueError(f"Unsupported sample weighting mode: {mode}")
+
+    counts: dict[tuple[Any, ...], int] = {}
+    for key in keys:
+        counts[key] = counts.get(key, 0) + 1
+    weights = np.asarray([1.0 / counts[key] for key in keys], dtype=np.float64)
+    weights /= float(weights.mean())
+    return weights
+
+
+def _fit_candidate_model(
+    model: Any,
+    features: np.ndarray,
+    labels: np.ndarray,
+    *,
+    sample_weight: np.ndarray | None,
+):
+    """Fit a sklearn decoder, routing sample weights through pipelines."""
+
+    if sample_weight is None:
+        model.fit(features, labels)
+        return model
+    sample_weight = np.asarray(sample_weight, dtype=float).reshape(-1)
+    if sample_weight.shape[0] != labels.shape[0]:
+        raise ValueError("sample_weight must contain one weight per training row.")
+    try:
+        model.fit(features, labels, sample_weight=sample_weight)
+    except (TypeError, ValueError) as exc:
+        if not hasattr(model, "steps") or not getattr(model, "steps"):
+            raise TypeError(f"{model.__class__.__name__} does not support sample_weight.") from exc
+        final_step_name = model.steps[-1][0]
+        model.fit(features, labels, **{f"{final_step_name}__sample_weight": sample_weight})
+    return model
+
+
+def _apply_class_bias(probabilities: np.ndarray, bias: np.ndarray) -> np.ndarray:
+    probabilities = np.asarray(probabilities, dtype=float)
+    bias = np.asarray(bias, dtype=float).reshape(-1)
+    if probabilities.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional matrix.")
+    if bias.shape[0] != probabilities.shape[1]:
+        raise ValueError("class-bias vector length must match the number of probability columns.")
+    logits = np.log(np.clip(probabilities, 1e-12, 1.0)) + bias[None, :]
+    logits -= np.max(logits, axis=1, keepdims=True)
+    exp_logits = np.exp(np.clip(logits, -50.0, 50.0))
+    return exp_logits / exp_logits.sum(axis=1, keepdims=True)
+
+
+def _fit_class_bias(probabilities: np.ndarray, labels: np.ndarray, *, n_classes: int, mode: str) -> np.ndarray:
+    """Fit a target-free per-class logit bias from source training predictions."""
+
+    mode = _normalize_class_bias(mode)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if mode == "none":
+        return np.zeros(n_classes, dtype=float)
+    if mode == "log_prior":
+        counts = np.bincount(labels, minlength=n_classes).astype(float)
+        priors = (counts + 1.0) / (float(counts.sum()) + float(n_classes))
+        bias = -np.log(priors)
+        return bias - float(bias.mean())
+    if mode == "balanced_accuracy":
+        return _fit_balanced_accuracy_class_bias(probabilities, labels, n_classes=n_classes)
+    raise ValueError(f"Unsupported class-bias mode: {mode}")  # pragma: no cover
+
+
+def _fit_balanced_accuracy_class_bias(probabilities: np.ndarray, labels: np.ndarray, *, n_classes: int) -> np.ndarray:
+    probabilities = np.asarray(probabilities, dtype=float)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if probabilities.shape != (labels.shape[0], n_classes):
+        raise ValueError("probabilities must have shape (n_trials, n_classes).")
+    log_probabilities = np.log(np.clip(probabilities, 1e-12, 1.0))
+    bias = np.zeros(n_classes, dtype=float)
+    best_score = float(balanced_accuracy_score(labels, np.argmax(log_probabilities, axis=1)))
+    for _ in range(DEFAULT_CLASS_BIAS_ROUNDS):
+        improved = False
+        for class_idx in range(n_classes):
+            best_candidate = bias.copy()
+            best_candidate_score = best_score
+            for delta in DEFAULT_CLASS_BIAS_DELTAS:
+                candidate = bias.copy()
+                candidate[class_idx] += float(delta)
+                candidate -= float(candidate.mean())
+                score = float(balanced_accuracy_score(labels, np.argmax(log_probabilities + candidate[None, :], axis=1)))
+                if score > best_candidate_score + 1e-12:
+                    best_candidate = candidate
+                    best_candidate_score = score
+            if best_candidate_score > best_score + 1e-12:
+                bias = best_candidate
+                best_score = best_candidate_score
+                improved = True
+        if not improved:
+            break
+    return bias
+
+
 def _fit_xdawn_filters(
     data: np.ndarray,
     labels: np.ndarray,
@@ -593,13 +961,26 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     return float(np.mean(label_scores >= kth_scores))
 
 
-def _candidate_model(candidate: CandidateSpec, *, max_iter: int):
+def _effective_pca_components(candidate: CandidateSpec, n_features: int | None, n_samples: int | None) -> int | float | None:
+    pca_components = candidate.pca_components
+    if n_features is None or pca_components is None:
+        return pca_components
+    if normalize_feature_preprocessor(candidate.feature_preprocessor) not in {"pca", "pca_whiten"}:
+        return pca_components
+    if isinstance(pca_components, (int, np.integer)):
+        max_components = int(n_features) if n_samples is None else min(int(n_features), int(n_samples))
+        return min(int(pca_components), max(1, max_components))
+    return pca_components
+
+
+def _candidate_model(candidate: CandidateSpec, *, max_iter: int, n_features: int | None = None, n_samples: int | None = None):
+    pca_components = _effective_pca_components(candidate, n_features, n_samples)
     return make_decoder(
         candidate.decoder,
         max_iter=max_iter,
         emission_mode=candidate.emission_mode,
         feature_preprocessor=candidate.feature_preprocessor,
-        pca_components=candidate.pca_components,
+        pca_components=pca_components,
         classifier_param=candidate.classifier_param,
         random_state=DEFAULT_RANDOM_SEED,
     )
@@ -616,8 +997,11 @@ def _predict_candidate(
     max_iter: int,
 ) -> np.ndarray:
     train_labels = _stack_subject_labels(subjects, train_subjects)
+    sample_weight = _sample_weights_for_training(subjects, train_subjects, train_labels, candidate.sample_weighting)
     test_n = len(subjects[test_subject].labels)
     probabilities_sum = np.zeros((test_n, n_classes), dtype=float)
+    class_bias_mode = _normalize_class_bias(candidate.class_bias)
+    train_probabilities_sum = np.zeros((len(train_labels), n_classes), dtype=float) if class_bias_mode != "none" else None
     classes = np.arange(n_classes)
     feature_kind = normalize_source_feature_kind(candidate.feature_kind)
     for window in candidate.windows:
@@ -632,18 +1016,17 @@ def _predict_candidate(
                 n_components=candidate.xdawn_components,
             )
         else:
-            train_features = _stack_subject_features(
-                cache,
-                subjects,
-                train_subjects,
-                window,
-                candidate.temporal_bins,
-                feature_kind=feature_kind,
-                covariance_max_channels=candidate.covariance_max_channels,
+            train_features, test_features = _prepare_window_train_test_features(
+                subjects=subjects,
+                cache=cache,
+                candidate=candidate,
+                train_subjects=train_subjects,
+                test_subject=test_subject,
+                window=window,
+                n_classes=n_classes,
             )
-            test_features = cache.get(test_subject, window, candidate.temporal_bins, feature_kind=feature_kind, covariance_max_channels=candidate.covariance_max_channels)
-        model = _candidate_model(candidate, max_iter=max_iter)
-        model.fit(train_features, train_labels)
+        model = _candidate_model(candidate, max_iter=max_iter, n_features=train_features.shape[1], n_samples=train_features.shape[0])
+        _fit_candidate_model(model, train_features, train_labels, sample_weight=sample_weight)
         probabilities = predict_emission_probabilities(
             model,
             test_features,
@@ -654,7 +1037,23 @@ def _predict_candidate(
             model=model,
             classes=classes,
         )
-    return _base._probability_average(probabilities_sum, len(candidate.windows))
+        if train_probabilities_sum is not None:
+            train_probabilities = predict_emission_probabilities(
+                model,
+                train_features,
+                emission_mode=candidate.emission_mode,
+            )
+            train_probabilities_sum += _base._align_probability_columns(
+                train_probabilities,
+                model=model,
+                classes=classes,
+            )
+    averaged = _base._probability_average(probabilities_sum, len(candidate.windows))
+    if train_probabilities_sum is None:
+        return averaged
+    train_averaged = _base._probability_average(train_probabilities_sum, len(candidate.windows))
+    bias = _fit_class_bias(train_averaged, train_labels, n_classes=n_classes, mode=class_bias_mode)
+    return _apply_class_bias(averaged, bias)
 
 
 def _candidate_metrics(probabilities: np.ndarray, labels: np.ndarray, *, n_classes: int) -> dict[str, float]:
@@ -680,11 +1079,14 @@ def _score_is_better(candidate_score: float, incumbent_score: float | None, *, m
 def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
     return {
         "candidate": candidate.name,
+        "feature_family": normalize_source_feature_family(candidate.feature_family),
         "decoder": normalize_decoder_name(candidate.decoder),
         "emission_mode": normalize_emission_mode(candidate.emission_mode),
         "feature_preprocessor": normalize_feature_preprocessor(candidate.feature_preprocessor),
         "pca_components": "" if candidate.pca_components is None else candidate.pca_components,
         "classifier_param": "" if candidate.classifier_param is None else candidate.classifier_param,
+        "sample_weighting": _normalize_sample_weighting(candidate.sample_weighting),
+        "class_bias": _normalize_class_bias(candidate.class_bias),
         "temporal_bins": candidate.temporal_bins,
         "feature_kind": normalize_source_feature_kind(candidate.feature_kind),
         "xdawn_components": "" if candidate.xdawn_components is None else candidate.xdawn_components,
@@ -810,6 +1212,8 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
         )
     ]
     pca_values = _list_value(grid.get("pca_components"), [decoding.get("pca_components", preprocessing.get("pca_components", 96))])
+    feature_family_values = grid.get("feature_families", grid.get("feature_family"))
+    feature_families = [normalize_source_feature_family(value) for value in _list_value(feature_family_values, ["bin_means"])]
     normalized_pca_values = [None if value in {None, "", "none", "None"} else normalize_pca_components(value) for value in pca_values]
     temporal_bins_values = [int(value) for value in _list_value(grid.get("temporal_bins"), [4])]
     c_grid = [float(value) for value in parse_c_grid(grid.get("c_grid", decoding.get("tuning_c_grid", "0.1,1.0,10.0")))]
@@ -823,71 +1227,94 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
     ]
     covariance_max_channels_values = [int(value) for value in _list_value(grid.get("covariance_max_channels"), [DEFAULT_COVARIANCE_MAX_CHANNELS])]
     deep_weight_decay_grid = [float(value) for value in _list_value(grid.get("deep_weight_decay_grid"), [1e-4])]
+    sample_weighting_values = [
+        _normalize_sample_weighting(value)
+        for value in _list_value(
+            grid.get("sample_weightings", grid.get("sample_weighting", source_loso.get("sample_weighting", "none"))),
+            ["none"],
+        )
+    ]
+    class_bias_values = [
+        _normalize_class_bias(value)
+        for value in _list_value(
+            grid.get("class_bias_modes", grid.get("class_bias", source_loso.get("class_bias", "none"))),
+            ["none"],
+        )
+    ]
 
     candidates: list[CandidateSpec] = []
     for window_name, windows in window_sets:
-        for decoder in decoders:
-            for emission_mode in emission_modes:
-                for feature_preprocessor in feature_preprocessors:
-                    for pca_components in normalized_pca_values:
-                        for temporal_bins in temporal_bins_values:
-                            for feature_kind in feature_kinds:
-                                xdawn_component_grid = (
-                                    xdawn_components_values if feature_kind == "xdawn" else [None]
-                                )
-                                covariance_channel_grid = (
-                                    covariance_max_channels_values
-                                    if feature_kind in {"covariance", "evoked_covariance"}
-                                    else [DEFAULT_COVARIANCE_MAX_CHANNELS]
-                                )
-                                for xdawn_components in xdawn_component_grid:
-                                    for covariance_max_channels in covariance_channel_grid:
-                                        normalized_decoder = normalize_decoder_name(decoder)
-                                        classifier_grid = (
-                                            deep_weight_decay_grid
-                                            if normalized_decoder == "torch_mlp"
-                                            else c_grid
-                                        )
-                                        for classifier_value in classifier_grid:
-                                            parameter_token = (
-                                                f"wd{classifier_value:g}"
+        for feature_family in feature_families:
+            for decoder in decoders:
+                for emission_mode in emission_modes:
+                    for feature_preprocessor in feature_preprocessors:
+                        for pca_components in normalized_pca_values:
+                            for temporal_bins in temporal_bins_values:
+                                for feature_kind in feature_kinds:
+                                    xdawn_component_grid = (
+                                        xdawn_components_values if feature_kind == "xdawn" else [None]
+                                    )
+                                    covariance_channel_grid = (
+                                        covariance_max_channels_values
+                                        if feature_kind in {"covariance", "evoked_covariance"}
+                                        else [DEFAULT_COVARIANCE_MAX_CHANNELS]
+                                    )
+                                    for xdawn_components in xdawn_component_grid:
+                                        for covariance_max_channels in covariance_channel_grid:
+                                            normalized_decoder = normalize_decoder_name(decoder)
+                                            classifier_grid = (
+                                                deep_weight_decay_grid
                                                 if normalized_decoder == "torch_mlp"
-                                                else f"c{classifier_value:g}"
+                                                else c_grid
                                             )
-                                            name = "__".join(
-                                                [
-                                                    window_name,
-                                                    normalized_decoder,
-                                                    normalize_emission_mode(emission_mode),
-                                                    normalize_feature_preprocessor(feature_preprocessor),
-                                                    "pca"
-                                                    + (
-                                                        "none"
-                                                        if pca_components is None
-                                                        else str(pca_components)
-                                                    ),
-                                                    f"bins{temporal_bins}",
-                                                    f"feat{feature_kind}",
-                                                    f"xdawn{'' if xdawn_components is None else xdawn_components}",
-                                                    f"covch{covariance_max_channels}",
-                                                    parameter_token,
-                                                ]
-                                            )
-                                            candidates.append(
-                                                CandidateSpec(
-                                                    name=name,
-                                                    decoder=decoder,
-                                                    emission_mode=emission_mode,
-                                                    feature_preprocessor=feature_preprocessor,
-                                                    pca_components=pca_components,
-                                                    classifier_param=classifier_value,
-                                                    temporal_bins=temporal_bins,
-                                                    windows=windows,
-                                                    feature_kind=feature_kind,
-                                                    xdawn_components=xdawn_components,
-                                                    covariance_max_channels=covariance_max_channels,
-                                                )
-                                            )
+                                            for sample_weighting in sample_weighting_values:
+                                                for class_bias in class_bias_values:
+                                                    for classifier_value in classifier_grid:
+                                                        parameter_token = (
+                                                            f"wd{classifier_value:g}"
+                                                            if normalized_decoder == "torch_mlp"
+                                                            else f"c{classifier_value:g}"
+                                                        )
+                                                        name = "__".join(
+                                                            [
+                                                                window_name,
+                                                                feature_family,
+                                                                normalized_decoder,
+                                                                normalize_emission_mode(emission_mode),
+                                                                normalize_feature_preprocessor(feature_preprocessor),
+                                                                "pca"
+                                                                + (
+                                                                    "none"
+                                                                    if pca_components is None
+                                                                    else str(pca_components)
+                                                                ),
+                                                                f"bins{temporal_bins}",
+                                                                f"feat{feature_kind}",
+                                                                f"xdawn{'' if xdawn_components is None else xdawn_components}",
+                                                                f"covch{covariance_max_channels}",
+                                                                _normalize_sample_weighting(sample_weighting),
+                                                                _normalize_class_bias(class_bias),
+                                                                parameter_token,
+                                                            ]
+                                                        )
+                                                        candidates.append(
+                                                            CandidateSpec(
+                                                                name=name,
+                                                                decoder=decoder,
+                                                                emission_mode=emission_mode,
+                                                                feature_preprocessor=feature_preprocessor,
+                                                                pca_components=pca_components,
+                                                                classifier_param=classifier_value,
+                                                                temporal_bins=temporal_bins,
+                                                                windows=windows,
+                                                                feature_kind=feature_kind,
+                                                                xdawn_components=xdawn_components,
+                                                                covariance_max_channels=covariance_max_channels,
+                                                                feature_family=feature_family,
+                                                                sample_weighting=sample_weighting,
+                                                                class_bias=class_bias,
+                                                            )
+                                                        )
     return candidates
 
 
@@ -1013,7 +1440,10 @@ def run_bushmeg_source_loso(
             "selection_metric": selection_metric,
             "n_subjects": len(subjects),
             "n_candidates": len(candidates),
+            "feature_families": sorted({normalize_source_feature_family(candidate.feature_family) for candidate in candidates}),
             "normalization_scope": "subject_unlabeled_baseline",
+            "sample_weighting_modes": sorted({candidate.sample_weighting for candidate in candidates}),
+            "class_bias_modes": sorted({candidate.class_bias for candidate in candidates}),
             "cue_files_used": False,
             "random_seed": DEFAULT_RANDOM_SEED,
         },

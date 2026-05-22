@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import balanced_accuracy_score
 
 from neureptrace.decoding import make_decoder, normalize_decoder_name
 from neureptrace.bushmeg_source_loso import (
@@ -9,10 +10,16 @@ from neureptrace.bushmeg_source_loso import (
     FeatureCache,
     SubjectEpochs,
     WindowSpec,
+    _apply_class_bias,
     _candidate_metrics,
+    _fit_candidate_model,
+    _fit_class_bias,
+    _prepare_window_train_test_features,
+    _sample_weights_for_training,
     _select_candidate,
     _window_features,
     _window_bin_mean_features,
+    normalize_source_feature_family,
 )
 
 
@@ -40,6 +47,56 @@ def test_window_bin_mean_features_concatenates_channel_bins():
         dtype=np.float32,
     )
     np.testing.assert_allclose(features, expected)
+
+
+def test_template_similarity_features_are_source_subject_prototype_scores():
+    subjects = {}
+    times = np.array([0.15])
+    labels = np.array([0, 0, 1, 1])
+    for subject_idx in range(3):
+        offset = subject_idx * 0.25
+        data = np.zeros((4, 2, 1), dtype=np.float32)
+        data[labels == 0, :, 0] = np.array([2.0 + offset, -2.0 + offset])
+        data[labels == 1, :, 0] = np.array([-2.0 + offset, 2.0 + offset])
+        subjects[str(subject_idx)] = SubjectEpochs(
+            subject=str(subject_idx),
+            data=data,
+            times=times,
+            metadata=pd.DataFrame(),
+            labels=labels,
+        )
+
+    candidate = CandidateSpec(
+        name="template",
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        feature_preprocessor="none",
+        pca_components=None,
+        classifier_param=1.0,
+        temporal_bins=1,
+        windows=(WindowSpec(center=0.15, width=0.05),),
+        feature_family="template_similarity",
+    )
+
+    train_features, test_features = _prepare_window_train_test_features(
+        subjects=subjects,
+        cache=FeatureCache(subjects),
+        candidate=candidate,
+        train_subjects=["0", "1"],
+        test_subject="2",
+        window=WindowSpec(center=0.15, width=0.05),
+        n_classes=2,
+    )
+
+    assert train_features.shape == (8, 2)
+    assert test_features.shape == (4, 2)
+    assert np.all(test_features[:2, 0] > test_features[:2, 1])
+    assert np.all(test_features[2:, 1] > test_features[2:, 0])
+
+
+def test_normalize_source_feature_family_aliases():
+    assert normalize_source_feature_family("template-corr") == "template_similarity"
+    assert normalize_source_feature_family("templates-plus-bin-means") == "template_similarity_plus_bin_means"
 
 
 def test_window_feature_kinds_add_logvar_and_covariance_branches():
@@ -131,6 +188,75 @@ def test_select_candidate_uses_only_source_subjects_for_inner_loso():
     assert {row["inner_test_subject"] for row in rows} == {"0", "1", "2"}
     assert all(row["outer_test_subject"] == "3" for row in rows)
     assert summary["inner_n_folds"] == 3
+
+
+def test_subject_class_balanced_sample_weights_equalize_observed_cells():
+    times = np.array([0.10])
+    subjects = {
+        "s1": SubjectEpochs(
+            subject="s1",
+            data=np.zeros((3, 1, 1), dtype=np.float32),
+            times=times,
+            metadata=pd.DataFrame(),
+            labels=np.array([0, 0, 1]),
+        ),
+        "s2": SubjectEpochs(
+            subject="s2",
+            data=np.zeros((4, 1, 1), dtype=np.float32),
+            times=times,
+            metadata=pd.DataFrame(),
+            labels=np.array([0, 1, 1, 1]),
+        ),
+    }
+    labels = np.concatenate([subjects["s1"].labels, subjects["s2"].labels])
+
+    weights = _sample_weights_for_training(subjects, ["s1", "s2"], labels, "subject_class_balanced")
+
+    assert weights is not None
+    assert np.isclose(weights.mean(), 1.0)
+    cell_sums = []
+    cursor = 0
+    for subject in ["s1", "s2"]:
+        subject_labels = subjects[subject].labels
+        subject_weights = weights[cursor : cursor + len(subject_labels)]
+        cursor += len(subject_labels)
+        for class_label in np.unique(subject_labels):
+            cell_sums.append(float(subject_weights[subject_labels == class_label].sum()))
+    np.testing.assert_allclose(cell_sums, np.full(len(cell_sums), cell_sums[0]))
+
+
+def test_balanced_accuracy_class_bias_can_adjust_overpredicted_class():
+    probabilities = np.array(
+        [
+            [0.49, 0.51],
+            [0.45, 0.55],
+            [0.40, 0.60],
+            [0.35, 0.65],
+        ]
+    )
+    labels = np.array([0, 0, 1, 1])
+    baseline_score = balanced_accuracy_score(labels, probabilities.argmax(axis=1))
+
+    bias = _fit_class_bias(probabilities, labels, n_classes=2, mode="balanced_accuracy")
+    adjusted = _apply_class_bias(probabilities, bias)
+
+    assert balanced_accuracy_score(labels, adjusted.argmax(axis=1)) > baseline_score
+
+
+def test_fit_candidate_model_routes_sample_weight_to_registry_decoder():
+    features = np.array([[-2.0], [-1.0], [1.0], [2.0]], dtype=float)
+    labels = np.array([0, 0, 1, 1])
+    weights = np.array([1.0, 2.0, 1.0, 2.0])
+    model = make_decoder(
+        "multinomial-logistic",
+        emission_mode="uncalibrated",
+        feature_preprocessor="none",
+        classifier_param=1.0,
+    )
+
+    fitted = _fit_candidate_model(model, features, labels, sample_weight=weights)
+
+    assert fitted.predict(features).shape == labels.shape
 
 
 def test_make_decoder_uses_classifier_param_for_logistic_c():

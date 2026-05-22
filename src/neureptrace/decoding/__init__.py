@@ -162,7 +162,12 @@ class RegistryDecoder(ClassifierMixin, BaseEstimator):
         self.classifier_param = classifier_param
         self.random_state = random_state
 
-    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence | np.ndarray):
+    def fit(
+        self,
+        features: Sequence[Sequence[float]] | np.ndarray,
+        labels: Sequence | np.ndarray,
+        sample_weight: Sequence[float] | np.ndarray | None = None,
+    ):
         classifier = normalize_registry_decoder_name(self.classifier)
         classifier_param = get_default_classifier_param(classifier) if self.classifier_param is None else self.classifier_param
         self.model_ = train_multiclass_classifier(
@@ -171,6 +176,7 @@ class RegistryDecoder(ClassifierMixin, BaseEstimator):
             classifier,
             classifier_param,
             random_state=self.random_state,
+            sample_weight=sample_weight,
         )
         self.classes_ = np.asarray(getattr(self.model_, "classes_", np.unique(labels)))
         self.classifier_ = classifier

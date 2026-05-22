@@ -58,7 +58,12 @@ class CorrelationPrototypeClassifier(ClassifierMixin, BaseEstimator):
         self.prototypes_: np.ndarray | None = None
         self.normalized_prototypes_: np.ndarray | None = None
 
-    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence | np.ndarray):
+    def fit(
+        self,
+        features: Sequence[Sequence[float]] | np.ndarray,
+        labels: Sequence | np.ndarray,
+        sample_weight: Sequence[float] | np.ndarray | None = None,
+    ):
         features = np.asarray(features, dtype=float)
         labels = np.asarray(labels).ravel()
         if features.ndim != 2:
@@ -68,7 +73,20 @@ class CorrelationPrototypeClassifier(ClassifierMixin, BaseEstimator):
         self.classes_ = np.unique(labels)
         if self.classes_.size == 0:
             raise ValueError("At least one class is required.")
-        self.prototypes_ = np.vstack([np.mean(features[labels == class_label], axis=0) for class_label in self.classes_])
+        if sample_weight is None:
+            self.prototypes_ = np.vstack([np.mean(features[labels == class_label], axis=0) for class_label in self.classes_])
+        else:
+            sample_weight = np.asarray(sample_weight, dtype=float).reshape(-1)
+            if sample_weight.shape[0] != labels.shape[0]:
+                raise ValueError("sample_weight must contain one weight per feature row.")
+            if not np.all(np.isfinite(sample_weight)) or np.any(sample_weight < 0.0):
+                raise ValueError("sample_weight must contain finite non-negative values.")
+            self.prototypes_ = np.vstack(
+                [
+                    np.average(features[labels == class_label], axis=0, weights=sample_weight[labels == class_label])
+                    for class_label in self.classes_
+                ]
+            )
         self.normalized_prototypes_ = self._row_center_normalize(self.prototypes_)
         return self
 
@@ -199,6 +217,34 @@ def encode_classifier_labels(labels: Sequence | np.ndarray) -> tuple[np.ndarray,
     return classes, encoded
 
 
+def _fit_classifier_model(
+    model: Any,
+    features: np.ndarray,
+    labels: np.ndarray,
+    sample_weight: Sequence[float] | np.ndarray | None,
+):
+    """Fit a registry model, routing sample weights through pipelines when needed."""
+
+    if sample_weight is None:
+        model.fit(features, labels)
+        return model
+
+    sample_weight = np.asarray(sample_weight, dtype=float).reshape(-1)
+    if sample_weight.shape[0] != labels.shape[0]:
+        raise ValueError("sample_weight must contain one weight per label.")
+    if not np.all(np.isfinite(sample_weight)) or np.any(sample_weight < 0.0):
+        raise ValueError("sample_weight must contain finite non-negative values.")
+
+    try:
+        model.fit(features, labels, sample_weight=sample_weight)
+    except (TypeError, ValueError) as exc:
+        if not hasattr(model, "steps") or not getattr(model, "steps"):
+            raise TypeError(f"{model.__class__.__name__} does not support sample_weight.") from exc
+        final_step_name = model.steps[-1][0]
+        model.fit(features, labels, **{f"{final_step_name}__sample_weight": sample_weight})
+    return model
+
+
 def _build_multiclass_svm(_features: np.ndarray, _labels: np.ndarray, classifier_param: Any, random_state: int | None):
     return make_pipeline(StandardScaler(), SVC(C=classifier_param, kernel="linear", random_state=random_state))
 
@@ -294,6 +340,7 @@ def train_classifier(
     random_state: int | None = None,
     *,
     registry: dict[str, ClassifierSpec] | None = None,
+    sample_weight: Sequence[float] | np.ndarray | None = None,
 ):
     """Build and fit a classifier from a registry entry."""
 
@@ -307,9 +354,10 @@ def train_classifier(
         raise ValueError(f"Unsupported classifier: {classifier}. Supported classifiers: {supported_classifiers}") from exc
     model = classifier_spec.builder(features, labels, classifier_param, random_state)
     if classifier_spec.fits_in_builder:
+        if sample_weight is not None:
+            raise ValueError(f"classifier='{classifier}' fits in its builder and does not support external sample_weight.")
         return model
-    model.fit(features, labels)
-    return model
+    return _fit_classifier_model(model, features, labels, sample_weight)
 
 
 def train_multiclass_classifier(
@@ -320,11 +368,14 @@ def train_multiclass_classifier(
     random_state: int | None = None,
     *,
     registry: dict[str, ClassifierSpec] | None = None,
+    sample_weight: Sequence[float] | np.ndarray | None = None,
 ):
     """Train a classifier on dense labels while exposing the original labels."""
 
     classes, encoded_labels = encode_classifier_labels(labels)
-    model = train_classifier(features, encoded_labels, classifier, classifier_param, random_state=random_state, registry=registry)
+    model = train_classifier(
+        features, encoded_labels, classifier, classifier_param, random_state=random_state, registry=registry, sample_weight=sample_weight
+    )
     return DecodedLabelClassifier(model, classes)
 
 
