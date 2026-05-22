@@ -1,0 +1,129 @@
+schema_version: neureptrace.dataset.v1
+
+dataset:
+  name: bush_meg
+  type: fieldtrip_mat
+  root: $BUSH_MEG_DATA_DIR
+  file_templates:
+    main:
+      path: Part{participant}Data.mat
+
+participants:
+  ids:
+    [
+      1,
+      2,
+      3,
+      4,
+      6,
+      8,
+      9,
+      10,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+    ]
+
+matlab:
+  struct_candidates: [data, Data, timelock, epochs]
+  trial_field: trial
+  time_field: time
+  label_field: label
+  trialinfo_field: trialinfo
+  sampleinfo_field: sampleinfo
+  sensor_geometry_field: grad
+
+validation:
+  require_files: true
+  require_equal_trial_time_lengths: true
+  require_trialinfo_rows_equal_trials: true
+  trim_channel_labels_to_data: true
+  warn_on_channel_label_trim: true
+  warn_on_missing_sensor_geometry: true
+
+metadata:
+  source: trialinfo
+  columns:
+    - name: stimulus_class
+      index: 0
+      dtype: category
+      required: true
+    - name: condition
+      index: 1
+      dtype: category
+      required: false
+    - name: reaction_time
+      index: 2
+      dtype: float
+      required: false
+  add_columns:
+    participant: "{participant}"
+    source_file: "{file}"
+
+preprocessing:
+  tmin: -0.35
+  tmax: 0.30
+  baseline_window: [-0.35, -0.05]
+  epoch_normalization: subject_baseline_whiten
+  window_size: 0.100
+
+decoding:
+  label_column: stimulus_class
+  group_column: participant
+  decoder: multinomial-logistic
+  emission_mode: uncalibrated
+  feature_preprocessor: pca
+  pca_components: 128
+  max_iter: 2000
+
+source_loso:
+  group_column: participant
+  selection_metric: balanced_accuracy
+  ensemble_top_k: 5
+  ensemble_weighting: softmax
+  ensemble_temperature: 0.01
+  candidate_grid:
+    # Keep this grid deliberately small enough for nested LOSO while testing the
+    # source-train-only prototype features against the strongest evoked baseline.
+    window_sets:
+      - name: single_150ms
+        centers: [0.150]
+        window_size: 0.100
+      - name: single_175ms
+        centers: [0.175]
+        window_size: 0.100
+      - name: single_200ms
+        centers: [0.200]
+        window_size: 0.100
+      - name: triplet_150_200ms
+        centers: [0.150, 0.175, 0.200]
+        window_size: 0.100
+    decoders: [multinomial-logistic]
+    emission_modes: [uncalibrated]
+    feature_preprocessors: [pca]
+    pca_components: [64, 128]
+    temporal_bins: [2, 4]
+    feature_kinds: [evoked, evoked_prototype, prototype]
+    c_grid: [0.1, 1.0]
+
+outputs:
+  base_dir: results/bush_meg/source_loso_prototype
+  source_loso_summary_csv: source_loso_summary.csv
+  source_loso_inner_cv_csv: source_loso_inner_cv.csv
+  source_loso_predictions_csv: source_loso_predictions.csv
+  source_loso_ensemble_summary_csv: source_loso_ensemble_summary.csv
+  source_loso_ensemble_inner_cv_csv: source_loso_ensemble_inner_cv.csv
+  source_loso_ensemble_candidate_summary_csv: source_loso_ensemble_candidate_summary.csv
+  source_loso_ensemble_predictions_csv: source_loso_ensemble_predictions.csv
