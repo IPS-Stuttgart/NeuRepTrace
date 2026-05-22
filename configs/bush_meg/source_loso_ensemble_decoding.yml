@@ -46,7 +46,11 @@ source_loso:
   group_column: participant
   selection_metric: balanced_accuracy
   ensemble_top_k: 5
-  ensemble_weighting: softmax
+  # Learn non-negative top-k weights from source-subject OOF probabilities.
+  # This remains strict source-only: no Part*CueData.mat and no held-out-subject
+  # labels or unlabeled epochs are used for calibration.
+  ensemble_weighting: stacked
+  ensemble_class_bias: balanced_accuracy
   ensemble_temperature: 0.01
   candidate_grid:
     temporal_bins: [4]

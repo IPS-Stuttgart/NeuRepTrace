@@ -27,9 +27,11 @@ from neureptrace.bushmeg_source_loso import (
     CandidateSpec,
     FeatureCache,
     SubjectEpochs,
+    _apply_class_bias,
     _candidate_grid,
     _candidate_metrics,
     _candidate_rowspec,
+    _fit_class_bias,
     _inner_loso_scores,
     _load_subjects_from_config,
     _predict_candidate,
@@ -41,7 +43,12 @@ from neureptrace.dataset_config import apply_overrides, load_config
 DEFAULT_ENSEMBLE_TOP_K = 5
 DEFAULT_ENSEMBLE_WEIGHTING = "softmax"
 DEFAULT_ENSEMBLE_TEMPERATURE = 0.01
-ENSEMBLE_WEIGHTING_MODES = {"uniform", "rank", "softmax"}
+DEFAULT_ENSEMBLE_CLASS_BIAS = "none"
+DEFAULT_STACKING_MAX_ITER = 250
+DEFAULT_STACKING_LEARNING_RATE = 0.25
+DEFAULT_STACKING_EPSILON = 1.0e-12
+ENSEMBLE_WEIGHTING_MODES = {"uniform", "rank", "softmax", "stacked"}
+ENSEMBLE_CLASS_BIAS_MODES = {"none", "log_prior", "balanced_accuracy"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,10 +76,15 @@ class EnsembleSelection:
     selection_metric: str
     weighting: str
     temperature: float | None
+    class_bias_mode: str = "none"
+    class_bias: tuple[float, ...] = ()
+    oof_balanced_accuracy: float | None = None
+    oof_log_loss: float | None = None
 
     @property
     def name(self) -> str:
-        return f"ensemble_top{len(self.members)}__{self.weighting}"
+        bias_suffix = "" if self.class_bias_mode == "none" else f"__bias_{self.class_bias_mode}"
+        return f"ensemble_top{len(self.members)}__{self.weighting}{bias_suffix}"
 
 
 def _larger_is_better(score: float, metric: str) -> float:
@@ -96,12 +108,30 @@ def _normalize_temperature(value: Any, weighting: str) -> float | None:
     return temperature
 
 
+def _normalize_ensemble_class_bias(value: Any) -> str:
+    mode = DEFAULT_ENSEMBLE_CLASS_BIAS if value is None else str(value).strip().lower().replace("-", "_")
+    mode = {
+        "": "none",
+        "false": "none",
+        "off": "none",
+        "no": "none",
+        "prior": "log_prior",
+        "class_prior": "log_prior",
+        "balanced_acc": "balanced_accuracy",
+        "source_balanced_accuracy": "balanced_accuracy",
+        "source_loso_balanced_accuracy": "balanced_accuracy",
+    }.get(mode, mode)
+    if mode not in ENSEMBLE_CLASS_BIAS_MODES:
+        raise ValueError(f"Unknown ensemble class-bias mode {value!r}; choose one of {sorted(ENSEMBLE_CLASS_BIAS_MODES)}.")
+    return mode
+
+
 def _weights_from_scores(scores: Sequence[float], *, weighting: str, temperature: float | None) -> np.ndarray:
     scores = np.asarray(scores, dtype=float)
     if scores.ndim != 1 or scores.size == 0 or not np.all(np.isfinite(scores)):
         raise ValueError("Ensemble scores must be a non-empty finite vector.")
     weighting = _normalize_weighting(weighting)
-    if weighting == "uniform" or scores.size == 1:
+    if weighting in {"uniform", "stacked"} or scores.size == 1:
         weights = np.ones(scores.size, dtype=float)
     elif weighting == "rank":
         weights = 1.0 / np.arange(1, scores.size + 1, dtype=float)
@@ -118,6 +148,138 @@ def _candidate_summary(candidate: CandidateSpec, rows: Sequence[Mapping[str, Any
     return CandidateSummary(candidate, mean_score, std_score, _larger_is_better(mean_score, metric), len(frame))
 
 
+def _class_balanced_sample_weights(labels: np.ndarray, *, n_classes: int) -> np.ndarray:
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if labels.size == 0:
+        raise ValueError("Need at least one source prediction for ensemble stacking.")
+    counts = np.bincount(labels, minlength=int(n_classes)).astype(float)
+    weights = np.zeros(labels.shape[0], dtype=float)
+    observed = counts[labels] > 0.0
+    weights[observed] = 1.0 / counts[labels[observed]]
+    if float(weights.mean()) <= 0.0:
+        raise ValueError("Cannot compute class-balanced stacking weights from empty labels.")
+    return weights / float(weights.mean())
+
+
+def _fit_stacking_weights(
+    probability_cube: np.ndarray,
+    labels: np.ndarray,
+    *,
+    n_classes: int,
+    max_iter: int = DEFAULT_STACKING_MAX_ITER,
+    learning_rate: float = DEFAULT_STACKING_LEARNING_RATE,
+    epsilon: float = DEFAULT_STACKING_EPSILON,
+) -> np.ndarray:
+    """Fit non-negative ensemble weights from source-only out-of-fold probabilities.
+
+    The objective is class-balanced log loss on the inner source-subject LOSO
+    predictions.  Only source-subject predictions are used, so this is a
+    leakage-safe stacking layer rather than a held-out-subject calibration step.
+    """
+
+    cube = np.asarray(probability_cube, dtype=float)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if cube.ndim != 3:
+        raise ValueError("probability_cube must have shape (n_candidates, n_samples, n_classes).")
+    n_candidates, n_samples, cube_classes = cube.shape
+    if n_candidates < 1 or n_samples != labels.shape[0] or cube_classes != int(n_classes):
+        raise ValueError("probability_cube shape is inconsistent with labels or n_classes.")
+    if n_candidates == 1:
+        return np.ones(1, dtype=float)
+    cube = np.clip(cube, float(epsilon), 1.0)
+    cube /= cube.sum(axis=2, keepdims=True)
+    true_probabilities = cube[:, np.arange(n_samples), labels]
+    sample_weights = _class_balanced_sample_weights(labels, n_classes=n_classes)
+    weights = np.full(n_candidates, 1.0 / float(n_candidates), dtype=float)
+    max_iter = max(1, int(max_iter))
+    learning_rate = float(learning_rate)
+    if not np.isfinite(learning_rate) or learning_rate <= 0.0:
+        raise ValueError("Stacking learning_rate must be positive and finite.")
+
+    for iteration in range(max_iter):
+        denominator = np.clip(weights @ true_probabilities, float(epsilon), 1.0)
+        gradient = -np.average(true_probabilities / denominator[None, :], axis=1, weights=sample_weights)
+        gradient -= float(np.dot(gradient, weights))
+        step = learning_rate / np.sqrt(float(iteration + 1))
+        updated = weights * np.exp(np.clip(-step * gradient, -50.0, 50.0))
+        total = float(updated.sum())
+        if not np.isfinite(total) or total <= 0.0:
+            break
+        weights = updated / total
+    return weights / float(weights.sum())
+
+
+def _source_oof_probabilities(
+    *,
+    subjects: Mapping[str, SubjectEpochs],
+    cache: FeatureCache,
+    candidates: Sequence[CandidateSpec],
+    outer_test_subject: str,
+    n_classes: int,
+    max_iter: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return candidate × source-trial × class probabilities from inner LOSO."""
+
+    source_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
+    if not candidates:
+        raise ValueError("At least one selected candidate is required for source OOF stacking.")
+    probability_blocks: list[list[np.ndarray]] = [[] for _ in candidates]
+    label_blocks: list[np.ndarray] = []
+    for inner_test_subject in source_subjects:
+        train_subjects = [subject for subject in source_subjects if subject != inner_test_subject]
+        label_blocks.append(subjects[inner_test_subject].labels)
+        for candidate_index, candidate in enumerate(candidates):
+            probability_blocks[candidate_index].append(
+                _predict_candidate(
+                    subjects=subjects,
+                    cache=cache,
+                    candidate=candidate,
+                    train_subjects=train_subjects,
+                    test_subject=inner_test_subject,
+                    n_classes=n_classes,
+                    max_iter=max_iter,
+                )
+            )
+    probability_cube = np.stack([np.vstack(blocks) for blocks in probability_blocks], axis=0)
+    labels = np.concatenate(label_blocks, axis=0)
+    return probability_cube, labels
+
+
+def _calibrate_ensemble_from_oof(
+    *,
+    subjects: Mapping[str, SubjectEpochs],
+    cache: FeatureCache,
+    selected: Sequence[CandidateSummary],
+    initial_weights: np.ndarray,
+    outer_test_subject: str,
+    n_classes: int,
+    max_iter: int,
+    weighting: str,
+    class_bias: str,
+) -> tuple[np.ndarray, tuple[float, ...], dict[str, float]]:
+    weights = np.asarray(initial_weights, dtype=float).reshape(-1)
+    if weighting != "stacked" and class_bias == "none":
+        return weights, (), {}
+
+    probability_cube, labels = _source_oof_probabilities(
+        subjects=subjects,
+        cache=cache,
+        candidates=[item.candidate for item in selected],
+        outer_test_subject=outer_test_subject,
+        n_classes=n_classes,
+        max_iter=max_iter,
+    )
+    if weighting == "stacked":
+        weights = _fit_stacking_weights(probability_cube, labels, n_classes=n_classes)
+    combined = _renormalize(np.tensordot(weights, probability_cube, axes=(0, 0)))
+    bias = _fit_class_bias(combined, labels, n_classes=n_classes, mode=class_bias)
+    if class_bias != "none":
+        combined = _apply_class_bias(combined, bias)
+    metrics = _candidate_metrics(combined, labels, n_classes=n_classes)
+    bias_tuple = tuple(float(value) for value in bias) if class_bias != "none" else ()
+    return weights, bias_tuple, metrics
+
+
 def _select_ensemble(
     *,
     subjects: Mapping[str, SubjectEpochs],
@@ -130,6 +292,7 @@ def _select_ensemble(
     top_k: int,
     weighting: str,
     temperature: float | None,
+    class_bias: str = DEFAULT_ENSEMBLE_CLASS_BIAS,
 ) -> tuple[EnsembleSelection, list[dict[str, Any]], list[dict[str, Any]]]:
     if metric not in SUPPORTED_SELECTION_METRICS:
         raise ValueError(f"Unknown selection metric {metric!r}; choose one of {sorted(SUPPORTED_SELECTION_METRICS)}.")
@@ -144,7 +307,29 @@ def _select_ensemble(
     ranked = sorted(summaries, key=lambda item: (-item.comparable_score, item.candidate.name))
     selected = ranked[: min(top_k, len(ranked))]
     weights = _weights_from_scores([item.comparable_score for item in selected], weighting=weighting, temperature=temperature)
+    class_bias = _normalize_ensemble_class_bias(class_bias)
+    weights, bias, oof_metrics = _calibrate_ensemble_from_oof(
+        subjects=subjects,
+        cache=cache,
+        selected=selected,
+        initial_weights=weights,
+        outer_test_subject=outer_test_subject,
+        n_classes=n_classes,
+        max_iter=max_iter,
+        weighting=weighting,
+        class_bias=class_bias,
+    )
     members = tuple(EnsembleMember(item.candidate, rank, float(weight), item.mean_score, item.std_score, item.comparable_score) for rank, (item, weight) in enumerate(zip(selected, weights, strict=True), start=1))
+    selection = EnsembleSelection(
+        members,
+        metric,
+        weighting,
+        temperature,
+        class_bias_mode=class_bias,
+        class_bias=bias,
+        oof_balanced_accuracy=oof_metrics.get("balanced_accuracy"),
+        oof_log_loss=oof_metrics.get("log_loss"),
+    )
     rank_rows = [
         {
             "outer_test_subject": outer_test_subject,
@@ -157,10 +342,13 @@ def _select_ensemble(
             "inner_comparable_score": item.comparable_score,
             "inner_n_folds": item.n_folds,
             "ensemble_weight": float(weights[rank - 1]) if rank <= len(weights) else 0.0,
+            "ensemble_class_bias": class_bias,
+            "ensemble_oof_balanced_accuracy": "" if selection.oof_balanced_accuracy is None else selection.oof_balanced_accuracy,
+            "ensemble_oof_log_loss": "" if selection.oof_log_loss is None else selection.oof_log_loss,
         }
         for rank, item in enumerate(ranked, start=1)
     ]
-    return EnsembleSelection(members, metric, weighting, temperature), inner_rows, rank_rows
+    return selection, inner_rows, rank_rows
 
 
 def _renormalize(probabilities: np.ndarray) -> np.ndarray:
@@ -183,7 +371,10 @@ def _predict_ensemble(
     probability_sum = np.zeros((len(subjects[test_subject].labels), n_classes), dtype=float)
     for member in selection.members:
         probability_sum += member.weight * _predict_candidate(subjects=subjects, cache=cache, candidate=member.candidate, train_subjects=train_subjects, test_subject=test_subject, n_classes=n_classes, max_iter=max_iter)
-    return _renormalize(probability_sum)
+    combined = _renormalize(probability_sum)
+    if selection.class_bias:
+        combined = _apply_class_bias(combined, np.asarray(selection.class_bias, dtype=float))
+    return combined
 
 
 def _selection_rowspec(selection: EnsembleSelection) -> dict[str, Any]:
@@ -195,6 +386,10 @@ def _selection_rowspec(selection: EnsembleSelection) -> dict[str, Any]:
         "ensemble_size": len(selection.members),
         "ensemble_weighting": selection.weighting,
         "ensemble_temperature": "" if selection.temperature is None else selection.temperature,
+        "ensemble_class_bias": selection.class_bias_mode,
+        "ensemble_class_bias_values": "|".join(f"{value:.8g}" for value in selection.class_bias),
+        "ensemble_oof_balanced_accuracy": "" if selection.oof_balanced_accuracy is None else selection.oof_balanced_accuracy,
+        "ensemble_oof_log_loss": "" if selection.oof_log_loss is None else selection.oof_log_loss,
         "ensemble_candidates": "|".join(member.candidate.name for member in selection.members),
         "ensemble_weights": "|".join(f"{member.weight:.8g}" for member in selection.members),
         "ensemble_inner_scores": "|".join(f"{member.mean_score:.8g}" for member in selection.members),
@@ -222,6 +417,7 @@ def run_bushmeg_source_loso_ensemble(
     top_k = int(source_loso.get("ensemble_top_k", DEFAULT_ENSEMBLE_TOP_K))
     weighting = _normalize_weighting(source_loso.get("ensemble_weighting", DEFAULT_ENSEMBLE_WEIGHTING))
     temperature = _normalize_temperature(source_loso.get("ensemble_temperature", DEFAULT_ENSEMBLE_TEMPERATURE), weighting)
+    class_bias = _normalize_ensemble_class_bias(source_loso.get("ensemble_class_bias", DEFAULT_ENSEMBLE_CLASS_BIAS))
     max_iter = int((_section(config, "decoding") or {}).get("max_iter", 1000))
 
     subjects, encoder = _load_subjects_from_config(config, config_dir=config_path.parent)
@@ -239,7 +435,7 @@ def run_bushmeg_source_loso_ensemble(
     rank_rows: list[dict[str, Any]] = []
     prediction_rows: list[dict[str, Any]] = []
     for outer_test_subject in sorted(subjects):
-        selection, fold_inner_rows, fold_rank_rows = _select_ensemble(subjects=subjects, cache=cache, candidates=candidates, outer_test_subject=outer_test_subject, n_classes=n_classes, max_iter=max_iter, metric=metric, top_k=top_k, weighting=weighting, temperature=temperature)
+        selection, fold_inner_rows, fold_rank_rows = _select_ensemble(subjects=subjects, cache=cache, candidates=candidates, outer_test_subject=outer_test_subject, n_classes=n_classes, max_iter=max_iter, metric=metric, top_k=top_k, weighting=weighting, temperature=temperature, class_bias=class_bias)
         inner_rows.extend(fold_inner_rows)
         rank_rows.extend(fold_rank_rows)
         train_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
@@ -272,6 +468,7 @@ def run_bushmeg_source_loso_ensemble(
                 "ensemble_size": len(selection.members),
                 "ensemble_candidates": "|".join(member.candidate.name for member in selection.members),
                 "ensemble_weights": "|".join(f"{member.weight:.8g}" for member in selection.members),
+                "ensemble_class_bias": selection.class_bias_mode,
                 "true_label": int(true_label),
                 "true_class": str(encoder.classes_[true_label]),
                 "predicted_label": int(predicted_label),
@@ -292,7 +489,7 @@ def run_bushmeg_source_loso_ensemble(
     for path, frame in ((out, summary), (inner_out, pd.DataFrame(inner_rows)), (rank_out, pd.DataFrame(rank_rows)), (pred_out, pd.DataFrame(prediction_rows))):
         path.parent.mkdir(parents=True, exist_ok=True)
         frame.to_csv(path, index=False)
-    _write_json_sidecar(out, {"config_path": str(config_path), "selection_metric": metric, "ensemble_top_k": top_k, "ensemble_weighting": weighting, "ensemble_temperature": temperature, "n_subjects": len(subjects), "n_candidates": len(candidates), "cue_files_used": False, "target_labels_used_for_selection": False, "random_seed": DEFAULT_RANDOM_SEED})
+    _write_json_sidecar(out, {"config_path": str(config_path), "selection_metric": metric, "ensemble_top_k": top_k, "ensemble_weighting": weighting, "ensemble_temperature": temperature, "ensemble_class_bias": class_bias, "stacking_max_iter": DEFAULT_STACKING_MAX_ITER, "n_subjects": len(subjects), "n_candidates": len(candidates), "cue_files_used": False, "target_labels_used_for_selection": False, "target_unlabeled_data_used_for_calibration": False, "random_seed": DEFAULT_RANDOM_SEED})
     return summary
 
 
