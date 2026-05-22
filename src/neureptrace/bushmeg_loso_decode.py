@@ -30,7 +30,6 @@ from sklearn.preprocessing import LabelEncoder
 
 from neureptrace.dataset_config import parse_participant_ids
 from neureptrace.decoding import (
-    DECODER_CLI_CHOICES,
     EMISSION_MODE_CHOICES,
     FEATURE_PREPROCESSOR_CHOICES,
     make_decoder,
