@@ -109,8 +109,12 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
         "temporal_train_window",
         preprocessing.get("temporal_train_window"),
     )
+    temporal_train_mode = decoding.get(
+        "temporal_train_mode",
+        preprocessing.get("temporal_train_mode"),
+    )
 
-    return {
+    kwargs = {
         "label_column": decoding["label_column"],
         "group_column": decoding.get("group_column"),
         "out_path": _resolve_output(
@@ -168,6 +172,9 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             tuple(temporal_train_window) if temporal_train_window is not None else None
         ),
     }
+    if temporal_train_mode is not None:
+        kwargs["temporal_train_mode"] = temporal_train_mode
+    return kwargs
 
 
 def _output_paths_from_kwargs(kwargs: Mapping[str, Any]) -> list[Path]:

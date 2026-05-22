@@ -66,6 +66,8 @@ BASELINE_WHITENING_SHRINKAGE = 0.1
 BASELINE_WHITENING_EIGENVALUE_FLOOR = 1e-6
 TimeWindow = tuple[int, int, float]
 TemporalTrainWindow = tuple[float, float]
+TEMPORAL_TRAIN_MODE_CHOICES = ("window_ensemble", "pooled")
+TEMPORAL_TRAIN_MODE_RUN_CHOICES = (*TEMPORAL_TRAIN_MODE_CHOICES, "window-ensemble")
 
 
 def _add_subject(row: dict, subject: str | None) -> dict:
@@ -318,6 +320,37 @@ def _normalize_temporal_train_window(
     return start, stop
 
 
+def _normalize_temporal_train_mode(mode: str | None) -> str:
+    """Normalize how a non-empty temporal train window is used.
+
+    ``window_ensemble`` keeps the historical behavior: fit one model per
+    selected train-time window and average probabilities. ``pooled`` treats all
+    selected train-time windows from the source subjects as fold-local temporal
+    augmentation and fits one classifier on the pooled rows. The pooled mode is
+    considerably cheaper and can improve small cross-subject M/EEG datasets by
+    increasing the effective number of source examples without using held-out
+    subject trials.
+    """
+
+    normalized = "window_ensemble" if mode is None else str(mode).strip().lower().replace("-", "_")
+    aliases = {
+        "ensemble": "window_ensemble",
+        "train_window_ensemble": "window_ensemble",
+        "temporal_ensemble": "window_ensemble",
+        "pool": "pooled",
+        "pooled_windows": "pooled",
+        "temporal_pool": "pooled",
+        "train_window_pooled": "pooled",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in TEMPORAL_TRAIN_MODE_CHOICES:
+        raise ValueError(
+            f"Unknown temporal_train_mode '{mode}'. Available modes: "
+            f"{', '.join(TEMPORAL_TRAIN_MODE_CHOICES)}."
+        )
+    return normalized
+
+
 def _select_temporal_train_windows(
     windows: list[TimeWindow],
     temporal_train_window: tuple[float, float] | list[float] | None,
@@ -343,6 +376,22 @@ def _select_temporal_train_windows(
 def _features_for_window(data: np.ndarray, window: TimeWindow) -> np.ndarray:
     start, stop, _center = window
     return data[:, :, start:stop].reshape(data.shape[0], -1)
+
+
+def _pooled_temporal_training_set(
+    feature_cache: dict[TimeWindow, np.ndarray],
+    train_windows: list[TimeWindow],
+    train_idx: np.ndarray,
+    labels: np.ndarray,
+    groups: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Return fold-local temporal augmentation rows for selected train windows."""
+
+    n_windows = len(train_windows)
+    pooled_features = np.concatenate([feature_cache[window][train_idx] for window in train_windows], axis=0)
+    pooled_labels = np.tile(labels[train_idx], n_windows)
+    pooled_groups = None if groups is None else np.tile(groups[train_idx], n_windows)
+    return pooled_features, pooled_labels, pooled_groups
 
 
 def _probability_average(probability_sum: np.ndarray, n_models: int) -> np.ndarray:
@@ -668,14 +717,16 @@ def run_time_resolved_decode(
     observation_out_path: Path | None = None,
     subject: str | None = None,
     temporal_train_window: tuple[float, float] | None = None,
+    temporal_train_mode: str = "window_ensemble",
 ) -> pd.DataFrame:
     """Run time-resolved decoding on an MNE epochs file and save metrics as CSV.
 
-    If ``temporal_train_window`` is set, models are trained on every decoding
-    window whose center lies in that interval and are evaluated at every test
-    time. The per-test-time probabilities are averaged across those train-time
-    models, turning temporal generalization into a direct result-improving
-    train-window ensemble. Without the option, the historical diagonal
+    If ``temporal_train_window`` is set, selected train-time windows are used
+    according to ``temporal_train_mode``. ``window_ensemble`` trains one model
+    per selected train-time window and averages probabilities. ``pooled`` stacks
+    the selected source-subject train windows as fold-local temporal
+    augmentation and trains one classifier for all test times. Without a
+    temporal train window, the historical diagonal
     train-time == test-time decoding path is used.
     """
     epochs, metadata = _load_epochs_and_metadata(
@@ -706,6 +757,7 @@ def run_time_resolved_decode(
     tuning_scoring = normalize_tuning_scoring(tuning_scoring)
     tuning_c_grid_values = parse_c_grid(tuning_c_grid)
     normalized_temporal_train_window = _normalize_temporal_train_window(temporal_train_window)
+    temporal_train_mode_name = _normalize_temporal_train_mode(temporal_train_mode)
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
@@ -729,7 +781,12 @@ def run_time_resolved_decode(
     session_values = metadata["session"].to_numpy() if "session" in metadata.columns else groups
     splitter_name = "stratified-group-kfold" if groups is not None else "stratified-kfold"
     split_id = f"{splitter_name}-{n_splits}"
-    temporal_mode = "same_time" if normalized_temporal_train_window is None else "train_window_ensemble"
+    if normalized_temporal_train_window is None:
+        temporal_mode = "same_time"
+    elif temporal_train_mode_name == "pooled":
+        temporal_mode = "train_window_pooled"
+    else:
+        temporal_mode = "train_window_ensemble"
     preprocessing_hash = stable_hash(
         {
             "picks": picks,
@@ -742,6 +799,7 @@ def run_time_resolved_decode(
             "normalization": normalization_name,
             "baseline_window": baseline_window_value,
             "temporal_train_window": normalized_temporal_train_window,
+            "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
         }
     )
     default_model_hash = _model_hash(
@@ -865,6 +923,109 @@ def run_time_resolved_decode(
                         train_window_start=float(epochs.times[start]),
                         train_window_stop=float(epochs.times[stop - 1]),
                         n_train_windows=1,
+                        calibration_out_path=calibration_out_path,
+                        calibration_bins=calibration_bins,
+                        observation_out_path=observation_out_path,
+                        subject=subject,
+                        tuning_metadata=tuning_metadata,
+                    )
+    elif temporal_train_mode_name == "pooled":
+        feature_cache = {time_window: _features_for_window(data, time_window) for time_window in windows}
+        train_time, train_window_start, train_window_stop = _train_window_summary(epochs, selected_train_windows)
+        train_window_centers = [window[2] for window in selected_train_windows]
+        for fold, (train_idx, test_idx) in enumerate(splits):
+            test_labels = labels[test_idx]
+            pooled_train_features, pooled_train_labels, pooled_train_groups = _pooled_temporal_training_set(
+                feature_cache,
+                selected_train_windows,
+                train_idx,
+                labels,
+                groups,
+            )
+            for current_emission_mode in emission_modes:
+                tuning_cv = (
+                    make_tuning_cross_validator(pooled_train_labels, pooled_train_groups, tuning_cv_splits)
+                    if tune_hyperparameters
+                    else 3
+                )
+                model = make_decoder(
+                    decoder_name,
+                    max_iter=max_iter,
+                    emission_mode=current_emission_mode,
+                    feature_preprocessor=feature_preprocessor_name,
+                    pca_components=pca_components_value,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv=tuning_cv,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                )
+                model.fit(pooled_train_features, pooled_train_labels)
+                tuning_metadata = _tuning_metadata(
+                    model,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv_splits=tuning_cv_splits,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                )
+                current_model_hash = _model_hash(
+                    decoder_name=decoder_name,
+                    emission_mode=current_emission_mode,
+                    max_iter=max_iter,
+                    feature_preprocessor=feature_preprocessor_name,
+                    pca_components=pca_components_value,
+                    normalization=normalization_name,
+                    baseline_window=baseline_window_value,
+                    temporal_mode=temporal_mode,
+                    temporal_train_window=normalized_temporal_train_window,
+                    train_window_centers=train_window_centers,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv_splits=tuning_cv_splits,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                    tuning_metadata=tuning_metadata,
+                )
+                for test_window in windows:
+                    probabilities = _align_probability_columns(
+                        predict_emission_probabilities(
+                            model,
+                            feature_cache[test_window][test_idx],
+                            emission_mode=current_emission_mode,
+                        ),
+                        model=model,
+                        classes=classes,
+                    )
+                    _append_decoded_outputs(
+                        rows=rows,
+                        calibration_rows=calibration_rows,
+                        observation_rows=observation_rows,
+                        probabilities=probabilities,
+                        test_labels=test_labels,
+                        test_idx=test_idx,
+                        original_indices=original_indices,
+                        session_values=session_values,
+                        groups=groups,
+                        group_column=group_column,
+                        classes=classes,
+                        class_names=encoder.classes_,
+                        fold=fold,
+                        n_train=len(pooled_train_labels),
+                        decoder_name=decoder_name,
+                        emission_mode=current_emission_mode,
+                        feature_preprocessor_name=feature_preprocessor_name,
+                        pca_components_value=pca_components_value,
+                        normalization_name=normalization_name,
+                        baseline_window=baseline_window_value,
+                        time_window=test_window,
+                        epochs=epochs,
+                        split_id=split_id,
+                        preprocessing_hash=preprocessing_hash,
+                        model_hash=current_model_hash,
+                        temporal_mode=temporal_mode,
+                        temporal_train_window=normalized_temporal_train_window,
+                        train_time=train_time,
+                        train_window_start=train_window_start,
+                        train_window_stop=train_window_stop,
+                        n_train_windows=len(selected_train_windows),
                         calibration_out_path=calibration_out_path,
                         calibration_bins=calibration_bins,
                         observation_out_path=observation_out_path,
@@ -1076,8 +1237,18 @@ def main() -> None:
         type=float,
         metavar=("START", "STOP"),
         help=(
-            "Train one model per time-window center in START..STOP seconds, "
-            "evaluate each model at every test time, and average probabilities."
+            "Use time-window centers in START..STOP seconds for non-diagonal "
+            "temporal training. The behavior is controlled by --temporal-train-mode."
+        ),
+    )
+    parser.add_argument(
+        "--temporal-train-mode",
+        choices=TEMPORAL_TRAIN_MODE_RUN_CHOICES,
+        default="window_ensemble",
+        help=(
+            "How --temporal-train-window is used: window_ensemble fits one model "
+            "per selected train window; pooled stacks selected train windows as "
+            "fold-local temporal augmentation and fits one model."
         ),
     )
     parser.add_argument(
@@ -1127,6 +1298,7 @@ def main() -> None:
         observation_out_path=args.observations_out,
         subject=args.subject,
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
+        temporal_train_mode=args.temporal_train_mode,
     )
     print(f"Wrote {args.out}")
     if args.observations_out is not None:
