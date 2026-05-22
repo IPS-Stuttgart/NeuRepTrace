@@ -1,3 +1,5 @@
+import importlib.util
+
 import numpy as np
 import pytest
 
@@ -57,6 +59,8 @@ def test_make_decoder_produces_probabilities_for_standard_decoders():
     labels = np.array([0, 1] * 15)
 
     for decoder in BUILTIN_DECODER_CHOICES:
+        if decoder == "torch_mlp" and importlib.util.find_spec("torch") is None:
+            continue
         model = make_decoder(decoder, max_iter=2000)
         model.fit(features, labels)
         probabilities = model.predict_proba(features[:3])
