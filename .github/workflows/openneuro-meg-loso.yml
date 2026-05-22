@@ -77,6 +77,16 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Cache OpenNeuro datasets on GitHub-hosted runners
+        if: runner.environment == 'github-hosted'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/datasets/openneuro
+          key: openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-${{ inputs.subjects }}-${{ inputs.runs }}-v1
+          restore-keys: |
+            openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-
+            openneuro-meg-${{ runner.os }}-
+
       - name: Install NeuRepTrace and OpenNeuro client
         shell: bash
         run: |
@@ -86,6 +96,8 @@ jobs:
 
       - name: Resolve run parameters
         shell: bash
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -112,9 +124,15 @@ jobs:
               max_events_arg = ""
           else:
               max_events_arg = f"--max-events-per-label {max_events}"
-          cache_root = Path("/home/github-runner/.cache/datasets/openneuro")
-          data_root = Path(os.environ.get("DATA_ROOT_INPUT") or cache_root / dataset)
-          staged_root = Path(os.environ.get("STAGED_ROOT_INPUT") or cache_root / "staged-epochs")
+          runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "")
+          dataset_cache_root = (
+              Path("/home/github-runner/.cache/datasets")
+              if runner_environment == "self-hosted"
+              else Path.home() / ".cache" / "datasets"
+          )
+          openneuro_cache_root = dataset_cache_root / "openneuro"
+          data_root = Path(os.environ.get("DATA_ROOT_INPUT") or openneuro_cache_root / dataset)
+          staged_root = Path(os.environ.get("STAGED_ROOT_INPUT") or openneuro_cache_root / "staged-epochs")
           output_dir = Path("outputs") / f"openneuro_{dataset}_{mode}"
           env_path = Path(os.environ["GITHUB_ENV"])
           with env_path.open("a", encoding="utf-8") as handle:
@@ -130,6 +148,8 @@ jobs:
           print(f"Runs: {runs} ({len(parse_runs(spec, runs))})")
           print(f"Raw BIDS root: {data_root}")
           print(f"Staged Epochs root: {staged_root}")
+          print(f"Runner environment: {runner_environment or 'unknown'}")
+          print(f"Dataset cache root: {dataset_cache_root}")
           print(f"Output dir: {output_dir}")
           PY
 
@@ -142,7 +162,9 @@ jobs:
             --dataset "$DATASET" \
             --bids-root "$OPENNEURO_DATA_ROOT" \
             --subjects "$OPENNEURO_SUBJECTS" \
-            --runs "$OPENNEURO_RUNS"
+            --runs "$OPENNEURO_RUNS" \
+            --validate-readable \
+            --delete-invalid
           status="$?"
           if [[ "$status" -eq 0 ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -167,6 +189,11 @@ jobs:
             --runs "$OPENNEURO_RUNS" > "$OPENNEURO_OUTPUT_DIR.includes.txt"
           while IFS= read -r include_path; do
             [[ -z "$include_path" ]] && continue
+            target_path="$OPENNEURO_DATA_ROOT/$include_path"
+            if [[ "$include_path" == *_meg.fif && -s "$target_path" ]]; then
+              echo "Using cached $include_path"
+              continue
+            fi
             echo "Downloading $include_path"
             openneuro-py download \
               --dataset "$DATASET" \
@@ -182,7 +209,8 @@ jobs:
             --dataset "$DATASET" \
             --bids-root "$OPENNEURO_DATA_ROOT" \
             --subjects "$OPENNEURO_SUBJECTS" \
-            --runs "$OPENNEURO_RUNS"
+            --runs "$OPENNEURO_RUNS" \
+            --validate-readable
 
       - name: Stage OpenNeuro MEG epochs
         shell: bash
