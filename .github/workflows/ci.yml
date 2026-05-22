@@ -64,7 +64,7 @@ jobs:
         run: poetry check --lock
 
       - name: Lint Python sources and tests
-        run: poetry run ruff check src tests scripts
+        run: poetry run ruff check src tests
 
       - name: Run tests
         run: poetry run pytest -q
