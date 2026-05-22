@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import mne
+import numpy as np
 import pandas as pd
 
 from neureptrace.openneuro_meg import (
     DATASET_SPECS,
     RunFiles,
     _derive_metadata,
+    _drop_non_epochable_metadata,
     _filter_metadata,
     expected_relative_files,
     parse_runs,
@@ -97,6 +100,28 @@ def test_ds004276_word_metadata_ignores_probe_events(tmp_path: Path):
     assert metadata["onset"].tolist() == [0.1, 0.3]
     assert metadata["word"].tolist() == ["cat", "elephant"]
     assert metadata["word_length_binary"].tolist() == ["short", "long"]
+
+
+def test_drop_non_epochable_metadata_removes_out_of_bounds_events():
+    info = mne.create_info(["MEG0111"], sfreq=100.0, ch_types=["mag"])
+    raw = mne.io.RawArray(np.zeros((1, 100)), info, verbose="error")
+    metadata = pd.DataFrame(
+        {
+            "onset": [0.5, 2.0],
+            "duration": [0.0, 0.0],
+            "condition": ["a", "a"],
+        }
+    )
+
+    filtered = _drop_non_epochable_metadata(
+        raw,
+        metadata,
+        label_column="condition",
+        tmin=-0.1,
+        tmax=0.2,
+    )
+
+    assert filtered["onset"].tolist() == [0.5]
 
 
 def test_ds004330_derives_stimulus_form_and_id():
