@@ -80,6 +80,18 @@ DEFAULT_TUNING_ALPHA_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
 DEFAULT_TUNING_VAR_SMOOTHING_GRID = (1e-12, 1e-10, 1e-9, 1e-8, 1e-6)
 
 
+def _positive_float_classifier_param(
+    classifier_param: Any,
+    *,
+    default: float,
+    name: str,
+) -> float:
+    value = default if classifier_param is None else float(classifier_param)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be a positive finite value.")
+    return value
+
+
 def _registry_decoder_lookup() -> dict[str, str]:
     lookup: dict[str, str] = {}
     for registry_name in CLASSIFIER_REGISTRY:
@@ -276,34 +288,40 @@ def make_decoder(
         )
 
     if normalized == "logistic":
+        c_value = _positive_float_classifier_param(classifier_param, default=1.0, name="LogisticRegression C")
         return make_pipeline(
             StandardScaler(),
             *feature_steps,
             LogisticRegression(
                 class_weight="balanced",
+                C=c_value,
                 max_iter=max_iter,
                 solver="lbfgs",
             ),
         )
     if normalized == "sparse_logistic":
+        c_value = _positive_float_classifier_param(classifier_param, default=1.0, name="LogisticRegression C")
         return make_pipeline(
             StandardScaler(),
             *feature_steps,
             LogisticRegression(
                 class_weight="balanced",
                 penalty="l1",
+                C=c_value,
                 max_iter=max_iter,
                 random_state=13,
                 solver="saga",
             ),
         )
     if normalized == "elastic_net_logistic":
+        c_value = _positive_float_classifier_param(classifier_param, default=1.0, name="LogisticRegression C")
         return make_pipeline(
             StandardScaler(),
             *feature_steps,
             LogisticRegression(
                 class_weight="balanced",
                 penalty="elasticnet",
+                C=c_value,
                 l1_ratio=DEFAULT_ELASTIC_NET_L1_RATIO,
                 max_iter=max_iter,
                 random_state=13,
@@ -346,11 +364,13 @@ def make_decoder(
         )
 
     if normalized == "linear_svm":
+        c_value = _positive_float_classifier_param(classifier_param, default=1.0, name="LinearSVC C")
         linear_svm = make_pipeline(
             StandardScaler(),
             *feature_steps,
             LinearSVC(
                 class_weight="balanced",
+                C=c_value,
                 max_iter=max_iter,
             ),
         )

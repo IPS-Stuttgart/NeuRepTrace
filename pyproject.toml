@@ -14,6 +14,7 @@ packages = [
 neureptrace = "neureptrace.cli:main"
 neureptrace-benchmark = "neureptrace.benchmark:main"
 neureptrace-bushmeg-data = "neureptrace.bushmeg_data:main"
+neureptrace-bushmeg-source-loso = "neureptrace.bushmeg_source_loso:main"
 neureptrace-bushmeg-loso-decode = "neureptrace.bushmeg_loso_decode:main"
 neureptrace-decode-from-config = "neureptrace.decode_from_config:main"
 neureptrace-dataset = "neureptrace.dataset_spec_cli:main"
