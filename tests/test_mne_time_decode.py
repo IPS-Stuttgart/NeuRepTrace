@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
-from neureptrace.mne_time_decode import _align_probability_columns, run_time_resolved_decode
+from neureptrace.mne_time_decode import _align_probability_columns, normalize_time_decode_backend, run_time_resolved_decode
 
 
 class FakeEpochs:
@@ -149,6 +149,73 @@ def test_run_time_resolved_decode_writes_probability_observations(tmp_path: Path
     assert observations["subject"].unique().tolist() == ["sub-01"]
     assert sorted(observations["emission_mode"].unique().tolist()) == ["calibrated", "uncalibrated"]
     assert observations[["prob_class_0", "prob_class_1"]].sum(axis=1).round(6).tolist() == [1.0] * 32
+
+
+def test_normalize_time_decode_backend_accepts_mne_alias():
+    assert normalize_time_decode_backend(None) == "sklearn"
+    assert normalize_time_decode_backend("mne-decoding") == "mne"
+
+
+def test_mne_sliding_backend_matches_existing_same_time_decode(tmp_path: Path, monkeypatch):
+    rng = np.random.default_rng(41)
+    labels = np.array(["animate", "inanimate"] * 8)
+    data = rng.normal(size=(16, 2, 6))
+    data[labels == "animate", 0, 2:5] += 0.7
+    metadata = pd.DataFrame({"condition": labels, "session": np.repeat(["a", "b", "c", "d"], 4)})
+    epochs = FakeEpochs(data, np.array([0.00, 0.01, 0.02, 0.03, 0.04, 0.05]), metadata)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    sklearn_out = tmp_path / "decode_sklearn.csv"
+    mne_out = tmp_path / "decode_mne.csv"
+    sklearn_observations_out = tmp_path / "observations_sklearn.csv"
+    mne_observations_out = tmp_path / "observations_mne.csv"
+
+    sklearn_results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        out_path=sklearn_out,
+        n_splits=2,
+        window_ms=20,
+        step_ms=20,
+        max_iter=2000,
+        emission_mode="calibrated",
+        observation_out_path=sklearn_observations_out,
+        time_decode_backend="sklearn",
+    )
+    mne_results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        out_path=mne_out,
+        n_splits=2,
+        window_ms=20,
+        step_ms=20,
+        max_iter=2000,
+        emission_mode="calibrated",
+        observation_out_path=mne_observations_out,
+        time_decode_backend="mne",
+    )
+
+    sort_result_columns = ["fold", "time", "emission_mode"]
+    sklearn_results = sklearn_results.sort_values(sort_result_columns).reset_index(drop=True)
+    mne_results = mne_results.sort_values(sort_result_columns).reset_index(drop=True)
+    pd.testing.assert_frame_equal(
+        sklearn_results[["fold", "time", "accuracy", "log_loss", "brier", "ece"]],
+        mne_results[["fold", "time", "accuracy", "log_loss", "brier", "ece"]],
+        check_exact=False,
+        atol=1e-12,
+        rtol=1e-12,
+    )
+
+    sklearn_observations = pd.read_csv(sklearn_observations_out).sort_values(["fold", "time", "sample_index"]).reset_index(drop=True)
+    mne_observations = pd.read_csv(mne_observations_out).sort_values(["fold", "time", "sample_index"]).reset_index(drop=True)
+    pd.testing.assert_frame_equal(
+        sklearn_observations[["fold", "time", "sample_index", "prob_class_0", "prob_class_1"]],
+        mne_observations[["fold", "time", "sample_index", "prob_class_0", "prob_class_1"]],
+        check_exact=False,
+        atol=1e-12,
+        rtol=1e-12,
+    )
+    assert mne_observations["backend"].unique().tolist() == ["mne"]
 
 
 def test_mne_time_decode_exposes_classifier_registry_decoders():

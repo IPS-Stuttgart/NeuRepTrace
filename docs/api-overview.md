@@ -40,6 +40,11 @@ implementation remains available as `neureptrace-mne-time-decode-base` and
 ensembling is available as `neureptrace-mne-time-decode-ensemble` and
 `neureptrace mne-time-decode-ensemble`.
 
+The base decoder also exposes `--time-decode-backend mne` for same-time
+decoding. This backend uses `mne.decoding.SlidingEstimator` over NeuRepTrace's
+windowed feature tensors and is intended as a parity path while replacing
+hand-written per-window estimator loops with MNE-maintained decoding machinery.
+
 Reusable table-oriented APIs include:
 
 - `neureptrace.metrics` for calibration/probabilistic scoring metrics, pre/post window comparisons, and confusion-table summaries.

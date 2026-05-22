@@ -25,6 +25,19 @@ For exact comparisons to historical runs that used whole-subject normalization,
 use `neureptrace-mne-time-decode-base` or the grouped command
 `neureptrace mne-time-decode-base`.
 
+For maintainability checks against MNE's decoding stack, the base command can
+run same-time decoding through `mne.decoding.SlidingEstimator`:
+
+```bash
+neureptrace-mne-time-decode-base \
+  --epochs path/to/sub-01_epo.fif \
+  --metadata-csv path/to/sub-01_events.csv \
+  --label-column stim_is_animate \
+  --group-column session \
+  --time-decode-backend mne \
+  --out results/nod_sub-01_animate_mne_backend.csv
+```
+
 Use `--metadata-csv` when the labels are stored outside the epochs metadata and
 `--group-column` when cross-validation should keep sessions or runs separated.
 
