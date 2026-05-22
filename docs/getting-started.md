@@ -25,8 +25,8 @@ For exact comparisons to historical runs that used whole-subject normalization,
 use `neureptrace-mne-time-decode-base` or the grouped command
 `neureptrace mne-time-decode-base`.
 
-For maintainability checks against MNE's decoding stack, the base command can
-run same-time decoding through `mne.decoding.SlidingEstimator`:
+For same-time decoding, the base command now uses
+`mne.decoding.SlidingEstimator` by default:
 
 ```bash
 neureptrace-mne-time-decode-base \
@@ -37,6 +37,9 @@ neureptrace-mne-time-decode-base \
   --time-decode-backend mne \
   --out results/nod_sub-01_animate_mne_backend.csv
 ```
+
+Use `--time-decode-backend sklearn` only when you need the previous
+hand-written per-window estimator loop for historical comparisons.
 
 Use `--metadata-csv` when the labels are stored outside the epochs metadata and
 `--group-column` when cross-validation should keep sessions or runs separated.

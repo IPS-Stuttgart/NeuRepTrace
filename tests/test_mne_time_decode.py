@@ -92,6 +92,7 @@ def test_run_time_resolved_decode_aligns_missing_fold_class_probabilities(tmp_pa
         step_ms=10,
         emission_mode="uncalibrated",
         observation_out_path=observations_out,
+        time_decode_backend="sklearn",
     )
     observations = pd.read_csv(observations_out)
 
@@ -152,7 +153,7 @@ def test_run_time_resolved_decode_writes_probability_observations(tmp_path: Path
 
 
 def test_normalize_time_decode_backend_accepts_mne_alias():
-    assert normalize_time_decode_backend(None) == "sklearn"
+    assert normalize_time_decode_backend(None) == "auto"
     assert normalize_time_decode_backend("mne-decoding") == "mne"
 
 

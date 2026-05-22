@@ -53,7 +53,7 @@ EPOCH_NORMALIZATION_RUN_CHOICES = (
 )
 RESULT_SELECTION_METRIC_CHOICES = ("accuracy", "log_loss", "brier", "ece")
 RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
-TIME_DECODE_BACKEND_CHOICES = ("sklearn", "mne")
+TIME_DECODE_BACKEND_CHOICES = ("auto", "sklearn", "mne")
 DEFAULT_BASELINE_WINDOW = (-0.35, -0.05)
 BASELINE_WHITENING_SHRINKAGE = 0.1
 BASELINE_WHITENING_EIGENVALUE_FLOOR = 1e-6
@@ -194,7 +194,7 @@ def normalize_epoch_normalization(name: str | None) -> str:
 def normalize_time_decode_backend(name: str | None) -> str:
     """Normalize the implementation backend for same-time decoding."""
 
-    normalized = "sklearn" if name is None else str(name).strip().lower().replace("-", "_")
+    normalized = "auto" if name is None else str(name).strip().lower().replace("-", "_")
     if normalized == "mne_decoding":
         return "mne"
     if normalized not in TIME_DECODE_BACKEND_CHOICES:
@@ -713,7 +713,7 @@ def run_time_resolved_decode(
     observation_out_path: Path | None = None,
     subject: str | None = None,
     temporal_train_window: tuple[float, float] | None = None,
-    time_decode_backend: str = "sklearn",
+    time_decode_backend: str = "auto",
 ) -> pd.DataFrame:
     """Run time-resolved decoding on an MNE epochs file and save metrics as CSV.
 
@@ -752,9 +752,16 @@ def run_time_resolved_decode(
     tuning_scoring = normalize_tuning_scoring(tuning_scoring)
     tuning_c_grid_values = parse_c_grid(tuning_c_grid)
     normalized_temporal_train_window = _normalize_temporal_train_window(temporal_train_window)
-    time_decode_backend = normalize_time_decode_backend(time_decode_backend)
-    if time_decode_backend == "mne" and normalized_temporal_train_window is not None:
+    requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
+    if requested_time_decode_backend == "mne" and normalized_temporal_train_window is not None:
         raise ValueError("The MNE time-decode backend currently supports same-time decoding only.")
+    time_decode_backend = (
+        "sklearn"
+        if requested_time_decode_backend == "auto" and normalized_temporal_train_window is not None
+        else "mne"
+        if requested_time_decode_backend == "auto"
+        else requested_time_decode_backend
+    )
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
@@ -1222,8 +1229,8 @@ def main() -> None:
     parser.add_argument(
         "--time-decode-backend",
         choices=TIME_DECODE_BACKEND_CHOICES,
-        default="sklearn",
-        help="Implementation backend for same-time decoding. The mne backend uses mne.decoding.SlidingEstimator.",
+        default="auto",
+        help="Implementation backend. auto uses mne.decoding.SlidingEstimator for same-time decoding and sklearn for temporal train-window decoding.",
     )
     parser.add_argument(
         "--temporal-train-window",
