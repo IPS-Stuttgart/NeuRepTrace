@@ -98,6 +98,19 @@ def test_ensemble_probability_observations_baseline_debiases_bias() -> None:
     assert effect["probability_true_class"].gt(0.70).all()
 
 
+def test_ensemble_probability_observations_accepts_hyphenated_decoder_aliases() -> None:
+    observations = _source_observations().replace({"decoder": {"logistic": "multinomial_logistic"}})
+
+    ensemble = ensemble_probability_observations(
+        observations,
+        decoders=("multinomial-logistic", "linear_svm"),
+        baseline_window=(-0.25, -0.15),
+    )
+
+    assert ensemble["source_decoders"].unique().tolist() == ["multinomial-logistic|linear_svm"]
+    assert np.allclose(ensemble[["prob_class_0", "prob_class_1"]].sum(axis=1), 1.0)
+
+
 def test_summarize_ensemble_metrics_returns_time_resolved_rows() -> None:
     ensemble = ensemble_probability_observations(
         _source_observations(),

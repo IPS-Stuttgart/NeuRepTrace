@@ -25,8 +25,8 @@ def test_grouped_cli_dispatches_to_module_main(monkeypatch):
 
 
 def test_grouped_cli_exposes_mne_decoder_variants():
-    assert cli.COMMAND_MODULES["mne-time-decode"] == "neureptrace.mne_time_decode_foldlocal"
-    assert cli.COMMAND_MODULES["mne-time-decode-base"] == "neureptrace.mne_time_decode"
+    assert cli.COMMAND_MODULES["mne-time-decode"] == "neureptrace.mne_time_decode_foldlocal_cli"
+    assert cli.COMMAND_MODULES["mne-time-decode-base"] == "neureptrace.mne_time_decode_cli"
     assert cli.COMMAND_MODULES["mne-time-decode-ensemble"] == "neureptrace.mne_time_decode_ensemble"
 
 
@@ -34,8 +34,8 @@ def test_poetry_scripts_expose_mne_decoder_variants():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject["tool"]["poetry"]["scripts"]
 
-    assert scripts["neureptrace-mne-time-decode"] == "neureptrace.mne_time_decode_foldlocal:main"
-    assert scripts["neureptrace-mne-time-decode-base"] == "neureptrace.mne_time_decode:main"
+    assert scripts["neureptrace-mne-time-decode"] == "neureptrace.mne_time_decode_foldlocal_cli:main"
+    assert scripts["neureptrace-mne-time-decode-base"] == "neureptrace.mne_time_decode_cli:main"
     assert scripts["neureptrace-mne-time-decode-ensemble"] == "neureptrace.mne_time_decode_ensemble:main"
 
 
