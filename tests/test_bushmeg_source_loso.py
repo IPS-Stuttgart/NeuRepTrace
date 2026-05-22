@@ -58,6 +58,7 @@ def test_window_feature_kinds_add_logvar_and_covariance_branches():
     evoked_logvar = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_logvar")
     covariance = _window_features(data, times, window, temporal_bins=2, feature_kind="covariance", covariance_max_channels=2)
     evoked_covariance = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_covariance", covariance_max_channels=2)
+    braindecode_window = _window_features(data, times, window, temporal_bins=2, feature_kind="braindecode-window")
 
     assert evoked.shape == (2, 6)
     assert logvar.shape == (2, 6)
@@ -65,6 +66,7 @@ def test_window_feature_kinds_add_logvar_and_covariance_branches():
     assert covariance.shape == (2, 3)
     assert evoked_covariance.shape == (2, 9)
     assert np.all(np.isfinite(logvar))
+    assert braindecode_window.shape == (2, 3, 4)
     assert np.all(np.isfinite(covariance))
 
 
@@ -172,3 +174,13 @@ def test_make_decoder_constructs_torch_mlp_without_importing_torch():
     assert "torchmlpclassifier" in model.named_steps
     assert model.named_steps["torchmlpclassifier"].weight_decay == 1e-4
     assert model.named_steps["torchmlpclassifier"].max_iter == 3
+
+
+def test_make_decoder_constructs_braindecode_without_importing_braindecode():
+    model = make_decoder("braindecode-shallow", emission_mode="uncalibrated", classifier_param=1e-4, max_iter=3)
+
+    assert normalize_decoder_name("braindecode-eegnetv4") == "braindecode_eegnet"
+    assert normalize_decoder_name("braindecode-deep4net") == "braindecode_deep4"
+    assert model.architecture == "shallow"
+    assert model.weight_decay == 1e-4
+    assert model.max_epochs == 3

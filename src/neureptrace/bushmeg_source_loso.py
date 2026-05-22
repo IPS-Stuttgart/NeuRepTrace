@@ -59,6 +59,7 @@ FEATURE_KIND_CHOICES = (
     "evoked_logvar",
     "evoked_covariance",
     "xdawn",
+    "braindecode_window",
 )
 DEFAULT_XDAWN_COMPONENTS = 8
 DEFAULT_COVARIANCE_MAX_CHANNELS = 64
@@ -421,6 +422,8 @@ def _window_features(
     feature_kind = normalize_source_feature_kind(feature_kind)
     if feature_kind == "xdawn":
         raise ValueError("xDawn features are supervised and must be fitted inside _predict_candidate.")
+    if feature_kind == "braindecode_window":
+        return np.asarray(data[:, :, _sample_indices_for_window(times, window)], dtype=np.float32)
     evoked = None
     if feature_kind in {"evoked", "evoked_logvar", "evoked_covariance"}:
         evoked = _window_bin_mean_features(data, times, window, temporal_bins=temporal_bins)
@@ -827,11 +830,22 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
     candidates: list[CandidateSpec] = []
     for window_name, windows in window_sets:
         for decoder in decoders:
+            normalized_decoder = normalize_decoder_name(decoder)
+            is_braindecode_decoder = normalized_decoder.startswith("braindecode_")
+            decoder_feature_preprocessors = ["none"] if is_braindecode_decoder else feature_preprocessors
+            decoder_pca_values = [None] if is_braindecode_decoder else normalized_pca_values
+            decoder_feature_kinds = (
+                ["braindecode_window"]
+                if is_braindecode_decoder
+                else [feature_kind for feature_kind in feature_kinds if feature_kind != "braindecode_window"]
+            )
+            if not decoder_feature_kinds:
+                continue
             for emission_mode in emission_modes:
-                for feature_preprocessor in feature_preprocessors:
-                    for pca_components in normalized_pca_values:
+                for feature_preprocessor in decoder_feature_preprocessors:
+                    for pca_components in decoder_pca_values:
                         for temporal_bins in temporal_bins_values:
-                            for feature_kind in feature_kinds:
+                            for feature_kind in decoder_feature_kinds:
                                 xdawn_component_grid = (
                                     xdawn_components_values if feature_kind == "xdawn" else [None]
                                 )
@@ -842,16 +856,17 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                                 )
                                 for xdawn_components in xdawn_component_grid:
                                     for covariance_max_channels in covariance_channel_grid:
-                                        normalized_decoder = normalize_decoder_name(decoder)
                                         classifier_grid = (
                                             deep_weight_decay_grid
-                                            if normalized_decoder == "torch_mlp"
+                                            if normalized_decoder
+                                            in {"torch_mlp", "braindecode_shallow", "braindecode_deep4", "braindecode_eegnet"}
                                             else c_grid
                                         )
                                         for classifier_value in classifier_grid:
                                             parameter_token = (
                                                 f"wd{classifier_value:g}"
-                                                if normalized_decoder == "torch_mlp"
+                                                if normalized_decoder
+                                                in {"torch_mlp", "braindecode_shallow", "braindecode_deep4", "braindecode_eegnet"}
                                                 else f"c{classifier_value:g}"
                                             )
                                             name = "__".join(

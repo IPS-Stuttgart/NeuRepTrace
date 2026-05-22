@@ -46,6 +46,9 @@ BUILTIN_DECODER_CHOICES = (
     "ovo_linear_svm",
     "ecoc_linear_svm",
     "torch_mlp",
+    "braindecode_shallow",
+    "braindecode_deep4",
+    "braindecode_eegnet",
 )
 DECODER_ALIASES = (
     "l1-logistic",
@@ -70,6 +73,14 @@ DECODER_ALIASES = (
     "outputcode-linear-svm",
     "deep-mlp",
     "shallow-torch-mlp",
+    "braindecode-shallow",
+    "braindecode-shallowfbcspnet",
+    "braindecode-shallow-fbcspnet",
+    "braindecode-deep4",
+    "braindecode-deep4net",
+    "braindecode-deep-4-net",
+    "braindecode-eegnet",
+    "braindecode-eegnetv4",
 )
 DECODER_CHOICES = tuple(
     dict.fromkeys(
@@ -367,6 +378,158 @@ class TorchMLPClassifier(ClassifierMixin, BaseEstimator):
         with torch.no_grad():
             probabilities = torch.softmax(self.model_(x), dim=1).detach().cpu().numpy()
         return probabilities.astype(float, copy=False)
+
+    def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        return self.classes_[np.argmax(self.predict_proba(features), axis=1)]
+
+
+class BraindecodeClassifier(ClassifierMixin, BaseEstimator):
+    """Braindecode architecture adapter with a scikit-learn classifier API.
+
+    The adapter expects trial tensors shaped ``n_trials × n_channels × n_times``.
+    It imports Braindecode and torch lazily inside ``fit``/``predict`` so the
+    optional dependency is not required unless a Braindecode decoder is actually
+    used.  This is intended for strict source-only BUSH-MEG window tensors rather
+    than flattened PCA features.
+    """
+
+    def __init__(
+        self,
+        architecture: str = "shallow",
+        max_epochs: int = 40,
+        batch_size: int = 64,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 1e-4,
+        device: str = "cpu",
+        random_state: int | None = 13,
+        class_weight: str | None = "balanced",
+        verbose: int = 0,
+        drop_prob: float | None = None,
+    ):
+        self.architecture = architecture
+        self.max_epochs = max_epochs
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.device = device
+        self.random_state = random_state
+        self.class_weight = class_weight
+        self.verbose = verbose
+        self.drop_prob = drop_prob
+
+    @staticmethod
+    def _normalize_architecture(architecture: str) -> str:
+        normalized = str(architecture).strip().lower().replace("-", "_")
+        if normalized in {"braindecode_shallow", "shallow", "shallowfbcspnet", "shallow_fbcspnet"}:
+            return "shallow"
+        if normalized in {"braindecode_deep4", "deep4", "deep4net", "deep_4_net"}:
+            return "deep4"
+        if normalized in {"braindecode_eegnet", "eegnet", "eegnetv4", "eegnet_v4"}:
+            return "eegnet"
+        raise ValueError("architecture must be one of: shallow, deep4, eegnet")
+
+    def _imports(self):
+        try:
+            import torch
+            from braindecode.classifier import EEGClassifier
+            from braindecode.models import Deep4Net, EEGNet, ShallowFBCSPNet
+        except ImportError as exc:  # pragma: no cover - exercised only without optional dependency
+            raise ImportError(
+                "Braindecode decoders require the optional braindecode extra, "
+                "e.g. `pip install neureptrace[braindecode]`."
+            ) from exc
+        return torch, EEGClassifier, {
+            "shallow": ShallowFBCSPNet,
+            "deep4": Deep4Net,
+            "eegnet": EEGNet,
+        }
+
+    @staticmethod
+    def _as_window_tensor(features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        x = np.asarray(features, dtype=np.float32)
+        if x.ndim != 3:
+            raise ValueError(
+                "BraindecodeClassifier expects a 3-D tensor shaped "
+                "(n_trials, n_channels, n_times). Use source_loso feature_kind='braindecode_window'."
+            )
+        if x.shape[0] < 1 or x.shape[1] < 1 or x.shape[2] < 1:
+            raise ValueError("BraindecodeClassifier received an empty trial/channel/time dimension.")
+        return x
+
+    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence | np.ndarray):
+        torch, EEGClassifier, model_classes = self._imports()
+        if self.random_state is not None:
+            torch.manual_seed(int(self.random_state))
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(int(self.random_state))
+
+        x = self._as_window_tensor(features)
+        y_raw = np.asarray(labels)
+        self.classes_, y = np.unique(y_raw, return_inverse=True)
+        y = y.astype(np.int64, copy=False)
+        n_classes = int(self.classes_.shape[0])
+        if n_classes < 2:
+            raise ValueError("BraindecodeClassifier needs at least two classes.")
+
+        max_epochs = int(self.max_epochs)
+        batch_size = int(self.batch_size)
+        if max_epochs < 1 or batch_size < 1:
+            raise ValueError("max_epochs and batch_size must be positive integers.")
+        if not np.isfinite(self.learning_rate) or self.learning_rate <= 0:
+            raise ValueError("learning_rate must be positive and finite.")
+        if not np.isfinite(self.weight_decay) or self.weight_decay < 0:
+            raise ValueError("weight_decay must be non-negative and finite.")
+
+        architecture = self._normalize_architecture(self.architecture)
+        module_kwargs: dict[str, Any] = {
+            "n_chans": int(x.shape[1]),
+            "n_outputs": n_classes,
+            "n_times": int(x.shape[2]),
+        }
+        if self.drop_prob is not None:
+            module_kwargs["drop_prob"] = float(self.drop_prob)
+        module = model_classes[architecture](**module_kwargs)
+
+        criterion_kwargs: dict[str, Any] = {}
+        if self.class_weight == "balanced":
+            class_counts = np.bincount(y, minlength=n_classes).astype(np.float32)
+            weights = y.shape[0] / np.maximum(class_counts, 1.0) / float(n_classes)
+            criterion_kwargs["criterion__weight"] = torch.as_tensor(weights, dtype=torch.float32)
+
+        self.model_ = EEGClassifier(
+            module,
+            criterion=torch.nn.CrossEntropyLoss,
+            optimizer=torch.optim.AdamW,
+            lr=float(self.learning_rate),
+            optimizer__weight_decay=float(self.weight_decay),
+            batch_size=batch_size,
+            max_epochs=max_epochs,
+            train_split=None,
+            device=str(self.device),
+            iterator_train__shuffle=True,
+            iterator_train__drop_last=False,
+            verbose=int(self.verbose),
+            **criterion_kwargs,
+        )
+        self.model_.fit(x, y)
+        self.architecture_ = architecture
+        self.n_features_in_ = (int(x.shape[1]), int(x.shape[2]))
+        return self
+
+    def predict_proba(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        if not hasattr(self, "model_"):
+            raise RuntimeError("BraindecodeClassifier must be fitted before prediction.")
+        probabilities = np.asarray(self.model_.predict_proba(self._as_window_tensor(features)), dtype=float)
+        if probabilities.ndim != 2:
+            probabilities = probabilities.reshape(probabilities.shape[0], -1)
+        row_sums = probabilities.sum(axis=1, keepdims=True)
+        return probabilities / np.maximum(row_sums, 1e-12)
+
+    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        log_probabilities = np.log(np.clip(self.predict_proba(features), 1e-12, 1.0))
+        if log_probabilities.shape[1] == 2:
+            return log_probabilities[:, 1] - log_probabilities[:, 0]
+        return log_probabilities
 
     def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
         return self.classes_[np.argmax(self.predict_proba(features), axis=1)]
@@ -673,6 +836,28 @@ def make_decoder(
             ),
         )
 
+    if normalized in {"braindecode_shallow", "braindecode_deep4", "braindecode_eegnet"}:
+        if normalize_feature_preprocessor(feature_preprocessor) != "none" or pca_components is not None:
+            raise ValueError("Braindecode decoders require unflattened tensors; set feature_preprocessor='none' and pca_components=None.")
+        weight_decay = _positive_float_classifier_param(
+            classifier_param,
+            default=1e-4,
+            name="Braindecode weight_decay",
+        )
+        braindecode_model = BraindecodeClassifier(
+            architecture=normalized.removeprefix("braindecode_"),
+            max_epochs=max_iter,
+            weight_decay=weight_decay,
+            random_state=random_state,
+        )
+        if emission_mode == "uncalibrated":
+            return braindecode_model
+        return _make_calibrated_classifier(
+            braindecode_model,
+            method="sigmoid",
+            cv=3,
+        )
+
     registry_decoder = _make_registry_decoder_pipeline(
         normalized,
         feature_preprocessor=feature_preprocessor,
@@ -869,6 +1054,22 @@ def make_tuned_decoder(
         # decoder so CLI tuning semantics remain consistent with linear models.
         param_grid = {"torchmlpclassifier__weight_decay": tuple(1.0 / value for value in c_grid)}
         param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
+    elif normalized in {"braindecode_shallow", "braindecode_deep4", "braindecode_eegnet"}:
+        if normalize_feature_preprocessor(feature_preprocessor) != "none" or pca_components is not None:
+            raise ValueError("Braindecode decoders require unflattened tensors; set feature_preprocessor='none' and pca_components=None.")
+        estimator = BraindecodeClassifier(
+            architecture=normalized.removeprefix("braindecode_"),
+            max_epochs=max_iter,
+            random_state=random_state,
+        )
+        # Interpret the shared C grid as inverse weight decay for consistency
+        # with the torch_mlp decoder branch.
+        weight_decay_grid = tuple(1.0 / value for value in c_grid)
+        if emission_mode == "uncalibrated":
+            param_grid = {"weight_decay": weight_decay_grid}
+        else:
+            estimator = _make_calibrated_classifier(estimator, method="sigmoid", cv=3)
+            param_grid = {_calibrated_estimator_param(estimator, "weight_decay"): weight_decay_grid}
     else:
         registry_name = normalize_registry_decoder_name(normalized)
         registry_decoder = _make_registry_decoder_pipeline(
@@ -1032,6 +1233,12 @@ def normalize_decoder_name(name: str) -> str:
         return "ecoc_linear_svm"
     if normalized in {"deep_mlp", "mlp", "torch_deep_mlp", "shallow_torch_mlp"}:
         return "torch_mlp"
+    if normalized in {"braindecode_shallow", "braindecode_shallowfbcspnet", "braindecode_shallow_fbcspnet"}:
+        return "braindecode_shallow"
+    if normalized in {"braindecode_deep4", "braindecode_deep4net", "braindecode_deep_4_net"}:
+        return "braindecode_deep4"
+    if normalized in {"braindecode_eegnet", "braindecode_eegnetv4", "braindecode_eegnet_v4"}:
+        return "braindecode_eegnet"
     if normalized in BUILTIN_DECODER_CHOICES:
         return normalized
     registry_name = _normalize_registry_decoder_name_or_none(name)
