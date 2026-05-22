@@ -15,6 +15,7 @@ from neureptrace.mne_time_decode import (
     FEATURE_PREPROCESSOR_RUN_CHOICES,
     RESULT_SELECTION_METRIC_CHOICES,
     RESULT_SELECTION_MINIMIZE_METRICS,
+    RESULT_SUMMARY_METRIC_COLUMNS,
     _best_time_by_metric,
 )
 from neureptrace.mne_time_decode_foldlocal import run_time_resolved_decode as _run_time_resolved_decode
@@ -361,7 +362,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.observations_out is not None:
         print(f"Wrote probability observations: {args.observations_out}")
     for emission_mode_name, summary in results.groupby("emission_mode", sort=True):
-        time_summary = summary.groupby("time")[["accuracy", "log_loss", "brier", "ece"]].mean()
+        time_summary = summary.groupby("time")[list(RESULT_SUMMARY_METRIC_COLUMNS)].mean()
         best_time = _best_time_by_metric(time_summary, args.selection_metric)
         best_value = time_summary.loc[best_time, args.selection_metric]
         direction = "lowest" if args.selection_metric in RESULT_SELECTION_MINIMIZE_METRICS else "highest"

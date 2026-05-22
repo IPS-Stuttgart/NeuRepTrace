@@ -291,7 +291,7 @@ def make_decoder(
             *feature_steps,
             LogisticRegression(
                 class_weight="balanced",
-                l1_ratio=1.0,
+                penalty="l1",
                 max_iter=max_iter,
                 random_state=13,
                 solver="saga",
@@ -303,6 +303,7 @@ def make_decoder(
             *feature_steps,
             LogisticRegression(
                 class_weight="balanced",
+                penalty="elasticnet",
                 l1_ratio=DEFAULT_ELASTIC_NET_L1_RATIO,
                 max_iter=max_iter,
                 random_state=13,
@@ -424,7 +425,7 @@ def make_tuned_decoder(
             *feature_steps,
             LogisticRegression(
                 class_weight="balanced",
-                l1_ratio=1.0,
+                penalty="l1",
                 max_iter=max_iter,
                 random_state=13,
                 solver="saga",
@@ -438,6 +439,7 @@ def make_tuned_decoder(
             *feature_steps,
             LogisticRegression(
                 class_weight="balanced",
+                penalty="elasticnet",
                 l1_ratio=DEFAULT_ELASTIC_NET_L1_RATIO,
                 max_iter=max_iter,
                 random_state=13,

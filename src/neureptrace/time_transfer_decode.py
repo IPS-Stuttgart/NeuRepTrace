@@ -6,7 +6,7 @@ from pathlib import Path
 import mne
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 from sklearn.preprocessing import LabelEncoder
 
 from neureptrace.decoding import (
@@ -31,6 +31,7 @@ from neureptrace.mne_time_decode import (
     FEATURE_PREPROCESSOR_RUN_CHOICES,
     RESULT_SELECTION_METRIC_CHOICES,
     RESULT_SELECTION_MINIMIZE_METRICS,
+    RESULT_SUMMARY_METRIC_COLUMNS,
     _align_probability_columns,
     _apply_epoch_normalization,
     _best_params_json,
@@ -43,6 +44,7 @@ from neureptrace.mne_time_decode import (
     _normalize_temporal_train_window,
     _probability_average,
     _select_temporal_train_windows,
+    _top_k_accuracy,
     _train_window_summary,
     normalize_epoch_normalization,
 )
@@ -202,6 +204,9 @@ def _append_transfer_outputs(
     row = {
         **common,
         "accuracy": accuracy_score(validation_labels, predictions),
+        "balanced_accuracy": balanced_accuracy_score(validation_labels, predictions),
+        "top2_accuracy": _top_k_accuracy(probabilities, validation_labels, k=2),
+        "top3_accuracy": _top_k_accuracy(probabilities, validation_labels, k=3),
         "log_loss": log_loss(validation_labels, probabilities, labels=classes),
         "brier": brier_score_multiclass(probabilities, validation_labels),
         "ece": expected_calibration_error(probabilities, validation_labels),
@@ -634,7 +639,7 @@ def main() -> None:
     if args.observations_out is not None:
         print(f"Wrote probability observations: {args.observations_out}")
     for emission_mode_name, summary in results.groupby("emission_mode", sort=True):
-        time_summary = summary.groupby("time")[["accuracy", "log_loss", "brier", "ece"]].mean()
+        time_summary = summary.groupby("time")[list(RESULT_SUMMARY_METRIC_COLUMNS)].mean()
         best_time = _best_time_by_metric(time_summary, args.selection_metric)
         best_value = time_summary.loc[best_time, args.selection_metric]
         direction = "lowest" if args.selection_metric in RESULT_SELECTION_MINIMIZE_METRICS else "highest"

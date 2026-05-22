@@ -8,7 +8,7 @@ from pathlib import Path
 import mne
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 from sklearn.preprocessing import LabelEncoder
 
 from neureptrace.decoding import (
@@ -50,7 +50,16 @@ EPOCH_NORMALIZATION_RUN_CHOICES = (
     "subject-baseline-z",
     "subject-baseline-whiten",
 )
-RESULT_SELECTION_METRIC_CHOICES = ("accuracy", "log_loss", "brier", "ece")
+RESULT_SELECTION_METRIC_CHOICES = (
+    "accuracy",
+    "balanced_accuracy",
+    "top2_accuracy",
+    "top3_accuracy",
+    "log_loss",
+    "brier",
+    "ece",
+)
+RESULT_SUMMARY_METRIC_COLUMNS = RESULT_SELECTION_METRIC_CHOICES
 RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 DEFAULT_BASELINE_WINDOW = (-0.35, -0.05)
 BASELINE_WHITENING_SHRINKAGE = 0.1
@@ -344,6 +353,25 @@ def _probability_average(probability_sum: np.ndarray, n_models: int) -> np.ndarr
     return probabilities / row_sums
 
 
+def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
+    """Return top-k accuracy for probability columns aligned to integer labels."""
+
+    probabilities = np.asarray(probabilities, dtype=float)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if probabilities.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional array.")
+    if probabilities.shape[0] != labels.shape[0]:
+        raise ValueError("probabilities and labels must contain the same number of rows.")
+    if probabilities.shape[1] == 0:
+        raise ValueError("probabilities must contain at least one class column.")
+    if k < 1:
+        raise ValueError("k must be at least one.")
+
+    effective_k = min(int(k), probabilities.shape[1])
+    top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
+    return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
+
+
 def _model_probability_classes(model) -> np.ndarray | None:
     """Return the class order that corresponds to a model's probability columns."""
 
@@ -555,6 +583,9 @@ def _append_decoded_outputs(
     row = {
         **common,
         "accuracy": accuracy_score(test_labels, predictions),
+        "balanced_accuracy": balanced_accuracy_score(test_labels, predictions),
+        "top2_accuracy": _top_k_accuracy(probabilities, test_labels, k=2),
+        "top3_accuracy": _top_k_accuracy(probabilities, test_labels, k=3),
         "log_loss": log_loss(test_labels, probabilities, labels=classes),
         "brier": brier_score_multiclass(probabilities, test_labels),
         "ece": expected_calibration_error(probabilities, test_labels),
@@ -1101,7 +1132,7 @@ def main() -> None:
     if args.observations_out is not None:
         print(f"Wrote probability observations: {args.observations_out}")
     for emission_mode_name, summary in results.groupby("emission_mode", sort=True):
-        time_summary = summary.groupby("time")[["accuracy", "log_loss", "brier", "ece"]].mean()
+        time_summary = summary.groupby("time")[list(RESULT_SUMMARY_METRIC_COLUMNS)].mean()
         best_time = _best_time_by_metric(time_summary, args.selection_metric)
         best_value = time_summary.loc[best_time, args.selection_metric]
         direction = "lowest" if args.selection_metric in RESULT_SELECTION_MINIMIZE_METRICS else "highest"
