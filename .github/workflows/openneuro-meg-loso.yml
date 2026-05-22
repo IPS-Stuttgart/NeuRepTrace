@@ -1,0 +1,241 @@
+name: OpenNeuro MEG LOSO
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "OpenNeuro dataset recipe"
+        required: true
+        type: choice
+        options:
+          - ds006629
+          - ds004276
+          - ds004330
+        default: ds006629
+      mode:
+        description: "Smoke uses two subjects and small caps; full uses all configured subjects/runs."
+        required: true
+        type: choice
+        options:
+          - smoke
+          - full
+        default: smoke
+      subjects:
+        description: "Override subject ids/ranges, or leave empty for mode default"
+        required: false
+        default: ""
+      runs:
+        description: "Override run ids, or leave empty for mode default"
+        required: false
+        default: ""
+      data_root:
+        description: "Raw BIDS dataset root, or empty for persistent self-hosted cache"
+        required: false
+        default: ""
+      staged_root:
+        description: "Per-subject staged Epochs root, or empty for persistent self-hosted cache"
+        required: false
+        default: ""
+      max_events_per_label:
+        description: "Per-run class cap during staging; 0 disables the cap"
+        required: true
+        default: "120"
+      run_decode:
+        description: "Run LOSO decoding after staging"
+        required: true
+        type: boolean
+        default: true
+      no_download:
+        description: "Fail instead of downloading missing raw files"
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  openneuro-meg-loso:
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 720
+    env:
+      OPENNEURO_API_KEY: ${{ secrets.OPENNEURO_API_KEY }}
+      DATASET: ${{ inputs.dataset }}
+      MODE: ${{ inputs.mode }}
+      SUBJECTS_INPUT: ${{ inputs.subjects }}
+      RUNS_INPUT: ${{ inputs.runs }}
+      DATA_ROOT_INPUT: ${{ inputs.data_root }}
+      STAGED_ROOT_INPUT: ${{ inputs.staged_root }}
+      MAX_EVENTS_PER_LABEL_INPUT: ${{ inputs.max_events_per_label }}
+      RUN_DECODE: ${{ inputs.run_decode }}
+      NO_DOWNLOAD: ${{ inputs.no_download }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install NeuRepTrace and OpenNeuro client
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e . openneuro-py
+
+      - name: Resolve run parameters
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+
+          from neureptrace.openneuro_meg import DATASET_SPECS, parse_runs, parse_subjects
+
+          dataset = os.environ["DATASET"]
+          mode = os.environ["MODE"]
+          spec = DATASET_SPECS[dataset]
+          smoke_defaults = {
+              "ds004276": ("1-2", "all"),
+              "ds006629": ("1,2", "0"),
+              "ds004330": ("1,2", "01,02,03"),
+          }
+          subjects = os.environ.get("SUBJECTS_INPUT") or (smoke_defaults[dataset][0] if mode == "smoke" else "all")
+          runs = os.environ.get("RUNS_INPUT") or (smoke_defaults[dataset][1] if mode == "smoke" else "all")
+          subject_count = len(parse_subjects(spec, subjects))
+          max_events = int(os.environ["MAX_EVENTS_PER_LABEL_INPUT"])
+          if max_events <= 0:
+              max_events_arg = ""
+          else:
+              max_events_arg = f"--max-events-per-label {max_events}"
+          cache_root = Path("/home/github-runner/.cache/datasets/openneuro")
+          data_root = Path(os.environ.get("DATA_ROOT_INPUT") or cache_root / dataset)
+          staged_root = Path(os.environ.get("STAGED_ROOT_INPUT") or cache_root / "staged-epochs")
+          output_dir = Path("outputs") / f"openneuro_{dataset}_{mode}"
+          env_path = Path(os.environ["GITHUB_ENV"])
+          with env_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"OPENNEURO_SUBJECTS={subjects}\n")
+              handle.write(f"OPENNEURO_RUNS={runs}\n")
+              handle.write(f"OPENNEURO_N_SPLITS={subject_count}\n")
+              handle.write(f"OPENNEURO_DATA_ROOT={data_root}\n")
+              handle.write(f"NEUREPTRACE_OPENNEURO_STAGED_DIR={staged_root}\n")
+              handle.write(f"OPENNEURO_OUTPUT_DIR={output_dir}\n")
+              handle.write(f"OPENNEURO_MAX_EVENTS_ARG={max_events_arg}\n")
+          print(f"Dataset: {dataset}")
+          print(f"Subjects: {subjects} ({subject_count})")
+          print(f"Runs: {runs} ({len(parse_runs(spec, runs))})")
+          print(f"Raw BIDS root: {data_root}")
+          print(f"Staged Epochs root: {staged_root}")
+          print(f"Output dir: {output_dir}")
+          PY
+
+      - name: Check selected raw files
+        id: raw_check
+        shell: bash
+        run: |
+          set +e
+          python -m neureptrace.openneuro_meg check-raw \
+            --dataset "$DATASET" \
+            --bids-root "$OPENNEURO_DATA_ROOT" \
+            --subjects "$OPENNEURO_SUBJECTS" \
+            --runs "$OPENNEURO_RUNS"
+          status="$?"
+          if [[ "$status" -eq 0 ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Download selected OpenNeuro files
+        if: steps.raw_check.outputs.ready != 'true' && env.NO_DOWNLOAD != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OPENNEURO_DATA_ROOT"
+          mkdir -p "$(dirname "$OPENNEURO_OUTPUT_DIR")"
+          if [[ -n "${OPENNEURO_API_KEY:-}" ]]; then
+            printf '%s\n' "$OPENNEURO_API_KEY" | openneuro-py login || true
+          fi
+          python -m neureptrace.openneuro_meg print-download-includes \
+            --dataset "$DATASET" \
+            --subjects "$OPENNEURO_SUBJECTS" \
+            --runs "$OPENNEURO_RUNS" > "$OPENNEURO_OUTPUT_DIR.includes.txt"
+          while IFS= read -r include_path; do
+            [[ -z "$include_path" ]] && continue
+            echo "Downloading $include_path"
+            openneuro-py download \
+              --dataset "$DATASET" \
+              --target-dir "$OPENNEURO_DATA_ROOT" \
+              --include "$include_path"
+          done < "$OPENNEURO_OUTPUT_DIR.includes.txt"
+
+      - name: Re-check selected raw files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m neureptrace.openneuro_meg check-raw \
+            --dataset "$DATASET" \
+            --bids-root "$OPENNEURO_DATA_ROOT" \
+            --subjects "$OPENNEURO_SUBJECTS" \
+            --runs "$OPENNEURO_RUNS"
+
+      - name: Stage OpenNeuro MEG epochs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OPENNEURO_OUTPUT_DIR"
+          # shellcheck disable=SC2086
+          python -m neureptrace.openneuro_meg stage \
+            --dataset "$DATASET" \
+            --bids-root "$OPENNEURO_DATA_ROOT" \
+            --staged-dir "$NEUREPTRACE_OPENNEURO_STAGED_DIR" \
+            --subjects "$OPENNEURO_SUBJECTS" \
+            --runs "$OPENNEURO_RUNS" \
+            --summary-out "$OPENNEURO_OUTPUT_DIR/stage_summary.csv" \
+            $OPENNEURO_MAX_EVENTS_ARG \
+            --on-mismatch warn \
+            --overwrite
+
+      - name: Run NeuRepTrace LOSO decode
+        if: env.RUN_DECODE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DATASET" in
+            ds004276) CONFIG="configs/openneuro/ds004276_words.yml" ;;
+            ds006629) CONFIG="configs/openneuro/ds006629_singsing.yml" ;;
+            ds004330) CONFIG="configs/openneuro/ds004330_object_drawing.yml" ;;
+            *) echo "Unknown dataset: $DATASET" >&2; exit 1 ;;
+          esac
+          python -m neureptrace.decode_from_config "$CONFIG" \
+            --set "participants.ids=$OPENNEURO_SUBJECTS" \
+            --set "decoding.n_splits=$OPENNEURO_N_SPLITS" \
+            --set "outputs.base_dir=$OPENNEURO_OUTPUT_DIR/decode"
+
+      - name: Summarize LOSO decode
+        if: env.RUN_DECODE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import pandas as pd
+
+          summary = Path(os.environ["OPENNEURO_OUTPUT_DIR"]) / "decode" / "time_decode_summary.csv"
+          frame = pd.read_csv(summary)
+          metrics = frame.groupby("time")[["accuracy", "log_loss", "brier", "ece"]].mean()
+          best_time = metrics["accuracy"].idxmax()
+          print(metrics.loc[[best_time]].to_string())
+          PY
+
+      - name: Upload OpenNeuro MEG outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}
+          path: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}/**

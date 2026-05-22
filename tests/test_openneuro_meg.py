@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+
+from neureptrace.openneuro_meg import (
+    DATASET_SPECS,
+    RunFiles,
+    _derive_metadata,
+    _filter_metadata,
+    expected_relative_files,
+    parse_runs,
+    parse_subjects,
+    run_files,
+)
+
+
+def test_expected_relative_files_include_singsing_raw_and_events():
+    assert expected_relative_files("ds006629", subjects="1,2", runs="0") == [
+        "sub-01/meg/sub-01_task-MMNHCS_run-0_meg.fif",
+        "sub-01/meg/sub-01_task-MMNHCS_run-0_events.tsv",
+        "sub-02/meg/sub-02_task-MMNHCS_run-0_meg.fif",
+        "sub-02/meg/sub-02_task-MMNHCS_run-0_events.tsv",
+    ]
+
+
+def test_ds004276_word_metadata_joins_behavior_file(tmp_path: Path):
+    behavior = pd.DataFrame(
+        {
+            "Event_Type": ["Sound", "Sound", "Picture"],
+            "Code": ["cat", "elephant", "probe"],
+            "Trial": [1, 2, 3],
+            "Stim_Type": ["other", "other", "other"],
+        }
+    )
+    behavior_path = tmp_path / "sub-001_task-words_beh.tsv"
+    behavior.to_csv(behavior_path, sep="\t", index=False)
+    events = pd.DataFrame({"onset": [0.1, 0.2], "duration": [0.0, 0.0], "trial_type": ["item", "item"]})
+
+    metadata = _derive_metadata(
+        DATASET_SPECS["ds004276"],
+        RunFiles(
+            subject="sub-001",
+            run=None,
+            raw_path=tmp_path / "sub-001_task-words_meg.fif",
+            events_path=tmp_path / "sub-001_task-words_events.tsv",
+            behavior_path=behavior_path,
+        ),
+        events,
+    )
+    filtered = _filter_metadata(
+        metadata,
+        label_column="word_length_binary",
+        include_labels=None,
+        max_events_per_label=None,
+        selection="random",
+        seed=13,
+    )
+
+    assert filtered["word"].tolist() == ["cat", "elephant"]
+    assert filtered["condition"].tolist() == ["short", "long"]
+
+
+def test_ds004330_derives_stimulus_form_and_id():
+    metadata = _derive_metadata(
+        DATASET_SPECS["ds004330"],
+        RunFiles(
+            subject="sub-01",
+            run="01",
+            raw_path=Path("sub-01_ses-01_task-main_run-01_meg.fif"),
+            events_path=Path("sub-01_ses-01_task-main_run-01_events.tsv"),
+        ),
+        pd.DataFrame({"onset": [1.0], "duration": [0.45], "trial_type": ["Drawing_26"]}),
+    )
+
+    assert metadata.loc[0, "stimulus_form"] == "Drawing"
+    assert metadata.loc[0, "stimulus_id"] == "26"
+    assert metadata.loc[0, "stimulus_modality"] == "drawing"
+
+
+def test_openneuro_subject_and_path_formatting():
+    assert parse_subjects(DATASET_SPECS["ds004276"], "1-2") == (1, 2)
+    assert parse_runs(DATASET_SPECS["ds004330"], "1,2,3") == ("01", "02", "03")
+    files = run_files(DATASET_SPECS["ds004276"], Path("root"), 1, None)
+    assert files.raw_path == Path("root/sub-001/meg/sub-001_task-words_meg.fif")
+    assert files.behavior_path == Path("root/sub-001/beh/sub-001_task-words_beh.tsv")

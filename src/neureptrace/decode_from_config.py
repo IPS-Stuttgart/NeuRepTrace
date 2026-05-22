@@ -17,6 +17,11 @@ from neureptrace.dataset_config import (
     provenance_payload,
 )
 from neureptrace import mne_time_decode
+from neureptrace.mne_time_decode_ensemble import (
+    ENSEMBLE_DECODER,
+    normalize_time_decode_decoder_name,
+    run_time_resolved_decode as run_ensemble_time_resolved_decode,
+)
 from neureptrace.mne_time_decode import DEFAULT_BASELINE_WINDOW
 
 
@@ -205,13 +210,15 @@ def _run_time_decode_in_memory(dataset, *, channel_type: str, kwargs: dict[str, 
     epochs = dataset.to_mne_epochs(channel_type=channel_type)
     metadata = dataset.metadata.reset_index(drop=True).copy()
     original_loader = mne_time_decode._load_epochs_and_metadata
+    decoder_name = normalize_time_decode_decoder_name(str(kwargs.get("decoder", "")))
+    runner = run_ensemble_time_resolved_decode if decoder_name == ENSEMBLE_DECODER else mne_time_decode.run_time_resolved_decode
 
     def _configured_loader(_epochs_path, _metadata_csv, **_kwargs):
         return epochs, metadata
 
     mne_time_decode._load_epochs_and_metadata = _configured_loader
     try:
-        return mne_time_decode.run_time_resolved_decode(
+        return runner(
             epochs_path=Path("<configured-in-memory-epochs>"),
             metadata_csv=None,
             **kwargs,
