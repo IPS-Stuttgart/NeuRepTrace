@@ -24,6 +24,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy.linalg import eigh
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 from sklearn.preprocessing import LabelEncoder
 
@@ -51,6 +52,16 @@ DEFAULT_SELECTION_METRIC = "balanced_accuracy"
 DEFAULT_RANDOM_SEED = 13
 SUPPORTED_SELECTION_METRICS = {"balanced_accuracy", "accuracy", "log_loss"}
 MINIMIZE_SELECTION_METRICS = {"log_loss"}
+FEATURE_KIND_CHOICES = (
+    "evoked",
+    "logvar",
+    "covariance",
+    "evoked_logvar",
+    "evoked_covariance",
+    "xdawn",
+)
+DEFAULT_XDAWN_COMPONENTS = 8
+DEFAULT_COVARIANCE_MAX_CHANNELS = 64
 
 
 @dataclass(slots=True)
@@ -92,6 +103,9 @@ class CandidateSpec:
     classifier_param: float | None
     temporal_bins: int
     windows: tuple[WindowSpec, ...]
+    feature_kind: str = "evoked"
+    xdawn_components: int | None = None
+    covariance_max_channels: int = DEFAULT_COVARIANCE_MAX_CHANNELS
 
     @property
     def window_centers(self) -> tuple[float, ...]:
@@ -107,17 +121,28 @@ class FeatureCache:
 
     def __init__(self, subjects: Mapping[str, SubjectEpochs]):
         self._subjects = dict(subjects)
-        self._cache: dict[tuple[str, WindowSpec, int], np.ndarray] = {}
+        self._cache: dict[tuple[str, WindowSpec, int, str, int], np.ndarray] = {}
 
-    def get(self, subject: str, window: WindowSpec, temporal_bins: int) -> np.ndarray:
-        key = (subject, window, int(temporal_bins))
+    def get(
+        self,
+        subject: str,
+        window: WindowSpec,
+        temporal_bins: int,
+        *,
+        feature_kind: str = "evoked",
+        covariance_max_channels: int = DEFAULT_COVARIANCE_MAX_CHANNELS,
+    ) -> np.ndarray:
+        normalized_feature_kind = normalize_source_feature_kind(feature_kind)
+        key = (subject, window, int(temporal_bins), normalized_feature_kind, int(covariance_max_channels))
         if key not in self._cache:
             subject_epochs = self._subjects[subject]
-            self._cache[key] = _window_bin_mean_features(
+            self._cache[key] = _window_features(
                 subject_epochs.data,
                 subject_epochs.times,
                 window,
                 temporal_bins=int(temporal_bins),
+                feature_kind=normalized_feature_kind,
+                covariance_max_channels=int(covariance_max_channels),
             )
         return self._cache[key]
 
@@ -137,6 +162,16 @@ def _list_value(value: Any, default: Sequence[Any]) -> list[Any]:
     if isinstance(value, Sequence):
         return list(value)
     return [value]
+
+
+def normalize_source_feature_kind(feature_kind: str) -> str:
+    normalized = str(feature_kind).strip().lower().replace("-", "_")
+    if normalized not in FEATURE_KIND_CHOICES:
+        raise ValueError(
+            f"Unknown source_loso feature kind '{feature_kind}'. "
+            f"Available values: {', '.join(FEATURE_KIND_CHOICES)}."
+        )
+    return normalized
 
 
 def _window_size_seconds(preprocessing: Mapping[str, Any], default: float = 0.100) -> float:
@@ -306,12 +341,247 @@ def _window_bin_mean_features(
     return np.concatenate(features, axis=1).astype(np.float32, copy=False)
 
 
-def _stack_subject_features(cache: FeatureCache, subjects: Mapping[str, SubjectEpochs], subject_ids: Sequence[str], window: WindowSpec, temporal_bins: int) -> np.ndarray:
-    return np.concatenate([cache.get(subject_id, window, temporal_bins) for subject_id in subject_ids], axis=0)
+def _window_log_variance_features(
+    data: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    temporal_bins: int,
+    epsilon: float = 1e-12,
+) -> np.ndarray:
+    """Return trial x (channel x bin) log-variance features."""
+
+    if temporal_bins < 1:
+        raise ValueError("temporal_bins must be at least one.")
+    indices = _sample_indices_for_window(times, window)
+    bins = np.array_split(indices, int(temporal_bins))
+    if any(len(bin_indices) == 0 for bin_indices in bins):
+        raise ValueError(
+            f"Window {window.center:.6g}s/{window.width:.6g}s has only {len(indices)} samples, "
+            f"not enough for {temporal_bins} temporal bins."
+        )
+    features = []
+    for bin_indices in bins:
+        ddof = 1 if len(bin_indices) > 1 else 0
+        variance = np.var(data[:, :, bin_indices], axis=2, ddof=ddof)
+        features.append(np.log(np.maximum(variance, epsilon)))
+    return np.concatenate(features, axis=1).astype(np.float32, copy=False)
+
+
+def _channel_subset_indices(n_channels: int, max_channels: int) -> np.ndarray:
+    max_channels = max(1, int(max_channels))
+    if n_channels <= max_channels:
+        return np.arange(n_channels, dtype=int)
+    return np.unique(np.linspace(0, n_channels - 1, max_channels, dtype=int))
+
+
+def _window_covariance_features(
+    data: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    covariance_max_channels: int = DEFAULT_COVARIANCE_MAX_CHANNELS,
+    shrinkage: float = 0.10,
+    epsilon: float = 1e-12,
+) -> np.ndarray:
+    """Return compact per-trial shrinkage covariance features."""
+
+    indices = _sample_indices_for_window(times, window)
+    channel_indices = _channel_subset_indices(data.shape[1], covariance_max_channels)
+    window_data = np.asarray(data[:, channel_indices][:, :, indices], dtype=np.float64)
+    n_trials, n_channels, n_times = window_data.shape
+    tri = np.triu_indices(n_channels)
+    features = np.empty((n_trials, len(tri[0])), dtype=np.float32)
+    identity = np.eye(n_channels, dtype=np.float64)
+    for trial_index in range(n_trials):
+        trial = window_data[trial_index] - window_data[trial_index].mean(axis=1, keepdims=True)
+        denom = max(n_times - 1, 1)
+        covariance = (trial @ trial.T) / float(denom)
+        mean_variance = float(np.trace(covariance) / max(n_channels, 1))
+        covariance = (
+            (1.0 - float(shrinkage)) * covariance
+            + float(shrinkage) * mean_variance * identity
+        )
+        covariance /= max(float(np.trace(covariance)), epsilon)
+        features[trial_index] = covariance[tri]
+    return features
+
+
+def _window_features(
+    data: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    temporal_bins: int,
+    feature_kind: str = "evoked",
+    covariance_max_channels: int = DEFAULT_COVARIANCE_MAX_CHANNELS,
+) -> np.ndarray:
+    """Return source-LOSO features for one subject/window."""
+
+    feature_kind = normalize_source_feature_kind(feature_kind)
+    if feature_kind == "xdawn":
+        raise ValueError("xDawn features are supervised and must be fitted inside _predict_candidate.")
+    evoked = None
+    if feature_kind in {"evoked", "evoked_logvar", "evoked_covariance"}:
+        evoked = _window_bin_mean_features(data, times, window, temporal_bins=temporal_bins)
+    if feature_kind == "evoked":
+        assert evoked is not None
+        return evoked
+    if feature_kind == "logvar":
+        return _window_log_variance_features(data, times, window, temporal_bins=temporal_bins)
+    if feature_kind == "covariance":
+        return _window_covariance_features(
+            data,
+            times,
+            window,
+            covariance_max_channels=covariance_max_channels,
+        )
+    if feature_kind == "evoked_logvar":
+        assert evoked is not None
+        logvar = _window_log_variance_features(data, times, window, temporal_bins=temporal_bins)
+        return np.concatenate([evoked, logvar], axis=1).astype(np.float32, copy=False)
+    if feature_kind == "evoked_covariance":
+        assert evoked is not None
+        covariance = _window_covariance_features(
+            data,
+            times,
+            window,
+            covariance_max_channels=covariance_max_channels,
+        )
+        return np.concatenate([evoked, covariance], axis=1).astype(np.float32, copy=False)
+    raise AssertionError(f"Unhandled feature kind: {feature_kind}")
+
+
+def _stack_subject_data(subjects: Mapping[str, SubjectEpochs], subject_ids: Sequence[str]) -> np.ndarray:
+    return np.concatenate([subjects[subject_id].data for subject_id in subject_ids], axis=0)
+
+
+def _stack_subject_features(
+    cache: FeatureCache,
+    subjects: Mapping[str, SubjectEpochs],
+    subject_ids: Sequence[str],
+    window: WindowSpec,
+    temporal_bins: int,
+    *,
+    feature_kind: str = "evoked",
+    covariance_max_channels: int = DEFAULT_COVARIANCE_MAX_CHANNELS,
+) -> np.ndarray:
+    return np.concatenate(
+        [
+            cache.get(
+                subject_id,
+                window,
+                temporal_bins,
+                feature_kind=feature_kind,
+                covariance_max_channels=covariance_max_channels,
+            )
+            for subject_id in subject_ids
+        ],
+        axis=0,
+    )
 
 
 def _stack_subject_labels(subjects: Mapping[str, SubjectEpochs], subject_ids: Sequence[str]) -> np.ndarray:
     return np.concatenate([subjects[subject_id].labels for subject_id in subject_ids], axis=0)
+
+
+def _fit_xdawn_filters(
+    data: np.ndarray,
+    labels: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    n_components: int,
+) -> np.ndarray:
+    """Fit supervised ERP-denoising spatial filters on source-train epochs."""
+
+    indices = _sample_indices_for_window(times, window)
+    x = np.asarray(data[:, :, indices], dtype=np.float64)
+    labels = np.asarray(labels)
+    n_channels = x.shape[1]
+    n_components = min(max(1, int(n_components)), n_channels)
+    flattened = np.transpose(x, (1, 0, 2)).reshape(n_channels, -1)
+    flattened -= flattened.mean(axis=1, keepdims=True)
+    data_cov = (flattened @ flattened.T) / float(max(flattened.shape[1] - 1, 1))
+    signal_cov = np.zeros_like(data_cov)
+    for class_label in np.unique(labels):
+        class_epochs = x[labels == class_label]
+        if class_epochs.size == 0:
+            continue
+        evoked = class_epochs.mean(axis=0)
+        evoked -= evoked.mean(axis=1, keepdims=True)
+        signal_cov += (
+            (class_epochs.shape[0] / x.shape[0])
+            * (evoked @ evoked.T)
+            / float(max(evoked.shape[1] - 1, 1))
+        )
+    ridge = max(float(np.trace(data_cov)) / max(n_channels, 1), 1.0) * 1e-6
+    eigenvalues, eigenvectors = eigh(
+        signal_cov,
+        data_cov + ridge * np.eye(n_channels),
+        check_finite=False,
+    )
+    order = np.argsort(eigenvalues)[::-1][:n_components]
+    filters = np.asarray(eigenvectors[:, order], dtype=np.float64)
+    norms = np.linalg.norm(filters, axis=0, keepdims=True)
+    return filters / np.maximum(norms, 1e-12)
+
+
+def _xdawn_bin_mean_features(
+    data: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    filters: np.ndarray,
+    temporal_bins: int,
+) -> np.ndarray:
+    indices = _sample_indices_for_window(times, window)
+    projected = np.einsum("ck,nct->nkt", filters, np.asarray(data[:, :, indices], dtype=np.float64))
+    relative_bins = np.array_split(np.arange(projected.shape[2]), int(temporal_bins))
+    if any(len(bin_indices) == 0 for bin_indices in relative_bins):
+        raise ValueError(
+            f"Window {window.center:.6g}s/{window.width:.6g}s has only {len(indices)} samples, "
+            f"not enough for {temporal_bins} temporal bins."
+        )
+    features = [projected[:, :, bin_indices].mean(axis=2) for bin_indices in relative_bins]
+    return np.concatenate(features, axis=1).astype(np.float32, copy=False)
+
+
+def _xdawn_train_test_features(
+    *,
+    subjects: Mapping[str, SubjectEpochs],
+    train_subjects: Sequence[str],
+    test_subject: str,
+    train_labels: np.ndarray,
+    window: WindowSpec,
+    temporal_bins: int,
+    n_components: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    train_data = _stack_subject_data(subjects, train_subjects)
+    train_times = subjects[train_subjects[0]].times
+    filters = _fit_xdawn_filters(
+        train_data,
+        train_labels,
+        train_times,
+        window,
+        n_components=DEFAULT_XDAWN_COMPONENTS if n_components is None else int(n_components),
+    )
+    train_features = _xdawn_bin_mean_features(
+        train_data,
+        train_times,
+        window,
+        filters=filters,
+        temporal_bins=temporal_bins,
+    )
+    test_epochs = subjects[test_subject]
+    test_features = _xdawn_bin_mean_features(
+        test_epochs.data,
+        test_epochs.times,
+        window,
+        filters=filters,
+        temporal_bins=temporal_bins,
+    )
+    return train_features, test_features
 
 
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
@@ -349,9 +619,29 @@ def _predict_candidate(
     test_n = len(subjects[test_subject].labels)
     probabilities_sum = np.zeros((test_n, n_classes), dtype=float)
     classes = np.arange(n_classes)
+    feature_kind = normalize_source_feature_kind(candidate.feature_kind)
     for window in candidate.windows:
-        train_features = _stack_subject_features(cache, subjects, train_subjects, window, candidate.temporal_bins)
-        test_features = cache.get(test_subject, window, candidate.temporal_bins)
+        if feature_kind == "xdawn":
+            train_features, test_features = _xdawn_train_test_features(
+                subjects=subjects,
+                train_subjects=train_subjects,
+                test_subject=test_subject,
+                train_labels=train_labels,
+                window=window,
+                temporal_bins=candidate.temporal_bins,
+                n_components=candidate.xdawn_components,
+            )
+        else:
+            train_features = _stack_subject_features(
+                cache,
+                subjects,
+                train_subjects,
+                window,
+                candidate.temporal_bins,
+                feature_kind=feature_kind,
+                covariance_max_channels=candidate.covariance_max_channels,
+            )
+            test_features = cache.get(test_subject, window, candidate.temporal_bins, feature_kind=feature_kind, covariance_max_channels=candidate.covariance_max_channels)
         model = _candidate_model(candidate, max_iter=max_iter)
         model.fit(train_features, train_labels)
         probabilities = predict_emission_probabilities(
@@ -396,6 +686,9 @@ def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
         "pca_components": "" if candidate.pca_components is None else candidate.pca_components,
         "classifier_param": "" if candidate.classifier_param is None else candidate.classifier_param,
         "temporal_bins": candidate.temporal_bins,
+        "feature_kind": normalize_source_feature_kind(candidate.feature_kind),
+        "xdawn_components": "" if candidate.xdawn_components is None else candidate.xdawn_components,
+        "covariance_max_channels": candidate.covariance_max_channels,
         "n_windows": len(candidate.windows),
         "window_centers": "|".join(f"{center:.6g}" for center in candidate.window_centers),
         "window_widths": "|".join(f"{width:.6g}" for width in candidate.window_widths),
@@ -520,6 +813,16 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
     normalized_pca_values = [None if value in {None, "", "none", "None"} else normalize_pca_components(value) for value in pca_values]
     temporal_bins_values = [int(value) for value in _list_value(grid.get("temporal_bins"), [4])]
     c_grid = [float(value) for value in parse_c_grid(grid.get("c_grid", decoding.get("tuning_c_grid", "0.1,1.0,10.0")))]
+    feature_kinds = [
+        normalize_source_feature_kind(value)
+        for value in _list_value(grid.get("feature_kinds"), [source_loso.get("feature_kind", "evoked")])
+    ]
+    xdawn_components_values = [
+        int(value)
+        for value in _list_value(grid.get("xdawn_components"), [source_loso.get("xdawn_components", DEFAULT_XDAWN_COMPONENTS)])
+    ]
+    covariance_max_channels_values = [int(value) for value in _list_value(grid.get("covariance_max_channels"), [DEFAULT_COVARIANCE_MAX_CHANNELS])]
+    deep_weight_decay_grid = [float(value) for value in _list_value(grid.get("deep_weight_decay_grid"), [1e-4])]
 
     candidates: list[CandidateSpec] = []
     for window_name, windows in window_sets:
@@ -528,31 +831,63 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                 for feature_preprocessor in feature_preprocessors:
                     for pca_components in normalized_pca_values:
                         for temporal_bins in temporal_bins_values:
-                            for c_value in c_grid:
-                                normalized_decoder = normalize_decoder_name(decoder)
-                                name = "__".join(
-                                    [
-                                        window_name,
-                                        normalized_decoder,
-                                        normalize_emission_mode(emission_mode),
-                                        normalize_feature_preprocessor(feature_preprocessor),
-                                        "pca" + ("none" if pca_components is None else str(pca_components)),
-                                        f"bins{temporal_bins}",
-                                        f"c{c_value:g}",
-                                    ]
+                            for feature_kind in feature_kinds:
+                                xdawn_component_grid = (
+                                    xdawn_components_values if feature_kind == "xdawn" else [None]
                                 )
-                                candidates.append(
-                                    CandidateSpec(
-                                        name=name,
-                                        decoder=decoder,
-                                        emission_mode=emission_mode,
-                                        feature_preprocessor=feature_preprocessor,
-                                        pca_components=pca_components,
-                                        classifier_param=c_value,
-                                        temporal_bins=temporal_bins,
-                                        windows=windows,
-                                    )
+                                covariance_channel_grid = (
+                                    covariance_max_channels_values
+                                    if feature_kind in {"covariance", "evoked_covariance"}
+                                    else [DEFAULT_COVARIANCE_MAX_CHANNELS]
                                 )
+                                for xdawn_components in xdawn_component_grid:
+                                    for covariance_max_channels in covariance_channel_grid:
+                                        normalized_decoder = normalize_decoder_name(decoder)
+                                        classifier_grid = (
+                                            deep_weight_decay_grid
+                                            if normalized_decoder == "torch_mlp"
+                                            else c_grid
+                                        )
+                                        for classifier_value in classifier_grid:
+                                            parameter_token = (
+                                                f"wd{classifier_value:g}"
+                                                if normalized_decoder == "torch_mlp"
+                                                else f"c{classifier_value:g}"
+                                            )
+                                            name = "__".join(
+                                                [
+                                                    window_name,
+                                                    normalized_decoder,
+                                                    normalize_emission_mode(emission_mode),
+                                                    normalize_feature_preprocessor(feature_preprocessor),
+                                                    "pca"
+                                                    + (
+                                                        "none"
+                                                        if pca_components is None
+                                                        else str(pca_components)
+                                                    ),
+                                                    f"bins{temporal_bins}",
+                                                    f"feat{feature_kind}",
+                                                    f"xdawn{'' if xdawn_components is None else xdawn_components}",
+                                                    f"covch{covariance_max_channels}",
+                                                    parameter_token,
+                                                ]
+                                            )
+                                            candidates.append(
+                                                CandidateSpec(
+                                                    name=name,
+                                                    decoder=decoder,
+                                                    emission_mode=emission_mode,
+                                                    feature_preprocessor=feature_preprocessor,
+                                                    pca_components=pca_components,
+                                                    classifier_param=classifier_value,
+                                                    temporal_bins=temporal_bins,
+                                                    windows=windows,
+                                                    feature_kind=feature_kind,
+                                                    xdawn_components=xdawn_components,
+                                                    covariance_max_channels=covariance_max_channels,
+                                                )
+                                            )
     return candidates
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import mne
 import numpy as np
 import pandas as pd
+from mne.decoding import SlidingEstimator
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 from sklearn.preprocessing import LabelEncoder
 
@@ -61,9 +62,11 @@ RESULT_SELECTION_METRIC_CHOICES = (
 )
 RESULT_SUMMARY_METRIC_COLUMNS = RESULT_SELECTION_METRIC_CHOICES
 RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
+TIME_DECODE_BACKEND_CHOICES = ("auto", "sklearn", "mne")
 DEFAULT_BASELINE_WINDOW = (-0.35, -0.05)
 BASELINE_WHITENING_SHRINKAGE = 0.1
 BASELINE_WHITENING_EIGENVALUE_FLOOR = 1e-6
+MNE_SLIDING_MAX_FEATURE_BYTES = 512 * 1024 * 1024
 TimeWindow = tuple[int, int, float]
 TemporalTrainWindow = tuple[float, float]
 TEMPORAL_TRAIN_MODE_CHOICES = ("window_ensemble", "pooled")
@@ -196,6 +199,17 @@ def normalize_epoch_normalization(name: str | None) -> str:
         raise ValueError(
             f"Unknown normalization '{name}'. Available normalizations: {', '.join(EPOCH_NORMALIZATION_CHOICES)}."
         )
+    return normalized
+
+
+def normalize_time_decode_backend(name: str | None) -> str:
+    """Normalize the implementation backend for same-time decoding."""
+
+    normalized = "auto" if name is None else str(name).strip().lower().replace("-", "_")
+    if normalized == "mne_decoding":
+        return "mne"
+    if normalized not in TIME_DECODE_BACKEND_CHOICES:
+        raise ValueError(f"Unknown time-decode backend '{name}'. Available backends: {', '.join(TIME_DECODE_BACKEND_CHOICES)}.")
     return normalized
 
 
@@ -394,6 +408,66 @@ def _pooled_temporal_training_set(
     return pooled_features, pooled_labels, pooled_groups
 
 
+def _estimate_window_feature_bytes(data: np.ndarray, windows: Sequence[TimeWindow]) -> int:
+    if not windows:
+        return 0
+    start, stop, _center = windows[0]
+    n_features = int(data.shape[1]) * int(stop - start)
+    return int(data.shape[0]) * n_features * len(windows) * np.dtype(data.dtype).itemsize
+
+
+def _window_feature_batches(
+    data: np.ndarray,
+    windows: Sequence[TimeWindow],
+    *,
+    max_bytes: int = MNE_SLIDING_MAX_FEATURE_BYTES,
+) -> list[list[TimeWindow]]:
+    if not windows:
+        return []
+    bytes_per_window = max(1, _estimate_window_feature_bytes(data, windows[:1]))
+    windows_per_batch = max(1, int(max_bytes // bytes_per_window))
+    return [list(windows[start : start + windows_per_batch]) for start in range(0, len(windows), windows_per_batch)]
+
+
+def _features_for_window_batch(data: np.ndarray, windows: Sequence[TimeWindow]) -> np.ndarray:
+    """Return ``(epochs, flattened-window-features, windows)`` for MNE SlidingEstimator."""
+
+    return np.stack([_features_for_window(data, window) for window in windows], axis=-1)
+
+
+def _iter_mne_sliding_same_time_predictions(
+    *,
+    data: np.ndarray,
+    windows: Sequence[TimeWindow],
+    labels: np.ndarray,
+    train_idx: np.ndarray,
+    test_idx: np.ndarray,
+    model,
+    emission_mode: str,
+    classes: np.ndarray,
+) -> list[tuple[TimeWindow, object, np.ndarray]]:
+    """Fit one MNE SlidingEstimator batch and return aligned probabilities by window."""
+
+    predictions: list[tuple[TimeWindow, object, np.ndarray]] = []
+    for window_batch in _window_feature_batches(data, windows):
+        feature_tensor = _features_for_window_batch(data, window_batch)
+        sliding = SlidingEstimator(model, scoring="accuracy", verbose=False)
+        sliding.fit(feature_tensor[train_idx], labels[train_idx])
+        for window_index, time_window in enumerate(window_batch):
+            estimator = sliding.estimators_[window_index]
+            probabilities = _align_probability_columns(
+                predict_emission_probabilities(
+                    estimator,
+                    feature_tensor[test_idx, :, window_index],
+                    emission_mode=emission_mode,
+                ),
+                model=estimator,
+                classes=classes,
+            )
+            predictions.append((time_window, estimator, probabilities))
+    return predictions
+
+
 def _probability_average(probability_sum: np.ndarray, n_models: int) -> np.ndarray:
     probabilities = probability_sum / float(n_models)
     row_sums = probabilities.sum(axis=1, keepdims=True)
@@ -539,9 +613,10 @@ def _model_hash(
     tuning_scoring: str | None = None,
     tuning_c_grid: Sequence[float] | None = None,
     tuning_metadata: dict[str, object] | None = None,
+    backend: str = "sklearn",
 ) -> str:
     payload: dict[str, object] = {
-        "backend": "sklearn",
+        "backend": backend,
         "decoder": decoder_name,
         "emission_mode": emission_mode,
         "max_iter": max_iter,
@@ -604,6 +679,7 @@ def _append_decoded_outputs(
     observation_out_path: Path | None,
     subject: str | None,
     tuning_metadata: dict[str, object] | None = None,
+    backend: str = "sklearn",
 ) -> None:
     tuning_metadata = {} if tuning_metadata is None else tuning_metadata
     start, stop, center = time_window
@@ -659,7 +735,7 @@ def _append_decoded_outputs(
                 **common,
                 "split_id": split_id,
                 "seed": 13,
-                "backend": "sklearn",
+                "backend": backend,
                 "sample_index": int(original_indices[filtered_index]),
                 "sequence_id": int(original_indices[filtered_index]),
                 "session": "" if session_values is None else session_values[filtered_index],
@@ -718,6 +794,7 @@ def run_time_resolved_decode(
     subject: str | None = None,
     temporal_train_window: tuple[float, float] | None = None,
     temporal_train_mode: str = "window_ensemble",
+    time_decode_backend: str = "auto",
 ) -> pd.DataFrame:
     """Run time-resolved decoding on an MNE epochs file and save metrics as CSV.
 
@@ -758,6 +835,16 @@ def run_time_resolved_decode(
     tuning_c_grid_values = parse_c_grid(tuning_c_grid)
     normalized_temporal_train_window = _normalize_temporal_train_window(temporal_train_window)
     temporal_train_mode_name = _normalize_temporal_train_mode(temporal_train_mode)
+    requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
+    if requested_time_decode_backend == "mne" and normalized_temporal_train_window is not None:
+        raise ValueError("The MNE time-decode backend currently supports same-time decoding only.")
+    time_decode_backend = (
+        "sklearn"
+        if requested_time_decode_backend == "auto" and normalized_temporal_train_window is not None
+        else "mne"
+        if requested_time_decode_backend == "auto"
+        else requested_time_decode_backend
+    )
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
@@ -816,6 +903,7 @@ def run_time_resolved_decode(
         tuning_cv_splits=tuning_cv_splits,
         tuning_scoring=tuning_scoring,
         tuning_c_grid=tuning_c_grid_values,
+        backend=time_decode_backend,
     )
 
     raw_data = epochs.get_data(copy=False)
@@ -833,7 +921,102 @@ def run_time_resolved_decode(
     selected_train_windows = _select_temporal_train_windows(windows, normalized_temporal_train_window)
     splits = list(make_cross_validator(labels, groups, n_splits))
 
-    if selected_train_windows is None:
+    if selected_train_windows is None and time_decode_backend == "mne":
+        for fold, (train_idx, test_idx) in enumerate(splits):
+            test_labels = labels[test_idx]
+            for current_emission_mode in emission_modes:
+                tuning_cv = (
+                    make_tuning_cross_validator(labels[train_idx], None if groups is None else groups[train_idx], tuning_cv_splits)
+                    if tune_hyperparameters
+                    else 3
+                )
+                model = make_decoder(
+                    decoder_name,
+                    max_iter=max_iter,
+                    emission_mode=current_emission_mode,
+                    feature_preprocessor=feature_preprocessor_name,
+                    pca_components=pca_components_value,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv=tuning_cv,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                )
+                for time_window, fitted_model, probabilities in _iter_mne_sliding_same_time_predictions(
+                    data=data,
+                    windows=windows,
+                    labels=labels,
+                    train_idx=train_idx,
+                    test_idx=test_idx,
+                    model=model,
+                    emission_mode=current_emission_mode,
+                    classes=classes,
+                ):
+                    start, stop, center = time_window
+                    tuning_metadata = _tuning_metadata(
+                        fitted_model,
+                        tune_hyperparameters=tune_hyperparameters,
+                        tuning_cv_splits=tuning_cv_splits,
+                        tuning_scoring=tuning_scoring,
+                        tuning_c_grid=tuning_c_grid_values,
+                    )
+                    current_model_hash = _model_hash(
+                        decoder_name=decoder_name,
+                        emission_mode=current_emission_mode,
+                        max_iter=max_iter,
+                        feature_preprocessor=feature_preprocessor_name,
+                        pca_components=pca_components_value,
+                        normalization=normalization_name,
+                        baseline_window=baseline_window_value,
+                        temporal_mode=temporal_mode,
+                        temporal_train_window=None,
+                        train_window_centers=[center],
+                        tune_hyperparameters=tune_hyperparameters,
+                        tuning_cv_splits=tuning_cv_splits,
+                        tuning_scoring=tuning_scoring,
+                        tuning_c_grid=tuning_c_grid_values,
+                        tuning_metadata=tuning_metadata,
+                        backend=time_decode_backend,
+                    )
+                    _append_decoded_outputs(
+                        rows=rows,
+                        calibration_rows=calibration_rows,
+                        observation_rows=observation_rows,
+                        probabilities=probabilities,
+                        test_labels=test_labels,
+                        test_idx=test_idx,
+                        original_indices=original_indices,
+                        session_values=session_values,
+                        groups=groups,
+                        group_column=group_column,
+                        classes=classes,
+                        class_names=encoder.classes_,
+                        fold=fold,
+                        n_train=len(train_idx),
+                        decoder_name=decoder_name,
+                        emission_mode=current_emission_mode,
+                        feature_preprocessor_name=feature_preprocessor_name,
+                        pca_components_value=pca_components_value,
+                        normalization_name=normalization_name,
+                        baseline_window=baseline_window_value,
+                        time_window=time_window,
+                        epochs=epochs,
+                        split_id=split_id,
+                        preprocessing_hash=preprocessing_hash,
+                        model_hash=current_model_hash,
+                        temporal_mode=temporal_mode,
+                        temporal_train_window=normalized_temporal_train_window,
+                        train_time=center,
+                        train_window_start=float(epochs.times[start]),
+                        train_window_stop=float(epochs.times[stop - 1]),
+                        n_train_windows=1,
+                        calibration_out_path=calibration_out_path,
+                        calibration_bins=calibration_bins,
+                        observation_out_path=observation_out_path,
+                        subject=subject,
+                        tuning_metadata=tuning_metadata,
+                        backend=time_decode_backend,
+                    )
+    elif selected_train_windows is None:
         for time_window in windows:
             features = _features_for_window(data, time_window)
             start, stop, center = time_window
@@ -890,6 +1073,7 @@ def run_time_resolved_decode(
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
                         tuning_metadata=tuning_metadata,
+                        backend=time_decode_backend,
                     )
                     _append_decoded_outputs(
                         rows=rows,
@@ -928,6 +1112,7 @@ def run_time_resolved_decode(
                         observation_out_path=observation_out_path,
                         subject=subject,
                         tuning_metadata=tuning_metadata,
+                        backend=time_decode_backend,
                     )
     elif temporal_train_mode_name == "pooled":
         feature_cache = {time_window: _features_for_window(data, time_window) for time_window in windows}
@@ -1098,6 +1283,7 @@ def run_time_resolved_decode(
                     tuning_scoring=tuning_scoring,
                     tuning_c_grid=tuning_c_grid_values,
                     tuning_metadata=tuning_metadata,
+                    backend=time_decode_backend,
                 )
                 for test_window in windows:
                     probabilities = _probability_average(probability_sums[test_window], len(selected_train_windows))
@@ -1138,6 +1324,7 @@ def run_time_resolved_decode(
                         observation_out_path=observation_out_path,
                         subject=subject,
                         tuning_metadata=tuning_metadata,
+                        backend=time_decode_backend,
                     )
 
     results = pd.DataFrame(rows)
@@ -1149,7 +1336,7 @@ def run_time_resolved_decode(
     if observation_out_path is not None:
         ProbabilityObservationTable(pd.DataFrame(observation_rows)).standardized(
             defaults={
-                "backend": "sklearn",
+                "backend": time_decode_backend,
                 "split_id": split_id,
                 "seed": 13,
                 "calibration_fold": "",
@@ -1232,6 +1419,12 @@ def main() -> None:
     parser.add_argument("--observations-out", type=Path, help="Optional held-out trial/time probability observation CSV.")
     parser.add_argument("--subject", help="Optional subject identifier to include in output CSVs.")
     parser.add_argument(
+        "--time-decode-backend",
+        choices=TIME_DECODE_BACKEND_CHOICES,
+        default="auto",
+        help="Implementation backend. auto uses mne.decoding.SlidingEstimator for same-time decoding and sklearn for temporal train-window decoding.",
+    )
+    parser.add_argument(
         "--temporal-train-window",
         nargs=2,
         type=float,
@@ -1299,6 +1492,7 @@ def main() -> None:
         subject=args.subject,
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
         temporal_train_mode=args.temporal_train_mode,
+        time_decode_backend=args.time_decode_backend,
     )
     print(f"Wrote {args.out}")
     if args.observations_out is not None:

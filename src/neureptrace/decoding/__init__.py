@@ -12,7 +12,8 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.feature_selection import SelectPercentile, f_classif
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.metrics import log_loss
-from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold, StratifiedKFold, train_test_split
+from sklearn.multiclass import OneVsOneClassifier, OutputCodeClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -42,6 +43,9 @@ BUILTIN_DECODER_CHOICES = (
     "lda",
     "shrinkage_lda",
     "linear_svm",
+    "ovo_linear_svm",
+    "ecoc_linear_svm",
+    "torch_mlp",
 )
 DECODER_ALIASES = (
     "l1-logistic",
@@ -57,6 +61,15 @@ DECODER_ALIASES = (
     "linear-svm",
     "lda-shrinkage",
     "shrinkage-lda",
+    "one-vs-one-linear-svm",
+    "onevsone-linear-svm",
+    "ovo-linear-svm",
+    "ovo-svm",
+    "ecoc-svm",
+    "output-code-linear-svm",
+    "outputcode-linear-svm",
+    "deep-mlp",
+    "shallow-torch-mlp",
 )
 DECODER_CHOICES = tuple(
     dict.fromkeys(
@@ -194,6 +207,237 @@ class RegistryDecoder(ClassifierMixin, BaseEstimator):
         if not hasattr(self.model_, "predict_proba"):
             raise AttributeError(f"{self.classifier!r} does not provide predict_proba")
         return np.asarray(self.model_.predict_proba(features), dtype=float)
+
+
+class TorchMLPClassifier(ClassifierMixin, BaseEstimator):
+    """Small CPU-friendly PyTorch MLP exposed as a sklearn classifier.
+
+    The estimator intentionally imports torch only inside ``fit`` and
+    ``predict`` so the optional torch extra is not required for normal sklearn
+    decoder use or for constructing config grids that do not select this model.
+    It is designed for held-out-subject MEG smoke runs: a single hidden layer,
+    class-balanced cross entropy, modest early stopping, and no background GPU
+    assumptions.
+    """
+
+    def __init__(
+        self,
+        hidden_units: int = 64,
+        max_iter: int = 100,
+        batch_size: int = 128,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 1e-4,
+        validation_fraction: float = 0.1,
+        patience: int = 8,
+        dropout: float = 0.1,
+        random_state: int | None = 13,
+        class_weight: str | None = "balanced",
+    ):
+        self.hidden_units = hidden_units
+        self.max_iter = max_iter
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.validation_fraction = validation_fraction
+        self.patience = patience
+        self.dropout = dropout
+        self.random_state = random_state
+        self.class_weight = class_weight
+
+    def _torch(self):
+        try:
+            import torch
+        except ImportError as exc:  # pragma: no cover - exercised only without the optional extra
+            raise ImportError("The 'torch_mlp' decoder requires the optional torch extra, e.g. `pip install neureptrace[torch]`.") from exc
+        return torch
+
+    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence | np.ndarray):
+        torch = self._torch()
+        if self.random_state is not None:
+            torch.manual_seed(int(self.random_state))
+
+        x = np.asarray(features, dtype=np.float32)
+        if x.ndim != 2:
+            raise ValueError("TorchMLPClassifier expects a two-dimensional feature matrix.")
+        y_raw = np.asarray(labels)
+        self.classes_, y = np.unique(y_raw, return_inverse=True)
+        y = y.astype(np.int64, copy=False)
+        n_classes = int(self.classes_.shape[0])
+        if n_classes < 2:
+            raise ValueError("TorchMLPClassifier needs at least two classes.")
+
+        hidden_units = int(self.hidden_units)
+        max_iter = int(self.max_iter)
+        batch_size = int(self.batch_size)
+        if hidden_units < 1 or max_iter < 1 or batch_size < 1:
+            raise ValueError("hidden_units, max_iter, and batch_size must be positive integers.")
+        if not np.isfinite(self.learning_rate) or self.learning_rate <= 0:
+            raise ValueError("learning_rate must be positive and finite.")
+        if not np.isfinite(self.weight_decay) or self.weight_decay < 0:
+            raise ValueError("weight_decay must be non-negative and finite.")
+
+        indices = np.arange(y.shape[0])
+        class_counts = np.bincount(y, minlength=n_classes)
+        can_validate = (
+            0.0 < float(self.validation_fraction) < 1.0
+            and y.shape[0] >= 2 * n_classes
+            and np.min(class_counts) >= 2
+        )
+        if can_validate:
+            train_idx, validation_idx = train_test_split(
+                indices,
+                test_size=float(self.validation_fraction),
+                random_state=self.random_state,
+                stratify=y,
+            )
+        else:
+            train_idx = indices
+            validation_idx = indices
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(x.shape[1], hidden_units),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(float(self.dropout)),
+            torch.nn.Linear(hidden_units, n_classes),
+        )
+        if self.class_weight == "balanced":
+            train_counts = np.bincount(y[train_idx], minlength=n_classes).astype(np.float32)
+            weights = train_idx.shape[0] / np.maximum(train_counts, 1.0) / float(n_classes)
+            class_weights = torch.as_tensor(weights, dtype=torch.float32)
+        else:
+            class_weights = None
+        loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights)
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=float(self.learning_rate),
+            weight_decay=float(self.weight_decay),
+        )
+
+        x_tensor = torch.from_numpy(x)
+        y_tensor = torch.from_numpy(y)
+        rng = np.random.default_rng(self.random_state)
+        best_loss = np.inf
+        best_state = None
+        patience_left = int(self.patience)
+        for _epoch in range(max_iter):
+            model.train()
+            epoch_indices = rng.permutation(train_idx)
+            for start in range(0, train_idx.shape[0], batch_size):
+                batch_idx = epoch_indices[start : start + batch_size]
+                optimizer.zero_grad(set_to_none=True)
+                loss = loss_fn(model(x_tensor[batch_idx]), y_tensor[batch_idx])
+                loss.backward()
+                optimizer.step()
+            model.eval()
+            with torch.no_grad():
+                validation_loss = float(loss_fn(model(x_tensor[validation_idx]), y_tensor[validation_idx]).detach().cpu())
+            if validation_loss + 1e-6 < best_loss:
+                best_loss = validation_loss
+                best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+                patience_left = int(self.patience)
+            else:
+                patience_left -= 1
+                if patience_left <= 0:
+                    break
+
+        if best_state is not None:
+            model.load_state_dict(best_state)
+        self.model_ = model.eval()
+        self.n_features_in_ = x.shape[1]
+        return self
+
+    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        if not hasattr(self, "model_"):
+            raise RuntimeError("TorchMLPClassifier must be fitted before prediction.")
+        torch = self._torch()
+        x = torch.as_tensor(np.asarray(features, dtype=np.float32))
+        self.model_.eval()
+        with torch.no_grad():
+            logits = self.model_(x).detach().cpu().numpy()
+        if logits.shape[1] == 2:
+            return logits[:, 1] - logits[:, 0]
+        return logits
+
+    def predict_proba(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        if not hasattr(self, "model_"):
+            raise RuntimeError("TorchMLPClassifier must be fitted before prediction.")
+        torch = self._torch()
+        x = torch.as_tensor(np.asarray(features, dtype=np.float32))
+        self.model_.eval()
+        with torch.no_grad():
+            probabilities = torch.softmax(self.model_(x), dim=1).detach().cpu().numpy()
+        return probabilities.astype(float, copy=False)
+
+    def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        return self.classes_[np.argmax(self.predict_proba(features), axis=1)]
+
+
+class ECOCLinearSVC(ClassifierMixin, BaseEstimator):
+    """Output-code linear SVM with class-level decision scores.
+
+    sklearn's ``OutputCodeClassifier`` exposes ``predict`` but not
+    ``decision_function``.  NeuRepTrace needs a score matrix so uncalibrated
+    emissions and ``CalibratedClassifierCV`` can produce probabilities.  This
+    wrapper converts binary code margins into negative distances to each class
+    code word.
+    """
+
+    def __init__(
+        self,
+        C: float = 1.0,
+        code_size: float = 2.0,
+        max_iter: int = 1000,
+        class_weight: str | dict | None = "balanced",
+        random_state: int | None = 13,
+    ):
+        self.C = C
+        self.code_size = code_size
+        self.max_iter = max_iter
+        self.class_weight = class_weight
+        self.random_state = random_state
+
+    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence | np.ndarray):
+        base = LinearSVC(
+            class_weight=self.class_weight,
+            C=float(self.C),
+            max_iter=int(self.max_iter),
+            random_state=self.random_state,
+        )
+        self.model_ = OutputCodeClassifier(
+            base,
+            code_size=float(self.code_size),
+            random_state=self.random_state,
+        )
+        self.model_.fit(features, labels)
+        self.classes_ = np.asarray(self.model_.classes_)
+        return self
+
+    def _class_score_matrix(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        if not hasattr(self, "model_"):
+            raise RuntimeError("ECOCLinearSVC must be fitted before prediction.")
+        binary_scores = []
+        for estimator in self.model_.estimators_:
+            if hasattr(estimator, "decision_function"):
+                scores = np.asarray(estimator.decision_function(features), dtype=float)
+                if scores.ndim > 1:
+                    scores = scores[:, -1]
+            else:
+                scores = np.asarray(estimator.predict(features), dtype=float)
+                scores = np.where(scores > 0, 1.0, -1.0)
+            binary_scores.append(scores)
+        code_scores = np.column_stack(binary_scores)
+        code_book = np.asarray(self.model_.code_book_, dtype=float)
+        distances = np.linalg.norm(code_scores[:, None, :] - code_book[None, :, :], axis=2)
+        return -distances
+
+    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        class_scores = self._class_score_matrix(features)
+        if self.classes_.size == 2:
+            return class_scores[:, 1] - class_scores[:, 0]
+        return class_scores
+
+    def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        return self.classes_[np.argmax(self._class_score_matrix(features), axis=1)]
 
 
 def _make_registry_decoder_pipeline(
@@ -382,6 +626,53 @@ def make_decoder(
             cv=3,
         )
 
+    if normalized in {"ovo_linear_svm", "ecoc_linear_svm"}:
+        c_value = _positive_float_classifier_param(classifier_param, default=1.0, name="LinearSVC C")
+        multiclass_svm = (
+            OneVsOneClassifier(
+                LinearSVC(
+                    class_weight="balanced",
+                    C=c_value,
+                    max_iter=max_iter,
+                    random_state=random_state,
+                )
+            )
+            if normalized == "ovo_linear_svm"
+            else ECOCLinearSVC(
+                C=c_value,
+                max_iter=max_iter,
+                random_state=random_state,
+            )
+        )
+        model = make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            multiclass_svm,
+        )
+        if emission_mode == "uncalibrated":
+            return model
+        return _make_calibrated_classifier(
+            model,
+            method="sigmoid",
+            cv=3,
+        )
+
+    if normalized == "torch_mlp":
+        weight_decay = _positive_float_classifier_param(
+            classifier_param,
+            default=1e-4,
+            name="TorchMLP weight_decay",
+        )
+        return make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            TorchMLPClassifier(
+                max_iter=max_iter,
+                weight_decay=weight_decay,
+                random_state=random_state,
+            ),
+        )
+
     registry_decoder = _make_registry_decoder_pipeline(
         normalized,
         feature_preprocessor=feature_preprocessor,
@@ -537,6 +828,46 @@ def make_tuned_decoder(
         else:
             estimator = _make_calibrated_classifier(linear_svm, method="sigmoid", cv=3)
             param_grid = {_calibrated_estimator_param(estimator, "linearsvc__C"): c_grid}
+        param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
+    elif normalized in {"ovo_linear_svm", "ecoc_linear_svm"}:
+        multiclass_svm = (
+            OneVsOneClassifier(
+                LinearSVC(
+                    class_weight="balanced",
+                    max_iter=max_iter,
+                    random_state=random_state,
+                )
+            )
+            if normalized == "ovo_linear_svm"
+            else ECOCLinearSVC(
+                max_iter=max_iter,
+                random_state=random_state,
+            )
+        )
+        estimator = make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            multiclass_svm,
+        )
+        svm_c_param = "onevsoneclassifier__estimator__C" if normalized == "ovo_linear_svm" else "ecoclinearsvc__C"
+        if emission_mode == "uncalibrated":
+            param_grid = {svm_c_param: c_grid}
+        else:
+            estimator = _make_calibrated_classifier(estimator, method="sigmoid", cv=3)
+            param_grid = {_calibrated_estimator_param(estimator, svm_c_param): c_grid}
+        param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
+    elif normalized == "torch_mlp":
+        estimator = make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            TorchMLPClassifier(
+                max_iter=max_iter,
+                random_state=random_state,
+            ),
+        )
+        # Interpret the shared C grid as inverse regularization strength for this
+        # decoder so CLI tuning semantics remain consistent with linear models.
+        param_grid = {"torchmlpclassifier__weight_decay": tuple(1.0 / value for value in c_grid)}
         param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
     else:
         registry_name = normalize_registry_decoder_name(normalized)
@@ -695,6 +1026,12 @@ def normalize_decoder_name(name: str) -> str:
         return "ridge"
     if normalized in {"lda_shrinkage", "shrinkage_lda", "shrinkagelda"}:
         return "shrinkage_lda"
+    if normalized in {"one_vs_one_linear_svm", "onevsone_linear_svm", "ovo_svm", "ovo_linear_svm"}:
+        return "ovo_linear_svm"
+    if normalized in {"ecoc_svm", "output_code_linear_svm", "outputcode_linear_svm", "ecoc_linear_svm"}:
+        return "ecoc_linear_svm"
+    if normalized in {"deep_mlp", "mlp", "torch_deep_mlp", "shallow_torch_mlp"}:
+        return "torch_mlp"
     if normalized in BUILTIN_DECODER_CHOICES:
         return normalized
     registry_name = _normalize_registry_decoder_name_or_none(name)

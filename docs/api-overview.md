@@ -40,6 +40,11 @@ implementation remains available as `neureptrace-mne-time-decode-base` and
 ensembling is available as `neureptrace-mne-time-decode-ensemble` and
 `neureptrace mne-time-decode-ensemble`.
 
+For same-time decoding, the base decoder uses `mne.decoding.SlidingEstimator`
+over NeuRepTrace's windowed feature tensors by default. The previous
+hand-written per-window estimator loop remains available as
+`--time-decode-backend sklearn` for historical comparisons and fallback runs.
+
 Reusable table-oriented APIs include:
 
 - `neureptrace.metrics` for calibration/probabilistic scoring metrics, pre/post window comparisons, and confusion-table summaries.
