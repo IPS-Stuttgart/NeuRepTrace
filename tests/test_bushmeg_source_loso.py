@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from neureptrace.decoding import make_decoder
+from neureptrace.decoding import make_decoder, normalize_decoder_name
 from neureptrace.bushmeg_source_loso import (
     CandidateSpec,
     FeatureCache,
@@ -11,6 +11,7 @@ from neureptrace.bushmeg_source_loso import (
     WindowSpec,
     _candidate_metrics,
     _select_candidate,
+    _window_features,
     _window_bin_mean_features,
 )
 
@@ -39,6 +40,32 @@ def test_window_bin_mean_features_concatenates_channel_bins():
         dtype=np.float32,
     )
     np.testing.assert_allclose(features, expected)
+
+
+def test_window_feature_kinds_add_logvar_and_covariance_branches():
+    data = np.array(
+        [
+            [[1.0, 2.0, 3.0, 4.0], [4.0, 5.0, 6.0, 7.0], [7.0, 8.0, 9.0, 10.0]],
+            [[2.0, 4.0, 6.0, 8.0], [1.0, 3.0, 5.0, 7.0], [8.0, 6.0, 4.0, 2.0]],
+        ],
+        dtype=np.float32,
+    )
+    times = np.array([0.10, 0.15, 0.20, 0.25])
+    window = WindowSpec(center=0.175, width=0.20)
+
+    evoked = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked")
+    logvar = _window_features(data, times, window, temporal_bins=2, feature_kind="logvar")
+    evoked_logvar = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_logvar")
+    covariance = _window_features(data, times, window, temporal_bins=2, feature_kind="covariance", covariance_max_channels=2)
+    evoked_covariance = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_covariance", covariance_max_channels=2)
+
+    assert evoked.shape == (2, 6)
+    assert logvar.shape == (2, 6)
+    assert evoked_logvar.shape == (2, 12)
+    assert covariance.shape == (2, 3)
+    assert evoked_covariance.shape == (2, 9)
+    assert np.all(np.isfinite(logvar))
+    assert np.all(np.isfinite(covariance))
 
 
 def test_candidate_metrics_report_multiclass_topk():
@@ -124,3 +151,24 @@ def test_make_decoder_uses_classifier_param_for_linear_svm_c():
     )
 
     assert model.named_steps["linearsvc"].C == 0.5
+
+
+def test_make_decoder_recognizes_ovo_and_ecoc_linear_svm():
+    ovo = make_decoder("onevsone-linear-svm", emission_mode="uncalibrated", classifier_param=0.5)
+    ecoc = make_decoder("ecoc-svm", emission_mode="uncalibrated", classifier_param=0.5)
+
+    assert normalize_decoder_name("onevsone-linear-svm") == "ovo_linear_svm"
+    assert normalize_decoder_name("output-code-linear-svm") == "ecoc_linear_svm"
+    assert "onevsoneclassifier" in ovo.named_steps
+    assert "ecoclinearsvc" in ecoc.named_steps
+    assert ovo.named_steps["onevsoneclassifier"].estimator.C == 0.5
+    assert ecoc.named_steps["ecoclinearsvc"].C == 0.5
+
+
+def test_make_decoder_constructs_torch_mlp_without_importing_torch():
+    model = make_decoder("shallow-torch-mlp", emission_mode="uncalibrated", classifier_param=1e-4, max_iter=3)
+
+    assert normalize_decoder_name("shallow-torch-mlp") == "torch_mlp"
+    assert "torchmlpclassifier" in model.named_steps
+    assert model.named_steps["torchmlpclassifier"].weight_decay == 1e-4
+    assert model.named_steps["torchmlpclassifier"].max_iter == 3
