@@ -88,8 +88,17 @@ def test_train_multiclass_classifier_encodes_nonzero_labels_and_decodes_outputs(
 
     seen = {}
 
-    def fake_train_classifier(_features, labels, _classifier, _classifier_param, *, random_state=None, registry=None):
-        del random_state, registry
+    def fake_train_classifier(
+        _features,
+        labels,
+        _classifier,
+        _classifier_param,
+        *,
+        random_state=None,
+        registry=None,
+        sample_weight=None,
+    ):
+        del random_state, registry, sample_weight
         seen["labels"] = np.asarray(labels, dtype=int).copy()
         return EncodedBinaryModel()
 
