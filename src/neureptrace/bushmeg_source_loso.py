@@ -318,8 +318,9 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     probabilities = np.asarray(probabilities, dtype=float)
     labels = np.asarray(labels, dtype=int).reshape(-1)
     effective_k = min(int(k), probabilities.shape[1])
-    top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
-    return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
+    kth_scores = np.partition(probabilities, -effective_k, axis=1)[:, -effective_k]
+    label_scores = probabilities[np.arange(labels.size), labels]
+    return float(np.mean(label_scores >= kth_scores))
 
 
 def _candidate_model(candidate: CandidateSpec, *, max_iter: int):
