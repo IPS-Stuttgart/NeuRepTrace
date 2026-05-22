@@ -412,7 +412,7 @@ class ECOCLinearSVC(ClassifierMixin, BaseEstimator):
         self.classes_ = np.asarray(self.model_.classes_)
         return self
 
-    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+    def _class_score_matrix(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
         if not hasattr(self, "model_"):
             raise RuntimeError("ECOCLinearSVC must be fitted before prediction.")
         binary_scores = []
@@ -430,8 +430,14 @@ class ECOCLinearSVC(ClassifierMixin, BaseEstimator):
         distances = np.linalg.norm(code_scores[:, None, :] - code_book[None, :, :], axis=2)
         return -distances
 
+    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        class_scores = self._class_score_matrix(features)
+        if self.classes_.size == 2:
+            return class_scores[:, 1] - class_scores[:, 0]
+        return class_scores
+
     def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-        return self.classes_[np.argmax(self.decision_function(features), axis=1)]
+        return self.classes_[np.argmax(self._class_score_matrix(features), axis=1)]
 
 
 def _make_registry_decoder_pipeline(
