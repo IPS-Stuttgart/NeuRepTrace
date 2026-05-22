@@ -1,8 +1,6 @@
 schema_version: neureptrace.dataset.v1
-
 paths:
   base: cwd
-
 dataset:
   name: bush_meg
   type: fieldtrip_mat
@@ -16,14 +14,11 @@ dataset:
     label: label
     trialinfo: trialinfo
     sensor_geometry: grad
-
 participants:
   ids: "1-4,6,8,9,10,13-27"
-
 validation:
   trim_channel_labels_to_data: true
   channel_policy: exact
-
 metadata:
   columns:
     - name: stimulus_class
@@ -31,7 +26,6 @@ metadata:
     - name: condition
       index: 1
       optional: true
-
 preprocessing:
   tmin: -0.35
   tmax: 0.25
@@ -40,14 +34,12 @@ preprocessing:
   feature_preprocessor: pca
   pca_components: 96
   window_size: 0.100
-
 decoding:
   label_column: stimulus_class
   group_column: participant
   classifier: multinomial-logistic
   emission_mode: uncalibrated
   max_iter: 2500
-
 source_loso:
   group_column: participant
   selection_metric: balanced_accuracy
@@ -55,40 +47,19 @@ source_loso:
   ensemble_weighting: softmax
   ensemble_temperature: 0.01
   candidate_grid:
-    temporal_bins: [3, 4, 5]
-    decoders:
-      - multinomial-logistic
-      - linear_svm
-    emission_modes:
-      - uncalibrated
-    feature_preprocessors:
-      - pca
-      - pca_whiten
+    temporal_bins: [4]
+    decoders: [multinomial-logistic, linear_svm]
+    emission_modes: [uncalibrated]
+    feature_preprocessors: [pca, pca_whiten]
     pca_components: [64, 96, 128]
-    c_grid: [0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
+    c_grid: [0.1, 0.3, 1.0, 3.0]
     window_sets:
-      - name: single_125ms
-        centers: [0.125]
-        window_size: 0.100
-      - name: single_150ms
-        centers: [0.150]
-        window_size: 0.100
-      - name: single_175ms
-        centers: [0.175]
-        window_size: 0.100
-      - name: single_200ms
-        centers: [0.200]
-        window_size: 0.100
-      - name: triplet_125_175ms
-        centers: [0.125, 0.150, 0.175]
-        window_size: 0.100
-      - name: triplet_150_200ms
-        centers: [0.150, 0.175, 0.200]
-        window_size: 0.100
-      - name: quintet_125_225ms
-        centers: [0.125, 0.150, 0.175, 0.200, 0.225]
-        window_size: 0.100
-
+      - {name: single_150ms, centers: [0.150], window_size: 0.100}
+      - {name: single_175ms, centers: [0.175], window_size: 0.100}
+      - {name: single_200ms, centers: [0.200], window_size: 0.100}
+      - {name: triplet_125_175ms, centers: [0.125, 0.150, 0.175], window_size: 0.100}
+      - {name: triplet_150_200ms, centers: [0.150, 0.175, 0.200], window_size: 0.100}
+      - {name: quintet_125_225ms, centers: [0.125, 0.150, 0.175, 0.200, 0.225], window_size: 0.100}
 outputs:
   base_dir: results/{dataset}/source_loso_ensemble
   source_loso_ensemble_summary_csv: source_loso_ensemble_summary.csv
