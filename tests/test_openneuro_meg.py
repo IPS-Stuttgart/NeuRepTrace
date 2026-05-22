@@ -62,6 +62,43 @@ def test_ds004276_word_metadata_joins_behavior_file(tmp_path: Path):
     assert filtered["condition"].tolist() == ["short", "long"]
 
 
+def test_ds004276_word_metadata_ignores_probe_events(tmp_path: Path):
+    behavior = pd.DataFrame(
+        {
+            "Event_Type": ["Sound", "Picture", "Response", "Sound"],
+            "Code": ["cat", "probe_cat", "1", "elephant"],
+            "Trial": [1, 2, 2, 3],
+            "Stim_Type": ["other", "other", pd.NA, "other"],
+        }
+    )
+    behavior_path = tmp_path / "sub-001_task-words_beh.tsv"
+    behavior.to_csv(behavior_path, sep="\t", index=False)
+    events = pd.DataFrame(
+        {
+            "onset": [0.1, 0.2, 0.3],
+            "duration": [0.0, 0.0, 0.0],
+            "trial_type": ["item", "yes_probe", "item_post_probe"],
+        }
+    )
+
+    metadata = _derive_metadata(
+        DATASET_SPECS["ds004276"],
+        RunFiles(
+            subject="sub-001",
+            run=None,
+            raw_path=tmp_path / "sub-001_task-words_meg.fif",
+            events_path=tmp_path / "sub-001_task-words_events.tsv",
+            behavior_path=behavior_path,
+        ),
+        events,
+    )
+
+    assert metadata["trial_type"].tolist() == ["item", "item_post_probe"]
+    assert metadata["onset"].tolist() == [0.1, 0.3]
+    assert metadata["word"].tolist() == ["cat", "elephant"]
+    assert metadata["word_length_binary"].tolist() == ["short", "long"]
+
+
 def test_ds004330_derives_stimulus_form_and_id():
     metadata = _derive_metadata(
         DATASET_SPECS["ds004330"],

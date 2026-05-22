@@ -213,6 +213,15 @@ def _event_id(metadata: pd.DataFrame, *, label_column: str) -> dict[str, int]:
     return {label: index + 1 for index, label in enumerate(labels)}
 
 
+def _ds004276_sound_events(events: pd.DataFrame) -> pd.DataFrame:
+    """Return ds004276 rows corresponding to auditory word events."""
+    if "trial_type" not in events.columns:
+        return events
+    trial_type = events["trial_type"].astype(str)
+    sound_events = events[trial_type.isin({"item", "item_post_probe"})].copy()
+    return sound_events.reset_index(drop=True) if not sound_events.empty else events
+
+
 def _derive_metadata(spec: OpenNeuroMegSpec, files: RunFiles, events: pd.DataFrame) -> pd.DataFrame:
     metadata = events.copy().reset_index(drop=True)
     if "trial_type" in metadata.columns:
@@ -223,8 +232,13 @@ def _derive_metadata(spec: OpenNeuroMegSpec, files: RunFiles, events: pd.DataFra
             raise FileNotFoundError(f"Missing ds004276 behavior file: {files.behavior_path}")
         behavior = pd.read_csv(files.behavior_path, sep="\t")
         sound_rows = behavior[behavior["Event_Type"].astype(str) == "Sound"].reset_index(drop=True)
+        metadata = _ds004276_sound_events(metadata)
         if len(sound_rows) != len(metadata):
-            raise ValueError(f"{files.events_path} has {len(metadata)} events but {files.behavior_path} has {len(sound_rows)} sound rows.")
+            event_counts = events["trial_type"].astype(str).value_counts().to_dict() if "trial_type" in events.columns else {}
+            raise ValueError(
+                f"{files.events_path} has {len(metadata)} word events but {files.behavior_path} has "
+                f"{len(sound_rows)} sound rows. Event trial_type counts: {event_counts}."
+            )
         words = sound_rows["Code"].astype(str)
         word_lengths = words.str.len()
         metadata["word"] = words
