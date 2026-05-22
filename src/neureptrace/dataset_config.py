@@ -245,8 +245,8 @@ def validate_dataset_config(
         )
 
     if dataset_type == "mne_epochs":
-        if not (dataset.get("epochs") or dataset.get("epochs_file")):
-            raise ConfigValidationError("mne_epochs configs require dataset.epochs or dataset.epochs_file.")
+        if not (dataset.get("epochs") or dataset.get("epochs_file") or dataset.get("epochs_files")):
+            raise ConfigValidationError("mne_epochs configs require dataset.epochs, dataset.epochs_file, or dataset.epochs_files.")
     if dataset_type == "fieldtrip_mat":
         participants = config.get("participants", {}) or {}
         has_participant_template = bool(
@@ -293,11 +293,12 @@ def iter_dataset_files(config: Mapping[str, Any], *, base_dir: str | Path = ".")
     dataset_type = dataset.get("type")
     root = dataset.get("root")
     if dataset_type == "mne_epochs":
-        files = [expand_path(dataset.get("epochs") or dataset.get("epochs_file"), base_dir=base_dir, root=root)]
-        metadata_csv = dataset.get("metadata_csv")
-        if metadata_csv:
-            files.append(expand_path(metadata_csv, base_dir=base_dir, root=root))
-        return files
+        return [
+            file_path
+            for epochs_path, metadata_path in _mne_epoch_file_specs(config, base_dir=base_dir)
+            for file_path in (epochs_path, metadata_path)
+            if file_path is not None
+        ]
 
     if dataset_type != "fieldtrip_mat":
         return []
@@ -325,17 +326,55 @@ def iter_dataset_files(config: Mapping[str, Any], *, base_dir: str | Path = ".")
     return [expand_path(str(template).format(participant=participant), base_dir=base_dir, root=root) for participant in participants]
 
 
-def _load_mne_epochs_dataset(config: Mapping[str, Any], *, base_dir: str | Path) -> EpochDataset:
-    import mne
-
+def _mne_epoch_file_specs(config: Mapping[str, Any], *, base_dir: str | Path) -> list[tuple[Path, Path | None]]:
     dataset = _dataset_section(config)
     root = dataset.get("root")
+    epochs_files = dataset.get("epochs_files")
+    if epochs_files is not None:
+        if isinstance(epochs_files, Mapping):
+            template = epochs_files.get("template") or epochs_files.get("path") or epochs_files.get("file")
+            if template is None:
+                raise ConfigValidationError("dataset.epochs_files mappings must contain template, path, or file.")
+            participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
+            return [
+                (
+                    expand_path(str(template).format(**_format_values_for_participant(participant)), base_dir=base_dir, root=root),
+                    None,
+                )
+                for participant in participants
+            ]
+        if isinstance(epochs_files, str):
+            return [(expand_path(epochs_files, base_dir=base_dir, root=root), None)]
+        specs: list[tuple[Path, Path | None]] = []
+        for item in epochs_files:
+            if isinstance(item, Mapping):
+                value = item.get("path") or item.get("file") or item.get("epochs")
+                metadata_csv = item.get("metadata_csv")
+            else:
+                value = item
+                metadata_csv = None
+            if value is None:
+                raise ConfigValidationError("dataset.epochs_files entries must contain a path.")
+            specs.append(
+                (
+                    expand_path(str(value), base_dir=base_dir, root=root),
+                    expand_path(str(metadata_csv), base_dir=base_dir, root=root) if metadata_csv else None,
+                )
+            )
+        return specs
+
     epochs_path = expand_path(dataset.get("epochs") or dataset.get("epochs_file"), base_dir=base_dir, root=root)
+    metadata_csv = dataset.get("metadata_csv")
+    return [(epochs_path, expand_path(metadata_csv, base_dir=base_dir, root=root) if metadata_csv else None)]
+
+
+def _load_single_mne_epochs_dataset(epochs_path: Path, metadata_csv: Path | None, *, name: str) -> EpochDataset:
+    import mne
+
     epochs = mne.read_epochs(epochs_path, preload=True, verbose="error")
     metadata = epochs.metadata.copy() if epochs.metadata is not None else None
-    metadata_csv = dataset.get("metadata_csv")
     if metadata_csv is not None:
-        metadata = pd.read_csv(expand_path(metadata_csv, base_dir=base_dir, root=root))
+        metadata = pd.read_csv(metadata_csv)
     if metadata is None:
         metadata = pd.DataFrame(index=range(len(epochs)))
     if len(metadata) != len(epochs):
@@ -345,9 +384,23 @@ def _load_mne_epochs_dataset(config: Mapping[str, Any], *, base_dir: str | Path)
         times=epochs.times.copy(),
         channel_names=list(epochs.ch_names),
         metadata=metadata.reset_index(drop=True),
-        name=str(dataset.get("name") or epochs_path.stem),
+        name=name,
         provenance={"path": str(epochs_path), "loader": "mne_epochs"},
     )
+
+
+def _load_mne_epochs_dataset(config: Mapping[str, Any], *, base_dir: str | Path) -> EpochDataset:
+    dataset = _dataset_section(config)
+    specs = _mne_epoch_file_specs(config, base_dir=base_dir)
+    loaded = [
+        _load_single_mne_epochs_dataset(path, metadata_path, name=path.stem)
+        for path, metadata_path in specs
+    ]
+    if len(loaded) == 1:
+        return loaded[0]
+    name = str(dataset.get("name") or "mne_epochs")
+    channel_policy = str(_validation_section(config).get("channel_policy", "exact"))
+    return EpochDataset.concatenate(loaded, name=name, channel_policy=channel_policy)
 
 
 def _fieldtrip_file_specs(config: Mapping[str, Any], *, base_dir: str | Path) -> list[tuple[Path, dict[str, Any]]]:
@@ -406,6 +459,8 @@ def _format_values_for_participant(participant: int | str) -> dict[str, Any]:
             "subject_int": number,
             "participant02d": f"{number:02d}",
             "subject02d": f"{number:02d}",
+            "participant03d": f"{number:03d}",
+            "subject03d": f"{number:03d}",
         }
     )
     return values

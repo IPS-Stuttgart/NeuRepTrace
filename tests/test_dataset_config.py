@@ -6,6 +6,7 @@ from neureptrace.dataset_config import (
     apply_overrides,
     effective_config,
     iter_dataset_files,
+    load_epoch_dataset_from_config,
     parse_participant_ids,
     validate_dataset_config,
 )
@@ -67,6 +68,23 @@ def test_iter_dataset_files_includes_mne_metadata_csv(tmp_path: Path):
     assert iter_dataset_files(config, base_dir=tmp_path) == [
         tmp_path / "data" / "sub-01_epo.fif",
         tmp_path / "data" / "sub-01_events.csv",
+    ]
+
+
+def test_iter_dataset_files_expands_mne_epochs_template(tmp_path: Path):
+    config = {
+        "dataset": {
+            "type": "mne_epochs",
+            "root": "staged",
+            "epochs_files": {"template": "ds004276/sub-{subject03d}_epo.fif"},
+        },
+        "participants": {"ids": "1-2"},
+        "decoding": {"label_column": "condition"},
+    }
+
+    assert iter_dataset_files(config, base_dir=tmp_path) == [
+        tmp_path / "staged" / "ds004276" / "sub-001_epo.fif",
+        tmp_path / "staged" / "ds004276" / "sub-002_epo.fif",
     ]
 
 
@@ -132,3 +150,40 @@ def test_epoch_dataset_concatenate_supports_channel_intersection():
     assert merged.channel_names == ["B", "C"]
     assert merged.data.shape == (2, 2, 2)
     assert merged.provenance["dropped_channels"] == ["A", "D"]
+
+
+def test_load_mne_epochs_dataset_concatenates_template_files(tmp_path: Path):
+    import mne
+
+    staged = tmp_path / "staged" / "demo"
+    staged.mkdir(parents=True)
+    for subject, offset in [(1, 0.0), (2, 1.0)]:
+        info = mne.create_info(["MEG001", "MEG002"], sfreq=10.0, ch_types="mag")
+        metadata = pd.DataFrame({"subject": [f"sub-{subject:03d}"], "condition": ["a" if subject == 1 else "b"]})
+        epochs = mne.EpochsArray(
+            np.ones((1, 2, 3)) + offset,
+            info,
+            events=np.array([[subject, 0, 1]]),
+            event_id={"event": 1},
+            tmin=-0.1,
+            metadata=metadata,
+            verbose="error",
+        )
+        epochs.save(staged / f"sub-{subject:03d}_epo.fif", overwrite=True)
+
+    dataset = load_epoch_dataset_from_config(
+        {
+            "dataset": {
+                "type": "mne_epochs",
+                "root": "staged",
+                "epochs_files": {"template": "demo/sub-{subject03d}_epo.fif"},
+            },
+            "participants": {"ids": "1-2"},
+            "decoding": {"label_column": "condition"},
+        },
+        base_dir=tmp_path,
+        check_files=True,
+    )
+
+    assert dataset.data.shape == (2, 2, 3)
+    assert dataset.metadata["subject"].tolist() == ["sub-001", "sub-002"]
