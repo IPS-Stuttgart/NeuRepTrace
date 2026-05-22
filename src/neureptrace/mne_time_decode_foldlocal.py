@@ -149,6 +149,7 @@ def run_time_resolved_decode(
     observation_out_path: Path | None = None,
     subject: str | None = None,
     temporal_train_window: tuple[float, float] | None = None,
+    time_decode_backend: str = "sklearn",
 ) -> pd.DataFrame:
     """Run time-resolved decoding with train-fold-local epoch normalization.
 
@@ -172,6 +173,9 @@ def run_time_resolved_decode(
     emission_modes = list(EMISSION_MODE_CHOICES) if emission_mode == "both" else [normalize_emission_mode(emission_mode)]
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
     normalization_name = _base.normalize_epoch_normalization(normalization)
+    time_decode_backend = _base.normalize_time_decode_backend(time_decode_backend)
+    if time_decode_backend != "sklearn":
+        raise ValueError("Fold-local normalization currently supports only the sklearn time-decode backend.")
     baseline_window_value = _base._normalize_baseline_window(baseline_window)
     if feature_preprocessor_name == "none" and pca_components is not None:
         raise ValueError(
