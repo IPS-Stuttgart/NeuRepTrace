@@ -62,10 +62,18 @@ on:
           - sklearn
           - mne
         default: sklearn
+      runner_type:
+        description: "Runner family. GitHub-hosted uses actions/cache; self-hosted uses /home/github-runner/.cache/datasets."
+        required: true
+        type: choice
+        options:
+          - self-hosted
+          - github-hosted
+        default: self-hosted
 
 jobs:
   openneuro-meg-loso:
-    runs-on: [self-hosted, Linux]
+    runs-on: ${{ fromJSON(inputs.runner_type == 'github-hosted' && '["ubuntu-latest"]' || '["self-hosted","Linux"]') }}
     timeout-minutes: 720
     env:
       OPENNEURO_API_KEY: ${{ secrets.OPENNEURO_API_KEY }}
