@@ -96,6 +96,7 @@ def run_time_resolved_decode(
     observation_out_path: Path | None = None,
     subject: str | None = None,
     temporal_train_window: tuple[float, float] | None = None,
+    time_decode_backend: str = "sklearn",
     ensemble_weights: Sequence[float] | None = None,
     ensemble_baseline_window: tuple[float, float] | None = DEFAULT_ENSEMBLE_BASELINE_WINDOW,
     ensemble_baseline_group_columns: Sequence[str] = DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS,
@@ -139,6 +140,7 @@ def run_time_resolved_decode(
             observation_out_path=observation_out_path,
             subject=subject,
             temporal_train_window=temporal_train_window,
+            time_decode_backend=time_decode_backend,
         )
 
     if emission_mode != "calibrated":
@@ -183,6 +185,7 @@ def run_time_resolved_decode(
                     observation_out_path=source_observations,
                     subject=subject,
                     temporal_train_window=temporal_train_window,
+                    time_decode_backend=time_decode_backend,
                 )
             )
             source_observation_paths.append(source_observations)
