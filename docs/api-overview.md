@@ -47,7 +47,7 @@ hand-written per-window estimator loop remains available as
 
 Reusable table-oriented APIs include:
 
-- `neureptrace.metrics` for calibration/probabilistic scoring metrics, pre/post window comparisons, and confusion-table summaries.
+- `neureptrace.metrics` for calibration/probabilistic scoring metrics, pre/post window comparisons, and confusion-table summaries. Probability-matrix helpers include input validation, Brier score, expected calibration error, reliability bins, categorical negative log-likelihood, and top-k accuracy.
 - `neureptrace.decoding.alignment_window` for applying projections fitted on one M/EEG feature window to matching-channel features from another window.
 - `neureptrace.continuous_stimulus_scan` for training an event-locked decoder on one raw run, scanning a held-out raw run, exporting long-stream class probabilities, and scoring detected events.
 - `neureptrace.stimulus_detection` for detecting zero, one, or many stimulus events in long probability streams and evaluating them against annotation tables.
