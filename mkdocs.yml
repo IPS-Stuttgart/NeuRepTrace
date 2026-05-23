@@ -7,6 +7,7 @@ repo_name: IPS-Stuttgart/NeuRepTrace
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Diagnostics: doctor.md
   - Data Staging: data-staging.md
   - Dataset Configuration: dataset-config.md
   - Dataset Specs: dataset-specs.md
