@@ -7,6 +7,8 @@ import sys
 from collections.abc import Sequence
 from importlib import import_module
 
+from neureptrace import __version__
+
 COMMAND_MODULES = {
     "benchmark": "neureptrace.benchmark",
     "bushmeg-artifact-diff": "neureptrace.bushmeg_artifact_diff",
@@ -85,6 +87,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_module_main(argv[0], argv[1:])
 
     parser = argparse.ArgumentParser(description="NeuRepTrace command-line interface.")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"neureptrace {__version__}",
+        help="Show the installed NeuRepTrace version and exit.",
+    )
     parser.add_argument(
         "command",
         nargs="?",
