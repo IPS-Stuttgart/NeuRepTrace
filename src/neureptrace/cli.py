@@ -10,6 +10,7 @@ from importlib import import_module
 COMMAND_MODULES = {
     "benchmark": "neureptrace.benchmark",
     "bushmeg-data": "neureptrace.bushmeg_data",
+    "bushmeg-covariance-loso": "neureptrace.bushmeg_covariance_loso",
     "bushmeg-source-loso": "neureptrace.bushmeg_source_loso",
     "bushmeg-source-loso-ensemble": "neureptrace.bushmeg_source_loso_ensemble",
     "bushmeg-supervised-lowrank-loso": "neureptrace.bushmeg_supervised_lowrank_loso",
