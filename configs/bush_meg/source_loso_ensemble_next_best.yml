@@ -58,8 +58,10 @@ source_loso:
     c_grid: [0.1, 1.0, 10.0]
     feature_kinds:
       - evoked
+      - evoked_slope
       - evoked_logvar
       - evoked_prototype
+      - evoked_slope_prototype
       - covariance
       - evoked_covariance
       - xdawn

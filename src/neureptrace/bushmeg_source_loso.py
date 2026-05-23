@@ -9,8 +9,8 @@ epochs are never added as classifier training or test trials.
 The implementation differs from the generic time-resolved decoder in two ways
 that matter for BUSH-MEG:
 
-* temporal features are compact per-channel bin means rather than very large
-  sensor-by-sample windows;
+* temporal features are compact per-channel bin means or bin-level temporal
+  slope contrasts rather than very large sensor-by-sample windows;
 * optional source-class template-similarity features turn each trial into a
   low-dimensional vector of leave-source-subject-out class-prototype scores;
 * a candidate may average probabilities from several nearby post-stimulus
@@ -77,6 +77,8 @@ FEATURE_KIND_CHOICES = (
     "bandpower",
     "logvar",
     "covariance",
+    "evoked_slope",
+    "evoked_stats",
     "evoked_logvar",
     "evoked_bandpower",
     "evoked_covariance",
@@ -84,6 +86,8 @@ FEATURE_KIND_CHOICES = (
     "bandpower_prototype",
     "evoked_prototype",
     "logvar_prototype",
+    "evoked_slope_prototype",
+    "evoked_stats_prototype",
     "evoked_bandpower_prototype",
     "evoked_logvar_prototype",
     "mnn_evoked",
@@ -92,9 +96,11 @@ FEATURE_KIND_CHOICES = (
     "mnn_evoked_logvar",
     "mnn_evoked_covariance",
     "mnn_prototype",
+    "mnn_evoked_slope",
     "mnn_evoked_prototype",
     "mnn_logvar_prototype",
     "mnn_evoked_logvar_prototype",
+    "mnn_evoked_slope_prototype",
     "xdawn",
     "xdawn_prototype",
 )
@@ -109,12 +115,15 @@ PROTOTYPE_FEATURE_KINDS = frozenset(
         "evoked_prototype",
         "logvar_prototype",
         "evoked_bandpower_prototype",
+        "evoked_slope_prototype",
+        "evoked_stats_prototype",
         "evoked_logvar_prototype",
         "xdawn_prototype",
         "mnn_prototype",
         "mnn_evoked_prototype",
         "mnn_logvar_prototype",
         "mnn_evoked_logvar_prototype",
+        "mnn_evoked_slope_prototype",
     }
 )
 SUPERVISED_FEATURE_KINDS = PROTOTYPE_FEATURE_KINDS | {"xdawn"}
@@ -123,10 +132,13 @@ PROTOTYPE_BASE_FEATURE_KINDS = {
     "evoked_prototype": "evoked",
     "logvar_prototype": "logvar",
     "bandpower_prototype": "bandpower",
+    "evoked_slope_prototype": "evoked_slope",
+    "evoked_stats_prototype": "evoked_stats",
     "evoked_logvar_prototype": "evoked_logvar",
     "evoked_bandpower_prototype": "evoked_bandpower",
     "mnn_prototype": "mnn_evoked",
     "mnn_evoked_prototype": "mnn_evoked",
+    "mnn_evoked_slope_prototype": "mnn_evoked_slope",
     "mnn_logvar_prototype": "mnn_logvar",
     "mnn_evoked_logvar_prototype": "mnn_evoked_logvar",
 }
@@ -328,6 +340,25 @@ def _normalize_class_bias(value: str | None) -> str:
 
 def normalize_source_feature_kind(feature_kind: str) -> str:
     normalized = str(feature_kind).strip().lower().replace("-", "_")
+    aliases = {
+        "evoked_derivative": "evoked_slope",
+        "evoked_gradient": "evoked_slope",
+        "evoked_slope_contrast": "evoked_slope",
+        "evoked_temporal_derivative": "evoked_slope",
+        "evoked_temporal_gradient": "evoked_slope",
+        "evoked_temporal_slope": "evoked_slope",
+        "temporal_slope": "evoked_slope",
+        "evoked_derivative_prototype": "evoked_slope_prototype",
+        "evoked_gradient_prototype": "evoked_slope_prototype",
+        "evoked_temporal_slope_prototype": "evoked_slope_prototype",
+        "mnn_evoked_derivative": "mnn_evoked_slope",
+        "mnn_evoked_gradient": "mnn_evoked_slope",
+        "mnn_evoked_temporal_slope": "mnn_evoked_slope",
+        "mnn_evoked_derivative_prototype": "mnn_evoked_slope_prototype",
+        "mnn_evoked_gradient_prototype": "mnn_evoked_slope_prototype",
+        "mnn_evoked_temporal_slope_prototype": "mnn_evoked_slope_prototype",
+    }
+    normalized = aliases.get(normalized, normalized)
     if normalized not in FEATURE_KIND_CHOICES:
         raise ValueError(
             f"Unknown source_loso feature kind '{feature_kind}'. "
@@ -623,6 +654,95 @@ def _window_bin_mean_features(
             f"not enough for {temporal_bins} temporal bins."
         )
     features = [data[:, :, bin_indices].mean(axis=2) for bin_indices in bins]
+    return np.concatenate(features, axis=1).astype(np.float32, copy=False)
+
+
+def _window_evoked_slope_features(
+    data: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    temporal_bins: int,
+) -> np.ndarray:
+    """Return bin means plus within-bin linear temporal-contrast features.
+
+    The first columns exactly match :func:`_window_bin_mean_features`.  The
+    appended columns project each channel/bin onto a unit-norm linear ramp in
+    time, preserving compact evoked features while exposing rising/falling ERP
+    shape that is lost by pure per-bin averaging.
+    """
+
+    if temporal_bins < 1:
+        raise ValueError("temporal_bins must be at least one.")
+    times = np.asarray(times, dtype=float)
+    indices = _sample_indices_for_window(times, window)
+    bins = np.array_split(indices, int(temporal_bins))
+    if any(len(bin_indices) == 0 for bin_indices in bins):
+        raise ValueError(
+            f"Window {window.center:.6g}s/{window.width:.6g}s has only {len(indices)} samples, "
+            f"not enough for {temporal_bins} temporal bins."
+        )
+
+    mean_features: list[np.ndarray] = []
+    slope_features: list[np.ndarray] = []
+    for bin_indices in bins:
+        segment = np.asarray(data[:, :, bin_indices], dtype=np.float64)
+        mean_features.append(segment.mean(axis=2))
+        if len(bin_indices) < 2:
+            slope_features.append(np.zeros(segment.shape[:2], dtype=np.float64))
+            continue
+
+        weights = times[bin_indices] - float(np.mean(times[bin_indices]))
+        norm = float(np.linalg.norm(weights))
+        if norm <= 1e-12:
+            slope_features.append(np.zeros(segment.shape[:2], dtype=np.float64))
+            continue
+        weights = weights / norm
+        slope_features.append(np.tensordot(segment, weights, axes=([2], [0])))
+
+    return np.concatenate([*mean_features, *slope_features], axis=1).astype(np.float32, copy=False)
+
+
+def _window_evoked_stat_features(
+    data: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    temporal_bins: int,
+) -> np.ndarray:
+    """Return latency-tolerant per-channel temporal summaries for one window."""
+
+    if temporal_bins < 1:
+        raise ValueError("temporal_bins must be at least one.")
+    indices = _sample_indices_for_window(times, window)
+    bins = np.array_split(indices, int(temporal_bins))
+    if any(len(bin_indices) == 0 for bin_indices in bins):
+        raise ValueError(
+            f"Window {window.center:.6g}s/{window.width:.6g}s has only {len(indices)} samples, "
+            f"not enough for {temporal_bins} temporal bins."
+        )
+
+    data64 = np.asarray(data, dtype=np.float64)
+    features: list[np.ndarray] = []
+    for bin_indices in bins:
+        segment = data64[:, :, bin_indices]
+        mean = segment.mean(axis=2)
+        std = segment.std(axis=2, ddof=1 if len(bin_indices) > 1 else 0)
+        minimum = segment.min(axis=2)
+        maximum = segment.max(axis=2)
+        if len(bin_indices) > 1:
+            relative_time = np.linspace(-1.0, 1.0, len(bin_indices), dtype=np.float64)
+            relative_time -= relative_time.mean()
+            denominator = float(np.dot(relative_time, relative_time))
+            slope = np.einsum(
+                "t,nct->nc",
+                relative_time,
+                segment - mean[:, :, None],
+                optimize=True,
+            ) / max(denominator, 1e-12)
+        else:
+            slope = np.zeros_like(mean)
+        features.extend([mean, std, minimum, maximum, slope])
     return np.concatenate(features, axis=1).astype(np.float32, copy=False)
 
 
@@ -1131,6 +1251,15 @@ def _window_features(
     if feature_kind == "evoked":
         assert evoked is not None
         return evoked
+    if feature_kind == "evoked_slope":
+        return _window_evoked_slope_features(
+            data,
+            times,
+            window,
+            temporal_bins=temporal_bins,
+        )
+    if feature_kind == "evoked_stats":
+        return _window_evoked_stat_features(data, times, window, temporal_bins=temporal_bins)
     if feature_kind == "bandpower":
         return _window_bandpower_features(data, times, window, temporal_bins=temporal_bins)
     if feature_kind == "logvar":
