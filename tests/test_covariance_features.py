@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from neureptrace import bushmeg_covariance_loso
 from neureptrace.decoding.covariance_features import (
     COVARIANCE_FEATURE_MODES,
     CovarianceWindow,
@@ -38,6 +39,48 @@ def test_covariance_feature_modes_are_finite_and_pymegdec_compatible():
     for features in features_by_mode.values():
         assert np.all(np.isfinite(features))
     np.testing.assert_allclose(features_by_mode["correlation_upper"][[0, 3, 5]], np.ones(3))
+
+
+def test_reusable_covariance_features_match_bushmeg_workflow_helpers():
+    signal = np.array(
+        [
+            [1.0, 2.0, 4.0, 5.0],
+            [2.0, 3.0, 5.0, 7.0],
+            [7.0, 6.0, 4.0, 3.0],
+        ],
+        dtype=float,
+    )
+    for mode in COVARIANCE_FEATURE_MODES:
+        np.testing.assert_allclose(
+            covariance_feature_vector(signal, mode, shrinkage=0.1, epsilon=1e-6),
+            bushmeg_covariance_loso.covariance_feature_vector(signal, mode, shrinkage=0.1, epsilon=1e-6),
+        )
+
+    times = np.linspace(-0.1, 0.3, 9)
+    data = np.arange(2 * 5 * times.size, dtype=float).reshape(2, 5, times.size)
+    reusable_window = CovarianceWindow(name="post", start=0.0, stop=0.2)
+    bushmeg_window = bushmeg_covariance_loso.CovarianceWindow(name="post", start=0.0, stop=0.2)
+
+    np.testing.assert_allclose(
+        window_covariance_features(
+            data,
+            times,
+            reusable_window,
+            mode="variance",
+            shrinkage=0.2,
+            epsilon=1e-6,
+            max_channels=3,
+        ),
+        bushmeg_covariance_loso._window_covariance_features(
+            data,
+            times,
+            bushmeg_window,
+            mode="variance",
+            shrinkage=0.2,
+            epsilon=1e-6,
+            covariance_max_channels=3,
+        ),
+    )
 
 
 def test_window_covariance_features_selects_window_and_channels():
