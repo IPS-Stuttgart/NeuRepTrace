@@ -292,6 +292,33 @@ def test_subject_class_balanced_sample_weights_equalize_observed_cells():
     np.testing.assert_allclose(cell_sums, np.full(len(cell_sums), cell_sums[0]))
 
 
+def test_sample_weights_can_apply_cue_subject_multipliers():
+    times = np.array([0.10])
+    subjects = {
+        "s1": SubjectEpochs(
+            subject="s1",
+            data=np.zeros((2, 1, 1), dtype=np.float32),
+            times=times,
+            metadata=pd.DataFrame(),
+            labels=np.array([0, 1]),
+        ),
+        "s2": SubjectEpochs(
+            subject="s2",
+            data=np.zeros((2, 1, 1), dtype=np.float32),
+            times=times,
+            metadata=pd.DataFrame(),
+            labels=np.array([0, 1]),
+        ),
+    }
+    labels = np.concatenate([subjects["s1"].labels, subjects["s2"].labels])
+
+    weights = _sample_weights_for_training(subjects, ["s1", "s2"], labels, "none", subject_weight_multipliers={"s1": 2.0, "s2": 0.5})
+
+    assert weights is not None
+    assert np.isclose(weights.mean(), 1.0)
+    assert float(weights[:2].mean()) > float(weights[2:].mean())
+
+
 def test_balanced_accuracy_class_bias_can_adjust_overpredicted_class():
     probabilities = np.array(
         [
