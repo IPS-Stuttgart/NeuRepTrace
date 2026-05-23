@@ -102,10 +102,9 @@ def _check_dataset_config(path: Path, *, check_files: bool) -> DoctorCheck:
     except Exception as exc:
         return DoctorCheck(f"dataset-config:{path}", "error", str(exc))
 
-    detail = "valid"
     if warnings:
-        detail += "; warnings: " + " | ".join(str(warning) for warning in warnings)
-    return DoctorCheck(f"dataset-config:{path}", "ok", detail)
+        return DoctorCheck(f"dataset-config:{path}", "warning", "valid; warnings: " + " | ".join(str(warning) for warning in warnings))
+    return DoctorCheck(f"dataset-config:{path}", "ok", "valid")
 
 
 def run_checks(
