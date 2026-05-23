@@ -15,10 +15,11 @@ from pathlib import Path
 
 DEFAULT_PARTICIPANTS = "1-4,6,8,9,10,13-27"
 DEFAULT_ENV_VAR = "PYMEGDEC_DATA_DIR"
+DEFAULT_DATASET_ID = "bushmeg"
 DEFAULT_OUTPUT = Path("configs/bushmeg.yml")
 
 TEMPLATE = """schema_version: neureptrace.dataset.v1
-dataset_id: bushmeg
+dataset_id: {dataset_id}
 description: PyMEGDec-style MEG participant files described declaratively.
 
 root:
@@ -97,6 +98,7 @@ def build_pymegdec_bushmeg_dataset_spec_text(
     participants: str = DEFAULT_PARTICIPANTS,
     env_var: str = DEFAULT_ENV_VAR,
     data_dir: str | Path | None = None,
+    dataset_id: str = DEFAULT_DATASET_ID,
 ) -> str:
     """Return a YAML NeuRepTrace dataset spec for PyMEGDec-style files."""
 
@@ -104,6 +106,7 @@ def build_pymegdec_bushmeg_dataset_spec_text(
     if data_dir is not None:
         root_path_block = f"  path: {json.dumps(str(data_dir))}\n"
     return TEMPLATE.format(
+        dataset_id=dataset_id,
         participants=participants,
         env_var=env_var,
         root_path_block=root_path_block,
@@ -116,6 +119,7 @@ def write_pymegdec_bushmeg_dataset_spec_file(
     participants: str = DEFAULT_PARTICIPANTS,
     env_var: str = DEFAULT_ENV_VAR,
     data_dir: str | Path | None = None,
+    dataset_id: str = DEFAULT_DATASET_ID,
 ) -> Path:
     """Write the canonical PyMEGDec/BUSH-MEG dataset spec and return its path."""
 
@@ -126,6 +130,7 @@ def write_pymegdec_bushmeg_dataset_spec_file(
             participants=participants,
             env_var=env_var,
             data_dir=data_dir,
+            dataset_id=dataset_id,
         ),
         encoding="utf-8",
     )
@@ -138,6 +143,7 @@ def add_pymegdec_bushmeg_dataset_spec_arguments(parser: argparse.ArgumentParser)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT, help="Output YAML path.")
     parser.add_argument("--participants", default=DEFAULT_PARTICIPANTS, help="Participant ids, for example 1-4,6,8.")
     parser.add_argument("--env-var", default=DEFAULT_ENV_VAR, help="Environment variable used by root.env.")
+    parser.add_argument("--dataset-id", default=DEFAULT_DATASET_ID, help="Dataset id written into the spec.")
     parser.add_argument(
         "--data-dir",
         type=Path,
@@ -154,6 +160,7 @@ def write_pymegdec_bushmeg_dataset_spec_from_args(args: argparse.Namespace) -> i
         participants=args.participants,
         env_var=args.env_var,
         data_dir=args.data_dir,
+        dataset_id=args.dataset_id,
     )
     print(f"Wrote {out}")
     print("Validate with: neureptrace dataset validate", out)
@@ -169,6 +176,26 @@ def write_pymegdec_bushmeg_dataset_spec(argv: Sequence[str] | None = None, prog:
     )
     add_pymegdec_bushmeg_dataset_spec_arguments(parser)
     return write_pymegdec_bushmeg_dataset_spec_from_args(parser.parse_args(argv))
+
+
+# Aliases used by the deprecated PyMEGDec wrapper while it is being reduced to
+# NeuRepTrace-owned compatibility shims.
+build_neureptrace_dataset_spec_text = build_pymegdec_bushmeg_dataset_spec_text
+write_neureptrace_dataset_spec = write_pymegdec_bushmeg_dataset_spec
+
+__all__ = [
+    "DEFAULT_DATASET_ID",
+    "DEFAULT_ENV_VAR",
+    "DEFAULT_OUTPUT",
+    "DEFAULT_PARTICIPANTS",
+    "add_pymegdec_bushmeg_dataset_spec_arguments",
+    "build_neureptrace_dataset_spec_text",
+    "build_pymegdec_bushmeg_dataset_spec_text",
+    "write_neureptrace_dataset_spec",
+    "write_pymegdec_bushmeg_dataset_spec",
+    "write_pymegdec_bushmeg_dataset_spec_file",
+    "write_pymegdec_bushmeg_dataset_spec_from_args",
+]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
