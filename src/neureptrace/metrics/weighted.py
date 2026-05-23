@@ -62,6 +62,13 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
     return probabilities, labels.astype(int, copy=False)
 
 
+def _validate_n_bins(n_bins: int) -> int:
+    n_bins = int(n_bins)
+    if n_bins < 1:
+        raise ValueError("n_bins must be positive")
+    return n_bins
+
+
 def weighted_brier_score_multiclass(
     probabilities: np.ndarray,
     labels: np.ndarray,
@@ -127,8 +134,7 @@ def weighted_expected_calibration_error(
     """Compute weighted top-label expected calibration error."""
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
-    if n_bins < 1:
-        raise ValueError("n_bins must be positive")
+    n_bins = _validate_n_bins(n_bins)
 
     predictions = probabilities.argmax(axis=1)
     confidences = probabilities.max(axis=1)
@@ -154,10 +160,67 @@ def weighted_expected_calibration_error(
     return float(ece)
 
 
+def weighted_reliability_bins(
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+    sample_weight: Iterable[float] | np.ndarray,
+    *,
+    n_bins: int = 10,
+) -> list[dict[str, float | int]]:
+    """Summarize weighted top-label reliability bins for calibration plots.
+
+    The returned rows keep the unweighted ``reliability_bins`` schema and add
+    ``sample_weight`` plus ``sample_weight_fraction`` so downstream reports can
+    display both raw-bin occupancy and the effective contribution of each bin.
+    """
+    probabilities, labels = _validate_probability_inputs(probabilities, labels)
+    weights = validate_sample_weight(sample_weight, probabilities.shape[0])
+    n_bins = _validate_n_bins(n_bins)
+
+    predictions = probabilities.argmax(axis=1)
+    confidences = probabilities.max(axis=1)
+    correct = predictions == labels
+    total_weight = float(np.sum(weights))
+
+    rows: list[dict[str, float | int]] = []
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    for bin_index, (left, right) in enumerate(zip(edges[:-1], edges[1:])):
+        if right == 1.0:
+            in_bin = (confidences >= left) & (confidences <= right)
+        else:
+            in_bin = (confidences >= left) & (confidences < right)
+        n_samples = int(np.sum(in_bin))
+        bin_weight_sum = float(np.sum(weights[in_bin])) if n_samples else 0.0
+        if n_samples and bin_weight_sum > 0.0:
+            bin_weights = weights[in_bin]
+            accuracy = float(np.average(correct[in_bin].astype(float), weights=bin_weights))
+            confidence = float(np.average(confidences[in_bin], weights=bin_weights))
+            gap = accuracy - confidence
+        else:
+            accuracy = float("nan")
+            confidence = float("nan")
+            gap = float("nan")
+        rows.append(
+            {
+                "bin": bin_index,
+                "bin_left": float(left),
+                "bin_right": float(right),
+                "n_samples": n_samples,
+                "sample_weight": bin_weight_sum,
+                "sample_weight_fraction": bin_weight_sum / total_weight,
+                "accuracy": accuracy,
+                "confidence": confidence,
+                "gap": gap,
+            }
+        )
+    return rows
+
+
 __all__ = [
     "validate_sample_weight",
     "weighted_brier_score_multiclass",
     "weighted_expected_calibration_error",
     "weighted_negative_log_likelihood",
+    "weighted_reliability_bins",
     "weighted_top_k_accuracy",
 ]
