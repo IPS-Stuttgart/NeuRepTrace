@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from neureptrace import cli
 
 
@@ -46,9 +48,5 @@ def test_grouped_cli_json_list_exposes_aliases(capsys) -> None:
 
 
 def test_command_listing_rejects_unknown_format() -> None:
-    try:
+    with pytest.raises(ValueError, match="Unsupported command listing format: yaml"):
         cli._command_listing("yaml")
-    except ValueError as exc:
-        assert "Unsupported command listing format: yaml" in str(exc)
-    else:  # pragma: no cover - defensive assertion helper
-        raise AssertionError("_command_listing() accepted an unsupported format")
