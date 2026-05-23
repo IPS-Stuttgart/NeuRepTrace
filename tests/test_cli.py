@@ -43,6 +43,37 @@ def test_poetry_scripts_expose_mne_decoder_variants():
     assert scripts["neureptrace-mne-time-decode-ensemble"] == "neureptrace.mne_time_decode_ensemble:main"
 
 
+def test_primary_grouped_cli_commands_have_direct_console_scripts():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    scripts = pyproject["tool"]["poetry"]["scripts"]
+
+    grouped_only_aliases = {
+        "dataset-config",
+        "ensemble-observations",
+        "event-detection",
+        "mne-transfer-decode",
+        "observation-schema",
+        "onset-detection",
+        "stimulus-detection",
+        "transfer-decode",
+    }
+    missing = []
+    mismatched = []
+    for command, module in sorted(cli.COMMAND_MODULES.items()):
+        if command in grouped_only_aliases:
+            continue
+        script_name = f"neureptrace-{command}"
+        expected_target = f"{module}:main"
+        actual_target = scripts.get(script_name)
+        if actual_target is None:
+            missing.append(script_name)
+        elif actual_target != expected_target:
+            mismatched.append((script_name, expected_target, actual_target))
+
+    assert not missing
+    assert not mismatched
+
+
 def test_grouped_cli_without_command_prints_help(capsys):
     assert cli.main([]) == 0
     captured = capsys.readouterr()
