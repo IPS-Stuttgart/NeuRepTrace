@@ -45,7 +45,7 @@ def test_top_k_accuracy_handles_multiclass_predictions():
     probabilities = np.array(
         [
             [0.7, 0.2, 0.1],
-            [0.4, 0.35, 0.25],
+            [0.4, 0.25, 0.35],
             [0.1, 0.6, 0.3],
         ]
     )
