@@ -10,6 +10,7 @@ in PyMEGDec for reproducibility.
 NeuRepTrace already contains the main reusable migration pieces:
 
 - FieldTrip-style BUSH-MEG dataset loading and dataset-spec validation.
+- Canonical PyMEGDec/BUSH-MEG dataset-spec rendering for compatibility wrappers.
 - Strict source-only BUSH-MEG LOSO decoding.
 - Source-only top-k ensembles, source-fitted class-bias corrections, and
   top-k reranking from inner source-subject out-of-fold predictions.
@@ -18,6 +19,25 @@ NeuRepTrace already contains the main reusable migration pieces:
 - Fold-local supervised low-rank PLS LOSO utilities.
 - Synthetic FieldTrip fixtures for private-data-free smoke tests.
 - Generic reaction-time loading, joining, and metric-association utilities.
+
+## Canonical PyMEGDec/BUSH-MEG dataset spec helper
+
+PyMEGDec used to carry its own YAML template writer for the historical
+`Part*Data.mat` / `Part*CueData.mat` convention. The canonical template now lives
+in NeuRepTrace:
+
+```python
+from neureptrace.compat.pymegdec_dataset_spec import build_pymegdec_bushmeg_dataset_spec_text
+
+text = build_pymegdec_bushmeg_dataset_spec_text(
+    participants="1-4,6,8,9,10,13-27",
+    env_var="PYMEGDEC_DATA_DIR",
+)
+```
+
+The helper also exposes `write_pymegdec_bushmeg_dataset_spec(...)` for command-line
+adapters. This lets PyMEGDec keep `pymegdec-write-neureptrace-spec` as a deprecated
+wrapper without maintaining a separate copy of the dataset-spec template.
 
 ## Added covariance LOSO workflow
 
