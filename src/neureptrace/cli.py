@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import difflib
 import sys
 from collections.abc import Sequence
+from difflib import get_close_matches
 from importlib import import_module
 
 from neureptrace import __version__
@@ -76,13 +76,17 @@ def _command_listing() -> str:
     return "\n".join(["Available commands:", *rows])
 
 
-def _unknown_command_message(command: str) -> str:
-    """Return a helpful message for a misspelled grouped command."""
-    suggestions = difflib.get_close_matches(command, sorted(COMMAND_MODULES), n=3, cutoff=0.55)
-    suffix = ""
-    if suggestions:
-        suffix = " Close matches: " + ", ".join(suggestions) + "."
-    return f"Unrecognized workflow '{command}'.{suffix} Run 'neureptrace --list-commands' to see available commands."
+def _format_unknown_command_error(command: str) -> str:
+    """Return an actionable error message for a mistyped grouped command."""
+
+    close_matches = get_close_matches(command, sorted(COMMAND_MODULES), n=3, cutoff=0.6)
+    message = f"unknown command '{command}'"
+    if len(close_matches) == 1:
+        message += f". Did you mean '{close_matches[0]}'?"
+    elif close_matches:
+        suggestions = ", ".join(f"'{match}'" for match in close_matches)
+        message += f". Did you mean one of: {suggestions}?"
+    return f"{message} Use --list-commands to inspect available workflows."
 
 
 def _run_module_main(command: str, argv: Sequence[str]) -> int:
@@ -111,8 +115,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_module_main(argv[0], argv[1:])
 
     if argv and not argv[0].startswith("-"):
-        print(_unknown_command_message(argv[0]), file=sys.stderr)
-        return 2
+        print(_format_unknown_command_error(argv[0]), file=sys.stderr)
+        raise SystemExit(2)
 
     parser = argparse.ArgumentParser(description="NeuRepTrace command-line interface.")
     parser.add_argument(
@@ -131,10 +135,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=sorted(COMMAND_MODULES),
-        help="Workflow to run. Pass '<command> --help' for command-specific options.",
+        metavar="command",
+        help="Workflow to run. Use --list-commands to inspect available workflows; pass '<command> --help' for command-specific options.",
     )
     args, remaining = parser.parse_known_args(argv)
+
+    if remaining and args.command is None:
+        parser.error(f"unrecognized arguments: {' '.join(remaining)}")
 
     if args.list_commands:
         print(_command_listing())
@@ -143,6 +150,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+
+    if args.command not in COMMAND_MODULES:
+        parser.error(_format_unknown_command_error(args.command))
 
     return _run_module_main(args.command, remaining)
 
