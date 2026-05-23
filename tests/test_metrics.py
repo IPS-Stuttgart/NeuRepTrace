@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.metrics import (
     brier_score_multiclass,
@@ -9,9 +10,12 @@ from neureptrace.metrics import (
     confusion_counts,
     confusion_pair_summary,
     expected_calibration_error,
+    negative_log_likelihood,
     per_class_accuracy,
     reliability_bins,
     summarize_window_metric,
+    top_k_accuracy,
+    validate_probability_inputs,
 )
 
 
@@ -27,6 +31,50 @@ def test_brier_score_multiclass_perfect_predictions_are_zero():
     labels = np.array([0, 1])
 
     assert brier_score_multiclass(probabilities, labels) == 0.0
+
+
+def test_negative_log_likelihood_scores_true_class_probabilities():
+    probabilities = np.array([[0.8, 0.2], [0.1, 0.9], [0.3, 0.7]])
+    labels = np.array([0, 1, 1])
+
+    expected = -np.mean(np.log([0.8, 0.9, 0.7]))
+    assert negative_log_likelihood(probabilities, labels) == pytest.approx(expected)
+
+
+def test_top_k_accuracy_handles_multiclass_predictions():
+    probabilities = np.array(
+        [
+            [0.7, 0.2, 0.1],
+            [0.4, 0.35, 0.25],
+            [0.1, 0.6, 0.3],
+        ]
+    )
+    labels = np.array([0, 2, 1])
+
+    assert top_k_accuracy(probabilities, labels, k=1) == pytest.approx(2 / 3)
+    assert top_k_accuracy(probabilities, labels, k=2) == 1.0
+
+
+def test_probability_metrics_reject_invalid_probability_rows():
+    labels = np.array([0])
+
+    with pytest.raises(ValueError, match="sum to one"):
+        expected_calibration_error(np.array([[0.2, 0.2]]), labels)
+
+    with pytest.raises(ValueError, match="non-negative"):
+        brier_score_multiclass(np.array([[1.1, -0.1]]), labels)
+
+    with pytest.raises(ValueError, match="valid column indices"):
+        negative_log_likelihood(np.array([[0.5, 0.5]]), np.array([2]))
+
+
+def test_validate_probability_inputs_can_accept_unnormalized_scores_when_requested():
+    scores = np.array([[2.0, 1.0], [0.5, 0.25]])
+
+    probabilities, labels = validate_probability_inputs(scores, require_normalized=False)
+
+    assert labels is None
+    np.testing.assert_allclose(probabilities, scores)
 
 
 def test_reliability_bins_reports_confidence_accuracy_gap():
