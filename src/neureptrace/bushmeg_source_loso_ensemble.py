@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
 
 from neureptrace.bushmeg_source_loso import (
     DEFAULT_RANDOM_SEED,
@@ -47,6 +48,8 @@ DEFAULT_ENSEMBLE_CLASS_BIAS = "none"
 DEFAULT_STACKING_MAX_ITER = 250
 DEFAULT_STACKING_LEARNING_RATE = 0.25
 DEFAULT_STACKING_EPSILON = 1.0e-12
+DEFAULT_RERANK_TOP_K = 0
+DEFAULT_RERANK_ALPHA_GRID = (0.0, 0.25, 0.5, 1.0, 2.0)
 ENSEMBLE_WEIGHTING_MODES = {"uniform", "rank", "softmax", "stacked"}
 ENSEMBLE_CLASS_BIAS_MODES = {"none", "log_prior", "balanced_accuracy"}
 
@@ -71,6 +74,15 @@ class EnsembleMember:
 
 
 @dataclass(frozen=True, slots=True)
+class TopKPairwiseReranker:
+    n_classes: int
+    top_k: int
+    alpha: float
+    intercepts: tuple[float, ...]
+    slopes: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class EnsembleSelection:
     members: tuple[EnsembleMember, ...]
     selection_metric: str
@@ -78,13 +90,15 @@ class EnsembleSelection:
     temperature: float | None
     class_bias_mode: str = "none"
     class_bias: tuple[float, ...] = ()
+    reranker: TopKPairwiseReranker | None = None
     oof_balanced_accuracy: float | None = None
     oof_log_loss: float | None = None
 
     @property
     def name(self) -> str:
         bias_suffix = "" if self.class_bias_mode == "none" else f"__bias_{self.class_bias_mode}"
-        return f"ensemble_top{len(self.members)}__{self.weighting}{bias_suffix}"
+        rerank_suffix = "" if self.reranker is None else f"__rerank_top{self.reranker.top_k}_a{self.reranker.alpha:g}"
+        return f"ensemble_top{len(self.members)}__{self.weighting}{bias_suffix}{rerank_suffix}"
 
 
 def _larger_is_better(score: float, metric: str) -> float:
@@ -124,6 +138,140 @@ def _normalize_ensemble_class_bias(value: Any) -> str:
     if mode not in ENSEMBLE_CLASS_BIAS_MODES:
         raise ValueError(f"Unknown ensemble class-bias mode {value!r}; choose one of {sorted(ENSEMBLE_CLASS_BIAS_MODES)}.")
     return mode
+
+
+def _normalize_rerank_top_k(value: Any) -> int:
+    if value is None:
+        return DEFAULT_RERANK_TOP_K
+    if isinstance(value, str) and value.strip().lower().replace("-", "_") in {"", "none", "off", "false", "no"}:
+        return 0
+    top_k = int(value)
+    if top_k < 0:
+        raise ValueError("source_loso.rerank_top_k must be non-negative; use 0 to disable reranking.")
+    return top_k
+
+
+def _parse_float_grid(value: Any, default: Sequence[float]) -> list[float]:
+    if value is None:
+        values = [float(item) for item in default]
+    elif isinstance(value, str):
+        tokens = [token.strip() for token in value.split(",") if token.strip()]
+        values = [float(token) for token in tokens]
+    elif isinstance(value, Sequence):
+        values = [float(item) for item in value]
+    else:
+        values = [float(value)]
+    if not values or not np.all(np.isfinite(values)):
+        raise ValueError("Reranker alpha grid must contain at least one finite value.")
+    return sorted(set(values))
+
+
+def _softmax_scores(scores: np.ndarray) -> np.ndarray:
+    scores = np.asarray(scores, dtype=float)
+    shifted = scores - np.max(scores, axis=1, keepdims=True)
+    exp_scores = np.exp(np.clip(shifted, -50.0, 50.0))
+    return exp_scores / exp_scores.sum(axis=1, keepdims=True)
+
+
+def _apply_topk_pairwise_reranker(probabilities: np.ndarray, reranker: TopKPairwiseReranker | None) -> np.ndarray:
+    """Apply a source-fitted one-vs-one reranker to only the top-k classes.
+
+    The reranker never sees the held-out subject during fitting.  It only
+    recalibrates ambiguous top-k decisions using source-subject OOF probability
+    margins, so it is a decision-layer correction rather than an additional
+    target-subject training step.
+    """
+
+    probabilities = np.asarray(probabilities, dtype=float)
+    if reranker is None or reranker.alpha <= 0.0 or reranker.top_k <= 1:
+        return probabilities
+    n_classes = int(reranker.n_classes)
+    if probabilities.ndim != 2 or probabilities.shape[1] != n_classes:
+        raise ValueError("Reranker class count does not match probability matrix.")
+    intercepts = np.asarray(reranker.intercepts, dtype=float).reshape(n_classes, n_classes)
+    slopes = np.asarray(reranker.slopes, dtype=float).reshape(n_classes, n_classes)
+    log_probabilities = np.log(np.clip(probabilities, DEFAULT_STACKING_EPSILON, 1.0))
+    scores = log_probabilities.copy()
+    top_k = min(int(reranker.top_k), n_classes)
+    top_indices = np.argsort(log_probabilities, axis=1)[:, -top_k:]
+    for row_index, row_classes in enumerate(top_indices):
+        bonuses = np.zeros(n_classes, dtype=float)
+        for left_position in range(len(row_classes)):
+            for right_position in range(left_position + 1, len(row_classes)):
+                left = int(row_classes[left_position])
+                right = int(row_classes[right_position])
+                class_i, class_j = (left, right) if left < right else (right, left)
+                margin = log_probabilities[row_index, class_i] - log_probabilities[row_index, class_j]
+                pairwise_logit = intercepts[class_i, class_j] + slopes[class_i, class_j] * margin
+                bonuses[class_i] += pairwise_logit
+                bonuses[class_j] -= pairwise_logit
+        scores[row_index, row_classes] += float(reranker.alpha) * bonuses[row_classes] / float(max(top_k - 1, 1))
+    return _softmax_scores(scores)
+
+
+def _fit_topk_pairwise_reranker(
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+    *,
+    n_classes: int,
+    top_k: int,
+    alpha_grid: Sequence[float] | None = None,
+) -> TopKPairwiseReranker | None:
+    """Fit a leakage-safe top-k pairwise reranker from source OOF probabilities."""
+
+    top_k = min(_normalize_rerank_top_k(top_k), int(n_classes))
+    if top_k <= 1:
+        return None
+    probabilities = np.asarray(probabilities, dtype=float)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if probabilities.shape != (labels.shape[0], int(n_classes)):
+        raise ValueError("Reranker probabilities must have shape (n_samples, n_classes).")
+    log_probabilities = np.log(np.clip(probabilities, DEFAULT_STACKING_EPSILON, 1.0))
+    intercepts = np.zeros((int(n_classes), int(n_classes)), dtype=float)
+    slopes = np.zeros((int(n_classes), int(n_classes)), dtype=float)
+    for class_i in range(int(n_classes)):
+        for class_j in range(class_i + 1, int(n_classes)):
+            mask = (labels == class_i) | (labels == class_j)
+            if np.unique(labels[mask]).size < 2:
+                continue
+            margin = (log_probabilities[mask, class_i] - log_probabilities[mask, class_j]).reshape(-1, 1)
+            target = (labels[mask] == class_i).astype(int)
+            if float(np.std(margin)) <= 1e-12:
+                continue
+            try:
+                model = LogisticRegression(C=1.0, class_weight="balanced", solver="lbfgs", max_iter=200)
+                model.fit(margin, target)
+            except ValueError:
+                continue
+            intercepts[class_i, class_j] = float(model.intercept_[0])
+            slopes[class_i, class_j] = float(model.coef_[0, 0])
+
+    alpha_values = _parse_float_grid(alpha_grid, DEFAULT_RERANK_ALPHA_GRID)
+    if 0.0 not in alpha_values:
+        alpha_values = [0.0, *alpha_values]
+    best_alpha = 0.0
+    best_score = _candidate_metrics(probabilities, labels, n_classes=int(n_classes))["balanced_accuracy"]
+    for alpha in alpha_values:
+        candidate = TopKPairwiseReranker(
+            n_classes=int(n_classes),
+            top_k=top_k,
+            alpha=float(alpha),
+            intercepts=tuple(float(value) for value in intercepts.ravel()),
+            slopes=tuple(float(value) for value in slopes.ravel()),
+        )
+        score = _candidate_metrics(_apply_topk_pairwise_reranker(probabilities, candidate), labels, n_classes=int(n_classes))["balanced_accuracy"]
+        if score > best_score + 1e-12:
+            best_score = score
+            best_alpha = float(alpha)
+    if best_alpha <= 0.0:
+        return None
+    return TopKPairwiseReranker(
+        n_classes=int(n_classes),
+        top_k=top_k,
+        alpha=best_alpha,
+        intercepts=tuple(float(value) for value in intercepts.ravel()),
+        slopes=tuple(float(value) for value in slopes.ravel()),
+    )
 
 
 def _weights_from_scores(scores: Sequence[float], *, weighting: str, temperature: float | None) -> np.ndarray:
@@ -256,10 +404,12 @@ def _calibrate_ensemble_from_oof(
     max_iter: int,
     weighting: str,
     class_bias: str,
-) -> tuple[np.ndarray, tuple[float, ...], dict[str, float]]:
+    rerank_top_k: int = DEFAULT_RERANK_TOP_K,
+    rerank_alpha_grid: Sequence[float] | None = None,
+) -> tuple[np.ndarray, tuple[float, ...], TopKPairwiseReranker | None, dict[str, float]]:
     weights = np.asarray(initial_weights, dtype=float).reshape(-1)
-    if weighting != "stacked" and class_bias == "none":
-        return weights, (), {}
+    if weighting != "stacked" and class_bias == "none" and _normalize_rerank_top_k(rerank_top_k) <= 1:
+        return weights, (), None, {}
 
     probability_cube, labels = _source_oof_probabilities(
         subjects=subjects,
@@ -275,9 +425,17 @@ def _calibrate_ensemble_from_oof(
     bias = _fit_class_bias(combined, labels, n_classes=n_classes, mode=class_bias)
     if class_bias != "none":
         combined = _apply_class_bias(combined, bias)
+    reranker = _fit_topk_pairwise_reranker(
+        combined,
+        labels,
+        n_classes=n_classes,
+        top_k=rerank_top_k,
+        alpha_grid=rerank_alpha_grid,
+    )
+    combined = _apply_topk_pairwise_reranker(combined, reranker)
     metrics = _candidate_metrics(combined, labels, n_classes=n_classes)
     bias_tuple = tuple(float(value) for value in bias) if class_bias != "none" else ()
-    return weights, bias_tuple, metrics
+    return weights, bias_tuple, reranker, metrics
 
 
 def _select_ensemble(
@@ -293,6 +451,8 @@ def _select_ensemble(
     weighting: str,
     temperature: float | None,
     class_bias: str = DEFAULT_ENSEMBLE_CLASS_BIAS,
+    rerank_top_k: int = DEFAULT_RERANK_TOP_K,
+    rerank_alpha_grid: Sequence[float] | None = None,
 ) -> tuple[EnsembleSelection, list[dict[str, Any]], list[dict[str, Any]]]:
     if metric not in SUPPORTED_SELECTION_METRICS:
         raise ValueError(f"Unknown selection metric {metric!r}; choose one of {sorted(SUPPORTED_SELECTION_METRICS)}.")
@@ -308,7 +468,7 @@ def _select_ensemble(
     selected = ranked[: min(top_k, len(ranked))]
     weights = _weights_from_scores([item.comparable_score for item in selected], weighting=weighting, temperature=temperature)
     class_bias = _normalize_ensemble_class_bias(class_bias)
-    weights, bias, oof_metrics = _calibrate_ensemble_from_oof(
+    weights, bias, reranker, oof_metrics = _calibrate_ensemble_from_oof(
         subjects=subjects,
         cache=cache,
         selected=selected,
@@ -318,6 +478,8 @@ def _select_ensemble(
         max_iter=max_iter,
         weighting=weighting,
         class_bias=class_bias,
+        rerank_top_k=rerank_top_k,
+        rerank_alpha_grid=rerank_alpha_grid,
     )
     members = tuple(EnsembleMember(item.candidate, rank, float(weight), item.mean_score, item.std_score, item.comparable_score) for rank, (item, weight) in enumerate(zip(selected, weights, strict=True), start=1))
     selection = EnsembleSelection(
@@ -327,6 +489,7 @@ def _select_ensemble(
         temperature,
         class_bias_mode=class_bias,
         class_bias=bias,
+        reranker=reranker,
         oof_balanced_accuracy=oof_metrics.get("balanced_accuracy"),
         oof_log_loss=oof_metrics.get("log_loss"),
     )
@@ -344,6 +507,8 @@ def _select_ensemble(
             "ensemble_weight": float(weights[rank - 1]) if rank <= len(weights) else 0.0,
             "ensemble_class_bias": class_bias,
             "ensemble_oof_balanced_accuracy": "" if selection.oof_balanced_accuracy is None else selection.oof_balanced_accuracy,
+            "ensemble_rerank_top_k": "" if selection.reranker is None else selection.reranker.top_k,
+            "ensemble_rerank_alpha": "" if selection.reranker is None else selection.reranker.alpha,
             "ensemble_oof_log_loss": "" if selection.oof_log_loss is None else selection.oof_log_loss,
         }
         for rank, item in enumerate(ranked, start=1)
@@ -374,6 +539,8 @@ def _predict_ensemble(
     combined = _renormalize(probability_sum)
     if selection.class_bias:
         combined = _apply_class_bias(combined, np.asarray(selection.class_bias, dtype=float))
+    if selection.reranker is not None:
+        combined = _apply_topk_pairwise_reranker(combined, selection.reranker)
     return combined
 
 
@@ -388,6 +555,8 @@ def _selection_rowspec(selection: EnsembleSelection) -> dict[str, Any]:
         "ensemble_temperature": "" if selection.temperature is None else selection.temperature,
         "ensemble_class_bias": selection.class_bias_mode,
         "ensemble_class_bias_values": "|".join(f"{value:.8g}" for value in selection.class_bias),
+        "ensemble_rerank_top_k": "" if selection.reranker is None else selection.reranker.top_k,
+        "ensemble_rerank_alpha": "" if selection.reranker is None else selection.reranker.alpha,
         "ensemble_oof_balanced_accuracy": "" if selection.oof_balanced_accuracy is None else selection.oof_balanced_accuracy,
         "ensemble_oof_log_loss": "" if selection.oof_log_loss is None else selection.oof_log_loss,
         "ensemble_candidates": "|".join(member.candidate.name for member in selection.members),
@@ -418,6 +587,8 @@ def run_bushmeg_source_loso_ensemble(
     weighting = _normalize_weighting(source_loso.get("ensemble_weighting", DEFAULT_ENSEMBLE_WEIGHTING))
     temperature = _normalize_temperature(source_loso.get("ensemble_temperature", DEFAULT_ENSEMBLE_TEMPERATURE), weighting)
     class_bias = _normalize_ensemble_class_bias(source_loso.get("ensemble_class_bias", DEFAULT_ENSEMBLE_CLASS_BIAS))
+    rerank_top_k = _normalize_rerank_top_k(source_loso.get("rerank_top_k", source_loso.get("ensemble_rerank_top_k", DEFAULT_RERANK_TOP_K)))
+    rerank_alpha_grid = _parse_float_grid(source_loso.get("rerank_alpha_grid", source_loso.get("ensemble_rerank_alpha_grid", DEFAULT_RERANK_ALPHA_GRID)), DEFAULT_RERANK_ALPHA_GRID)
     max_iter = int((_section(config, "decoding") or {}).get("max_iter", 1000))
 
     subjects, encoder = _load_subjects_from_config(config, config_dir=config_path.parent)
@@ -435,7 +606,21 @@ def run_bushmeg_source_loso_ensemble(
     rank_rows: list[dict[str, Any]] = []
     prediction_rows: list[dict[str, Any]] = []
     for outer_test_subject in sorted(subjects):
-        selection, fold_inner_rows, fold_rank_rows = _select_ensemble(subjects=subjects, cache=cache, candidates=candidates, outer_test_subject=outer_test_subject, n_classes=n_classes, max_iter=max_iter, metric=metric, top_k=top_k, weighting=weighting, temperature=temperature, class_bias=class_bias)
+        selection, fold_inner_rows, fold_rank_rows = _select_ensemble(
+            subjects=subjects,
+            cache=cache,
+            candidates=candidates,
+            outer_test_subject=outer_test_subject,
+            n_classes=n_classes,
+            max_iter=max_iter,
+            metric=metric,
+            top_k=top_k,
+            weighting=weighting,
+            temperature=temperature,
+            class_bias=class_bias,
+            rerank_top_k=rerank_top_k,
+            rerank_alpha_grid=rerank_alpha_grid,
+        )
         inner_rows.extend(fold_inner_rows)
         rank_rows.extend(fold_rank_rows)
         train_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
@@ -489,7 +674,26 @@ def run_bushmeg_source_loso_ensemble(
     for path, frame in ((out, summary), (inner_out, pd.DataFrame(inner_rows)), (rank_out, pd.DataFrame(rank_rows)), (pred_out, pd.DataFrame(prediction_rows))):
         path.parent.mkdir(parents=True, exist_ok=True)
         frame.to_csv(path, index=False)
-    _write_json_sidecar(out, {"config_path": str(config_path), "selection_metric": metric, "ensemble_top_k": top_k, "ensemble_weighting": weighting, "ensemble_temperature": temperature, "ensemble_class_bias": class_bias, "stacking_max_iter": DEFAULT_STACKING_MAX_ITER, "n_subjects": len(subjects), "n_candidates": len(candidates), "cue_files_used": False, "target_labels_used_for_selection": False, "target_unlabeled_data_used_for_calibration": False, "random_seed": DEFAULT_RANDOM_SEED})
+    _write_json_sidecar(
+        out,
+        {
+            "config_path": str(config_path),
+            "selection_metric": metric,
+            "ensemble_top_k": top_k,
+            "ensemble_weighting": weighting,
+            "ensemble_temperature": temperature,
+            "ensemble_class_bias": class_bias,
+            "rerank_top_k": rerank_top_k,
+            "rerank_alpha_grid": rerank_alpha_grid,
+            "stacking_max_iter": DEFAULT_STACKING_MAX_ITER,
+            "n_subjects": len(subjects),
+            "n_candidates": len(candidates),
+            "cue_files_used": False,
+            "target_labels_used_for_selection": False,
+            "target_unlabeled_data_used_for_calibration": False,
+            "random_seed": DEFAULT_RANDOM_SEED,
+        },
+    )
     return summary
 
 

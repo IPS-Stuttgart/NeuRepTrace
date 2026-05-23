@@ -13,6 +13,7 @@ from neureptrace.bushmeg_source_loso import (
     _apply_class_bias,
     _candidate_metrics,
     _class_prototype_similarity_features,
+    _candidate_grid,
     _fit_candidate_model,
     _fit_class_bias,
     _preprocessing_normalization_name,
@@ -99,6 +100,38 @@ def test_template_similarity_features_are_source_subject_prototype_scores():
 def test_normalize_source_feature_family_aliases():
     assert normalize_source_feature_family("template-corr") == "template_similarity"
     assert normalize_source_feature_family("templates-plus-bin-means") == "template_similarity_plus_bin_means"
+
+
+def test_candidate_grid_supports_range_and_full_epoch_window_sets():
+    config = {
+        "preprocessing": {"window_size": 0.100, "tmin": -0.35, "tmax": 0.70},
+        "decoding": {
+            "classifier": "multinomial-logistic",
+            "emission_mode": "uncalibrated",
+            "feature_preprocessor": "none",
+            "pca_components": None,
+            "tuning_c_grid": "1.0",
+        },
+        "source_loso": {
+            "candidate_grid": {
+                "decoders": ["logistic"],
+                "emission_modes": ["uncalibrated"],
+                "feature_preprocessors": ["none"],
+                "pca_components": [None],
+                "temporal_bins": [2],
+                "c_grid": [1.0],
+                "window_sets": [
+                    {"name": "late", "start": 0.300, "stop": 0.400, "step": 0.050, "window_size": 0.100},
+                    {"name": "full", "full_epoch": True, "start": 0.000, "stop": 0.650},
+                ],
+            }
+        },
+    }
+
+    window_specs = {tuple((round(window.center, 3), round(window.width, 3)) for window in candidate.windows) for candidate in _candidate_grid(config)}
+
+    assert ((0.3, 0.1), (0.35, 0.1), (0.4, 0.1)) in window_specs
+    assert ((0.325, 0.65),) in window_specs
 
 
 def test_window_feature_kinds_add_logvar_and_covariance_branches():

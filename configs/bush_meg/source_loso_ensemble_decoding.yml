@@ -52,6 +52,10 @@ source_loso:
   ensemble_weighting: stacked
   ensemble_class_bias: balanced_accuracy
   ensemble_temperature: 0.01
+  # Optional source-only top-k reranker fitted on inner source-subject OOF
+  # ensemble probabilities.  This targets the observed top-2/top-3 gap.
+  rerank_top_k: 3
+  rerank_alpha_grid: [0.0, 0.25, 0.5, 1.0, 2.0]
   candidate_grid:
     temporal_bins: [4]
     decoders: [multinomial-logistic, linear_svm]

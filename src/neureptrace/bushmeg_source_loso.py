@@ -308,6 +308,120 @@ def _window_size_seconds(preprocessing: Mapping[str, Any], default: float = 0.10
     return float(default)
 
 
+def _float_list_value(value: Any, default: Sequence[float]) -> list[float]:
+    """Return a config scalar/list as finite floats."""
+
+    values = [float(item) for item in _list_value(value, default)]
+    if not values:
+        raise ValueError("Expected at least one floating-point value.")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("Window-grid values must be finite.")
+    return values
+
+
+def _inclusive_float_range(start: float, stop: float, step: float) -> list[float]:
+    """Return an inclusive float grid, robust to binary rounding noise."""
+
+    start = float(start)
+    stop = float(stop)
+    step = float(step)
+    if not np.all(np.isfinite([start, stop, step])):
+        raise ValueError("Window range start/stop/step must be finite.")
+    if step <= 0.0:
+        raise ValueError("Window range step must be positive.")
+    if stop < start:
+        raise ValueError("Window range stop must be greater than or equal to start.")
+    values: list[float] = []
+    current = start
+    tolerance = abs(step) * 1e-9 + 1e-12
+    while current <= stop + tolerance:
+        values.append(round(float(current), 12))
+        current += step
+    return values
+
+
+def _config_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off", ""}:
+        return False
+    raise ValueError(f"Cannot interpret {value!r} as a boolean.")
+
+
+def _window_sets_from_config_item(
+    item: Mapping[str, Any],
+    *,
+    default_window_width: float,
+    preprocessing: Mapping[str, Any],
+) -> list[tuple[str, tuple[WindowSpec, ...]]]:
+    """Expand one ``source_loso.candidate_grid.window_sets`` entry.
+
+    Supported forms:
+
+    * legacy explicit centers: ``centers: [0.150, 0.175]``;
+    * generated late grids: ``start: 0.300, stop: 0.550, step: 0.050``;
+    * compact full-epoch windows: ``full_epoch: true, start: 0.0, stop: 0.65``.
+
+    The full-epoch form still uses compact temporal-bin means, so it does not
+    explode into sensor-by-sample flattened features.
+    """
+
+    name = str(item.get("name", "windows"))
+    if _config_bool(item.get("full_epoch"), default=False):
+        start = float(item.get("start", item.get("tmin", preprocessing.get("tmin", 0.0))))
+        stop = float(item.get("stop", item.get("tmax", preprocessing.get("tmax", start + default_window_width))))
+        if not np.all(np.isfinite([start, stop])) or stop <= start:
+            raise ValueError(f"full_epoch window set '{name}' must have finite stop > start.")
+        return [(name, (WindowSpec(center=(start + stop) / 2.0, width=stop - start),))]
+
+    raw_widths = item.get("window_sizes", item.get("widths", item.get("window_size", item.get("width", default_window_width))))
+    widths = _float_list_value(raw_widths, [default_window_width])
+    if any(width <= 0.0 for width in widths):
+        raise ValueError(f"window set '{name}' contains a non-positive width.")
+
+    if "centers" in item:
+        centers = _float_list_value(item.get("centers"), [])
+    elif {"start", "stop", "step"}.issubset(item):
+        centers = _inclusive_float_range(float(item["start"]), float(item["stop"]), float(item["step"]))
+    else:
+        raise ValueError(
+            f"window set '{name}' must define either centers, start/stop/step, or full_epoch: true."
+        )
+
+    expanded: list[tuple[str, tuple[WindowSpec, ...]]] = []
+    for width in widths:
+        width_name = name if len(widths) == 1 else f"{name}_w{int(round(width * 1000.0))}ms"
+        expanded.append((width_name, tuple(WindowSpec(center=center, width=width) for center in centers)))
+    return expanded
+
+
+def _candidate_window_sets(grid: Mapping[str, Any], preprocessing: Mapping[str, Any]) -> list[tuple[str, tuple[WindowSpec, ...]]]:
+    default_window_width = _window_size_seconds(preprocessing)
+    raw_window_sets = grid.get("window_sets") or [
+        {"name": "single_150ms", "centers": [0.150], "window_size": default_window_width},
+        {"name": "single_175ms", "centers": [0.175], "window_size": default_window_width},
+        {"name": "single_200ms", "centers": [0.200], "window_size": default_window_width},
+        {"name": "triplet_150_200ms", "centers": [0.150, 0.175, 0.200], "window_size": default_window_width},
+    ]
+    window_sets: list[tuple[str, tuple[WindowSpec, ...]]] = []
+    for item in raw_window_sets:
+        if not isinstance(item, Mapping):
+            raise ValueError("window_sets entries must be mappings.")
+        window_sets.extend(
+            _window_sets_from_config_item(
+                item,
+                default_window_width=default_window_width,
+                preprocessing=preprocessing,
+            )
+        )
+    return window_sets
+
+
 def _preprocessing_normalization_name(preprocessing: Mapping[str, Any]) -> str:
     """Return the configured subject-level normalization, accepting legacy aliases."""
 
@@ -1360,23 +1474,7 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
     if not isinstance(grid, Mapping):
         raise ValueError("source_loso.candidate_grid must be a mapping.")
 
-    default_window_width = _window_size_seconds(preprocessing)
-    raw_window_sets = grid.get("window_sets") or [
-        {"name": "single_150ms", "centers": [0.150], "window_size": default_window_width},
-        {"name": "single_175ms", "centers": [0.175], "window_size": default_window_width},
-        {"name": "single_200ms", "centers": [0.200], "window_size": default_window_width},
-        {"name": "triplet_150_200ms", "centers": [0.150, 0.175, 0.200], "window_size": default_window_width},
-    ]
-    window_sets: list[tuple[str, tuple[WindowSpec, ...]]] = []
-    for item in raw_window_sets:
-        if not isinstance(item, Mapping):
-            raise ValueError("window_sets entries must be mappings.")
-        name = str(item.get("name", "windows"))
-        width = float(item.get("window_size", item.get("width", default_window_width)))
-        centers = [float(center) for center in _list_value(item.get("centers"), [])]
-        if not centers:
-            raise ValueError(f"window set '{name}' must contain at least one center.")
-        window_sets.append((name, tuple(WindowSpec(center=center, width=width) for center in centers)))
+    window_sets = _candidate_window_sets(grid, preprocessing)
 
     decoders = [str(value) for value in _list_value(grid.get("decoders"), [decoding.get("decoder", decoding.get("classifier", "multinomial-logistic"))])]
     emission_modes = [str(value) for value in _list_value(grid.get("emission_modes"), [decoding.get("emission_mode", "uncalibrated")])]
