@@ -40,6 +40,11 @@ from neureptrace.bushmeg_source_loso import (
     _section,
 )
 from neureptrace.dataset_config import apply_overrides, load_config
+from neureptrace.bushmeg_cue_source_weights import (
+    CueSourceWeights,
+    resolve_cue_source_weights,
+    write_cue_source_weight_csv,
+)
 
 DEFAULT_ENSEMBLE_TOP_K = 5
 DEFAULT_ENSEMBLE_WEIGHTING = "softmax"
@@ -365,6 +370,7 @@ def _source_oof_probabilities(
     outer_test_subject: str,
     n_classes: int,
     max_iter: int,
+    cue_source_weights: CueSourceWeights | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return candidate × source-trial × class probabilities from inner LOSO."""
 
@@ -386,6 +392,7 @@ def _source_oof_probabilities(
                     test_subject=inner_test_subject,
                     n_classes=n_classes,
                     max_iter=max_iter,
+                    subject_weight_multipliers=None if cue_source_weights is None else cue_source_weights.for_fold(inner_test_subject, train_subjects),
                 )
             )
     probability_cube = np.stack([np.vstack(blocks) for blocks in probability_blocks], axis=0)
@@ -404,6 +411,7 @@ def _calibrate_ensemble_from_oof(
     max_iter: int,
     weighting: str,
     class_bias: str,
+    cue_source_weights: CueSourceWeights | None = None,
     rerank_top_k: int = DEFAULT_RERANK_TOP_K,
     rerank_alpha_grid: Sequence[float] | None = None,
 ) -> tuple[np.ndarray, tuple[float, ...], TopKPairwiseReranker | None, dict[str, float]]:
@@ -418,6 +426,7 @@ def _calibrate_ensemble_from_oof(
         outer_test_subject=outer_test_subject,
         n_classes=n_classes,
         max_iter=max_iter,
+        cue_source_weights=cue_source_weights,
     )
     if weighting == "stacked":
         weights = _fit_stacking_weights(probability_cube, labels, n_classes=n_classes)
@@ -451,6 +460,7 @@ def _select_ensemble(
     weighting: str,
     temperature: float | None,
     class_bias: str = DEFAULT_ENSEMBLE_CLASS_BIAS,
+    cue_source_weights: CueSourceWeights | None = None,
     rerank_top_k: int = DEFAULT_RERANK_TOP_K,
     rerank_alpha_grid: Sequence[float] | None = None,
 ) -> tuple[EnsembleSelection, list[dict[str, Any]], list[dict[str, Any]]]:
@@ -461,7 +471,15 @@ def _select_ensemble(
     inner_rows: list[dict[str, Any]] = []
     summaries: list[CandidateSummary] = []
     for candidate in candidates:
-        rows = _inner_loso_scores(subjects=subjects, cache=cache, candidate=candidate, outer_test_subject=outer_test_subject, n_classes=n_classes, max_iter=max_iter)
+        rows = _inner_loso_scores(
+            subjects=subjects,
+            cache=cache,
+            candidate=candidate,
+            outer_test_subject=outer_test_subject,
+            n_classes=n_classes,
+            max_iter=max_iter,
+            cue_source_weights=cue_source_weights,
+        )
         inner_rows.extend(rows)
         summaries.append(_candidate_summary(candidate, rows, metric))
     ranked = sorted(summaries, key=lambda item: (-item.comparable_score, item.candidate.name))
@@ -478,6 +496,7 @@ def _select_ensemble(
         max_iter=max_iter,
         weighting=weighting,
         class_bias=class_bias,
+        cue_source_weights=cue_source_weights,
         rerank_top_k=rerank_top_k,
         rerank_alpha_grid=rerank_alpha_grid,
     )
@@ -532,10 +551,11 @@ def _predict_ensemble(
     test_subject: str,
     n_classes: int,
     max_iter: int,
+    subject_weight_multipliers: Mapping[str, float] | None = None,
 ) -> np.ndarray:
     probability_sum = np.zeros((len(subjects[test_subject].labels), n_classes), dtype=float)
     for member in selection.members:
-        probability_sum += member.weight * _predict_candidate(subjects=subjects, cache=cache, candidate=member.candidate, train_subjects=train_subjects, test_subject=test_subject, n_classes=n_classes, max_iter=max_iter)
+        probability_sum += member.weight * _predict_candidate(subjects=subjects, cache=cache, candidate=member.candidate, train_subjects=train_subjects, test_subject=test_subject, n_classes=n_classes, max_iter=max_iter, subject_weight_multipliers=subject_weight_multipliers)
     combined = _renormalize(probability_sum)
     if selection.class_bias:
         combined = _apply_class_bias(combined, np.asarray(selection.class_bias, dtype=float))
@@ -594,12 +614,14 @@ def run_bushmeg_source_loso_ensemble(
     subjects, encoder = _load_subjects_from_config(config, config_dir=config_path.parent)
     candidates = _candidate_grid(config)
     cache = FeatureCache(subjects)
+    cue_source_weights = resolve_cue_source_weights(config, config_dir=config_path.parent, known_subjects=subjects)
     n_classes = len(encoder.classes_)
 
     out = Path(out_path) if out_path is not None else _resolve_output(config, config_dir=config_path.parent, key="source_loso_ensemble_summary_csv", default="source_loso_ensemble_summary.csv")
     inner_out = Path(inner_cv_out_path) if inner_cv_out_path is not None else _resolve_output(config, config_dir=config_path.parent, key="source_loso_ensemble_inner_cv_csv", default="source_loso_ensemble_inner_cv.csv")
     pred_out = Path(predictions_out_path) if predictions_out_path is not None else _resolve_output(config, config_dir=config_path.parent, key="source_loso_ensemble_predictions_csv", default="source_loso_ensemble_predictions.csv")
     rank_out = Path(candidate_summary_out_path) if candidate_summary_out_path is not None else _resolve_output(config, config_dir=config_path.parent, key="source_loso_ensemble_candidate_summary_csv", default="source_loso_ensemble_candidate_summary.csv")
+    cue_weights_out = _resolve_output(config, config_dir=config_path.parent, key="source_loso_ensemble_cue_weights_csv", default="source_loso_ensemble_cue_source_weights.csv")
 
     summary_rows: list[dict[str, Any]] = []
     inner_rows: list[dict[str, Any]] = []
@@ -618,13 +640,15 @@ def run_bushmeg_source_loso_ensemble(
             weighting=weighting,
             temperature=temperature,
             class_bias=class_bias,
+            cue_source_weights=cue_source_weights,
             rerank_top_k=rerank_top_k,
             rerank_alpha_grid=rerank_alpha_grid,
         )
         inner_rows.extend(fold_inner_rows)
         rank_rows.extend(fold_rank_rows)
         train_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
-        probabilities = _predict_ensemble(subjects=subjects, cache=cache, selection=selection, train_subjects=train_subjects, test_subject=outer_test_subject, n_classes=n_classes, max_iter=max_iter)
+        fold_subject_weights = None if cue_source_weights is None else cue_source_weights.for_fold(outer_test_subject, train_subjects)
+        probabilities = _predict_ensemble(subjects=subjects, cache=cache, selection=selection, train_subjects=train_subjects, test_subject=outer_test_subject, n_classes=n_classes, max_iter=max_iter, subject_weight_multipliers=fold_subject_weights)
         labels = subjects[outer_test_subject].labels
         predictions = probabilities.argmax(axis=1)
         member_scores = np.asarray([member.mean_score for member in selection.members], dtype=float)
@@ -637,6 +661,9 @@ def run_bushmeg_source_loso_ensemble(
             "inner_best_score": float(np.min(member_scores) if metric in MINIMIZE_SELECTION_METRICS else np.max(member_scores)),
             "inner_std_score": float(np.std(member_scores, ddof=0)),
             "inner_n_folds": len(train_subjects),
+            "cue_source_weighting": "" if cue_source_weights is None else cue_source_weights.mode,
+            "cue_source_weighting_blend": "" if cue_source_weights is None else cue_source_weights.blend,
+            "cue_source_weights": "" if not fold_subject_weights else "|".join(f"{subject}:{weight:.8g}" for subject, weight in sorted(fold_subject_weights.items())),
             **_candidate_metrics(probabilities, labels, n_classes=n_classes),
             "n_train_subjects": len(train_subjects),
             "n_test_trials": len(labels),
@@ -674,6 +701,8 @@ def run_bushmeg_source_loso_ensemble(
     for path, frame in ((out, summary), (inner_out, pd.DataFrame(inner_rows)), (rank_out, pd.DataFrame(rank_rows)), (pred_out, pd.DataFrame(prediction_rows))):
         path.parent.mkdir(parents=True, exist_ok=True)
         frame.to_csv(path, index=False)
+    if cue_source_weights is not None:
+        write_cue_source_weight_csv(cue_source_weights, sorted(subjects), cue_weights_out)
     _write_json_sidecar(
         out,
         {
@@ -688,7 +717,9 @@ def run_bushmeg_source_loso_ensemble(
             "stacking_max_iter": DEFAULT_STACKING_MAX_ITER,
             "n_subjects": len(subjects),
             "n_candidates": len(candidates),
-            "cue_files_used": False,
+            "cue_files_used": cue_source_weights is not None,
+            "cue_files_used_for_classifier_training": False,
+            "cue_source_weighting_config": {} if cue_source_weights is None else dict(cue_source_weights.config or {}),
             "target_labels_used_for_selection": False,
             "target_unlabeled_data_used_for_calibration": False,
             "random_seed": DEFAULT_RANDOM_SEED,

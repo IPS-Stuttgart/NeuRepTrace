@@ -1,8 +1,10 @@
 """Strict source-only LOSO decoding workflow for the BUSH-MEG main task.
 
-The workflow is intentionally cue-free: it loads only the configured main-task
+The workflow is cue-free by default: it loads only the configured main-task
 FieldTrip MATLAB files, performs leave-one-subject-out evaluation, and selects
 window/model hyperparameters by an inner LOSO loop over source subjects only.
+Optionally, cue files can be used for fold-local source-subject weighting; cue
+epochs are never added as classifier training or test trials.
 
 The implementation differs from the generic time-resolved decoder in two ways
 that matter for BUSH-MEG:
@@ -49,6 +51,11 @@ from neureptrace.decoding import (
     predict_emission_probabilities,
 )
 from neureptrace.io.fieldtrip_mat import load_fieldtrip_mat_epochs
+from neureptrace.bushmeg_cue_source_weights import (
+    CueSourceWeights,
+    resolve_cue_source_weights,
+    write_cue_source_weight_csv,
+)
 
 DEFAULT_SELECTION_METRIC = "balanced_accuracy"
 DEFAULT_RANDOM_SEED = 13
@@ -1018,29 +1025,43 @@ def _sample_weights_for_training(
     subject_ids: Sequence[str],
     labels: np.ndarray,
     mode: str,
+    subject_weight_multipliers: Mapping[str, float] | None = None,
 ) -> np.ndarray | None:
-    """Return mean-one training weights for class/subject-balanced fitting."""
+    """Return mean-one training weights for class/subject/cue-balanced fitting."""
 
     mode = _normalize_sample_weighting(mode)
-    if mode == "none":
-        return None
     labels = np.asarray(labels, dtype=int).reshape(-1)
     sample_subjects = _stack_subject_ids(subjects, subject_ids)
-    if mode == "class_balanced":
-        keys = [(int(label),) for label in labels]
-    elif mode == "subject_balanced":
-        keys = [(str(subject),) for subject in sample_subjects]
-    elif mode == "subject_class_balanced":
-        keys = [(str(subject), int(label)) for subject, label in zip(sample_subjects, labels, strict=True)]
-    else:  # pragma: no cover - guarded by _normalize_sample_weighting
-        raise ValueError(f"Unsupported sample weighting mode: {mode}")
+    if mode == "none":
+        weights = np.ones(labels.shape[0], dtype=np.float64)
+    else:
+        if mode == "class_balanced":
+            keys = [(int(label),) for label in labels]
+        elif mode == "subject_balanced":
+            keys = [(str(subject),) for subject in sample_subjects]
+        elif mode == "subject_class_balanced":
+            keys = [(str(subject), int(label)) for subject, label in zip(sample_subjects, labels, strict=True)]
+        else:  # pragma: no cover - guarded by _normalize_sample_weighting
+            raise ValueError(f"Unsupported sample weighting mode: {mode}")
 
-    counts: dict[tuple[Any, ...], int] = {}
-    for key in keys:
-        counts[key] = counts.get(key, 0) + 1
-    weights = np.asarray([1.0 / counts[key] for key in keys], dtype=np.float64)
-    weights /= float(weights.mean())
-    return weights
+        counts: dict[tuple[Any, ...], int] = {}
+        for key in keys:
+            counts[key] = counts.get(key, 0) + 1
+        weights = np.asarray([1.0 / counts[key] for key in keys], dtype=np.float64)
+
+    if subject_weight_multipliers:
+        lookup = {str(subject): float(weight) for subject, weight in subject_weight_multipliers.items()}
+        multipliers = np.asarray([lookup.get(str(subject), 1.0) for subject in sample_subjects], dtype=np.float64)
+        if np.any(~np.isfinite(multipliers)) or np.any(multipliers < 0.0):
+            raise ValueError("Cue/source subject weight multipliers must be finite and non-negative.")
+        weights *= multipliers
+    elif mode == "none":
+        return None
+
+    mean_weight = float(weights.mean())
+    if not np.isfinite(mean_weight) or mean_weight <= 0.0:
+        raise ValueError("Training sample weights must have positive finite mean.")
+    return weights / mean_weight
 
 
 def _fit_candidate_model(
@@ -1270,9 +1291,16 @@ def _predict_candidate(
     test_subject: str,
     n_classes: int,
     max_iter: int,
+    subject_weight_multipliers: Mapping[str, float] | None = None,
 ) -> np.ndarray:
     train_labels = _stack_subject_labels(subjects, train_subjects)
-    sample_weight = _sample_weights_for_training(subjects, train_subjects, train_labels, candidate.sample_weighting)
+    sample_weight = _sample_weights_for_training(
+        subjects,
+        train_subjects,
+        train_labels,
+        candidate.sample_weighting,
+        subject_weight_multipliers=subject_weight_multipliers,
+    )
     test_n = len(subjects[test_subject].labels)
     probabilities_sum = np.zeros((test_n, n_classes), dtype=float)
     class_bias_mode = _normalize_class_bias(candidate.class_bias)
@@ -1395,6 +1423,7 @@ def _inner_loso_scores(
     outer_test_subject: str,
     n_classes: int,
     max_iter: int,
+    cue_source_weights: CueSourceWeights | None = None,
 ) -> list[dict[str, Any]]:
     source_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
     rows: list[dict[str, Any]] = []
@@ -1408,6 +1437,7 @@ def _inner_loso_scores(
             test_subject=inner_test_subject,
             n_classes=n_classes,
             max_iter=max_iter,
+            subject_weight_multipliers=None if cue_source_weights is None else cue_source_weights.for_fold(inner_test_subject, train_subjects),
         )
         labels = subjects[inner_test_subject].labels
         rows.append(
@@ -1432,6 +1462,7 @@ def _select_candidate(
     n_classes: int,
     max_iter: int,
     selection_metric: str,
+    cue_source_weights: CueSourceWeights | None = None,
 ) -> tuple[CandidateSpec, list[dict[str, Any]], dict[str, Any]]:
     if selection_metric not in SUPPORTED_SELECTION_METRICS:
         raise ValueError(f"Unknown selection metric '{selection_metric}'. Available metrics: {sorted(SUPPORTED_SELECTION_METRICS)}.")
@@ -1447,6 +1478,7 @@ def _select_candidate(
             outer_test_subject=outer_test_subject,
             n_classes=n_classes,
             max_iter=max_iter,
+            cue_source_weights=cue_source_weights,
         )
         all_rows.extend(rows)
         frame = pd.DataFrame(rows)
@@ -1625,6 +1657,7 @@ def run_bushmeg_source_loso(
     subjects, encoder = _load_subjects_from_config(config, config_dir=config_path.parent)
     candidates = _candidate_grid(config)
     cache = FeatureCache(subjects)
+    cue_source_weights = resolve_cue_source_weights(config, config_dir=config_path.parent, known_subjects=subjects)
     n_classes = len(encoder.classes_)
 
     out = Path(out_path) if out_path is not None else _resolve_output(
@@ -1645,6 +1678,12 @@ def run_bushmeg_source_loso(
         key="source_loso_predictions_csv",
         default="source_loso_predictions.csv",
     )
+    cue_weights_out = _resolve_output(
+        config,
+        config_dir=config_path.parent,
+        key="source_loso_cue_weights_csv",
+        default="source_loso_cue_source_weights.csv",
+    )
 
     summary_rows: list[dict[str, Any]] = []
     inner_rows: list[dict[str, Any]] = []
@@ -1658,9 +1697,11 @@ def run_bushmeg_source_loso(
             n_classes=n_classes,
             max_iter=max_iter,
             selection_metric=selection_metric,
+            cue_source_weights=cue_source_weights,
         )
         inner_rows.extend(candidate_inner_rows)
         train_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
+        fold_subject_weights = None if cue_source_weights is None else cue_source_weights.for_fold(outer_test_subject, train_subjects)
         probabilities = _predict_candidate(
             subjects=subjects,
             cache=cache,
@@ -1669,6 +1710,7 @@ def run_bushmeg_source_loso(
             test_subject=outer_test_subject,
             n_classes=n_classes,
             max_iter=max_iter,
+            subject_weight_multipliers=fold_subject_weights,
         )
         labels = subjects[outer_test_subject].labels
         predictions = probabilities.argmax(axis=1)
@@ -1679,6 +1721,9 @@ def run_bushmeg_source_loso(
                 **selected_summary,
                 **_candidate_metrics(probabilities, labels, n_classes=n_classes),
                 "n_train_subjects": len(train_subjects),
+                "cue_source_weighting": "" if cue_source_weights is None else cue_source_weights.mode,
+                "cue_source_weighting_blend": "" if cue_source_weights is None else cue_source_weights.blend,
+                "cue_source_weights": "" if not fold_subject_weights else "|".join(f"{subject}:{weight:.8g}" for subject, weight in sorted(fold_subject_weights.items())),
                 "n_test_trials": len(labels),
                 "n_classes": n_classes,
                 "class_names": "|".join(map(str, encoder.classes_)),
@@ -1715,6 +1760,8 @@ def run_bushmeg_source_loso(
     summary.to_csv(out, index=False)
     inner.to_csv(inner_out, index=False)
     predictions.to_csv(predictions_out, index=False)
+    if cue_source_weights is not None:
+        write_cue_source_weight_csv(cue_source_weights, sorted(subjects), cue_weights_out)
     _write_json_sidecar(
         out,
         {
@@ -1729,7 +1776,10 @@ def run_bushmeg_source_loso(
             ),
             "sample_weighting_modes": sorted({candidate.sample_weighting for candidate in candidates}),
             "class_bias_modes": sorted({candidate.class_bias for candidate in candidates}),
-            "cue_files_used": False,
+            "cue_files_used": cue_source_weights is not None,
+            "cue_files_used_for_classifier_training": False,
+            "target_labels_used_for_selection": False,
+            "cue_source_weighting_config": {} if cue_source_weights is None else dict(cue_source_weights.config or {}),
             "random_seed": DEFAULT_RANDOM_SEED,
         },
     )
