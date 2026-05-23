@@ -57,5 +57,16 @@ workflows:
       window_stop_s: 0.6
       window_step_s: 0.05
 
+  stimulus_transfer_reverse:
+    split: cue
+    manifest:
+      paired_split: main
+      transfer_direction: cue-to-main
+      classifier: multiclass-svm
+      chance: 0.0625
+      window_start_s: -0.2
+      window_stop_s: 0.6
+      window_step_s: 0.05
+
 outputs:
   default_dir: outputs

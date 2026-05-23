@@ -12,6 +12,8 @@ from neureptrace.datasets.pymegdec import (
     write_pymegdec_bushmeg_dataset_spec_from_args,
 )
 
+_PYMEGDEC_COMMANDS = {"pymegdec-bushmeg", "write-pymegdec-bushmeg", "write-pymegdec-spec"}
+
 
 def _parse_subject_arg(value: str | None) -> tuple[str, ...] | None:
     if value is None:
@@ -39,7 +41,11 @@ def _build_parser() -> argparse.ArgumentParser:
     manifest.add_argument("--root", default=None, help="Override the data root resolved by the spec.")
     manifest.add_argument("--out", required=True, help="Output CSV manifest path.")
 
-    pymegdec_bushmeg = subparsers.add_parser("pymegdec-bushmeg", help="Write the canonical PyMEGDec/BUSH-MEG dataset spec.")
+    pymegdec_bushmeg = subparsers.add_parser(
+        "pymegdec-bushmeg",
+        aliases=["write-pymegdec-bushmeg", "write-pymegdec-spec"],
+        help="Write the canonical PyMEGDec/BUSH-MEG dataset spec.",
+    )
     add_pymegdec_bushmeg_dataset_spec_arguments(pymegdec_bushmeg)
 
     return parser
@@ -54,7 +60,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    if args.command == "pymegdec-bushmeg":
+    if args.command in _PYMEGDEC_COMMANDS:
         return write_pymegdec_bushmeg_dataset_spec_from_args(args)
 
     spec = load_dataset_spec(args.spec)

@@ -114,6 +114,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if argv and argv[0] in COMMAND_MODULES:
         return _run_module_main(argv[0], argv[1:])
 
+    if argv and not argv[0].startswith("-"):
+        print(_format_unknown_command_error(argv[0]), file=sys.stderr)
+        raise SystemExit(2)
+
     parser = argparse.ArgumentParser(description="NeuRepTrace command-line interface.")
     parser.add_argument(
         "--version",
