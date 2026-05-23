@@ -4,7 +4,36 @@ updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    groups:
+      python-core-stack:
+        patterns:
+          - "numpy"
+          - "scipy"
+          - "pandas"
+          - "scikit-learn"
+          - "mne"
+      docs-stack:
+        patterns:
+          - "mkdocs*"
+          - "mkdocstrings*"
     exclude-paths:
       - "requirements.txt"
       - "requirements-dev.txt"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:30"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
