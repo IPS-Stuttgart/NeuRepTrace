@@ -70,7 +70,15 @@ source_loso:
     temporal_bins: 8
   candidate_grid:
     temporal_bins: [2, 4]
-    feature_kinds: [evoked, evoked_logvar, prototype, evoked_prototype, xdawn, xdawn_prototype]
+    feature_kinds:
+      [
+        evoked,
+        evoked_logvar,
+        prototype,
+        evoked_prototype,
+        xdawn,
+        xdawn_prototype,
+      ]
     feature_families: [bin_means, template_similarity]
     sample_weightings: [subject_class_balanced]
     class_bias_modes: [none, balanced_accuracy]
