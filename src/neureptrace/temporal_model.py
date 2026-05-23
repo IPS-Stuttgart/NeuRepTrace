@@ -55,6 +55,26 @@ def _class_names(frame: pd.DataFrame, prob_columns: list[str]) -> list[str]:
     return names
 
 
+def _validate_probability_matrix(probabilities: np.ndarray) -> np.ndarray:
+    """Return probability-like observations as a finite non-negative matrix."""
+    try:
+        probability_array = np.asarray(probabilities, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Probability observations must be numeric.") from exc
+    if probability_array.ndim != 2:
+        raise ValueError("Probability observations must have shape (n_samples, n_classes).")
+    if probability_array.shape[0] == 0 or probability_array.shape[1] == 0:
+        raise ValueError("Probability observations must contain at least one sample and one class.")
+    if not np.all(np.isfinite(probability_array)):
+        raise ValueError("Probability observations must contain only finite values.")
+    if np.any(probability_array < -EPSILON):
+        raise ValueError("Probability observations must be non-negative.")
+    row_sums = probability_array.sum(axis=1)
+    if np.any(row_sums <= EPSILON):
+        raise ValueError("Probability observation rows must have positive mass.")
+    return probability_array
+
+
 def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
     """Read held-out probability observation CSVs emitted by NeuRepTrace."""
     if not csv_paths:
@@ -66,7 +86,8 @@ def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
         missing = [column for column in ("time",) if column not in frame.columns]
         if missing:
             raise ValueError(f"{csv_path} is missing required columns: {missing}")
-        probability_columns(frame)
+        prob_columns = probability_columns(frame)
+        _validate_probability_matrix(frame[prob_columns].to_numpy())
         if "sequence_id" not in frame.columns:
             if "sample_index" not in frame.columns:
                 raise ValueError(f"{csv_path} is missing 'sequence_id' or 'sample_index'.")
@@ -95,7 +116,8 @@ def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
 
 
 def _normalize_probabilities(probabilities: np.ndarray) -> np.ndarray:
-    clipped = np.clip(np.asarray(probabilities, dtype=float), EPSILON, 1.0)
+    probability_array = _validate_probability_matrix(probabilities)
+    clipped = np.maximum(probability_array, EPSILON)
     row_sums = clipped.sum(axis=1, keepdims=True)
     return clipped / row_sums
 
