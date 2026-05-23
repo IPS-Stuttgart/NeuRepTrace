@@ -71,6 +71,29 @@ def test_doctor_summary_counts_statuses():
     assert summary["error"] == 0
 
 
+def test_doctor_can_validate_entry_points(capsys):
+    code = doctor_main(["--json", "--skip-optional", "--check-entry-points"])
+
+    payload = json.loads(capsys.readouterr().out)
+    names = {check["name"] for check in payload["checks"]}
+    assert "grouped-command:doctor" in names
+    assert "grouped-command:mne-time-decode" in names
+    assert any(name.startswith("entry-point:neureptrace") for name in names)
+    assert payload["summary"]["error"] == 0
+    assert code in {0, 1}
+    if payload["summary"]["warning"] == 0:
+        assert code == 0
+
+
+def test_run_checks_can_validate_entry_points_directly():
+    checks = run_checks(include_optional=False, check_entry_points=True)
+    names = {check.name for check in checks}
+
+    assert "grouped-command:doctor" in names
+    assert "grouped-command:mne-time-decode" in names
+    assert not [check for check in checks if check.status == "error"]
+
+
 def test_grouped_cli_exposes_doctor():
     assert cli.COMMAND_MODULES["doctor"] == "neureptrace.doctor"
     assert cli.COMMAND_MODULES["env"] == "neureptrace.doctor"
