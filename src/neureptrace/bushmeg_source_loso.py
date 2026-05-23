@@ -23,6 +23,7 @@ that matter for BUSH-MEG:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import warnings
 from collections.abc import Mapping, Sequence
@@ -74,6 +75,7 @@ SOURCE_FEATURE_FAMILIES = (
 MINIMIZE_SELECTION_METRICS = {"log_loss"}
 SAMPLE_WEIGHTING_MODES = {"none", "class_balanced", "subject_balanced", "subject_class_balanced"}
 CLASS_BIAS_MODES = {"none", "log_prior", "balanced_accuracy"}
+PSEUDOTRIAL_TRAINING_MODES = {"off", "replace", "augment"}
 DEFAULT_CLASS_BIAS_DELTAS = (-2.0, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 2.0)
 DEFAULT_CLASS_BIAS_ROUNDS = 2
 FEATURE_KIND_CHOICES = (
@@ -208,7 +210,9 @@ class CandidateSpec:
     feature_family: str = "bin_means"
     sample_weighting: str = "none"
     class_bias: str = "none"
-    pseudotrials_per_subject_class: int = 0
+    pseudotrials_per_class: int = 0
+    pseudotrial_mode: str = "off"
+    pseudotrial_seed: int = DEFAULT_RANDOM_SEED
 
     @property
     def window_centers(self) -> tuple[float, ...]:
@@ -355,6 +359,39 @@ def _normalize_class_bias(value: str | None) -> str:
         return "balanced_accuracy"
     if normalized not in CLASS_BIAS_MODES:
         raise ValueError(f"Unknown class-bias mode '{value}'. Available modes: {sorted(CLASS_BIAS_MODES)}.")
+    return normalized
+
+
+def _normalize_pseudotrial_mode(value: str | None, *, pseudotrials_per_class: int | None = None) -> str:
+    """Normalize source pseudo-trial training modes."""
+
+    if pseudotrials_per_class is not None and int(pseudotrials_per_class) <= 0:
+        return "off"
+    normalized = "replace" if value is None else str(value).strip().lower().replace("-", "_")
+    aliases = {
+        "": "off",
+        "0": "off",
+        "false": "off",
+        "no": "off",
+        "none": "off",
+        "off": "off",
+        "mean": "replace",
+        "average": "replace",
+        "averaged": "replace",
+        "class_mean": "replace",
+        "class_means": "replace",
+        "pseudotrial": "replace",
+        "pseudotrials": "replace",
+        "pseudo_trial": "replace",
+        "pseudo_trials": "replace",
+        "add": "augment",
+        "append": "augment",
+        "augmented": "augment",
+        "concat": "augment",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in PSEUDOTRIAL_TRAINING_MODES:
+        raise ValueError(f"Unknown pseudo-trial mode '{value}'. Available modes: {sorted(PSEUDOTRIAL_TRAINING_MODES)}.")
     return normalized
 
 
@@ -1457,18 +1494,19 @@ def _stack_subject_ids(subjects: Mapping[str, SubjectEpochs], subject_ids: Seque
     return np.concatenate([np.full(len(subjects[subject_id].labels), subject_id, dtype=object) for subject_id in subject_ids], axis=0)
 
 
-def _sample_weights_for_training(
-    subjects: Mapping[str, SubjectEpochs],
-    subject_ids: Sequence[str],
+def _sample_weights_from_subject_labels(
+    sample_subjects: Sequence[str] | np.ndarray,
     labels: np.ndarray,
     mode: str,
     subject_weight_multipliers: Mapping[str, float] | None = None,
 ) -> np.ndarray | None:
-    """Return mean-one training weights for class/subject/cue-balanced fitting."""
+    """Return mean-one training weights for an explicit row-subject vector."""
 
     mode = _normalize_sample_weighting(mode)
     labels = np.asarray(labels, dtype=int).reshape(-1)
-    sample_subjects = _stack_subject_ids(subjects, subject_ids)
+    sample_subjects = np.asarray(sample_subjects, dtype=object).reshape(-1)
+    if sample_subjects.shape[0] != labels.shape[0]:
+        raise ValueError("sample_subjects and labels must contain one value per training row.")
     if mode == "none":
         weights = np.ones(labels.shape[0], dtype=np.float64)
     else:
@@ -1501,76 +1539,98 @@ def _sample_weights_for_training(
     return weights / mean_weight
 
 
-def _source_pseudotrial_training_features(
+def _sample_weights_for_training(
+    subjects: Mapping[str, SubjectEpochs],
+    subject_ids: Sequence[str],
+    labels: np.ndarray,
+    mode: str,
+    subject_weight_multipliers: Mapping[str, float] | None = None,
+) -> np.ndarray | None:
+    """Return mean-one training weights for class/subject/cue-balanced fitting."""
+
+    return _sample_weights_from_subject_labels(
+        _stack_subject_ids(subjects, subject_ids),
+        labels,
+        mode,
+        subject_weight_multipliers=subject_weight_multipliers,
+    )
+
+
+def _stable_pseudotrial_seed(seed: int, *tokens: object) -> int:
+    """Return a deterministic NumPy seed for one candidate/window/fold context."""
+
+    payload = json.dumps([int(seed), *[str(token) for token in tokens]], separators=(",", ":")).encode("utf-8")
+    digest = hashlib.blake2b(payload, digest_size=8).digest()
+    return int.from_bytes(digest, "little") & 0x7FFFFFFF
+
+
+def _source_class_pseudotrials(
     features: np.ndarray,
     labels: np.ndarray,
-    subject_ids: np.ndarray,
+    sample_subjects: Sequence[str] | np.ndarray,
     *,
-    pseudotrials_per_subject_class: int,
-    random_seed: int = DEFAULT_RANDOM_SEED,
-    sample_weight: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    """Average source trials into deterministic subject-class pseudo-trials.
+    n_classes: int,
+    pseudotrials_per_class: int,
+    pseudotrial_mode: str,
+    pseudotrial_seed: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Average source trials within each subject/class before classifier fitting.
 
-    Pseudo-trials are built only from the current source-training subjects. The
-    held-out subject is never used, so this is a variance-reduction option rather
-    than an alignment/calibration step. Each subject/class cell contributes up to
-    ``pseudotrials_per_subject_class`` averaged rows; if a cell has fewer trials
-    than requested, it contributes one row per available trial.
+    Pseudo-trials are built only from source-subject training rows. Held-out
+    subject trials remain untouched single trials. ``replace`` trains only on
+    averaged rows; ``augment`` appends averaged rows to original source trials.
     """
 
-    n_pseudotrials = int(pseudotrials_per_subject_class)
-    labels = np.asarray(labels, dtype=int).reshape(-1)
-    subject_ids = np.asarray(subject_ids, dtype=object).reshape(-1)
-    if n_pseudotrials <= 0:
-        passthrough_weight = None if sample_weight is None else np.asarray(sample_weight, dtype=float).reshape(-1)
-        return np.asarray(features, dtype=np.float32), labels, passthrough_weight
-
+    count = int(pseudotrials_per_class)
+    mode = _normalize_pseudotrial_mode(pseudotrial_mode, pseudotrials_per_class=count)
     features = np.asarray(features, dtype=np.float32)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    sample_subjects = np.asarray(sample_subjects, dtype=object).reshape(-1)
     if features.ndim != 2:
-        raise ValueError("Pseudo-trial aggregation expects a two-dimensional feature matrix.")
-    if features.shape[0] != labels.shape[0] or labels.shape[0] != subject_ids.shape[0]:
-        raise ValueError("features, labels, and subject_ids must contain the same number of rows.")
-    if sample_weight is not None:
-        weights = np.asarray(sample_weight, dtype=float).reshape(-1)
-        if weights.shape[0] != labels.shape[0]:
-            raise ValueError("sample_weight must contain one value per source trial before pseudo-trial aggregation.")
-    else:
-        weights = None
+        raise ValueError("Pseudo-trial features must be a two-dimensional matrix.")
+    if features.shape[0] != labels.shape[0] or labels.shape[0] != sample_subjects.shape[0]:
+        raise ValueError("features, labels, and sample_subjects must have matching row counts.")
+    if mode == "off":
+        return features, labels, sample_subjects
+    if count < 1:
+        raise ValueError("pseudotrials_per_class must be positive when pseudo-trial training is enabled.")
 
-    blocks: list[np.ndarray] = []
-    block_labels: list[int] = []
-    block_weights: list[float] = []
-    subject_ids_str = np.asarray([str(subject) for subject in subject_ids], dtype=object)
-    ordered_subjects = list(dict.fromkeys(subject_ids_str.tolist()))
-    for subject_offset, subject_id in enumerate(ordered_subjects):
-        subject_mask = subject_ids_str == subject_id
-        for class_label in np.unique(labels[subject_mask]):
-            row_indices = np.flatnonzero(subject_mask & (labels == int(class_label)))
-            if row_indices.size == 0:
+    subject_strings = sample_subjects.astype(str)
+    pseudo_features: list[np.ndarray] = []
+    pseudo_labels: list[int] = []
+    pseudo_subjects: list[str] = []
+    for subject in sorted(set(subject_strings.tolist())):
+        subject_mask = subject_strings == subject
+        for class_idx in range(int(n_classes)):
+            indices = np.flatnonzero(subject_mask & (labels == class_idx))
+            if indices.size == 0:
                 continue
-            rng = np.random.default_rng(int(random_seed) + 1009 * subject_offset + 9173 * int(class_label))
-            shuffled = rng.permutation(row_indices)
-            n_chunks = min(n_pseudotrials, int(row_indices.size))
+            rng = np.random.default_rng(
+                _stable_pseudotrial_seed(pseudotrial_seed, subject, class_idx, indices.size, features.shape[1])
+            )
+            shuffled = rng.permutation(indices)
+            n_chunks = min(count, int(indices.size))
             for chunk in np.array_split(shuffled, n_chunks):
                 if chunk.size == 0:
                     continue
-                blocks.append(features[chunk].mean(axis=0, dtype=np.float64).astype(np.float32))
-                block_labels.append(int(class_label))
-                if weights is not None:
-                    block_weights.append(float(np.sum(weights[chunk])))
+                pseudo_features.append(features[chunk].mean(axis=0, dtype=np.float64).astype(np.float32, copy=False))
+                pseudo_labels.append(class_idx)
+                pseudo_subjects.append(subject)
 
-    if not blocks:
-        raise ValueError("No source pseudo-trials could be constructed from the training fold.")
-    pseudo_features = np.vstack(blocks).astype(np.float32, copy=False)
-    pseudo_labels = np.asarray(block_labels, dtype=labels.dtype)
-    if weights is None:
-        return pseudo_features, pseudo_labels, None
-    pseudo_weights = np.asarray(block_weights, dtype=float)
-    mean_weight = float(pseudo_weights.mean())
-    if not np.isfinite(mean_weight) or mean_weight <= 0.0:
-        raise ValueError("Pseudo-trial sample weights must have positive finite mean.")
-    return pseudo_features, pseudo_labels, pseudo_weights / mean_weight
+    if not pseudo_features:
+        raise ValueError("Pseudo-trial training was enabled but no source pseudo-trials could be built.")
+    pseudo_x = np.vstack(pseudo_features).astype(np.float32, copy=False)
+    pseudo_y = np.asarray(pseudo_labels, dtype=int)
+    pseudo_s = np.asarray(pseudo_subjects, dtype=object)
+    if mode == "replace":
+        return pseudo_x, pseudo_y, pseudo_s
+    if mode == "augment":
+        return (
+            np.vstack([features, pseudo_x]).astype(np.float32, copy=False),
+            np.concatenate([labels, pseudo_y]).astype(int, copy=False),
+            np.concatenate([sample_subjects, pseudo_s]).astype(object, copy=False),
+        )
+    raise AssertionError(f"Unhandled pseudo-trial training mode: {mode}")
 
 
 def _fit_candidate_model(
@@ -1818,13 +1878,6 @@ def _predict_candidate(
 ) -> np.ndarray:
     train_labels = _stack_subject_labels(subjects, train_subjects)
     train_subject_ids = _stack_subject_ids(subjects, train_subjects)
-    raw_sample_weight = _sample_weights_for_training(
-        subjects,
-        train_subjects,
-        train_labels,
-        candidate.sample_weighting,
-        subject_weight_multipliers=subject_weight_multipliers,
-    )
     test_n = len(subjects[test_subject].labels)
     probabilities_sum = np.zeros((test_n, n_classes), dtype=float)
     class_bias_mode = _normalize_class_bias(candidate.class_bias)
@@ -1868,19 +1921,23 @@ def _predict_candidate(
                 window=window,
                 n_classes=n_classes,
             )
-        fit_labels = train_labels
-        fit_sample_weight = raw_sample_weight
-        if int(candidate.pseudotrials_per_subject_class) > 0:
-            train_features, fit_labels, fit_sample_weight = _source_pseudotrial_training_features(
-                train_features,
-                train_labels,
-                train_subject_ids,
-                pseudotrials_per_subject_class=int(candidate.pseudotrials_per_subject_class),
-                random_seed=DEFAULT_RANDOM_SEED,
-                sample_weight=raw_sample_weight,
-            )
-        model = _candidate_model(candidate, max_iter=max_iter, n_features=train_features.shape[1], n_samples=train_features.shape[0])
-        _fit_candidate_model(model, train_features, fit_labels, sample_weight=fit_sample_weight)
+        fit_features, fit_labels, fit_subjects = _source_class_pseudotrials(
+            train_features,
+            train_labels,
+            train_subject_ids,
+            n_classes=n_classes,
+            pseudotrials_per_class=int(candidate.pseudotrials_per_class),
+            pseudotrial_mode=candidate.pseudotrial_mode,
+            pseudotrial_seed=int(candidate.pseudotrial_seed),
+        )
+        fit_sample_weight = _sample_weights_from_subject_labels(
+            fit_subjects,
+            fit_labels,
+            candidate.sample_weighting,
+            subject_weight_multipliers=subject_weight_multipliers,
+        )
+        model = _candidate_model(candidate, max_iter=max_iter, n_features=fit_features.shape[1], n_samples=fit_features.shape[0])
+        _fit_candidate_model(model, fit_features, fit_labels, sample_weight=fit_sample_weight)
         probabilities = predict_emission_probabilities(
             model,
             test_features,
@@ -1899,7 +1956,7 @@ def _predict_candidate(
                 raise ValueError("Class-bias fitting requires a stable source-training representation across candidate windows.")
             train_probabilities = predict_emission_probabilities(
                 model,
-                train_features,
+                fit_features,
                 emission_mode=candidate.emission_mode,
             )
             train_probabilities_sum += _base._align_probability_columns(
@@ -1937,6 +1994,10 @@ def _score_is_better(candidate_score: float, incumbent_score: float | None, *, m
 
 
 def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
+    pseudotrial_mode = _normalize_pseudotrial_mode(
+        candidate.pseudotrial_mode,
+        pseudotrials_per_class=int(candidate.pseudotrials_per_class),
+    )
     return {
         "candidate": candidate.name,
         "feature_family": normalize_source_feature_family(candidate.feature_family),
@@ -1947,7 +2008,9 @@ def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
         "classifier_param": "" if candidate.classifier_param is None else candidate.classifier_param,
         "sample_weighting": _normalize_sample_weighting(candidate.sample_weighting),
         "class_bias": _normalize_class_bias(candidate.class_bias),
-        "pseudotrials_per_subject_class": int(candidate.pseudotrials_per_subject_class),
+        "pseudotrials_per_class": int(candidate.pseudotrials_per_class) if pseudotrial_mode != "off" else 0,
+        "pseudotrial_mode": pseudotrial_mode,
+        "pseudotrial_seed": "" if pseudotrial_mode == "off" else int(candidate.pseudotrial_seed),
         "temporal_bins": candidate.temporal_bins,
         "feature_kind": normalize_source_feature_kind(candidate.feature_kind),
         "xdawn_components": "" if candidate.xdawn_components is None else candidate.xdawn_components,
@@ -2108,7 +2171,34 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
             )
         )
     )
-    include_pseudotrial_name_token = len(pseudotrial_values) > 1 or any(value > 0 for value in pseudotrial_values)
+    pseudotrial_mode_values = [
+        str(value)
+        for value in _list_value(
+            grid.get("pseudotrial_modes", grid.get("pseudotrial_mode", source_loso.get("pseudotrial_mode", "replace"))),
+            ["replace"],
+        )
+    ]
+    pseudotrial_seed_values = [
+        int(value)
+        for value in _list_value(
+            grid.get("pseudotrial_seeds", grid.get("pseudotrial_seed", source_loso.get("pseudotrial_seed", DEFAULT_RANDOM_SEED))),
+            [DEFAULT_RANDOM_SEED],
+        )
+    ]
+    pseudotrial_options: list[tuple[int, str, int]] = []
+    for count in pseudotrial_values:
+        if int(count) <= 0:
+            pseudotrial_options.append((0, "off", DEFAULT_RANDOM_SEED))
+            continue
+        for mode_value in pseudotrial_mode_values:
+            mode = _normalize_pseudotrial_mode(mode_value, pseudotrials_per_class=int(count))
+            if mode == "off":
+                pseudotrial_options.append((0, "off", DEFAULT_RANDOM_SEED))
+                continue
+            for seed in pseudotrial_seed_values:
+                pseudotrial_options.append((int(count), mode, int(seed)))
+    pseudotrial_options = list(dict.fromkeys(pseudotrial_options))
+    include_pseudotrial_name_token = len(pseudotrial_options) > 1 or any(count > 0 for count, _mode, _seed in pseudotrial_options)
 
     candidates: list[CandidateSpec] = []
     for window_name, windows in window_sets:
@@ -2137,7 +2227,7 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                                     )
                                     for xdawn_components in xdawn_component_grid:
                                         for covariance_max_channels in covariance_channel_grid:
-                                            for pseudotrials_per_subject_class in pseudotrial_values:
+                                            for pseudotrials_per_class, pseudotrial_mode, pseudotrial_seed in pseudotrial_options:
                                                 normalized_decoder = normalize_decoder_name(decoder)
                                                 classifier_grid = (
                                                     deep_weight_decay_grid
@@ -2170,7 +2260,9 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                                                                 f"covch{covariance_max_channels}",
                                                             ]
                                                             if include_pseudotrial_name_token:
-                                                                name_tokens.append(f"pt{pseudotrials_per_subject_class}")
+                                                                name_tokens.append(f"pt{pseudotrial_mode}{pseudotrials_per_class}")
+                                                                if pseudotrial_mode != "off":
+                                                                    name_tokens.append(f"ptseed{pseudotrial_seed}")
                                                             name_tokens.extend(
                                                                 [
                                                                     _normalize_sample_weighting(sample_weighting),
@@ -2195,7 +2287,9 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                                                                     feature_family=feature_family,
                                                                     sample_weighting=sample_weighting,
                                                                     class_bias=class_bias,
-                                                                    pseudotrials_per_subject_class=pseudotrials_per_subject_class,
+                                                                    pseudotrials_per_class=pseudotrials_per_class,
+                                                                    pseudotrial_mode=pseudotrial_mode,
+                                                                    pseudotrial_seed=pseudotrial_seed,
                                                                 )
                                                             )
     return candidates
@@ -2345,7 +2439,16 @@ def run_bushmeg_source_loso(
             ),
             "sample_weighting_modes": sorted({candidate.sample_weighting for candidate in candidates}),
             "class_bias_modes": sorted({candidate.class_bias for candidate in candidates}),
-            "pseudotrials_per_subject_class": sorted({int(candidate.pseudotrials_per_subject_class) for candidate in candidates}),
+            "pseudotrials_per_class": sorted({int(candidate.pseudotrials_per_class) for candidate in candidates}),
+            "pseudotrial_modes": sorted(
+                {
+                    _normalize_pseudotrial_mode(
+                        candidate.pseudotrial_mode,
+                        pseudotrials_per_class=int(candidate.pseudotrials_per_class),
+                    )
+                    for candidate in candidates
+                }
+            ),
             "cue_files_used": cue_source_weights is not None,
             "cue_files_used_for_classifier_training": False,
             "target_labels_used_for_selection": False,
