@@ -65,6 +65,16 @@ COMMAND_MODULES = {
 }
 
 
+def _command_listing() -> str:
+    """Return a stable, human-readable inventory of grouped commands."""
+    width = max((len(command) for command in COMMAND_MODULES), default=0)
+    rows = [
+        f"  {command:<{width}}  {COMMAND_MODULES[command]}"
+        for command in sorted(COMMAND_MODULES)
+    ]
+    return "\n".join(["Available commands:", *rows])
+
+
 def _run_module_main(command: str, argv: Sequence[str]) -> int:
     """Run a NeuRepTrace module-level ``main`` as a grouped subcommand."""
     module = import_module(COMMAND_MODULES[command])
@@ -98,12 +108,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Show the installed NeuRepTrace version and exit.",
     )
     parser.add_argument(
+        "--list-commands",
+        "--list",
+        dest="list_commands",
+        action="store_true",
+        help="List grouped workflow commands and their backing modules, then exit.",
+    )
+    parser.add_argument(
         "command",
         nargs="?",
         choices=sorted(COMMAND_MODULES),
         help="Workflow to run. Pass '<command> --help' for command-specific options.",
     )
     args, remaining = parser.parse_known_args(argv)
+
+    if args.list_commands:
+        print(_command_listing())
+        return 0
 
     if args.command is None:
         parser.print_help()
