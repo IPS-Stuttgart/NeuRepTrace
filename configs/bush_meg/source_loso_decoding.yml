@@ -59,10 +59,14 @@ source_loso:
     # smaller than sensor×sample flattening while preserving coarse dynamics.
     temporal_bins: [4]
     # evoked_slope keeps the evoked bin means as a prefix and appends compact
-    # within-bin temporal contrasts; inner LOSO can still select plain evoked.
+    # within-bin temporal contrasts. evoked_dct keeps low-order temporal cosine
+    # coefficients over the same source-only window, exposing within-window
+    # shape without flattening all sensor×sample points. Inner LOSO can still
+    # select plain evoked.
     feature_kinds:
       - evoked
       - evoked_slope
+      - evoked_dct
     decoders:
       - multinomial-logistic
       - linear_svm

@@ -9,8 +9,9 @@ epochs are never added as classifier training or test trials.
 The implementation differs from the generic time-resolved decoder in two ways
 that matter for BUSH-MEG:
 
-* temporal features are compact per-channel bin means or bin-level temporal
-  slope contrasts rather than very large sensor-by-sample windows;
+* temporal features are compact per-channel bin means, low-order temporal DCT
+  coefficients, or bin-level temporal slope contrasts rather than very large
+  sensor-by-sample windows;
 * optional source-class template-similarity features turn each trial into a
   low-dimensional vector of leave-source-subject-out class-prototype scores;
 * a candidate may average probabilities from several nearby post-stimulus
@@ -29,6 +30,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy.fft import dct
 from scipy.linalg import eigh
 from scipy.signal import butter, sosfilt, sosfiltfilt
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
@@ -78,6 +80,7 @@ FEATURE_KIND_CHOICES = (
     "logvar",
     "covariance",
     "evoked_slope",
+    "evoked_dct",
     "evoked_stats",
     "evoked_logvar",
     "evoked_bandpower",
@@ -87,6 +90,7 @@ FEATURE_KIND_CHOICES = (
     "evoked_prototype",
     "logvar_prototype",
     "evoked_slope_prototype",
+    "evoked_dct_prototype",
     "evoked_stats_prototype",
     "evoked_bandpower_prototype",
     "evoked_logvar_prototype",
@@ -97,10 +101,12 @@ FEATURE_KIND_CHOICES = (
     "mnn_evoked_covariance",
     "mnn_prototype",
     "mnn_evoked_slope",
+    "mnn_evoked_dct",
     "mnn_evoked_prototype",
     "mnn_logvar_prototype",
     "mnn_evoked_logvar_prototype",
     "mnn_evoked_slope_prototype",
+    "mnn_evoked_dct_prototype",
     "xdawn",
     "xdawn_prototype",
 )
@@ -117,6 +123,7 @@ PROTOTYPE_FEATURE_KINDS = frozenset(
         "evoked_bandpower_prototype",
         "evoked_slope_prototype",
         "evoked_stats_prototype",
+        "evoked_dct_prototype",
         "evoked_logvar_prototype",
         "xdawn_prototype",
         "mnn_prototype",
@@ -124,6 +131,7 @@ PROTOTYPE_FEATURE_KINDS = frozenset(
         "mnn_logvar_prototype",
         "mnn_evoked_logvar_prototype",
         "mnn_evoked_slope_prototype",
+        "mnn_evoked_dct_prototype",
     }
 )
 SUPERVISED_FEATURE_KINDS = PROTOTYPE_FEATURE_KINDS | {"xdawn"}
@@ -134,6 +142,7 @@ PROTOTYPE_BASE_FEATURE_KINDS = {
     "bandpower_prototype": "bandpower",
     "evoked_slope_prototype": "evoked_slope",
     "evoked_stats_prototype": "evoked_stats",
+    "evoked_dct_prototype": "evoked_dct",
     "evoked_logvar_prototype": "evoked_logvar",
     "evoked_bandpower_prototype": "evoked_bandpower",
     "mnn_prototype": "mnn_evoked",
@@ -141,6 +150,7 @@ PROTOTYPE_BASE_FEATURE_KINDS = {
     "mnn_evoked_slope_prototype": "mnn_evoked_slope",
     "mnn_logvar_prototype": "mnn_logvar",
     "mnn_evoked_logvar_prototype": "mnn_evoked_logvar",
+    "mnn_evoked_dct_prototype": "mnn_evoked_dct",
 }
 
 
@@ -348,6 +358,18 @@ def normalize_source_feature_kind(feature_kind: str) -> str:
         "evoked_temporal_gradient": "evoked_slope",
         "evoked_temporal_slope": "evoked_slope",
         "temporal_slope": "evoked_slope",
+        "dct": "evoked_dct",
+        "temporal_dct": "evoked_dct",
+        "evoked_cosine": "evoked_dct",
+        "evoked_temporal_dct": "evoked_dct",
+        "evoked_dct_coefficients": "evoked_dct",
+        "dct_prototype": "evoked_dct_prototype",
+        "temporal_dct_prototype": "evoked_dct_prototype",
+        "evoked_cosine_prototype": "evoked_dct_prototype",
+        "evoked_temporal_dct_prototype": "evoked_dct_prototype",
+        "mnn_dct": "mnn_evoked_dct",
+        "mnn_temporal_dct": "mnn_evoked_dct",
+        "mnn_dct_prototype": "mnn_evoked_dct_prototype",
         "evoked_derivative_prototype": "evoked_slope_prototype",
         "evoked_gradient_prototype": "evoked_slope_prototype",
         "evoked_temporal_slope_prototype": "evoked_slope_prototype",
@@ -701,6 +723,41 @@ def _window_evoked_slope_features(
         slope_features.append(np.tensordot(segment, weights, axes=([2], [0])))
 
     return np.concatenate([*mean_features, *slope_features], axis=1).astype(np.float32, copy=False)
+
+
+def _window_evoked_dct_features(
+    data: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    temporal_bins: int,
+) -> np.ndarray:
+    """Return low-order temporal DCT coefficients per channel.
+
+    For this feature kind, ``temporal_bins`` is interpreted as the number of
+    DCT-II coefficients retained from the selected window.  Coefficient 0 is a
+    DC/mean-like term, and subsequent coefficients capture progressively finer
+    within-window evoked shape.  The transform is unsupervised and uses only the
+    current subject's signal, so it remains valid in strict source-only LOSO.
+    """
+
+    if temporal_bins < 1:
+        raise ValueError("temporal_bins must be at least one.")
+    indices = _sample_indices_for_window(times, window)
+    n_coefficients = int(temporal_bins)
+    if indices.size < n_coefficients:
+        raise ValueError(
+            f"Window {window.center:.6g}s/{window.width:.6g}s has only {len(indices)} samples, "
+            f"not enough for {n_coefficients} DCT coefficients."
+        )
+
+    segment = np.asarray(data[:, :, indices], dtype=np.float64)
+    coefficients = dct(segment, type=2, norm="ortho", axis=2)[:, :, :n_coefficients]
+    return (
+        np.transpose(coefficients, (0, 2, 1))
+        .reshape(segment.shape[0], -1)
+        .astype(np.float32, copy=False)
+    )
 
 
 def _window_evoked_stat_features(
@@ -1253,6 +1310,13 @@ def _window_features(
         return evoked
     if feature_kind == "evoked_slope":
         return _window_evoked_slope_features(
+            data,
+            times,
+            window,
+            temporal_bins=temporal_bins,
+        )
+    if feature_kind == "evoked_dct":
+        return _window_evoked_dct_features(
             data,
             times,
             window,

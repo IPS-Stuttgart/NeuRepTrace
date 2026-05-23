@@ -49,3 +49,21 @@ def test_evoked_slope_window_features_append_one_slope_contrast_per_bin():
 
     assert features.shape == (5, 4 * 2 * 2)
     assert np.isfinite(features).all()
+
+
+def test_evoked_dct_window_features_return_compact_temporal_coefficients():
+    rng = np.random.default_rng(49)
+    sfreq = 500.0
+    times = np.arange(500, dtype=float) / sfreq - 0.2
+    data = rng.normal(size=(5, 4, times.size)).astype(np.float32)
+
+    features = _window_features(
+        data,
+        times,
+        WindowSpec(center=0.1, width=0.2),
+        temporal_bins=4,
+        feature_kind="evoked_dct",
+    )
+
+    assert features.shape == (5, 4 * 4)
+    assert np.isfinite(features).all()

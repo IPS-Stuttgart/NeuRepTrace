@@ -41,6 +41,7 @@ COMMAND_MODULES = {
     "onset-detection": "neureptrace.onset_detection",
     "openneuro-meg": "neureptrace.openneuro_meg",
     "plot-time-decode": "neureptrace.plot_time_decode",
+    "pymegdec-bushmeg-spec": "neureptrace.datasets.pymegdec",
     "probability-stacking": "neureptrace.probability_stacking",
     "results": "neureptrace.results",
     "source-oof-stacking": "neureptrace.probability_stacking",
