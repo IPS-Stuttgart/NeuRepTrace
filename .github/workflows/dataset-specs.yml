@@ -1,0 +1,120 @@
+name: Dataset Spec Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "configs/**"
+      - "examples/configs/**"
+      - "src/neureptrace/dataset_spec.py"
+      - "src/neureptrace/dataset_spec_cli.py"
+      - "src/neureptrace/datasets/**"
+      - "tests/test_dataset_spec.py"
+      - "docs/dataset-specs.md"
+      - "pyproject.toml"
+      - "poetry.lock"
+      - ".github/workflows/dataset-specs.yml"
+  pull_request:
+    paths:
+      - "configs/**"
+      - "examples/configs/**"
+      - "src/neureptrace/dataset_spec.py"
+      - "src/neureptrace/dataset_spec_cli.py"
+      - "src/neureptrace/datasets/**"
+      - "tests/test_dataset_spec.py"
+      - "docs/dataset-specs.md"
+      - "pyproject.toml"
+      - "poetry.lock"
+      - ".github/workflows/dataset-specs.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dataset-specs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate dataset specs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Poetry
+        run: python -m pip install --upgrade pip poetry
+
+      - name: Install dependencies
+        run: |
+          poetry env use python
+          poetry install --with dev
+
+      - name: Validate specs and workflow manifests
+        run: |
+          poetry run python - <<'PY'
+          from pathlib import Path
+
+          import yaml
+
+          from neureptrace.dataset_spec import expand_manifest, load_dataset_spec, validate_dataset_spec
+
+          SUPPORTED_SCHEMA_VERSION = "neureptrace.dataset.v1"
+
+          def is_dataset_spec(path: Path) -> bool:
+              try:
+                  payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+              except yaml.YAMLError:
+                  return False
+              return (
+                  isinstance(payload, dict)
+                  and payload.get("schema_version") == SUPPORTED_SCHEMA_VERSION
+                  and isinstance(payload.get("dataset_id"), str)
+              )
+
+          spec_roots = (Path("configs"), Path("examples/configs"))
+          suffixes = {".json", ".yaml", ".yml"}
+          specs = sorted(
+              path
+              for root in spec_roots
+              if root.exists()
+              for path in root.rglob("*")
+              if path.is_file() and path.suffix.lower() in suffixes and is_dataset_spec(path)
+          )
+          if not specs:
+              raise SystemExit("No dataset specs found under configs/ or examples/configs/.")
+
+          output_root = Path("dataset-spec-validation")
+          output_root.mkdir(parents=True, exist_ok=True)
+
+          for spec_path in specs:
+              spec = load_dataset_spec(spec_path)
+              inventory = validate_dataset_spec(spec)
+              safe_name = spec_path.with_suffix("").as_posix().replace("/", "__")
+              inventory.to_csv(output_root / f"{safe_name}__inventory.csv", index=False)
+
+              for workflow_name in sorted(spec.workflows):
+                  manifest = expand_manifest(spec, workflow=workflow_name)
+                  safe_workflow = workflow_name.replace("/", "__")
+                  manifest.to_csv(output_root / f"{safe_name}__workflow-{safe_workflow}.csv", index=False)
+
+              print(
+                  f"validated {spec_path}: "
+                  f"{len(spec.subjects)} subjects, {len(spec.splits)} splits, "
+                  f"{len(spec.workflows)} workflows"
+              )
+          PY
+
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dataset-spec-validation
+          path: dataset-spec-validation/
