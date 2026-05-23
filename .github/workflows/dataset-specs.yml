@@ -63,7 +63,22 @@ jobs:
           poetry run python - <<'PY'
           from pathlib import Path
 
+          import yaml
+
           from neureptrace.dataset_spec import expand_manifest, load_dataset_spec, validate_dataset_spec
+
+          SUPPORTED_SCHEMA_VERSION = "neureptrace.dataset.v1"
+
+          def is_dataset_spec(path: Path) -> bool:
+              try:
+                  payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+              except yaml.YAMLError:
+                  return False
+              return (
+                  isinstance(payload, dict)
+                  and payload.get("schema_version") == SUPPORTED_SCHEMA_VERSION
+                  and isinstance(payload.get("dataset_id"), str)
+              )
 
           spec_roots = (Path("configs"), Path("examples/configs"))
           suffixes = {".json", ".yaml", ".yml"}
@@ -72,7 +87,7 @@ jobs:
               for root in spec_roots
               if root.exists()
               for path in root.rglob("*")
-              if path.is_file() and path.suffix.lower() in suffixes
+              if path.is_file() and path.suffix.lower() in suffixes and is_dataset_spec(path)
           )
           if not specs:
               raise SystemExit("No dataset specs found under configs/ or examples/configs/.")
