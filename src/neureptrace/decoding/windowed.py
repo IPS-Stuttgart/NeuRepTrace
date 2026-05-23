@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn.metrics import balanced_accuracy_score
 
 from neureptrace.decoding.classifiers import prediction_scores
 
@@ -33,6 +34,7 @@ class WindowedDecodingResult:
     accuracy: float
     permutation_accuracy: np.ndarray
     permutation_p_value: float
+    balanced_accuracy: float = np.nan
 
 
 FitModel = Callable[[np.ndarray, np.ndarray], Any]
@@ -127,6 +129,7 @@ def score_windowed_decoding(
     )
     predictions, scores = predict_window_model(model_bundle, validation_features)
     accuracy = float(np.mean(predictions == validation_labels)) if len(validation_labels) else np.nan
+    balanced_accuracy = _balanced_accuracy(predictions, validation_labels)
 
     permutation_accuracy = np.array([], dtype=float)
     permutation_p_value = np.nan
@@ -154,6 +157,7 @@ def score_windowed_decoding(
         accuracy=accuracy,
         permutation_accuracy=permutation_accuracy,
         permutation_p_value=permutation_p_value,
+        balanced_accuracy=balanced_accuracy,
     )
 
 
@@ -199,6 +203,14 @@ def permutation_p_from_accuracy(accuracy: float, permutation_accuracy: Sequence[
     if permutation_accuracy.size == 0 or not np.isfinite(accuracy):
         return np.nan
     return float((np.sum(permutation_accuracy >= accuracy) + 1.0) / (permutation_accuracy.size + 1.0))
+
+
+def _balanced_accuracy(predictions: Sequence | np.ndarray, labels: Sequence | np.ndarray) -> float:
+    labels = np.asarray(labels).ravel()
+    predictions = np.asarray(predictions).ravel()
+    if labels.size == 0:
+        return np.nan
+    return float(balanced_accuracy_score(labels, predictions))
 
 
 def _fit_pca_transform(
