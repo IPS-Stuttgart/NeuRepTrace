@@ -1,3 +1,4 @@
+---
 # Multivariate-noise-normalized source-only BUSH-MEG sweep.
 schema_version: neureptrace.dataset.v1
 paths:
@@ -62,10 +63,13 @@ source_loso:
       - {name: single_150ms, centers: [0.150], window_size: 0.100}
       - {name: single_175ms, centers: [0.175], window_size: 0.100}
       - {name: single_200ms, centers: [0.200], window_size: 0.100}
-      - {name: triplet_150_200ms, centers: [0.150, 0.175, 0.200], window_size: 0.100}
+      - name: triplet_150_200ms
+        centers: [0.150, 0.175, 0.200]
+        window_size: 0.100
 outputs:
   base_dir: results/{dataset}/source_loso_ensemble_mnn
   source_loso_ensemble_summary_csv: source_loso_ensemble_summary.csv
   source_loso_ensemble_inner_cv_csv: source_loso_ensemble_inner_cv.csv
-  source_loso_ensemble_candidate_summary_csv: source_loso_ensemble_candidate_summary.csv
+  source_loso_ensemble_candidate_summary_csv: >-
+    source_loso_ensemble_candidate_summary.csv
   source_loso_ensemble_predictions_csv: source_loso_ensemble_predictions.csv

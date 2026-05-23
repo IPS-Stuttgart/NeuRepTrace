@@ -1,3 +1,4 @@
+---
 # Focused source-only BUSH-MEG sweep for the next clean leaderboard attempt.
 schema_version: neureptrace.dataset.v1
 paths:
@@ -55,7 +56,14 @@ source_loso:
     feature_preprocessors: [pca]
     pca_components: [64, 128]
     c_grid: [0.1, 1.0, 10.0]
-    feature_kinds: [evoked, evoked_logvar, evoked_prototype, covariance, evoked_covariance, xdawn, xdawn_prototype]
+    feature_kinds:
+      - evoked
+      - evoked_logvar
+      - evoked_prototype
+      - covariance
+      - evoked_covariance
+      - xdawn
+      - xdawn_prototype
     feature_families: [bin_means]
     covariance_max_channels: [32, 64]
     xdawn_components: [4, 8]
@@ -66,14 +74,21 @@ source_loso:
       - {name: single_150ms, centers: [0.150], window_size: 0.100}
       - {name: single_175ms, centers: [0.175], window_size: 0.100}
       - {name: single_200ms, centers: [0.200], window_size: 0.100}
-      - {name: triplet_125_175ms, centers: [0.125, 0.150, 0.175], window_size: 0.100}
-      - {name: triplet_150_200ms, centers: [0.150, 0.175, 0.200], window_size: 0.100}
-      - {name: broad_100_250ms, centers: [0.100, 0.150, 0.200, 0.250], window_size: 0.100}
+      - name: triplet_125_175ms
+        centers: [0.125, 0.150, 0.175]
+        window_size: 0.100
+      - name: triplet_150_200ms
+        centers: [0.150, 0.175, 0.200]
+        window_size: 0.100
+      - name: broad_100_250ms
+        centers: [0.100, 0.150, 0.200, 0.250]
+        window_size: 0.100
 outputs:
   base_dir: results/{dataset}/source_loso_ensemble_next_best
   source_loso_ensemble_summary_csv: source_loso_ensemble_summary.csv
   source_loso_ensemble_inner_cv_csv: source_loso_ensemble_inner_cv.csv
-  source_loso_ensemble_candidate_summary_csv: source_loso_ensemble_candidate_summary.csv
+  source_loso_ensemble_candidate_summary_csv: >-
+    source_loso_ensemble_candidate_summary.csv
   source_loso_ensemble_predictions_csv: source_loso_ensemble_predictions.csv
   provenance: true
   hash_input_files: true
