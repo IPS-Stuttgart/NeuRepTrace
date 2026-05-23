@@ -611,12 +611,16 @@ def _stack_trials(trials: Any, *, trial_layout: str) -> np.ndarray:
 
 
 def _first_time_axis(times: Any) -> np.ndarray:
+    """Return the first MATLAB time axis as a flat vector."""
+
     items = _sequence_from_mat_value(times)
     time_axis = np.asarray(_unwrap_mat_object(items[0]), dtype=float)
-    if time_axis.ndim > 1:
-        time_axis = time_axis.reshape(time_axis.shape[0], -1)[0]
-    else:
+    if time_axis.ndim == 0:
+        time_axis = time_axis.reshape(1)
+    elif time_axis.ndim == 1 or 1 in time_axis.shape:
         time_axis = time_axis.reshape(-1)
+    else:
+        time_axis = time_axis.reshape(time_axis.shape[0], -1)[0]
     if time_axis.size == 0:
         raise ValueError("MATLAB time axis is empty.")
     return time_axis
