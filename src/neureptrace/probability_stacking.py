@@ -1,0 +1,567 @@
+"""Leakage-safe source-OOF probability stacking.
+
+This module generalizes the useful PyMEGDec source-only logit-stacking idea to
+NeuRepTrace probability-observation tables.  The stacker is fitted on
+source-subject/source-fold out-of-fold probability rows and is then applied to a
+separate target table.  Target labels are used only for reporting the resulting
+prediction columns and optional metrics; they are not used when fitting weights.
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
+
+from neureptrace.observations import ProbabilityObservationTable, probability_columns, stable_hash
+
+DEFAULT_CANDIDATE_COLUMN = "decoder"
+DEFAULT_WEIGHTING = "stacked"
+DEFAULT_TEMPERATURE = 0.02
+DEFAULT_MAX_ITER = 250
+DEFAULT_LEARNING_RATE = 0.25
+DEFAULT_MIN_PROBABILITY = 1.0e-12
+DEFAULT_OUTPUT_DECODER = "source_oof_stacked_ensemble"
+DEFAULT_OUTPUT_EMISSION_MODE = "source_oof_stacked"
+WEIGHTING_MODES = {"uniform", "softmax", "stacked"}
+
+_BASE_ALIGNMENT_COLUMNS = (
+    "subject",
+    "session",
+    "stream_id",
+    "fold",
+    "split_id",
+    "seed",
+    "train_time",
+    "test_time",
+    "time",
+    "window_start",
+    "window_stop",
+    "sample_index",
+    "sequence_id",
+    "true_label",
+    "true_class",
+    "group",
+)
+_METRIC_GROUP_COLUMNS = ("subject", "fold", "decoder", "emission_mode", "time", "window_start", "window_stop")
+
+
+@dataclass(frozen=True, slots=True)
+class SourceOOFStackingFit:
+    """Fitted source-only stacking parameters."""
+
+    candidates: tuple[str, ...]
+    weights: tuple[float, ...]
+    weighting: str
+    temperature: float | None
+    source_oof_balanced_accuracy: float
+    source_oof_log_loss: float
+
+
+@dataclass(frozen=True, slots=True)
+class AlignedProbabilityCube:
+    """Candidate-aligned probability rows."""
+
+    base: pd.DataFrame
+    cube: np.ndarray
+    label_positions: np.ndarray
+    label_values: tuple[int, ...]
+    probability_columns: tuple[str, ...]
+    candidates: tuple[str, ...]
+    alignment_columns: tuple[str, ...]
+
+
+def _class_suffixes(prob_columns: Sequence[str]) -> tuple[str, ...]:
+    return tuple(column.removeprefix("prob_class_") for column in prob_columns)
+
+
+def _label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
+    suffixes = _class_suffixes(prob_columns)
+    if not all(suffix.isdigit() for suffix in suffixes):
+        return tuple(range(len(prob_columns)))
+    return tuple(int(suffix) for suffix in suffixes)
+
+
+def _class_columns_for_probabilities(frame: pd.DataFrame, prob_columns: Sequence[str]) -> tuple[str, ...]:
+    return tuple(column for column in (f"class_{suffix}" for suffix in _class_suffixes(prob_columns)) if column in frame.columns)
+
+
+def _label_positions(labels: Sequence[object] | np.ndarray | pd.Series, label_values: Sequence[int]) -> np.ndarray:
+    numeric = pd.to_numeric(pd.Series(labels), errors="coerce")
+    if numeric.isna().any():
+        raise ValueError("true_label values must be numeric.")
+    label_to_position = {int(label): position for position, label in enumerate(label_values)}
+    positions = np.full(len(numeric), -1, dtype=int)
+    for row_index, label in enumerate(numeric.astype(int).to_numpy()):
+        position = label_to_position.get(int(label))
+        if position is not None:
+            positions[row_index] = position
+    if bool((positions < 0).any()):
+        missing = sorted(set(int(label) for label in numeric.astype(int).to_numpy() if int(label) not in label_to_position))
+        raise ValueError(f"true_label values must index probability labels {list(label_values)}; missing labels: {missing[:5]}")
+    return positions
+
+
+def _candidate_order(frame: pd.DataFrame, candidate_column: str) -> tuple[str, ...]:
+    if candidate_column not in frame.columns:
+        raise ValueError(f"Observation table is missing candidate column {candidate_column!r}.")
+    return tuple(dict.fromkeys(frame[candidate_column].astype(str).tolist()))
+
+
+def _normalize_candidates(candidates: Sequence[str] | None, frame: pd.DataFrame, candidate_column: str) -> tuple[str, ...]:
+    values = tuple(str(candidate) for candidate in candidates) if candidates is not None else _candidate_order(frame, candidate_column)
+    if not values:
+        raise ValueError("At least one candidate/decoder is required for probability stacking.")
+    return values
+
+
+def _infer_alignment_columns(frame: pd.DataFrame, prob_columns: Sequence[str], candidate_column: str) -> tuple[str, ...]:
+    class_columns = _class_columns_for_probabilities(frame, prob_columns)
+    return tuple(column for column in (*_BASE_ALIGNMENT_COLUMNS, *class_columns) if column in frame.columns and column != candidate_column)
+
+
+def _check_unique_alignment(subset: pd.DataFrame, keys: Sequence[str], candidate: str) -> None:
+    if not keys:
+        return
+    duplicate_count = int(subset.duplicated(list(keys), keep=False).sum())
+    if duplicate_count:
+        examples = subset.loc[subset.duplicated(list(keys), keep=False), list(keys)].head(5).to_dict("records")
+        raise ValueError(f"Candidate {candidate!r} has {duplicate_count} duplicate rows for the alignment keys. Examples: {examples}")
+
+
+def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = DEFAULT_MIN_PROBABILITY) -> np.ndarray:
+    probabilities = np.asarray(values, dtype=float)
+    if probabilities.ndim != 2:
+        raise ValueError("Probability values must be a two-dimensional matrix.")
+    if min_probability <= 0.0 or min_probability >= 1.0:
+        raise ValueError("min_probability must lie in (0, 1).")
+    if not np.isfinite(probabilities).all():
+        raise ValueError("Probability values must be finite.")
+    probabilities = np.clip(probabilities, float(min_probability), 1.0)
+    row_sums = probabilities.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0) or not np.isfinite(row_sums).all():
+        raise ValueError("Probability rows must have positive finite sums.")
+    return probabilities / row_sums
+
+
+def align_probability_cube(
+    observations: pd.DataFrame,
+    *,
+    candidate_column: str = DEFAULT_CANDIDATE_COLUMN,
+    candidates: Sequence[str] | None = None,
+    alignment_columns: Sequence[str] | None = None,
+    min_probability: float = DEFAULT_MIN_PROBABILITY,
+) -> AlignedProbabilityCube:
+    """Align candidate probability rows into a candidate × sample × class cube.
+
+    The default alignment keys use the canonical NeuRepTrace observation columns
+    but deliberately exclude the candidate column.  If no such columns are
+    present, rows are aligned by order and all candidates must have the same
+    number of rows.
+    """
+
+    prob_columns = probability_columns(observations)
+    if not prob_columns:
+        raise ValueError("Observation table must contain prob_class_* columns.")
+    if "true_label" not in observations.columns:
+        raise ValueError("Observation table must contain true_label for source-OOF stacking.")
+    candidates = _normalize_candidates(candidates, observations, candidate_column)
+    keys = tuple(alignment_columns) if alignment_columns is not None else _infer_alignment_columns(observations, prob_columns, candidate_column)
+
+    subsets: dict[str, pd.DataFrame] = {}
+    candidate_values = observations[candidate_column].astype(str)
+    for candidate in candidates:
+        subset = observations.loc[candidate_values == candidate].copy().reset_index(drop=True)
+        if subset.empty:
+            raise ValueError(f"No observation rows found for candidate {candidate!r}.")
+        _check_unique_alignment(subset, keys, candidate)
+        subsets[candidate] = subset
+
+    reference = subsets[candidates[0]].copy().reset_index(drop=True)
+    matrices: list[np.ndarray] = []
+    if keys:
+        aligned = reference.loc[:, list(keys)].copy()
+        for candidate in candidates:
+            subset = subsets[candidate]
+            renamed_columns = {column: f"{column}__{candidate}" for column in prob_columns}
+            renamed = subset.loc[:, [*keys, *prob_columns]].rename(columns=renamed_columns)
+            aligned_candidate = aligned.merge(renamed, on=list(keys), how="left", validate="one_to_one")
+            candidate_prob_columns = [renamed_columns[column] for column in prob_columns]
+            if aligned_candidate.loc[:, candidate_prob_columns].isna().any().any():
+                examples = aligned_candidate.loc[aligned_candidate.loc[:, candidate_prob_columns].isna().any(axis=1), list(keys)].head(5).to_dict("records")
+                raise ValueError(f"Candidate {candidate!r} does not align one-to-one with {candidates[0]!r}. Examples: {examples}")
+            matrices.append(_renormalize_probabilities(aligned_candidate.loc[:, candidate_prob_columns].to_numpy(dtype=float), min_probability=min_probability))
+    else:
+        n_rows = len(reference)
+        for candidate, subset in subsets.items():
+            if len(subset) != n_rows:
+                raise ValueError("Cannot align candidates by row order because they have different row counts and no alignment columns were inferred.")
+            matrices.append(_renormalize_probabilities(subset.loc[:, list(prob_columns)].to_numpy(dtype=float), min_probability=min_probability))
+
+    label_values = _label_values(prob_columns)
+    label_positions = _label_positions(reference["true_label"], label_values)
+    return AlignedProbabilityCube(
+        base=reference,
+        cube=np.stack(matrices, axis=0),
+        label_positions=label_positions,
+        label_values=label_values,
+        probability_columns=prob_columns,
+        candidates=candidates,
+        alignment_columns=keys,
+    )
+
+
+def class_balanced_sample_weights(labels: Sequence[int] | np.ndarray, *, n_classes: int) -> np.ndarray:
+    """Return inverse-frequency sample weights normalized to mean one."""
+
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if labels.size == 0:
+        raise ValueError("Need at least one source-OOF prediction row for stacking.")
+    counts = np.bincount(labels, minlength=int(n_classes)).astype(float)
+    weights = np.zeros(labels.shape[0], dtype=float)
+    observed = counts[labels] > 0.0
+    weights[observed] = 1.0 / counts[labels[observed]]
+    mean_weight = float(weights.mean())
+    if not np.isfinite(mean_weight) or mean_weight <= 0.0:
+        raise ValueError("Cannot compute class-balanced stacking weights from the provided labels.")
+    return weights / mean_weight
+
+
+def fit_stacking_weights(
+    probability_cube: np.ndarray,
+    labels: Sequence[int] | np.ndarray,
+    *,
+    n_classes: int | None = None,
+    max_iter: int = DEFAULT_MAX_ITER,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    min_probability: float = DEFAULT_MIN_PROBABILITY,
+) -> np.ndarray:
+    """Fit non-negative candidate weights from source-only OOF probabilities.
+
+    The objective is class-balanced log loss on source OOF rows.  This mirrors
+    the useful PyMEGDec source-only stacking design while staying independent of
+    any specific dataset loader.
+    """
+
+    cube = np.asarray(probability_cube, dtype=float)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if cube.ndim != 3:
+        raise ValueError("probability_cube must have shape (n_candidates, n_samples, n_classes).")
+    n_candidates, n_samples, cube_classes = cube.shape
+    if n_classes is None:
+        n_classes = int(cube_classes)
+    if n_candidates < 1 or n_samples != labels.shape[0] or cube_classes != int(n_classes):
+        raise ValueError("probability_cube shape is inconsistent with labels or n_classes.")
+    if np.any(labels < 0) or np.any(labels >= int(n_classes)):
+        raise ValueError("labels must be integer class positions compatible with probability_cube.")
+    if n_candidates == 1:
+        return np.ones(1, dtype=float)
+    if learning_rate <= 0.0 or not np.isfinite(float(learning_rate)):
+        raise ValueError("learning_rate must be positive and finite.")
+
+    cube = np.stack([_renormalize_probabilities(candidate, min_probability=min_probability) for candidate in cube], axis=0)
+    true_probabilities = cube[:, np.arange(n_samples), labels]
+    sample_weights = class_balanced_sample_weights(labels, n_classes=int(n_classes))
+    weights = np.full(n_candidates, 1.0 / float(n_candidates), dtype=float)
+
+    for iteration in range(max(1, int(max_iter))):
+        denominator = np.clip(weights @ true_probabilities, float(min_probability), 1.0)
+        gradient = -np.average(true_probabilities / denominator[None, :], axis=1, weights=sample_weights)
+        gradient -= float(np.dot(gradient, weights))
+        step = float(learning_rate) / np.sqrt(float(iteration + 1))
+        updated = weights * np.exp(np.clip(-step * gradient, -50.0, 50.0))
+        total = float(updated.sum())
+        if not np.isfinite(total) or total <= 0.0:
+            break
+        weights = updated / total
+    return weights / float(weights.sum())
+
+
+def combine_probability_cube(probability_cube: np.ndarray, weights: Sequence[float], *, min_probability: float = DEFAULT_MIN_PROBABILITY) -> np.ndarray:
+    """Return the weighted, row-normalized probability matrix for a candidate cube."""
+
+    cube = np.asarray(probability_cube, dtype=float)
+    weights_array = np.asarray(weights, dtype=float).reshape(-1)
+    if cube.ndim != 3:
+        raise ValueError("probability_cube must have shape (n_candidates, n_samples, n_classes).")
+    if weights_array.shape[0] != cube.shape[0]:
+        raise ValueError("weights must contain one value per candidate.")
+    if not np.isfinite(weights_array).all() or (weights_array < 0.0).any() or float(weights_array.sum()) <= 0.0:
+        raise ValueError("weights must be finite non-negative values with positive sum.")
+    weights_array = weights_array / float(weights_array.sum())
+    normalized = np.stack([_renormalize_probabilities(candidate, min_probability=min_probability) for candidate in cube], axis=0)
+    return _renormalize_probabilities(np.tensordot(weights_array, normalized, axes=(0, 0)), min_probability=min_probability)
+
+
+def _candidate_balanced_scores(probability_cube: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    return np.asarray([balanced_accuracy_score(labels, candidate.argmax(axis=1)) for candidate in probability_cube], dtype=float)
+
+
+def fit_source_oof_stacking(
+    source_probability_cube: np.ndarray,
+    source_labels: Sequence[int] | np.ndarray,
+    *,
+    candidates: Sequence[str],
+    weighting: str = DEFAULT_WEIGHTING,
+    temperature: float | None = DEFAULT_TEMPERATURE,
+    max_iter: int = DEFAULT_MAX_ITER,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    min_probability: float = DEFAULT_MIN_PROBABILITY,
+) -> SourceOOFStackingFit:
+    """Fit source-only ensemble weights and report source-OOF diagnostics."""
+
+    weighting = str(weighting).strip().lower().replace("-", "_")
+    if weighting not in WEIGHTING_MODES:
+        raise ValueError(f"Unknown weighting {weighting!r}; choose one of {sorted(WEIGHTING_MODES)}.")
+    cube = np.asarray(source_probability_cube, dtype=float)
+    labels = np.asarray(source_labels, dtype=int).reshape(-1)
+    if cube.ndim != 3:
+        raise ValueError("source_probability_cube must have shape (n_candidates, n_samples, n_classes).")
+    n_candidates, _n_samples, n_classes = cube.shape
+    if len(candidates) != n_candidates:
+        raise ValueError("candidates must contain one name per probability-cube candidate.")
+
+    if weighting == "uniform" or n_candidates == 1:
+        weights = np.full(n_candidates, 1.0 / float(n_candidates), dtype=float)
+        used_temperature = None
+    elif weighting == "softmax":
+        used_temperature = DEFAULT_TEMPERATURE if temperature is None else float(temperature)
+        if not np.isfinite(used_temperature) or used_temperature <= 0.0:
+            raise ValueError("temperature must be positive and finite for softmax weighting.")
+        scores = _candidate_balanced_scores(cube, labels)
+        weights = np.exp(np.clip((scores - float(scores.max())) / used_temperature, -60.0, 0.0))
+        weights = weights / float(weights.sum())
+    else:
+        used_temperature = None
+        weights = fit_stacking_weights(cube, labels, n_classes=n_classes, max_iter=max_iter, learning_rate=learning_rate, min_probability=min_probability)
+
+    combined = combine_probability_cube(cube, weights, min_probability=min_probability)
+    try:
+        source_log_loss = float(log_loss(labels, combined, labels=list(range(n_classes))))
+    except ValueError:
+        source_log_loss = float("nan")
+    return SourceOOFStackingFit(
+        candidates=tuple(str(candidate) for candidate in candidates),
+        weights=tuple(float(weight) for weight in weights),
+        weighting=weighting,
+        temperature=used_temperature,
+        source_oof_balanced_accuracy=float(balanced_accuracy_score(labels, combined.argmax(axis=1))),
+        source_oof_log_loss=source_log_loss,
+    )
+
+
+def _predicted_classes(base: pd.DataFrame, predicted_labels: np.ndarray) -> list[str]:
+    classes: list[str] = []
+    for row_index, predicted_label in enumerate(predicted_labels):
+        class_column = f"class_{predicted_label}"
+        if class_column in base.columns:
+            classes.append(str(base.iloc[row_index][class_column]))
+        else:
+            classes.append(str(predicted_label))
+    return classes
+
+
+def stack_probability_observations(
+    source_oof_observations: pd.DataFrame,
+    target_observations: pd.DataFrame,
+    *,
+    candidate_column: str = DEFAULT_CANDIDATE_COLUMN,
+    candidates: Sequence[str] | None = None,
+    alignment_columns: Sequence[str] | None = None,
+    weighting: str = DEFAULT_WEIGHTING,
+    temperature: float | None = DEFAULT_TEMPERATURE,
+    max_iter: int = DEFAULT_MAX_ITER,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    min_probability: float = DEFAULT_MIN_PROBABILITY,
+    output_decoder: str = DEFAULT_OUTPUT_DECODER,
+    output_emission_mode: str = DEFAULT_OUTPUT_EMISSION_MODE,
+) -> pd.DataFrame:
+    """Fit source-OOF stacking weights and apply them to target observations."""
+
+    source = align_probability_cube(
+        source_oof_observations,
+        candidate_column=candidate_column,
+        candidates=candidates,
+        alignment_columns=alignment_columns,
+        min_probability=min_probability,
+    )
+    target = align_probability_cube(
+        target_observations,
+        candidate_column=candidate_column,
+        candidates=source.candidates,
+        alignment_columns=alignment_columns,
+        min_probability=min_probability,
+    )
+    if target.probability_columns != source.probability_columns:
+        raise ValueError("Source-OOF and target observations must use the same prob_class_* columns.")
+
+    fit = fit_source_oof_stacking(
+        source.cube,
+        source.label_positions,
+        candidates=source.candidates,
+        weighting=weighting,
+        temperature=temperature,
+        max_iter=max_iter,
+        learning_rate=learning_rate,
+        min_probability=min_probability,
+    )
+    probabilities = combine_probability_cube(target.cube, fit.weights, min_probability=min_probability)
+    output = target.base.copy()
+    label_values = target.label_values
+    predicted_positions = probabilities.argmax(axis=1)
+    predicted_labels = np.asarray([label_values[position] for position in predicted_positions], dtype=int)
+    true_labels = pd.to_numeric(output["true_label"], errors="coerce")
+    if true_labels.isna().any():
+        raise ValueError("target true_label values must be numeric.")
+    true_label_values = true_labels.astype(int).to_numpy()
+    label_to_position = {label: position for position, label in enumerate(label_values)}
+    true_probabilities = np.full(len(output), np.nan, dtype=float)
+    for row_index, true_label in enumerate(true_label_values):
+        position = label_to_position.get(int(true_label))
+        if position is not None:
+            true_probabilities[row_index] = probabilities[row_index, position]
+
+    for column_index, column in enumerate(target.probability_columns):
+        output[column] = probabilities[:, column_index]
+    output[candidate_column] = output_decoder
+    output["decoder"] = output_decoder
+    output["backend"] = "source_oof_stacking"
+    output["emission_mode"] = output_emission_mode
+    output["predicted_label"] = predicted_labels
+    output["predicted_class"] = _predicted_classes(output, predicted_labels)
+    output["probability_true_class"] = true_probabilities
+    output["confidence"] = probabilities.max(axis=1)
+    output["is_correct"] = predicted_labels == true_label_values
+    output["calibration_fold"] = "source_oof"
+    output["source_oof_candidates"] = "|".join(fit.candidates)
+    output["source_oof_weights"] = "|".join(f"{weight:.12g}" for weight in fit.weights)
+    output["source_oof_weighting"] = fit.weighting
+    output["source_oof_temperature"] = "" if fit.temperature is None else fit.temperature
+    output["source_oof_balanced_accuracy"] = fit.source_oof_balanced_accuracy
+    output["source_oof_log_loss"] = fit.source_oof_log_loss
+    output["source_oof_alignment_columns"] = "|".join(target.alignment_columns)
+    output["model_hash"] = stable_hash(
+        {
+            "backend": "source_oof_stacking",
+            "candidate_column": candidate_column,
+            "candidates": list(fit.candidates),
+            "weights": list(fit.weights),
+            "weighting": fit.weighting,
+            "temperature": fit.temperature,
+            "alignment_columns": list(target.alignment_columns),
+            "min_probability": min_probability,
+        }
+    )
+    return ProbabilityObservationTable(output).standardized(defaults={"backend": "source_oof_stacking", "decoder": output_decoder, "emission_mode": output_emission_mode}).frame
+
+
+def summarize_stacked_metrics(observations: pd.DataFrame) -> pd.DataFrame:
+    """Summarize stacked observation rows by time/fold with standard metrics."""
+
+    prob_columns = probability_columns(observations)
+    if "true_label" not in observations.columns or not prob_columns:
+        raise ValueError("Stacked observations must contain true_label and prob_class_* columns.")
+    label_values = _label_values(prob_columns)
+    group_columns = [column for column in _METRIC_GROUP_COLUMNS if column in observations.columns]
+    rows: list[dict[str, object]] = []
+    for group_key, group in observations.groupby(group_columns, dropna=False, sort=True):
+        if len(group_columns) == 1 and not isinstance(group_key, tuple):
+            group_key = (group_key,)
+        probabilities = group.loc[:, list(prob_columns)].to_numpy(dtype=float)
+        true_labels = pd.to_numeric(group["true_label"], errors="coerce")
+        if true_labels.isna().any():
+            raise ValueError("true_label values must be numeric.")
+        true_label_values = true_labels.astype(int).to_numpy()
+        predicted_label_values = np.asarray([label_values[position] for position in probabilities.argmax(axis=1)], dtype=int)
+        row = dict(zip(group_columns, group_key, strict=True))
+        row.update(
+            {
+                "accuracy": float(accuracy_score(true_label_values, predicted_label_values)),
+                "balanced_accuracy": float(balanced_accuracy_score(true_label_values, predicted_label_values)),
+                "log_loss": float(log_loss(true_label_values, probabilities, labels=list(label_values))),
+                "n_test": int(len(group)),
+                "n_classes": int(len(prob_columns)),
+                "source_oof_candidates": str(group.iloc[0].get("source_oof_candidates", "")),
+                "source_oof_weights": str(group.iloc[0].get("source_oof_weights", "")),
+                "source_oof_weighting": str(group.iloc[0].get("source_oof_weighting", "")),
+                "source_oof_balanced_accuracy": group.iloc[0].get("source_oof_balanced_accuracy", ""),
+                "source_oof_log_loss": group.iloc[0].get("source_oof_log_loss", ""),
+            }
+        )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _read_csv_inputs(paths: Sequence[str | Path]) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for pattern in paths:
+        matches = sorted(glob.glob(str(pattern)))
+        if not matches and Path(pattern).exists():
+            matches = [str(pattern)]
+        if not matches:
+            raise FileNotFoundError(f"No CSV files match {pattern!r}.")
+        frames.extend(pd.read_csv(path) for path in matches)
+    if not frames:
+        raise ValueError("No CSV inputs were provided.")
+    return pd.concat(frames, ignore_index=True)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Command-line entry point for source-OOF probability stacking."""
+
+    parser = argparse.ArgumentParser(description="Fit a leakage-safe source-OOF probability stacker and apply it to target observation rows.")
+    parser.add_argument("--source-oof", nargs="+", required=True, help="Source out-of-fold observation CSVs or glob patterns used to fit weights.")
+    parser.add_argument("--target", nargs="+", required=True, help="Target observation CSVs or glob patterns to ensemble with fitted source weights.")
+    parser.add_argument("--out", type=Path, required=True, help="CSV path for stacked target observations.")
+    parser.add_argument("--metrics-out", type=Path, help="Optional CSV path for grouped metrics computed from the stacked observations.")
+    parser.add_argument("--candidate-column", default=DEFAULT_CANDIDATE_COLUMN, help="Column identifying base candidates/decoders. Defaults to decoder.")
+    parser.add_argument("--candidate", action="append", dest="candidates", help="Candidate/decoder to include. May be repeated; defaults to order in source rows.")
+    parser.add_argument("--alignment-column", action="append", dest="alignment_columns", help="Column used to align candidates. May be repeated; defaults to canonical observation keys.")
+    parser.add_argument("--weighting", choices=sorted(WEIGHTING_MODES), default=DEFAULT_WEIGHTING)
+    parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE, help="Softmax weighting temperature.")
+    parser.add_argument("--max-iter", type=int, default=DEFAULT_MAX_ITER, help="Projected-gradient iterations for stacked weighting.")
+    parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE)
+    parser.add_argument("--min-probability", type=float, default=DEFAULT_MIN_PROBABILITY)
+    parser.add_argument("--output-decoder", default=DEFAULT_OUTPUT_DECODER)
+    parser.add_argument("--output-emission-mode", default=DEFAULT_OUTPUT_EMISSION_MODE)
+    args = parser.parse_args(argv)
+
+    try:
+        source_oof = _read_csv_inputs(args.source_oof)
+        target = _read_csv_inputs(args.target)
+        stacked = stack_probability_observations(
+            source_oof,
+            target,
+            candidate_column=args.candidate_column,
+            candidates=args.candidates,
+            alignment_columns=args.alignment_columns,
+            weighting=args.weighting,
+            temperature=args.temperature,
+            max_iter=args.max_iter,
+            learning_rate=args.learning_rate,
+            min_probability=args.min_probability,
+            output_decoder=args.output_decoder,
+            output_emission_mode=args.output_emission_mode,
+        )
+        ProbabilityObservationTable(stacked).to_csv(args.out)
+        print(f"Wrote stacked observations: {args.out}")
+        if args.metrics_out is not None:
+            metrics = summarize_stacked_metrics(stacked)
+            args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
+            metrics.to_csv(args.metrics_out, index=False)
+            print(f"Wrote stacked metrics: {args.metrics_out}")
+    except Exception as exc:
+        print(f"Probability stacking failed: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
