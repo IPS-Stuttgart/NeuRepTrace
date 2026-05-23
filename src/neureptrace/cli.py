@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import sys
 from collections.abc import Sequence
 from importlib import import_module
@@ -75,6 +76,15 @@ def _command_listing() -> str:
     return "\n".join(["Available commands:", *rows])
 
 
+def _unknown_command_message(command: str) -> str:
+    """Return a helpful message for a misspelled grouped command."""
+    suggestions = difflib.get_close_matches(command, sorted(COMMAND_MODULES), n=3, cutoff=0.55)
+    suffix = ""
+    if suggestions:
+        suffix = " Close matches: " + ", ".join(suggestions) + "."
+    return f"Unrecognized workflow '{command}'.{suffix} Run 'neureptrace --list-commands' to see available commands."
+
+
 def _run_module_main(command: str, argv: Sequence[str]) -> int:
     """Run a NeuRepTrace module-level ``main`` as a grouped subcommand."""
     module = import_module(COMMAND_MODULES[command])
@@ -99,6 +109,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if argv and argv[0] in COMMAND_MODULES:
         return _run_module_main(argv[0], argv[1:])
+
+    if argv and not argv[0].startswith("-"):
+        print(_unknown_command_message(argv[0]), file=sys.stderr)
+        return 2
 
     parser = argparse.ArgumentParser(description="NeuRepTrace command-line interface.")
     parser.add_argument(
