@@ -12,6 +12,7 @@ nav:
   - Dataset Specs: dataset-specs.md
   - Dataset Spec Helpers: dataset-spec.md
   - Migrating from PyMEGDec: migrating-from-pymegdec.md
+  - PyMEGDec Upstreaming: pymegdec-upstreaming.md
   - Transfer from Config: transfer-from-config.md
   - Benchmarking: benchmarking.md
   - Examples: examples.md
