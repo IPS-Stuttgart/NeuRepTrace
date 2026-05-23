@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import importlib.metadata
 import importlib.util
 import json
@@ -107,12 +108,67 @@ def _check_dataset_config(path: Path, *, check_files: bool) -> DoctorCheck:
     return DoctorCheck(f"dataset-config:{path}", "ok", "valid")
 
 
+def _split_entry_point_target(target: str) -> tuple[str, str]:
+    module_name, separator, object_name = target.partition(":")
+    if not module_name or not separator or not object_name:
+        raise ValueError("entry-point target must have the form 'module:function'")
+    return module_name, object_name
+
+
+def _check_callable_target(check_name: str, target: str) -> DoctorCheck:
+    try:
+        module_name, object_name = _split_entry_point_target(target)
+        module = importlib.import_module(module_name)
+        resolved: Any = module
+        for attribute in object_name.split("."):
+            resolved = getattr(resolved, attribute)
+    except Exception as exc:
+        return DoctorCheck(check_name, "error", f"{target!r} could not be resolved: {exc}")
+
+    if callable(resolved):
+        return DoctorCheck(check_name, "ok", f"{target} is callable")
+    return DoctorCheck(check_name, "error", f"{target!r} resolved to non-callable {type(resolved).__name__}")
+
+
+def _neureptrace_console_entry_points() -> list[importlib.metadata.EntryPoint]:
+    try:
+        entry_points = importlib.metadata.entry_points(group="console_scripts")
+    except TypeError:  # pragma: no cover - compatibility with older importlib.metadata APIs
+        entry_points = importlib.metadata.entry_points().get("console_scripts", ())
+
+    return sorted((entry_point for entry_point in entry_points if entry_point.name.startswith("neureptrace")), key=lambda entry_point: entry_point.name)
+
+
+def _check_console_entry_points() -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    entry_points = _neureptrace_console_entry_points()
+    if not entry_points:
+        return [DoctorCheck("entry-points:console", "warning", "No installed neureptrace console entry points were found", required=False)]
+
+    for entry_point in entry_points:
+        checks.append(_check_callable_target(f"entry-point:{entry_point.name}", entry_point.value))
+    return checks
+
+
+def _check_grouped_cli_commands() -> list[DoctorCheck]:
+    try:
+        from neureptrace.cli import COMMAND_MODULES
+    except Exception as exc:
+        return [DoctorCheck("entry-points:grouped-cli", "error", f"Could not import grouped CLI registry: {exc}")]
+
+    checks: list[DoctorCheck] = []
+    for command, module_name in sorted(COMMAND_MODULES.items()):
+        checks.append(_check_callable_target(f"grouped-command:{command}", f"{module_name}:main"))
+    return checks
+
+
 def run_checks(
     *,
     include_optional: bool = True,
     required_modules: Iterable[str] = (),
     dataset_configs: Iterable[str | Path] = (),
     check_dataset_files: bool = False,
+    check_entry_points: bool = False,
 ) -> list[DoctorCheck]:
     """Run environment and configuration diagnostics."""
 
@@ -136,6 +192,10 @@ def run_checks(
 
     for config_path in dataset_configs:
         checks.append(_check_dataset_config(Path(config_path), check_files=check_dataset_files))
+
+    if check_entry_points:
+        checks.extend(_check_console_entry_points())
+        checks.extend(_check_grouped_cli_commands())
 
     return checks
 
@@ -178,6 +238,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Require files referenced by --dataset-config to exist.",
     )
     parser.add_argument(
+        "--check-entry-points",
+        action="store_true",
+        help="Validate installed neureptrace console scripts and grouped CLI command targets.",
+    )
+    parser.add_argument(
         "--require-module",
         action="append",
         default=[],
@@ -213,6 +278,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         required_modules=args.require_module,
         dataset_configs=args.dataset_config,
         check_dataset_files=args.check_dataset_files,
+        check_entry_points=args.check_entry_points,
     )
     summary = summarize_checks(checks)
 
