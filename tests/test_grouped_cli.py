@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from neureptrace import cli
+from neureptrace import __version__, cli
 
 
 def _console_scripts() -> dict[str, str]:
@@ -26,6 +26,14 @@ def test_grouped_cli_exposes_focused_console_scripts() -> None:
     }
 
     assert expected_commands <= set(cli.COMMAND_MODULES)
+
+
+def test_grouped_cli_version_flag(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--version"])
+
+    assert exc_info.value.code == 0
+    assert f"neureptrace {__version__}" in capsys.readouterr().out
 
 
 def test_grouped_bushmeg_data_help(capsys, monkeypatch) -> None:
