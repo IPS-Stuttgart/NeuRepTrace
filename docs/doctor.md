@@ -13,7 +13,10 @@ neureptrace doctor
 The command reports the Python version, the installed NeuRepTrace version, and
 the availability of required runtime dependencies. Optional machine-learning
 extras such as XGBoost and PyTorch are reported as warnings when they are not
-installed.
+installed. Dependency availability is checked by importing the corresponding
+Python modules, so broken compiled extensions or incompatible binary packages
+are reported as failed diagnostics instead of being hidden behind package
+metadata.
 
 Use a quieter core-only check in continuous-integration jobs or lightweight
 environments:
