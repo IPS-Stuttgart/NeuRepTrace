@@ -23,10 +23,12 @@ from neureptrace.bushmeg_source_loso import (
     _select_candidate,
     _window_features,
     _window_bin_mean_features,
+    _window_evoked_baseline_contrast_features,
     _window_evoked_slope_features,
     _window_evoked_dct_features,
     _window_evoked_stat_features,
     normalize_source_feature_family,
+    normalize_source_feature_kind,
 )
 
 
@@ -50,6 +52,33 @@ def test_window_bin_mean_features_concatenates_channel_bins():
         [
             [1.5, 5.0, 12.0, 9.0],
             [4.0, 3.0, 22.0, 7.0],
+        ],
+        dtype=np.float32,
+    )
+    np.testing.assert_allclose(features, expected)
+
+
+def test_window_evoked_baseline_contrast_features_subtract_trial_baseline():
+    data = np.array(
+        [
+            [[1.0, 3.0, 10.0, 14.0], [20.0, 20.0, 25.0, 21.0]],
+            [[5.0, 7.0, 9.0, 11.0], [2.0, 4.0, 5.0, 1.0]],
+        ],
+        dtype=np.float32,
+    )
+    times = np.array([-0.30, -0.10, 0.10, 0.20])
+
+    features = _window_evoked_baseline_contrast_features(
+        data,
+        times,
+        WindowSpec(center=0.15, width=0.10),
+        temporal_bins=2,
+    )
+
+    expected = np.array(
+        [
+            [8.0, 5.0, 12.0, 1.0],
+            [3.0, 2.0, 5.0, -2.0],
         ],
         dtype=np.float32,
     )
@@ -260,6 +289,27 @@ def test_mnn_feature_kinds_noise_normalize_before_feature_extraction():
     assert evoked.shape == (3, 2)
     assert evoked_logvar.shape == (3, 4)
     assert np.all(np.isfinite(evoked_logvar))
+
+
+def test_window_features_support_baseline_contrast_alias_and_mnn_variant():
+    data = np.array(
+        [
+            [[1.0, 2.0, 5.0, 6.0], [2.0, 4.0, 4.0, 8.0]],
+            [[2.0, 3.0, 6.0, 8.0], [4.0, 6.0, 8.0, 10.0]],
+            [[-1.0, -2.0, -5.0, -6.0], [-2.0, -4.0, -4.0, -8.0]],
+        ],
+        dtype=np.float32,
+    )
+    times = np.array([-0.30, -0.10, 0.15, 0.20])
+    window = WindowSpec(center=0.175, width=0.10)
+
+    assert normalize_source_feature_kind("baseline-corrected-evoked") == "evoked_baseline_contrast"
+    baseline_contrast = _window_features(data, times, window, temporal_bins=1, feature_kind="trial-baseline-contrast")
+    mnn_baseline_contrast = _window_features(data, times, window, temporal_bins=1, feature_kind="mnn_evoked_baseline_contrast")
+
+    assert baseline_contrast.shape == (3, 2)
+    assert mnn_baseline_contrast.shape == (3, 2)
+    assert np.all(np.isfinite(mnn_baseline_contrast))
 
 
 def test_preprocessing_normalization_accepts_epoch_normalization_alias():

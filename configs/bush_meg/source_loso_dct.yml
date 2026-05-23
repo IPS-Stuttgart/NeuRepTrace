@@ -33,9 +33,7 @@ metadata:
       optional: true
 
 preprocessing:
-  # Keep the cue task out of the workflow. Baseline statistics are fitted
-  # subject-locally from each main-task participant's unlabeled pre-stimulus
-  # samples, matching the strongest source-only BUSH-MEG smoke runs.
+  # Strict source-only normalization: no cue/localizer files are loaded.
   tmin: -0.35
   tmax: 0.25
   normalization: subject_baseline_whiten
@@ -55,21 +53,15 @@ source_loso:
   group_column: participant
   selection_metric: balanced_accuracy
   candidate_grid:
-    # Compact time-bin features keep the nested LOSO search substantially
-    # smaller than sensor×sample flattening while preserving coarse dynamics.
+    # evoked_dct keeps a small number of low-order temporal waveform
+    # coefficients per channel.  This preserves smooth latency/shape
+    # information that fixed bin means can discard, while remaining cue-free
+    # and fold-local under the existing nested LOSO selection.
     temporal_bins: [4]
-    # evoked_slope keeps the evoked bin means as a prefix and appends compact
-    # within-bin temporal contrasts. evoked_dct keeps low-order temporal cosine
-    # coefficients over the same source-only window, exposing within-window
-    # shape without flattening all sensor×sample points. evoked_baseline_contrast
-    # subtracts each trial/channel's own pre-stimulus mean before post-stimulus
-    # binning, which targets trial drift without using cue data or held-out
-    # labels. Inner LOSO can still select plain evoked.
     feature_kinds:
       - evoked
-      - evoked_baseline_contrast
-      - evoked_slope
       - evoked_dct
+      - evoked_dct_prototype
     decoders:
       - multinomial-logistic
       - linear_svm
@@ -80,23 +72,23 @@ source_loso:
     pca_components: [64, 128]
     c_grid: [0.1, 1.0, 10.0]
     window_sets:
-      - name: single_150ms
+      - name: dct_single_150ms
         centers: [0.150]
-        window_size: 0.100
-      - name: single_175ms
+        window_size: 0.125
+      - name: dct_single_175ms
         centers: [0.175]
-        window_size: 0.100
-      - name: single_200ms
+        window_size: 0.125
+      - name: dct_single_200ms
         centers: [0.200]
-        window_size: 0.100
-      - name: triplet_150_200ms
+        window_size: 0.125
+      - name: dct_triplet_150_200ms
         centers: [0.150, 0.175, 0.200]
         window_size: 0.100
 
 outputs:
   base_dir: results/{dataset}
-  source_loso_summary_csv: source_loso_summary.csv
-  source_loso_inner_cv_csv: source_loso_inner_cv.csv
-  source_loso_predictions_csv: source_loso_predictions.csv
+  source_loso_summary_csv: source_loso_dct_summary.csv
+  source_loso_inner_cv_csv: source_loso_dct_inner_cv.csv
+  source_loso_predictions_csv: source_loso_dct_predictions.csv
   provenance: true
   hash_input_files: true

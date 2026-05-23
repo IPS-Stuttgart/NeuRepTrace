@@ -9,11 +9,13 @@ epochs are never added as classifier training or test trials.
 The implementation differs from the generic time-resolved decoder in two ways
 that matter for BUSH-MEG:
 
-* temporal features are compact per-channel bin means, low-order temporal DCT
-  coefficients, or bin-level temporal slope contrasts rather than very large
+* temporal features are compact per-channel bin means, trial-wise baseline
+  contrasts, low-order temporal DCT coefficients, or bin-level temporal slope contrasts rather than very large
   sensor-by-sample windows;
 * optional source-class template-similarity features turn each trial into a
   low-dimensional vector of leave-source-subject-out class-prototype scores;
+* optional source pseudo-trials average within source-subject/class cells to
+  reduce trial noise and fit size without using cue or held-out labels;
 * a candidate may average probabilities from several nearby post-stimulus
   windows, giving a strict source-only temporal bagging baseline.
 """
@@ -82,6 +84,7 @@ FEATURE_KIND_CHOICES = (
     "evoked_slope",
     "evoked_dct",
     "evoked_stats",
+    "evoked_baseline_contrast",
     "evoked_logvar",
     "evoked_bandpower",
     "evoked_covariance",
@@ -92,6 +95,7 @@ FEATURE_KIND_CHOICES = (
     "evoked_slope_prototype",
     "evoked_dct_prototype",
     "evoked_stats_prototype",
+    "evoked_baseline_contrast_prototype",
     "evoked_bandpower_prototype",
     "evoked_logvar_prototype",
     "mnn_evoked",
@@ -102,11 +106,13 @@ FEATURE_KIND_CHOICES = (
     "mnn_prototype",
     "mnn_evoked_slope",
     "mnn_evoked_dct",
+    "mnn_evoked_baseline_contrast",
     "mnn_evoked_prototype",
     "mnn_logvar_prototype",
     "mnn_evoked_logvar_prototype",
     "mnn_evoked_slope_prototype",
     "mnn_evoked_dct_prototype",
+    "mnn_evoked_baseline_contrast_prototype",
     "xdawn",
     "xdawn_prototype",
 )
@@ -124,6 +130,7 @@ PROTOTYPE_FEATURE_KINDS = frozenset(
         "evoked_slope_prototype",
         "evoked_stats_prototype",
         "evoked_dct_prototype",
+        "evoked_baseline_contrast_prototype",
         "evoked_logvar_prototype",
         "xdawn_prototype",
         "mnn_prototype",
@@ -132,6 +139,7 @@ PROTOTYPE_FEATURE_KINDS = frozenset(
         "mnn_evoked_logvar_prototype",
         "mnn_evoked_slope_prototype",
         "mnn_evoked_dct_prototype",
+        "mnn_evoked_baseline_contrast_prototype",
     }
 )
 SUPERVISED_FEATURE_KINDS = PROTOTYPE_FEATURE_KINDS | {"xdawn"}
@@ -142,15 +150,16 @@ PROTOTYPE_BASE_FEATURE_KINDS = {
     "bandpower_prototype": "bandpower",
     "evoked_slope_prototype": "evoked_slope",
     "evoked_stats_prototype": "evoked_stats",
-    "evoked_dct_prototype": "evoked_dct",
     "evoked_logvar_prototype": "evoked_logvar",
+    "evoked_baseline_contrast_prototype": "evoked_baseline_contrast",
     "evoked_bandpower_prototype": "evoked_bandpower",
     "mnn_prototype": "mnn_evoked",
     "mnn_evoked_prototype": "mnn_evoked",
+    "mnn_evoked_dct_prototype": "mnn_evoked_dct",
     "mnn_evoked_slope_prototype": "mnn_evoked_slope",
+    "mnn_evoked_baseline_contrast_prototype": "mnn_evoked_baseline_contrast",
     "mnn_logvar_prototype": "mnn_logvar",
     "mnn_evoked_logvar_prototype": "mnn_evoked_logvar",
-    "mnn_evoked_dct_prototype": "mnn_evoked_dct",
 }
 
 
@@ -199,6 +208,7 @@ class CandidateSpec:
     feature_family: str = "bin_means"
     sample_weighting: str = "none"
     class_bias: str = "none"
+    pseudotrials_per_subject_class: int = 0
 
     @property
     def window_centers(self) -> tuple[float, ...]:
@@ -367,18 +377,35 @@ def normalize_source_feature_kind(feature_kind: str) -> str:
         "temporal_dct_prototype": "evoked_dct_prototype",
         "evoked_cosine_prototype": "evoked_dct_prototype",
         "evoked_temporal_dct_prototype": "evoked_dct_prototype",
-        "mnn_dct": "mnn_evoked_dct",
-        "mnn_temporal_dct": "mnn_evoked_dct",
-        "mnn_dct_prototype": "mnn_evoked_dct_prototype",
         "evoked_derivative_prototype": "evoked_slope_prototype",
         "evoked_gradient_prototype": "evoked_slope_prototype",
         "evoked_temporal_slope_prototype": "evoked_slope_prototype",
+        "mnn_dct": "mnn_evoked_dct",
+        "mnn_temporal_dct": "mnn_evoked_dct",
+        "mnn_evoked_temporal_dct": "mnn_evoked_dct",
         "mnn_evoked_derivative": "mnn_evoked_slope",
         "mnn_evoked_gradient": "mnn_evoked_slope",
         "mnn_evoked_temporal_slope": "mnn_evoked_slope",
+        "mnn_dct_prototype": "mnn_evoked_dct_prototype",
+        "mnn_temporal_dct_prototype": "mnn_evoked_dct_prototype",
+        "mnn_evoked_temporal_dct_prototype": "mnn_evoked_dct_prototype",
         "mnn_evoked_derivative_prototype": "mnn_evoked_slope_prototype",
         "mnn_evoked_gradient_prototype": "mnn_evoked_slope_prototype",
         "mnn_evoked_temporal_slope_prototype": "mnn_evoked_slope_prototype",
+        "baseline_contrast": "evoked_baseline_contrast",
+        "baseline_corrected_evoked": "evoked_baseline_contrast",
+        "evoked_baseline_corrected": "evoked_baseline_contrast",
+        "trial_baseline": "evoked_baseline_contrast",
+        "trial_baseline_evoked": "evoked_baseline_contrast",
+        "trial_baseline_contrast": "evoked_baseline_contrast",
+        "baseline_contrast_prototype": "evoked_baseline_contrast_prototype",
+        "baseline_corrected_evoked_prototype": "evoked_baseline_contrast_prototype",
+        "trial_baseline_prototype": "evoked_baseline_contrast_prototype",
+        "trial_baseline_contrast_prototype": "evoked_baseline_contrast_prototype",
+        "mnn_baseline_contrast": "mnn_evoked_baseline_contrast",
+        "mnn_trial_baseline_contrast": "mnn_evoked_baseline_contrast",
+        "mnn_baseline_contrast_prototype": "mnn_evoked_baseline_contrast_prototype",
+        "mnn_trial_baseline_contrast_prototype": "mnn_evoked_baseline_contrast_prototype",
     }
     normalized = aliases.get(normalized, normalized)
     if normalized not in FEATURE_KIND_CHOICES:
@@ -676,6 +703,37 @@ def _window_bin_mean_features(
             f"not enough for {temporal_bins} temporal bins."
         )
     features = [data[:, :, bin_indices].mean(axis=2) for bin_indices in bins]
+    return np.concatenate(features, axis=1).astype(np.float32, copy=False)
+
+
+def _window_evoked_baseline_contrast_features(
+    data: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    temporal_bins: int,
+    baseline_window: tuple[float, float] = DEFAULT_MNN_BASELINE_WINDOW,
+) -> np.ndarray:
+    """Return trial-wise baseline-corrected evoked bin means.
+
+    Each trial/channel's unlabeled pre-stimulus baseline mean is subtracted
+    from the post-stimulus bin means before flattening.
+    """
+
+    if temporal_bins < 1:
+        raise ValueError("temporal_bins must be at least one.")
+    indices = _sample_indices_for_window(times, window)
+    bins = np.array_split(indices, int(temporal_bins))
+    if any(len(bin_indices) == 0 for bin_indices in bins):
+        raise ValueError(
+            f"Window {window.center:.6g}s/{window.width:.6g}s has only {len(indices)} samples, "
+            f"not enough for {temporal_bins} temporal bins."
+        )
+
+    data64 = np.asarray(data, dtype=np.float64)
+    baseline_indices = _mnn_baseline_indices(times, baseline_window=baseline_window)
+    baseline_mean = data64[:, :, baseline_indices].mean(axis=2)
+    features = [data64[:, :, bin_indices].mean(axis=2) - baseline_mean for bin_indices in bins]
     return np.concatenate(features, axis=1).astype(np.float32, copy=False)
 
 
@@ -1308,13 +1366,6 @@ def _window_features(
     if feature_kind == "evoked":
         assert evoked is not None
         return evoked
-    if feature_kind == "evoked_slope":
-        return _window_evoked_slope_features(
-            data,
-            times,
-            window,
-            temporal_bins=temporal_bins,
-        )
     if feature_kind == "evoked_dct":
         return _window_evoked_dct_features(
             data,
@@ -1322,8 +1373,22 @@ def _window_features(
             window,
             temporal_bins=temporal_bins,
         )
+    if feature_kind == "evoked_slope":
+        return _window_evoked_slope_features(
+            data,
+            times,
+            window,
+            temporal_bins=temporal_bins,
+        )
     if feature_kind == "evoked_stats":
         return _window_evoked_stat_features(data, times, window, temporal_bins=temporal_bins)
+    if feature_kind == "evoked_baseline_contrast":
+        return _window_evoked_baseline_contrast_features(
+            data,
+            times,
+            window,
+            temporal_bins=temporal_bins,
+        )
     if feature_kind == "bandpower":
         return _window_bandpower_features(data, times, window, temporal_bins=temporal_bins)
     if feature_kind == "logvar":
@@ -1434,6 +1499,78 @@ def _sample_weights_for_training(
     if not np.isfinite(mean_weight) or mean_weight <= 0.0:
         raise ValueError("Training sample weights must have positive finite mean.")
     return weights / mean_weight
+
+
+def _source_pseudotrial_training_features(
+    features: np.ndarray,
+    labels: np.ndarray,
+    subject_ids: np.ndarray,
+    *,
+    pseudotrials_per_subject_class: int,
+    random_seed: int = DEFAULT_RANDOM_SEED,
+    sample_weight: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Average source trials into deterministic subject-class pseudo-trials.
+
+    Pseudo-trials are built only from the current source-training subjects. The
+    held-out subject is never used, so this is a variance-reduction option rather
+    than an alignment/calibration step. Each subject/class cell contributes up to
+    ``pseudotrials_per_subject_class`` averaged rows; if a cell has fewer trials
+    than requested, it contributes one row per available trial.
+    """
+
+    n_pseudotrials = int(pseudotrials_per_subject_class)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    subject_ids = np.asarray(subject_ids, dtype=object).reshape(-1)
+    if n_pseudotrials <= 0:
+        passthrough_weight = None if sample_weight is None else np.asarray(sample_weight, dtype=float).reshape(-1)
+        return np.asarray(features, dtype=np.float32), labels, passthrough_weight
+
+    features = np.asarray(features, dtype=np.float32)
+    if features.ndim != 2:
+        raise ValueError("Pseudo-trial aggregation expects a two-dimensional feature matrix.")
+    if features.shape[0] != labels.shape[0] or labels.shape[0] != subject_ids.shape[0]:
+        raise ValueError("features, labels, and subject_ids must contain the same number of rows.")
+    if sample_weight is not None:
+        weights = np.asarray(sample_weight, dtype=float).reshape(-1)
+        if weights.shape[0] != labels.shape[0]:
+            raise ValueError("sample_weight must contain one value per source trial before pseudo-trial aggregation.")
+    else:
+        weights = None
+
+    blocks: list[np.ndarray] = []
+    block_labels: list[int] = []
+    block_weights: list[float] = []
+    subject_ids_str = np.asarray([str(subject) for subject in subject_ids], dtype=object)
+    ordered_subjects = list(dict.fromkeys(subject_ids_str.tolist()))
+    for subject_offset, subject_id in enumerate(ordered_subjects):
+        subject_mask = subject_ids_str == subject_id
+        for class_label in np.unique(labels[subject_mask]):
+            row_indices = np.flatnonzero(subject_mask & (labels == int(class_label)))
+            if row_indices.size == 0:
+                continue
+            rng = np.random.default_rng(int(random_seed) + 1009 * subject_offset + 9173 * int(class_label))
+            shuffled = rng.permutation(row_indices)
+            n_chunks = min(n_pseudotrials, int(row_indices.size))
+            for chunk in np.array_split(shuffled, n_chunks):
+                if chunk.size == 0:
+                    continue
+                blocks.append(features[chunk].mean(axis=0, dtype=np.float64).astype(np.float32))
+                block_labels.append(int(class_label))
+                if weights is not None:
+                    block_weights.append(float(np.sum(weights[chunk])))
+
+    if not blocks:
+        raise ValueError("No source pseudo-trials could be constructed from the training fold.")
+    pseudo_features = np.vstack(blocks).astype(np.float32, copy=False)
+    pseudo_labels = np.asarray(block_labels, dtype=labels.dtype)
+    if weights is None:
+        return pseudo_features, pseudo_labels, None
+    pseudo_weights = np.asarray(block_weights, dtype=float)
+    mean_weight = float(pseudo_weights.mean())
+    if not np.isfinite(mean_weight) or mean_weight <= 0.0:
+        raise ValueError("Pseudo-trial sample weights must have positive finite mean.")
+    return pseudo_features, pseudo_labels, pseudo_weights / mean_weight
 
 
 def _fit_candidate_model(
@@ -1680,7 +1817,8 @@ def _predict_candidate(
     subject_weight_multipliers: Mapping[str, float] | None = None,
 ) -> np.ndarray:
     train_labels = _stack_subject_labels(subjects, train_subjects)
-    sample_weight = _sample_weights_for_training(
+    train_subject_ids = _stack_subject_ids(subjects, train_subjects)
+    raw_sample_weight = _sample_weights_for_training(
         subjects,
         train_subjects,
         train_labels,
@@ -1690,7 +1828,8 @@ def _predict_candidate(
     test_n = len(subjects[test_subject].labels)
     probabilities_sum = np.zeros((test_n, n_classes), dtype=float)
     class_bias_mode = _normalize_class_bias(candidate.class_bias)
-    train_probabilities_sum = np.zeros((len(train_labels), n_classes), dtype=float) if class_bias_mode != "none" else None
+    train_probabilities_sum: np.ndarray | None = None
+    class_bias_labels: np.ndarray | None = None
     classes = np.arange(n_classes)
     feature_kind = normalize_source_feature_kind(candidate.feature_kind)
     for window in candidate.windows:
@@ -1729,8 +1868,19 @@ def _predict_candidate(
                 window=window,
                 n_classes=n_classes,
             )
+        fit_labels = train_labels
+        fit_sample_weight = raw_sample_weight
+        if int(candidate.pseudotrials_per_subject_class) > 0:
+            train_features, fit_labels, fit_sample_weight = _source_pseudotrial_training_features(
+                train_features,
+                train_labels,
+                train_subject_ids,
+                pseudotrials_per_subject_class=int(candidate.pseudotrials_per_subject_class),
+                random_seed=DEFAULT_RANDOM_SEED,
+                sample_weight=raw_sample_weight,
+            )
         model = _candidate_model(candidate, max_iter=max_iter, n_features=train_features.shape[1], n_samples=train_features.shape[0])
-        _fit_candidate_model(model, train_features, train_labels, sample_weight=sample_weight)
+        _fit_candidate_model(model, train_features, fit_labels, sample_weight=fit_sample_weight)
         probabilities = predict_emission_probabilities(
             model,
             test_features,
@@ -1741,7 +1891,12 @@ def _predict_candidate(
             model=model,
             classes=classes,
         )
+        if class_bias_mode != "none" and train_probabilities_sum is None:
+            train_probabilities_sum = np.zeros((len(fit_labels), n_classes), dtype=float)
+            class_bias_labels = fit_labels
         if train_probabilities_sum is not None:
+            if class_bias_labels is None or len(class_bias_labels) != len(fit_labels) or not np.array_equal(class_bias_labels, fit_labels):
+                raise ValueError("Class-bias fitting requires a stable source-training representation across candidate windows.")
             train_probabilities = predict_emission_probabilities(
                 model,
                 train_features,
@@ -1756,7 +1911,8 @@ def _predict_candidate(
     if train_probabilities_sum is None:
         return averaged
     train_averaged = _base._probability_average(train_probabilities_sum, len(candidate.windows))
-    bias = _fit_class_bias(train_averaged, train_labels, n_classes=n_classes, mode=class_bias_mode)
+    assert class_bias_labels is not None
+    bias = _fit_class_bias(train_averaged, class_bias_labels, n_classes=n_classes, mode=class_bias_mode)
     return _apply_class_bias(averaged, bias)
 
 
@@ -1791,6 +1947,7 @@ def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
         "classifier_param": "" if candidate.classifier_param is None else candidate.classifier_param,
         "sample_weighting": _normalize_sample_weighting(candidate.sample_weighting),
         "class_bias": _normalize_class_bias(candidate.class_bias),
+        "pseudotrials_per_subject_class": int(candidate.pseudotrials_per_subject_class),
         "temporal_bins": candidate.temporal_bins,
         "feature_kind": normalize_source_feature_kind(candidate.feature_kind),
         "xdawn_components": "" if candidate.xdawn_components is None else candidate.xdawn_components,
@@ -1933,6 +2090,25 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
             ["none"],
         )
     ]
+    pseudotrial_values = list(
+        dict.fromkeys(
+            max(0, int(value))
+            for value in _list_value(
+                grid.get(
+                    "pseudotrials_per_subject_class",
+                    grid.get(
+                        "pseudotrials_per_class",
+                        source_loso.get(
+                            "pseudotrials_per_subject_class",
+                            source_loso.get("pseudotrials_per_class", 0),
+                        ),
+                    ),
+                ),
+                [0],
+            )
+        )
+    )
+    include_pseudotrial_name_token = len(pseudotrial_values) > 1 or any(value > 0 for value in pseudotrial_values)
 
     candidates: list[CandidateSpec] = []
     for window_name, windows in window_sets:
@@ -1961,22 +2137,22 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                                     )
                                     for xdawn_components in xdawn_component_grid:
                                         for covariance_max_channels in covariance_channel_grid:
-                                            normalized_decoder = normalize_decoder_name(decoder)
-                                            classifier_grid = (
-                                                deep_weight_decay_grid
-                                                if normalized_decoder == "torch_mlp"
-                                                else c_grid
-                                            )
-                                            for sample_weighting in sample_weighting_values:
-                                                for class_bias in class_bias_values:
-                                                    for classifier_value in classifier_grid:
-                                                        parameter_token = (
-                                                            f"wd{classifier_value:g}"
-                                                            if normalized_decoder == "torch_mlp"
-                                                            else f"c{classifier_value:g}"
-                                                        )
-                                                        name = "__".join(
-                                                            [
+                                            for pseudotrials_per_subject_class in pseudotrial_values:
+                                                normalized_decoder = normalize_decoder_name(decoder)
+                                                classifier_grid = (
+                                                    deep_weight_decay_grid
+                                                    if normalized_decoder == "torch_mlp"
+                                                    else c_grid
+                                                )
+                                                for sample_weighting in sample_weighting_values:
+                                                    for class_bias in class_bias_values:
+                                                        for classifier_value in classifier_grid:
+                                                            parameter_token = (
+                                                                f"wd{classifier_value:g}"
+                                                                if normalized_decoder == "torch_mlp"
+                                                                else f"c{classifier_value:g}"
+                                                            )
+                                                            name_tokens = [
                                                                 window_name,
                                                                 feature_family,
                                                                 normalized_decoder,
@@ -1992,29 +2168,36 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                                                                 f"feat{feature_kind}",
                                                                 f"xdawn{'' if xdawn_components is None else xdawn_components}",
                                                                 f"covch{covariance_max_channels}",
-                                                                _normalize_sample_weighting(sample_weighting),
-                                                                _normalize_class_bias(class_bias),
-                                                                parameter_token,
                                                             ]
-                                                        )
-                                                        candidates.append(
-                                                            CandidateSpec(
-                                                                name=name,
-                                                                decoder=decoder,
-                                                                emission_mode=emission_mode,
-                                                                feature_preprocessor=feature_preprocessor,
-                                                                pca_components=pca_components,
-                                                                classifier_param=classifier_value,
-                                                                temporal_bins=temporal_bins,
-                                                                windows=windows,
-                                                                feature_kind=feature_kind,
-                                                                xdawn_components=xdawn_components,
-                                                                covariance_max_channels=covariance_max_channels,
-                                                                feature_family=feature_family,
-                                                                sample_weighting=sample_weighting,
-                                                                class_bias=class_bias,
+                                                            if include_pseudotrial_name_token:
+                                                                name_tokens.append(f"pt{pseudotrials_per_subject_class}")
+                                                            name_tokens.extend(
+                                                                [
+                                                                    _normalize_sample_weighting(sample_weighting),
+                                                                    _normalize_class_bias(class_bias),
+                                                                    parameter_token,
+                                                                ]
                                                             )
-                                                        )
+                                                            name = "__".join(name_tokens)
+                                                            candidates.append(
+                                                                CandidateSpec(
+                                                                    name=name,
+                                                                    decoder=decoder,
+                                                                    emission_mode=emission_mode,
+                                                                    feature_preprocessor=feature_preprocessor,
+                                                                    pca_components=pca_components,
+                                                                    classifier_param=classifier_value,
+                                                                    temporal_bins=temporal_bins,
+                                                                    windows=windows,
+                                                                    feature_kind=feature_kind,
+                                                                    xdawn_components=xdawn_components,
+                                                                    covariance_max_channels=covariance_max_channels,
+                                                                    feature_family=feature_family,
+                                                                    sample_weighting=sample_weighting,
+                                                                    class_bias=class_bias,
+                                                                    pseudotrials_per_subject_class=pseudotrials_per_subject_class,
+                                                                )
+                                                            )
     return candidates
 
 
@@ -2162,6 +2345,7 @@ def run_bushmeg_source_loso(
             ),
             "sample_weighting_modes": sorted({candidate.sample_weighting for candidate in candidates}),
             "class_bias_modes": sorted({candidate.class_bias for candidate in candidates}),
+            "pseudotrials_per_subject_class": sorted({int(candidate.pseudotrials_per_subject_class) for candidate in candidates}),
             "cue_files_used": cue_source_weights is not None,
             "cue_files_used_for_classifier_training": False,
             "target_labels_used_for_selection": False,
