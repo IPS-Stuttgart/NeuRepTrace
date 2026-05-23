@@ -13,6 +13,8 @@ NeuRepTrace already contains the main reusable migration pieces:
 - Strict source-only BUSH-MEG LOSO decoding.
 - Source-only top-k ensembles, source-fitted class-bias corrections, and
   top-k reranking from inner source-subject out-of-fold predictions.
+- Generic source-OOF probability stacking for leakage-safe ensembles learned
+  from source-fold observations and applied to held-out target observations.
 - Fold-local supervised low-rank PLS LOSO utilities.
 - Synthetic FieldTrip fixtures for private-data-free smoke tests.
 - Generic reaction-time loading, joining, and metric-association utilities.
@@ -38,3 +40,36 @@ the PyMEGDec covariance representations:
 The workflow performs outer held-out-subject evaluation with inner source-subject
 LOSO model selection. `covariance_loso.label_shuffle_control: true` enables a
 training-label shuffle null control that leaves held-out labels untouched.
+
+## Added generic source-OOF probability stacking
+
+The reusable part of PyMEGDec's logit-stacking workflow is the leakage boundary:
+fit ensemble weights only from source-subject out-of-fold predictions, then
+apply those weights to a separate held-out target table. NeuRepTrace now exposes
+that idea for any probability-observation CSVs, independent of BUSH-MEG loaders
+or MATLAB file conventions.
+
+```bash
+neureptrace-probability-stacking \
+  --source-oof results/source_oof_observations.csv \
+  --target results/heldout_target_observations.csv \
+  --out results/stacked_observations.csv \
+  --metrics-out results/stacked_metrics.csv
+```
+
+The grouped CLI provides the same workflow:
+
+```bash
+neureptrace probability-stacking \
+  --source-oof results/source_oof_observations.csv \
+  --target results/heldout_target_observations.csv \
+  --out results/stacked_observations.csv
+```
+
+Use `--candidate-column` when base models are identified by a column other than
+`decoder`, repeat `--candidate` to control candidate order, and repeat
+`--alignment-column` when observation rows need study-specific alignment keys.
+The default `stacked` weighting fits non-negative weights by minimizing
+class-balanced source-OOF log loss; `uniform` and `softmax` are available as
+simpler baselines. Target labels are used only for reporting prediction and
+metric columns, never for fitting the source-OOF weights.
