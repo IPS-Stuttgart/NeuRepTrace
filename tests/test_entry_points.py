@@ -1,6 +1,8 @@
 from importlib import import_module
 from pathlib import Path
+import runpy
 
+import pytest
 import tomllib
 
 from neureptrace.cli import COMMAND_MODULES
@@ -24,6 +26,24 @@ def test_grouped_cli_targets_are_importable():
         module = import_module(module_name)
 
         assert callable(getattr(module, "main", None)), command
+
+
+def test_package_module_entrypoint_delegates_to_grouped_cli(monkeypatch):
+    import neureptrace.cli as cli_module
+
+    calls = []
+
+    def fake_main():
+        calls.append(True)
+        return 7
+
+    monkeypatch.setattr(cli_module, "main", fake_main)
+
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_module("neureptrace.__main__", run_name="__main__")
+
+    assert exc_info.value.code == 7
+    assert calls == [True]
 
 
 def test_mne_time_decode_scripts_use_safe_wrappers():
