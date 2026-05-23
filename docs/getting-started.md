@@ -6,6 +6,19 @@ Install NeuRepTrace from a source checkout:
 poetry install --with dev
 ```
 
+Check that the environment and core dependencies are usable before launching a
+benchmark:
+
+```bash
+neureptrace doctor --skip-optional
+```
+
+Dataset configs can be checked with the same diagnostic command:
+
+```bash
+neureptrace doctor --dataset-config path/to/dataset.yml --skip-optional
+```
+
 Run the first benchmark against an MNE epochs file with the installed
 fold-local time decoder:
 
