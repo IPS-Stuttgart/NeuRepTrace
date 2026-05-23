@@ -15,6 +15,7 @@ COMMAND_MODULES = {
     "bushmeg-source-loso": "neureptrace.bushmeg_source_loso",
     "bushmeg-source-loso-ensemble": "neureptrace.bushmeg_source_loso_ensemble",
     "bushmeg-supervised-lowrank-loso": "neureptrace.bushmeg_supervised_lowrank_loso",
+    "bushmeg-diagnostics": "neureptrace.bushmeg_diagnostics",
     "bushmeg-loso-decode": "neureptrace.bushmeg_loso_decode",
     "continuous-stimulus-scan": "neureptrace.continuous_stimulus_scan",
     "dataset": "neureptrace.dataset_spec_cli",

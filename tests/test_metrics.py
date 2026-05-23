@@ -68,6 +68,30 @@ def test_probability_metrics_reject_invalid_probability_rows():
         negative_log_likelihood(np.array([[0.5, 0.5]]), np.array([2]))
 
 
+@pytest.mark.parametrize(
+    "metric",
+    [expected_calibration_error, reliability_bins, brier_score_multiclass],
+)
+def test_probability_metrics_reject_out_of_range_labels(metric):
+    probabilities = np.array([[0.6, 0.4], [0.2, 0.8]])
+    labels = np.array([0, 2])
+
+    with pytest.raises(ValueError, match="valid column indices"):
+        metric(probabilities, labels)
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [expected_calibration_error, reliability_bins, brier_score_multiclass],
+)
+def test_probability_metrics_reject_invalid_probabilities(metric):
+    probabilities = np.array([[0.6, 0.6], [0.2, 0.8]])
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="sum to one"):
+        metric(probabilities, labels)
+
+
 def test_validate_probability_inputs_can_accept_unnormalized_scores_when_requested():
     scores = np.array([[2.0, 1.0], [0.5, 0.25]])
 

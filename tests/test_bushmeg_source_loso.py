@@ -23,6 +23,8 @@ from neureptrace.bushmeg_source_loso import (
     _select_candidate,
     _window_features,
     _window_bin_mean_features,
+    _window_evoked_slope_features,
+    _window_evoked_stat_features,
     normalize_source_feature_family,
 )
 
@@ -50,6 +52,50 @@ def test_window_bin_mean_features_concatenates_channel_bins():
         ],
         dtype=np.float32,
     )
+    np.testing.assert_allclose(features, expected)
+
+
+def test_window_evoked_slope_features_append_within_bin_linear_contrasts():
+    data = np.array(
+        [
+            [[1.0, 2.0, 10.0, 14.0], [4.0, 6.0, 8.0, 10.0]],
+            [[3.0, 5.0, 20.0, 24.0], [2.0, 4.0, 6.0, 8.0]],
+        ],
+        dtype=float,
+    )
+    times = np.array([0.10, 0.15, 0.20, 0.25])
+    window = WindowSpec(center=0.175, width=0.20)
+
+    evoked = _window_bin_mean_features(data, times, window, temporal_bins=2)
+    features = _window_evoked_slope_features(data, times, window, temporal_bins=2)
+
+    scale = np.sqrt(2.0)
+    expected = np.array(
+        [
+            [1.5, 5.0, 12.0, 9.0, 1.0 / scale, 2.0 / scale, 4.0 / scale, 2.0 / scale],
+            [4.0, 3.0, 22.0, 7.0, 2.0 / scale, 2.0 / scale, 4.0 / scale, 2.0 / scale],
+        ],
+        dtype=np.float32,
+    )
+
+    np.testing.assert_allclose(features[:, : evoked.shape[1]], evoked)
+    np.testing.assert_allclose(features, expected, rtol=1e-6)
+
+
+def test_window_evoked_stat_features_capture_extrema_and_trend():
+    data = np.array(
+        [
+            [[1.0, 2.0, 3.0]],
+            [[3.0, 2.0, 1.0]],
+        ],
+        dtype=np.float32,
+    )
+    times = np.array([0.10, 0.20, 0.30])
+
+    features = _window_evoked_stat_features(data, times, WindowSpec(center=0.20, width=0.20), temporal_bins=1)
+
+    expected = np.array([[2.0, 1.0, 1.0, 3.0, 1.0], [2.0, 1.0, 1.0, 3.0, -1.0]], dtype=np.float32)
+    assert features.shape == (2, 5)
     np.testing.assert_allclose(features, expected)
 
 
@@ -147,17 +193,23 @@ def test_window_feature_kinds_add_logvar_and_covariance_branches():
     window = WindowSpec(center=0.175, width=0.20)
 
     evoked = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked")
+    evoked_slope = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_slope")
+    evoked_stats = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_stats")
     logvar = _window_features(data, times, window, temporal_bins=2, feature_kind="logvar")
     evoked_logvar = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_logvar")
     covariance = _window_features(data, times, window, temporal_bins=2, feature_kind="covariance", covariance_max_channels=2)
     evoked_covariance = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_covariance", covariance_max_channels=2)
 
     assert evoked.shape == (2, 6)
+    assert evoked_slope.shape == (2, 12)
+    assert evoked_stats.shape == (2, 30)
     assert logvar.shape == (2, 6)
     assert evoked_logvar.shape == (2, 12)
     assert covariance.shape == (2, 3)
     assert evoked_covariance.shape == (2, 9)
     assert np.all(np.isfinite(logvar))
+    assert np.all(np.isfinite(evoked_slope))
+    assert np.all(np.isfinite(evoked_stats))
     assert np.all(np.isfinite(covariance))
 
 
