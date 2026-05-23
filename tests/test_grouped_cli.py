@@ -28,6 +28,13 @@ def test_grouped_cli_exposes_focused_console_scripts() -> None:
     assert expected_commands <= set(cli.COMMAND_MODULES)
 
 
+def test_temporal_smoothing_grouped_alias_matches_console_script() -> None:
+    """Keep the grouped temporal-smoothing command aligned with its focused script."""
+
+    assert _console_scripts()["neureptrace-temporal-smoothing"] == "neureptrace.temporal_smoothing:main"
+    assert cli.COMMAND_MODULES["temporal-smoothing"] == "neureptrace.temporal_smoothing"
+
+
 def test_grouped_bushmeg_data_help(capsys, monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["neureptrace"])
 
