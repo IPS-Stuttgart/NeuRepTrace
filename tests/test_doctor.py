@@ -5,6 +5,7 @@ import tomllib
 from pathlib import Path
 
 from neureptrace import cli
+import neureptrace.doctor as doctor
 from neureptrace.doctor import main as doctor_main
 from neureptrace.doctor import run_checks, summarize_checks
 
@@ -105,3 +106,64 @@ def test_poetry_scripts_expose_doctor():
     scripts = pyproject["tool"]["poetry"]["scripts"]
 
     assert scripts["neureptrace-doctor"] == "neureptrace.doctor:main"
+
+
+def test_import_module_for_diagnostics_reports_import_time_failure(monkeypatch):
+    def fake_import_module(module_name: str):
+        raise ImportError(f"{module_name} failed to load native extension")
+
+    monkeypatch.setattr(doctor.importlib, "import_module", fake_import_module)
+
+    available, error = doctor._import_module_for_diagnostics("broken_backend")
+
+    assert available is False
+    assert error == "ImportError: broken_backend failed to load native extension"
+
+
+def test_check_dependency_reports_installed_but_broken_required_module(monkeypatch):
+    monkeypatch.setattr(doctor, "_distribution_version", lambda distribution_name: "1.2.3")
+    monkeypatch.setattr(
+        doctor,
+        "_import_module_for_diagnostics",
+        lambda module_name: (False, "ImportError: libexample.so: cannot open shared object file"),
+    )
+
+    check = doctor._check_dependency("example-dist", "example", required=True)
+
+    assert check.name == "dependency:example-dist"
+    assert check.status == "error"
+    assert check.required is True
+    assert "required module 'example' is not importable" in check.details
+    assert "libexample.so" in check.details
+
+
+def test_check_dependency_reports_installed_but_broken_optional_module_as_warning(monkeypatch):
+    monkeypatch.setattr(doctor, "_distribution_version", lambda distribution_name: "1.2.3")
+    monkeypatch.setattr(
+        doctor,
+        "_import_module_for_diagnostics",
+        lambda module_name: (False, "RuntimeError: ABI mismatch"),
+    )
+
+    check = doctor._check_dependency("optional-dist", "optional_backend", required=False)
+
+    assert check.name == "dependency:optional-dist"
+    assert check.status == "warning"
+    assert check.required is False
+    assert "optional module 'optional_backend' is not importable" in check.details
+    assert "ABI mismatch" in check.details
+
+
+def test_check_required_module_reports_import_time_failure(monkeypatch):
+    monkeypatch.setattr(
+        doctor,
+        "_import_module_for_diagnostics",
+        lambda module_name: (False, "ValueError: incompatible binary interface"),
+    )
+
+    check = doctor._check_required_module("project_adapter")
+
+    assert check.name == "module:project_adapter"
+    assert check.status == "error"
+    assert "Required module 'project_adapter' is not importable" in check.details
+    assert "incompatible binary interface" in check.details
