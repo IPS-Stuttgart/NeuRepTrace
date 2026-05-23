@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -80,11 +81,21 @@ FEATURE_KIND_CHOICES = (
     "evoked_prototype",
     "logvar_prototype",
     "evoked_logvar_prototype",
+    "mnn_evoked",
+    "mnn_logvar",
+    "mnn_covariance",
+    "mnn_evoked_logvar",
+    "mnn_evoked_covariance",
+    "mnn_prototype",
+    "mnn_evoked_prototype",
+    "mnn_logvar_prototype",
+    "mnn_evoked_logvar_prototype",
     "xdawn",
     "xdawn_prototype",
 )
 DEFAULT_XDAWN_COMPONENTS = 8
 DEFAULT_COVARIANCE_MAX_CHANNELS = 64
+DEFAULT_MNN_BASELINE_WINDOW = (-0.35, -0.05)
 PROTOTYPE_FEATURE_KINDS = frozenset(
     {
         "prototype",
@@ -92,6 +103,10 @@ PROTOTYPE_FEATURE_KINDS = frozenset(
         "logvar_prototype",
         "evoked_logvar_prototype",
         "xdawn_prototype",
+        "mnn_prototype",
+        "mnn_evoked_prototype",
+        "mnn_logvar_prototype",
+        "mnn_evoked_logvar_prototype",
     }
 )
 SUPERVISED_FEATURE_KINDS = PROTOTYPE_FEATURE_KINDS | {"xdawn"}
@@ -100,6 +115,10 @@ PROTOTYPE_BASE_FEATURE_KINDS = {
     "evoked_prototype": "evoked",
     "logvar_prototype": "logvar",
     "evoked_logvar_prototype": "evoked_logvar",
+    "mnn_prototype": "mnn_evoked",
+    "mnn_evoked_prototype": "mnn_evoked",
+    "mnn_logvar_prototype": "mnn_logvar",
+    "mnn_evoked_logvar_prototype": "mnn_evoked_logvar",
 }
 
 
@@ -938,6 +957,64 @@ def _window_covariance_features(
     return features
 
 
+def _mnn_base_feature_kind(feature_kind: str) -> str | None:
+    """Return the underlying feature kind for an MNN-prefixed feature kind."""
+
+    if not feature_kind.startswith("mnn_"):
+        return None
+    return feature_kind[len("mnn_") :]
+
+
+def _mnn_baseline_indices(
+    times: np.ndarray,
+    *,
+    baseline_window: tuple[float, float] = DEFAULT_MNN_BASELINE_WINDOW,
+) -> np.ndarray:
+    """Return MNN baseline indices, falling back to all negative samples."""
+
+    times = np.asarray(times, dtype=float)
+    tolerance = 1e-12
+    start, stop = baseline_window
+    indices = np.flatnonzero((times >= float(start) - tolerance) & (times <= float(stop) + tolerance))
+    if indices.size == 0:
+        indices = np.flatnonzero(times < -tolerance)
+    if indices.size == 0:
+        raise ValueError(
+            "MNN feature extraction requires pre-stimulus baseline samples; "
+            f"no samples were found in {baseline_window} or at times < 0."
+        )
+    return indices
+
+
+def _baseline_channel_whitener(
+    data: np.ndarray,
+    times: np.ndarray,
+    *,
+    baseline_window: tuple[float, float] = DEFAULT_MNN_BASELINE_WINDOW,
+    shrinkage: float = 0.10,
+    epsilon: float = 1e-12,
+) -> np.ndarray:
+    """Estimate a subject-local baseline covariance inverse square root."""
+
+    baseline_indices = _mnn_baseline_indices(times, baseline_window=baseline_window)
+    baseline = np.asarray(data[:, :, baseline_indices], dtype=np.float64)
+    n_channels = baseline.shape[1]
+    flattened = np.transpose(baseline, (1, 0, 2)).reshape(n_channels, -1)
+    flattened -= flattened.mean(axis=1, keepdims=True)
+    covariance = (flattened @ flattened.T) / float(max(flattened.shape[1] - 1, 1))
+    mean_variance = float(np.trace(covariance) / max(n_channels, 1))
+    covariance = (1.0 - float(shrinkage)) * covariance + float(shrinkage) * mean_variance * np.eye(n_channels)
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    inverse_sqrt = 1.0 / np.sqrt(np.maximum(eigenvalues, float(epsilon)))
+    return (eigenvectors * inverse_sqrt[None, :]) @ eigenvectors.T
+
+
+def _apply_channel_whitener(data: np.ndarray, whitener: np.ndarray) -> np.ndarray:
+    """Apply a channel-space whitening/projection matrix to trial epochs."""
+
+    return np.einsum("dc,nct->ndt", np.asarray(whitener, dtype=np.float64), np.asarray(data, dtype=np.float64))
+
+
 def _window_features(
     data: np.ndarray,
     times: np.ndarray,
@@ -950,6 +1027,22 @@ def _window_features(
     """Return source-LOSO features for one subject/window."""
 
     feature_kind = normalize_source_feature_kind(feature_kind)
+    mnn_base_kind = _mnn_base_feature_kind(feature_kind)
+    if mnn_base_kind is not None:
+        if mnn_base_kind in SUPERVISED_FEATURE_KINDS:
+            raise ValueError(f"{feature_kind} features are supervised and must be fitted inside _predict_candidate.")
+        whitened = _apply_channel_whitener(
+            data,
+            _baseline_channel_whitener(data, times),
+        )
+        return _window_features(
+            whitened,
+            times,
+            window,
+            temporal_bins=temporal_bins,
+            feature_kind=mnn_base_kind,
+            covariance_max_channels=covariance_max_channels,
+        )
     if feature_kind in SUPERVISED_FEATURE_KINDS:
         raise ValueError(f"{feature_kind} features are supervised and must be fitted inside _predict_candidate.")
     evoked = None
@@ -1081,11 +1174,25 @@ def _fit_candidate_model(
         raise ValueError("sample_weight must contain one weight per training row.")
     try:
         model.fit(features, labels, sample_weight=sample_weight)
+        return model
     except (TypeError, ValueError) as exc:
         if not hasattr(model, "steps") or not getattr(model, "steps"):
-            raise TypeError(f"{model.__class__.__name__} does not support sample_weight.") from exc
+            warnings.warn(f"{model.__class__.__name__} does not accept sample_weight; fitting without weights.", RuntimeWarning, stacklevel=2)
+            model.fit(features, labels)
+            return model
         final_step_name = model.steps[-1][0]
-        model.fit(features, labels, **{f"{final_step_name}__sample_weight": sample_weight})
+        try:
+            model.fit(features, labels, **{f"{final_step_name}__sample_weight": sample_weight})
+            return model
+        except (TypeError, ValueError) as routed_exc:
+            warnings.warn(
+                f"{model.steps[-1][1].__class__.__name__} does not accept sample_weight; fitting without weights. "
+                f"First error: {exc}; routed error: {routed_exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            model.fit(features, labels)
+            return model
     return model
 
 

@@ -39,6 +39,14 @@ from neureptrace.bushmeg_source_loso import (
     _resolve_output,
     _section,
 )
+from neureptrace.bushmeg_cue_source_weighting import (
+    DEFAULT_CUE_SOURCE_TEMPERATURE,
+    DEFAULT_CUE_SOURCE_WEIGHTING,
+    cue_source_weights_from_summaries,
+    load_cue_summaries_from_config,
+    normalize_cue_source_temperature,
+    normalize_cue_source_weighting,
+)
 from neureptrace.dataset_config import apply_overrides, load_config
 from neureptrace.bushmeg_cue_source_weights import (
     CueSourceWeights,
@@ -381,6 +389,13 @@ def _source_oof_probabilities(
     label_blocks: list[np.ndarray] = []
     for inner_test_subject in source_subjects:
         train_subjects = [subject for subject in source_subjects if subject != inner_test_subject]
+        subject_weights = cue_source_weights_from_summaries(
+            cue_summaries or {},
+            test_subject=inner_test_subject,
+            train_subjects=train_subjects,
+            mode=cue_source_weighting,
+            temperature=cue_source_temperature,
+        )
         label_blocks.append(subjects[inner_test_subject].labels)
         for candidate_index, candidate in enumerate(candidates):
             probability_blocks[candidate_index].append(
