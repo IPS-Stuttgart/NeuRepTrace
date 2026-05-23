@@ -41,7 +41,7 @@ jobs:
           poetry install --with docs --without dev
 
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Build documentation
         run: poetry run mkdocs build --strict --site-dir site

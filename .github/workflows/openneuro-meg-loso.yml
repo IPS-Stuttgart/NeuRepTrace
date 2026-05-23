@@ -91,17 +91,17 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Cache OpenNeuro datasets on GitHub-hosted runners
         if: runner.environment == 'github-hosted'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/datasets/openneuro
           key: openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-${{ inputs.subjects }}-${{ inputs.runs }}-v1
@@ -292,7 +292,7 @@ jobs:
           PY
 
       - name: Upload OpenNeuro MEG outputs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}
           path: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}/**
