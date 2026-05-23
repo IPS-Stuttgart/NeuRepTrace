@@ -215,6 +215,12 @@ class CandidateSpec:
     pseudotrial_seed: int = DEFAULT_RANDOM_SEED
 
     @property
+    def pseudotrials_per_subject_class(self) -> int:
+        """Backward-compatible name for source subject/class pseudo-trials."""
+
+        return self.pseudotrials_per_class
+
+    @property
     def window_centers(self) -> tuple[float, ...]:
         return tuple(window.center for window in self.windows)
 
@@ -1633,6 +1639,73 @@ def _source_class_pseudotrials(
     raise AssertionError(f"Unhandled pseudo-trial training mode: {mode}")
 
 
+def _source_pseudotrial_training_features(
+    features: np.ndarray,
+    labels: np.ndarray,
+    subject_ids: Sequence[str] | np.ndarray,
+    *,
+    pseudotrials_per_subject_class: int,
+    sample_weight: np.ndarray | None = None,
+    pseudotrial_seed: int = DEFAULT_RANDOM_SEED,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Return source subject/class pseudo-trials with optional averaged weights.
+
+    This keeps the original helper API used by downstream tests while the main
+    implementation routes through the newer mode-aware pseudo-trial builder.
+    """
+
+    count = int(pseudotrials_per_subject_class)
+    features = np.asarray(features, dtype=np.float32)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    subject_ids = np.asarray(subject_ids, dtype=object).reshape(-1)
+    if features.ndim != 2:
+        raise ValueError("Pseudo-trial features must be a two-dimensional matrix.")
+    if features.shape[0] != labels.shape[0] or labels.shape[0] != subject_ids.shape[0]:
+        raise ValueError("features, labels, and subject_ids must have matching row counts.")
+    if count <= 0:
+        weights = None if sample_weight is None else np.asarray(sample_weight, dtype=float).reshape(-1)
+        return features, labels, weights
+    if labels.size == 0:
+        raise ValueError("Pseudo-trial labels must not be empty.")
+
+    weights = None if sample_weight is None else np.asarray(sample_weight, dtype=float).reshape(-1)
+    if weights is not None and weights.shape[0] != labels.shape[0]:
+        raise ValueError("sample_weight must contain one weight per training row.")
+
+    pseudo_features: list[np.ndarray] = []
+    pseudo_labels: list[int] = []
+    pseudo_weights: list[float] = []
+    subject_strings = subject_ids.astype(str)
+    n_classes = int(labels.max()) + 1
+    for subject in sorted(set(subject_strings.tolist())):
+        subject_mask = subject_strings == subject
+        for class_idx in range(n_classes):
+            indices = np.flatnonzero(subject_mask & (labels == class_idx))
+            if indices.size == 0:
+                continue
+            rng = np.random.default_rng(
+                _stable_pseudotrial_seed(pseudotrial_seed, subject, class_idx, indices.size, features.shape[1])
+            )
+            shuffled = rng.permutation(indices)
+            n_chunks = min(count, int(indices.size))
+            for chunk in np.array_split(shuffled, n_chunks):
+                if chunk.size == 0:
+                    continue
+                pseudo_features.append(features[chunk].mean(axis=0, dtype=np.float64).astype(np.float32, copy=False))
+                pseudo_labels.append(class_idx)
+                if weights is not None:
+                    pseudo_weights.append(float(np.mean(weights[chunk], dtype=np.float64)))
+
+    if not pseudo_features:
+        raise ValueError("Pseudo-trial training was enabled but no source pseudo-trials could be built.")
+    pseudo_weight_array = None if weights is None else np.asarray(pseudo_weights, dtype=float)
+    return (
+        np.vstack(pseudo_features).astype(np.float32, copy=False),
+        np.asarray(pseudo_labels, dtype=int),
+        pseudo_weight_array,
+    )
+
+
 def _fit_candidate_model(
     model: Any,
     features: np.ndarray,
@@ -2260,7 +2333,12 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                                                                 f"covch{covariance_max_channels}",
                                                             ]
                                                             if include_pseudotrial_name_token:
-                                                                name_tokens.append(f"pt{pseudotrial_mode}{pseudotrials_per_class}")
+                                                                if pseudotrial_mode == "replace":
+                                                                    name_tokens.append(f"pt{pseudotrials_per_class}")
+                                                                else:
+                                                                    name_tokens.append(f"pt{pseudotrial_mode}{pseudotrials_per_class}")
+                                                                if pseudotrial_mode not in {"off", "replace"}:
+                                                                    name_tokens.append(f"ptmode{pseudotrial_mode}")
                                                                 if pseudotrial_mode != "off":
                                                                     name_tokens.append(f"ptseed{pseudotrial_seed}")
                                                             name_tokens.extend(
