@@ -7,10 +7,31 @@ preserving the old MEG dataset conventions as explicit NeuRepTrace configs.
 
 | PyMEGDec command | NeuRepTrace equivalent |
 | --- | --- |
+| `pymegdec data write-neureptrace-spec --out configs/bushmeg.yml` | `neureptrace dataset write-pymegdec-bushmeg --out configs/bushmeg.yml` |
 | `pymegdec stimulus-decoding --data-dir DATA --participants 2` | `neureptrace decode-from-config configs/bush_meg/stimulus_decoding.yml --set dataset.root=DATA --set participants.ids=2` |
 | `pymegdec cross-validate --data-dir DATA --participant 2` | Add a cross-validation config using the same `fieldtrip_mat` dataset recipe and run `neureptrace decode-from-config ...` |
-| `pymegdec transfer --data-dir DATA --participant 2` | Represent main and cue files with `dataset.files` and add a transfer workflow config once transfer-from-config lands |
+| `pymegdec transfer --data-dir DATA --participant 2` | Represent main and cue files with `neureptrace dataset write-pymegdec-bushmeg`, then expand the `stimulus_transfer` or `stimulus_transfer_reverse` workflow with `neureptrace dataset manifest ...` |
 | `pymegdec-make-synthetic-data --out DIR` | `neureptrace synthetic-fieldtrip --out DIR` |
+
+## Dataset-spec migration
+
+NeuRepTrace owns the maintained dataset-spec template for the historical
+PyMEGDec/Bush-MEG `Part*Data.mat` and `Part*CueData.mat` convention:
+
+```bash
+neureptrace dataset write-pymegdec-bushmeg --out configs/bushmeg.yml
+neureptrace dataset validate configs/bushmeg.yml
+neureptrace dataset manifest configs/bushmeg.yml \
+  --workflow stimulus_transfer \
+  --out results/bushmeg_main_to_cue_manifest.csv
+```
+
+For compatibility with older migration notes, the dataset CLI also accepts
+`write-pymegdec-spec` as an alias. The generated spec includes participant
+ranges, main/cue file templates, FieldTrip-style MATLAB keys, 16-class chance
+defaults, and both main-to-cue and cue-to-main transfer workflow metadata. Keep
+only paper-specific alpha, CTF-geometry, and historical export scripts in
+PyMEGDec.
 
 ## Python API mapping
 
