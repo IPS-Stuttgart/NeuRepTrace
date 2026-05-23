@@ -16,6 +16,8 @@ NeuRepTrace already contains the main reusable migration pieces:
 - Generic source-OOF probability stacking for leakage-safe ensembles learned
   from source-fold observations and applied to held-out target observations.
 - Fold-local supervised low-rank PLS LOSO utilities.
+- Reusable PyMEGDec-compatible covariance feature extraction in
+  `neureptrace.decoding.covariance_features`.
 - Synthetic FieldTrip fixtures for private-data-free smoke tests.
 - Generic reaction-time loading, joining, and metric-association utilities.
 
@@ -40,6 +42,17 @@ the PyMEGDec covariance representations:
 The workflow performs outer held-out-subject evaluation with inner source-subject
 LOSO model selection. `covariance_loso.label_shuffle_control: true` enables a
 training-label shuffle null control that leaves held-out labels untouched.
+
+For compatibility wrappers that only need feature extraction, import the generic
+helpers directly instead of depending on the BUSH-MEG workflow module:
+
+```python
+from neureptrace.decoding.covariance_features import (
+    CovarianceWindow,
+    covariance_feature_vector,
+    window_covariance_features,
+)
+```
 
 ## Added generic source-OOF probability stacking
 
