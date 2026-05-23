@@ -4,6 +4,7 @@
 # not appended to the training set, not used as test trials, and not used to fit
 # class labels.  This is intended as a safer alternative to cue-fitted M-CCA or
 # hyperalignment when cue geometry does not preserve main-task class structure.
+# jscpd:ignore-start
 schema_version: neureptrace.dataset.v1
 paths:
   base: cwd
@@ -46,6 +47,7 @@ decoding:
   classifier: multinomial-logistic
   emission_mode: uncalibrated
   max_iter: 2500
+# jscpd:ignore-end
 source_loso:
   group_column: participant
   selection_metric: balanced_accuracy
