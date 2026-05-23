@@ -7,6 +7,7 @@
     "**/.github/workflows/**",
     "**/.pytest-tmp/**",
     "**/megalinter-reports/**",
+    "**/configs/bush_meg/source_loso_ensemble_*.yml",
     "**/src/neureptrace/decoding/hyperalignment.py",
     "**/src/neureptrace/decoding/mcca.py"
   ]
