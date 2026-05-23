@@ -213,8 +213,13 @@ def circular_mean_phase(phases, *, axis=None) -> np.ndarray:
 def average_phases(phases) -> np.ndarray:
     """Average a non-empty collection of equally shaped phase arrays."""
 
-    phase_list = list(phases)
+    phase_list = [np.asarray(phase, dtype=float) for phase in phases]
     if not phase_list:
         raise ValueError("At least one phase array is required.")
-    phase_matrix = np.vstack(phase_list)
-    return circular_mean_phase(phase_matrix, axis=0)
+
+    reference_shape = phase_list[0].shape
+    if any(phase.shape != reference_shape for phase in phase_list):
+        raise ValueError("All phase arrays must have the same shape.")
+
+    phase_stack = np.stack(phase_list, axis=0)
+    return circular_mean_phase(phase_stack, axis=0)
