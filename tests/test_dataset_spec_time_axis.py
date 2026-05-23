@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 
-import neureptrace  # noqa: F401
 from neureptrace.dataset_spec import _first_time_axis
 
 
