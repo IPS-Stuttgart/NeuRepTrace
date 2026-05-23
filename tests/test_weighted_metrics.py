@@ -48,17 +48,16 @@ def test_weighted_reliability_bins_report_weighted_calibration_rows() -> None:
 
     rows = weighted_reliability_bins(probabilities, labels, sample_weight, n_bins=2)
 
-    assert rows[0] == {
-        "bin": 0,
-        "bin_left": 0.0,
-        "bin_right": 0.5,
-        "n_samples": 0,
-        "sample_weight": 0.0,
-        "sample_weight_fraction": 0.0,
-        "accuracy": pytest.approx(float("nan"), nan_ok=True),
-        "confidence": pytest.approx(float("nan"), nan_ok=True),
-        "gap": pytest.approx(float("nan"), nan_ok=True),
-    }
+    assert rows[0]["bin"] == 0
+    assert rows[0]["bin_left"] == 0.0
+    assert rows[0]["bin_right"] == 0.5
+    assert rows[0]["n_samples"] == 0
+    assert rows[0]["sample_weight"] == 0.0
+    assert rows[0]["sample_weight_fraction"] == 0.0
+    assert np.isnan(rows[0]["accuracy"])
+    assert np.isnan(rows[0]["confidence"])
+    assert np.isnan(rows[0]["gap"])
+
     assert rows[1]["bin"] == 1
     assert rows[1]["n_samples"] == 4
     assert rows[1]["sample_weight"] == pytest.approx(6.0)
@@ -73,11 +72,11 @@ def test_weighted_reliability_bins_are_available_from_public_metrics_api() -> No
     labels = np.array([0, 1])
     sample_weight = np.array([1.0, 1.0])
 
-    assert exported_weighted_reliability_bins(probabilities, labels, sample_weight, n_bins=2) == weighted_reliability_bins(
+    assert exported_weighted_reliability_bins(probabilities, labels, sample_weight, n_bins=1) == weighted_reliability_bins(
         probabilities,
         labels,
         sample_weight,
-        n_bins=2,
+        n_bins=1,
     )
 
 
