@@ -1,0 +1,99 @@
+# Strict source-only BUSH-MEG LOSO sweep for the new supervised/full-epoch branches.
+#
+# This config intentionally uses only Part*Data.mat main-task files.  Cue files
+# remain excluded from classifier training, testing, and calibration.  Candidate
+# selection, stacking weights, class-bias correction, and top-k reranking are all
+# fitted from source-subject inner LOSO predictions only.
+schema_version: neureptrace.dataset.v1
+paths:
+  base: cwd
+dataset:
+  name: bush_meg
+  type: fieldtrip_mat
+  root: ${BUSH_MEG_DATA_DIR}
+  participant_file: "Part{participant}Data.mat"
+  variable: data
+  channel_type: mag
+  fields:
+    trial: trial
+    time: time
+    label: label
+    trialinfo: trialinfo
+    sensor_geometry: grad
+participants:
+  ids: "1-4,6,8,9,10,13-27"
+validation:
+  trim_channel_labels_to_data: true
+  channel_policy: exact
+metadata:
+  columns:
+    - name: stimulus_class
+      index: 0
+    - name: condition
+      index: 1
+      optional: true
+preprocessing:
+  tmin: -0.35
+  tmax: 0.70
+  normalization: subject_baseline_whiten
+  baseline_window: [-0.35, -0.05]
+  feature_preprocessor: pls-da
+  pca_components: 16
+  window_size: 0.100
+decoding:
+  label_column: stimulus_class
+  group_column: participant
+  classifier: multinomial-logistic
+  emission_mode: uncalibrated
+  max_iter: 2500
+source_loso:
+  group_column: participant
+  selection_metric: balanced_accuracy
+  ensemble_top_k: 7
+  ensemble_weighting: stacked
+  ensemble_class_bias: balanced_accuracy
+  rerank_top_k: 3
+  rerank_alpha_grid: [0.0, 0.25, 0.5, 1.0, 2.0]
+  candidate_grid:
+    temporal_bins: [4]
+    decoders: [multinomial-logistic]
+    emission_modes: [uncalibrated]
+    # PLS-DA is supervised and fitted inside each source-only train fold.
+    feature_preprocessors: [pls-da]
+    pca_components: [8, 16, 32]
+    c_grid: [0.1, 1.0]
+    sample_weightings: [subject_class_balanced]
+    class_bias_modes: [none, balanced_accuracy]
+    feature_kinds:
+      - evoked
+      - evoked_logvar
+      - bandpower
+      - evoked_bandpower
+      - prototype
+      - bandpower_prototype
+    window_sets:
+      - name: early_triplet_150_200ms
+        centers: [0.150, 0.175, 0.200]
+        window_size: 0.100
+      - name: mid_175_350ms
+        start: 0.175
+        stop: 0.350
+        step: 0.050
+        window_size: 0.125
+      - name: late_300_550ms
+        start: 0.300
+        stop: 0.550
+        step: 0.050
+        window_size: 0.150
+      - name: full_0_650ms
+        full_epoch: true
+        start: 0.000
+        stop: 0.650
+outputs:
+  base_dir: results/{dataset}/source_loso_pls_bandpower_ensemble
+  source_loso_ensemble_summary_csv: source_loso_pls_bandpower_ensemble_summary.csv
+  source_loso_ensemble_inner_cv_csv: source_loso_pls_bandpower_ensemble_inner_cv.csv
+  source_loso_ensemble_candidate_summary_csv: source_loso_pls_bandpower_ensemble_candidate_summary.csv
+  source_loso_ensemble_predictions_csv: source_loso_pls_bandpower_ensemble_predictions.csv
+  provenance: true
+  hash_input_files: true
