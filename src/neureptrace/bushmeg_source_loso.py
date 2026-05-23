@@ -29,6 +29,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.linalg import eigh
+from scipy.signal import butter, sosfilt, sosfiltfilt
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 from sklearn.preprocessing import LabelEncoder
 
@@ -72,24 +73,31 @@ DEFAULT_CLASS_BIAS_DELTAS = (-2.0, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 2.0)
 DEFAULT_CLASS_BIAS_ROUNDS = 2
 FEATURE_KIND_CHOICES = (
     "evoked",
+    "bandpower",
     "logvar",
     "covariance",
     "evoked_logvar",
+    "evoked_bandpower",
     "evoked_covariance",
     "prototype",
+    "bandpower_prototype",
     "evoked_prototype",
     "logvar_prototype",
+    "evoked_bandpower_prototype",
     "evoked_logvar_prototype",
     "xdawn",
     "xdawn_prototype",
 )
 DEFAULT_XDAWN_COMPONENTS = 8
 DEFAULT_COVARIANCE_MAX_CHANNELS = 64
+DEFAULT_BANDPOWER_BANDS = ((4.0, 8.0), (8.0, 12.0), (13.0, 30.0), (30.0, 55.0))
 PROTOTYPE_FEATURE_KINDS = frozenset(
     {
         "prototype",
+        "bandpower_prototype",
         "evoked_prototype",
         "logvar_prototype",
+        "evoked_bandpower_prototype",
         "evoked_logvar_prototype",
         "xdawn_prototype",
     }
@@ -99,7 +107,9 @@ PROTOTYPE_BASE_FEATURE_KINDS = {
     "prototype": "evoked",
     "evoked_prototype": "evoked",
     "logvar_prototype": "logvar",
+    "bandpower_prototype": "bandpower",
     "evoked_logvar_prototype": "evoked_logvar",
+    "evoked_bandpower_prototype": "evoked_bandpower",
 }
 
 
@@ -899,6 +909,76 @@ def _window_log_variance_features(
     return np.concatenate(features, axis=1).astype(np.float32, copy=False)
 
 
+def _sampling_frequency_hz(times: np.ndarray) -> float:
+    """Estimate the sample rate from an epoch time axis."""
+
+    times = np.asarray(times, dtype=float)
+    if times.ndim != 1 or times.size < 2:
+        raise ValueError("times must be a one-dimensional vector with at least two samples.")
+    diffs = np.diff(times)
+    median_step = float(np.median(diffs))
+    if not np.isfinite(median_step) or median_step <= 0.0:
+        raise ValueError("times must be strictly increasing to compute bandpower features.")
+    return 1.0 / median_step
+
+
+def _valid_bandpower_bands(sfreq: float) -> tuple[tuple[float, float], ...]:
+    """Return default analysis bands clipped to the available Nyquist rate."""
+
+    nyquist = float(sfreq) / 2.0
+    valid: list[tuple[float, float]] = []
+    for low, high in DEFAULT_BANDPOWER_BANDS:
+        low = float(low)
+        high = min(float(high), 0.98 * nyquist)
+        if low > 0.0 and high > low:
+            valid.append((low, high))
+    if not valid:
+        raise ValueError(
+            f"No default bandpower bands are valid for sampling frequency {sfreq:.6g} Hz. "
+            "Use evoked/logvar/covariance features for very low-rate data."
+        )
+    return tuple(valid)
+
+
+def _window_bandpower_features(
+    data: np.ndarray,
+    times: np.ndarray,
+    window: WindowSpec,
+    *,
+    temporal_bins: int,
+    epsilon: float = 1e-12,
+) -> np.ndarray:
+    """Return trial x (band x channel x bin) log-bandpower features.
+
+    Bands are filtered per subject/window with zero-phase SOS filtering when the
+    epoch is long enough; short epochs fall back to causal SOS filtering.  The
+    transform uses only each subject's signal and contains no label information.
+    """
+
+    if temporal_bins < 1:
+        raise ValueError("temporal_bins must be at least one.")
+    indices = _sample_indices_for_window(times, window)
+    bins = np.array_split(indices, int(temporal_bins))
+    if any(len(bin_indices) == 0 for bin_indices in bins):
+        raise ValueError(
+            f"Window {window.center:.6g}s/{window.width:.6g}s has only {len(indices)} samples, "
+            f"not enough for {temporal_bins} temporal bins."
+        )
+    sfreq = _sampling_frequency_hz(times)
+    data64 = np.asarray(data, dtype=np.float64)
+    features: list[np.ndarray] = []
+    for low, high in _valid_bandpower_bands(sfreq):
+        sos = butter(4, (low, high), btype="bandpass", fs=sfreq, output="sos")
+        try:
+            filtered = sosfiltfilt(sos, data64, axis=2)
+        except ValueError:
+            filtered = sosfilt(sos, data64, axis=2)
+        power = filtered * filtered
+        for bin_indices in bins:
+            features.append(np.log(np.maximum(power[:, :, bin_indices].mean(axis=2), epsilon)))
+    return np.concatenate(features, axis=1).astype(np.float32, copy=False)
+
+
 def _channel_subset_indices(n_channels: int, max_channels: int) -> np.ndarray:
     max_channels = max(1, int(max_channels))
     if n_channels <= max_channels:
@@ -953,11 +1033,13 @@ def _window_features(
     if feature_kind in SUPERVISED_FEATURE_KINDS:
         raise ValueError(f"{feature_kind} features are supervised and must be fitted inside _predict_candidate.")
     evoked = None
-    if feature_kind in {"evoked", "evoked_logvar", "evoked_covariance"}:
+    if feature_kind in {"evoked", "evoked_logvar", "evoked_bandpower", "evoked_covariance"}:
         evoked = _window_bin_mean_features(data, times, window, temporal_bins=temporal_bins)
     if feature_kind == "evoked":
         assert evoked is not None
         return evoked
+    if feature_kind == "bandpower":
+        return _window_bandpower_features(data, times, window, temporal_bins=temporal_bins)
     if feature_kind == "logvar":
         return _window_log_variance_features(data, times, window, temporal_bins=temporal_bins)
     if feature_kind == "covariance":
@@ -971,6 +1053,10 @@ def _window_features(
         assert evoked is not None
         logvar = _window_log_variance_features(data, times, window, temporal_bins=temporal_bins)
         return np.concatenate([evoked, logvar], axis=1).astype(np.float32, copy=False)
+    if feature_kind == "evoked_bandpower":
+        assert evoked is not None
+        bandpower = _window_bandpower_features(data, times, window, temporal_bins=temporal_bins)
+        return np.concatenate([evoked, bandpower], axis=1).astype(np.float32, copy=False)
     if feature_kind == "evoked_covariance":
         assert evoked is not None
         covariance = _window_covariance_features(

@@ -5,8 +5,9 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
-from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.cross_decomposition import PLSRegression
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.feature_selection import SelectPercentile, f_classif
@@ -82,11 +83,13 @@ DECODER_CHOICES = tuple(
 )
 DECODER_CLI_CHOICES = DECODER_CHOICES
 EMISSION_MODE_CHOICES = ("calibrated", "uncalibrated")
-FEATURE_PREPROCESSOR_CHOICES = ("none", "pca", "pca_whiten", "anova_select")
+FEATURE_PREPROCESSOR_CHOICES = ("none", "pca", "pca_whiten", "anova_select", "pls_da")
 TUNING_SCORING_CHOICES = ("accuracy", "balanced_accuracy", "neg_log_loss", "neg_brier", "neg_ece")
 DEFAULT_TUNING_C_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
 DEFAULT_ANOVA_SELECT_PERCENTILE = 20
 ANOVA_SELECT_PERCENTILE_GRID = (10, 20, 40, 60)
+DEFAULT_PLS_COMPONENTS = 16
+PLS_COMPONENT_GRID = (8, 16, 32, 48)
 DEFAULT_ELASTIC_NET_L1_RATIO = 0.5
 ELASTIC_NET_L1_RATIO_GRID = (0.15, 0.5, 0.85)
 DEFAULT_TUNING_ALPHA_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
@@ -145,6 +148,56 @@ def normalize_registry_decoder_name(name: str) -> str:
         supported = ", ".join(sorted(CLASSIFIER_REGISTRY))
         raise ValueError(f"Unknown registry decoder '{name}'. Available registry decoders: {supported}.")
     return normalized
+
+
+class PLSDiscriminantTransformer(TransformerMixin, BaseEstimator):
+    """Supervised PLS-DA feature projection for high-dimensional M/EEG windows.
+
+    The transformer maps class labels to one-hot targets and fits a
+    ``PLSRegression`` model on the training fold only.  Its output is the PLS
+    X-score matrix, which can then be consumed by the existing sklearn
+    classifiers.  This gives the BUSH-MEG pipelines a supervised dimensionality
+    reduction option without changing outer LOSO semantics.
+    """
+
+    def __init__(self, n_components: int | str | None = DEFAULT_PLS_COMPONENTS):
+        self.n_components = n_components
+
+    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence | np.ndarray):
+        x = np.asarray(features, dtype=float)
+        if x.ndim != 2:
+            raise ValueError("PLSDiscriminantTransformer expects a two-dimensional feature matrix.")
+        if x.shape[0] < 2 or x.shape[1] < 1:
+            raise ValueError("PLSDiscriminantTransformer needs at least two samples and one feature.")
+        y_raw = np.asarray(labels)
+        if y_raw.shape[0] != x.shape[0]:
+            raise ValueError("features and labels must contain the same number of rows.")
+        self.classes_, encoded = np.unique(y_raw, return_inverse=True)
+        if self.classes_.shape[0] < 2:
+            raise ValueError("PLSDiscriminantTransformer needs at least two classes.")
+
+        requested = normalize_pls_components(self.n_components)
+        max_components = max(1, min(int(x.shape[1]), int(x.shape[0]) - 1))
+        n_components = min(int(requested), max_components)
+
+        y = np.zeros((x.shape[0], self.classes_.shape[0]), dtype=float)
+        y[np.arange(x.shape[0]), encoded] = 1.0
+        self.model_ = PLSRegression(n_components=n_components, scale=False)
+        self.model_.fit(x, y)
+        self.n_components_ = n_components
+        self.n_features_in_ = x.shape[1]
+        return self
+
+    def transform(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        if not hasattr(self, "model_"):
+            raise RuntimeError("PLSDiscriminantTransformer must be fitted before transform.")
+        x = np.asarray(features, dtype=float)
+        if x.ndim != 2:
+            raise ValueError("PLSDiscriminantTransformer expects a two-dimensional feature matrix.")
+        transformed = self.model_.transform(x)
+        if isinstance(transformed, tuple):
+            transformed = transformed[0]
+        return np.asarray(transformed, dtype=float)
 
 
 class RegistryDecoder(ClassifierMixin, BaseEstimator):
@@ -920,21 +973,27 @@ def _calibrated_estimator_param(estimator, nested_parameter: str) -> str:
 
 
 def _feature_preprocessor_param(estimator, feature_preprocessor: str | None) -> str | None:
-    if normalize_feature_preprocessor(feature_preprocessor) != "anova_select":
+    normalized = normalize_feature_preprocessor(feature_preprocessor)
+    if normalized == "anova_select":
+        direct = "selectpercentile__percentile"
+    elif normalized == "pls_da":
+        direct = "plsdiscriminanttransformer__n_components"
+    else:
         return None
-    direct = "selectpercentile__percentile"
     if direct in estimator.get_params():
         return direct
     return _calibrated_estimator_param(estimator, direct)
 
 
 def _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor: str | None):
+    normalized = normalize_feature_preprocessor(feature_preprocessor)
     feature_param = _feature_preprocessor_param(estimator, feature_preprocessor)
     if feature_param is None:
         return param_grid
+    feature_values = ANOVA_SELECT_PERCENTILE_GRID if normalized == "anova_select" else PLS_COMPONENT_GRID
     if isinstance(param_grid, list):
-        return [{**grid, feature_param: ANOVA_SELECT_PERCENTILE_GRID} for grid in param_grid]
-    return {**param_grid, feature_param: ANOVA_SELECT_PERCENTILE_GRID}
+        return [{**grid, feature_param: feature_values} for grid in param_grid]
+    return {**param_grid, feature_param: feature_values}
 
 
 def parse_c_grid(values: Sequence[float] | str | None) -> tuple[float, ...]:
@@ -1063,6 +1122,8 @@ def normalize_feature_preprocessor(name: str | None) -> str:
         return "pca_whiten"
     if normalized in {"anova", "anova_percentile", "select_percentile", "select_k_best", "kbest"}:
         return "anova_select"
+    if normalized in {"pls", "plsd", "pls_da", "pls_discriminant", "pls_regression", "pls_discriminant_analysis", "supervised_pca"}:
+        return "pls_da"
     if normalized not in FEATURE_PREPROCESSOR_CHOICES:
         raise ValueError(
             f"Unknown feature preprocessor '{name}'. Available preprocessors: {', '.join(FEATURE_PREPROCESSOR_CHOICES)}."
@@ -1134,14 +1195,34 @@ def normalize_anova_select_percentile(percentile: int | float | str | None) -> i
     return int(percentile)
 
 
+def normalize_pls_components(n_components: int | str | None) -> int:
+    """Normalize supervised PLS-DA component counts.
+
+    PLS component counts are integer-only.  Fractional explained-variance values
+    are intentionally rejected because PLS-DA is supervised and does not have the
+    same variance-retention semantics as PCA.
+    """
+
+    if n_components is None:
+        return DEFAULT_PLS_COMPONENTS
+    if isinstance(n_components, str) and n_components.strip().lower() in {"", "none", "auto", "default"}:
+        return DEFAULT_PLS_COMPONENTS
+    normalized = normalize_pca_components(n_components)
+    if isinstance(normalized, float):
+        raise ValueError("PLS-DA components must be an integer count or auto/default, not a variance fraction.")
+    if normalized is None:
+        return DEFAULT_PLS_COMPONENTS
+    return int(normalized)
+
+
 def _feature_preprocessor_steps(
     feature_preprocessor: str | None,
     pca_components: int | float | str | None,
-) -> list[PCA | SelectPercentile]:
+) -> list[PCA | SelectPercentile | PLSDiscriminantTransformer]:
     normalized = normalize_feature_preprocessor(feature_preprocessor)
     if normalized == "none":
         if pca_components is not None:
-            raise ValueError("pca_components can only be set when feature_preprocessor is 'pca' or 'pca_whiten'.")
+            raise ValueError("pca_components can only be set when feature_preprocessor is 'pca', 'pca_whiten', 'anova_select', or 'pls_da'.")
         return []
     if normalized == "anova_select":
         return [
@@ -1150,6 +1231,8 @@ def _feature_preprocessor_steps(
                 percentile=normalize_anova_select_percentile(pca_components),
             )
         ]
+    if normalized == "pls_da":
+        return [PLSDiscriminantTransformer(n_components=normalize_pls_components(pca_components))]
     return [
         PCA(
             n_components=normalize_pca_components(pca_components),

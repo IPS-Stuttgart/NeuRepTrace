@@ -25,6 +25,7 @@ from neureptrace.decoding import (
     normalize_emission_mode,
     normalize_feature_preprocessor,
     normalize_pca_components,
+    normalize_pls_components,
     normalize_tuning_scoring,
     parse_c_grid,
     predict_emission_probabilities,
@@ -36,7 +37,7 @@ from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
 FIELDTRIP_DEFAULT_ROOT_PATH = ("data", 0)
 EMISSION_RUN_CHOICES = (*EMISSION_MODE_CHOICES, "both")
-FEATURE_PREPROCESSOR_RUN_CHOICES = (*FEATURE_PREPROCESSOR_CHOICES, "pca-whiten", "anova-select", "select-percentile")
+FEATURE_PREPROCESSOR_RUN_CHOICES = (*FEATURE_PREPROCESSOR_CHOICES, "pca-whiten", "anova-select", "select-percentile", "pls-da", "pls")
 EPOCH_NORMALIZATION_CHOICES = (
     "none",
     "subject_z",
@@ -823,10 +824,12 @@ def run_time_resolved_decode(
     baseline_window_value = _normalize_baseline_window(baseline_window)
     if feature_preprocessor_name == "none" and pca_components is not None:
         raise ValueError(
-            "pca_components can only be set when feature_preprocessor is 'pca', 'pca_whiten', or 'anova_select'."
+            "pca_components can only be set when feature_preprocessor is 'pca', 'pca_whiten', 'anova_select', or 'pls_da'."
         )
     if feature_preprocessor_name == "anova_select":
         pca_components_value = normalize_anova_select_percentile(pca_components)
+    elif feature_preprocessor_name == "pls_da":
+        pca_components_value = normalize_pls_components(pca_components)
     elif feature_preprocessor_name != "none":
         pca_components_value = normalize_pca_components(pca_components)
     else:

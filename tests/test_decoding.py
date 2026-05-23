@@ -7,6 +7,7 @@ from neureptrace.decoding import (
     BUILTIN_DECODER_CHOICES,
     DECODER_CLI_CHOICES,
     DECODER_CHOICES,
+    PLSDiscriminantTransformer,
     TUNING_SCORING_CHOICES,
     make_cross_validator,
     make_decoder,
@@ -15,6 +16,7 @@ from neureptrace.decoding import (
     normalize_decoder_name,
     normalize_feature_preprocessor,
     normalize_pca_components,
+    normalize_pls_components,
     normalize_tuning_scoring,
     parse_c_grid,
     predict_emission_probabilities,
@@ -192,6 +194,24 @@ def test_make_decoder_fits_anova_selection_inside_probability_pipeline():
     assert probabilities.sum(axis=1).round(6).tolist() == [1.0] * 5
 
 
+def test_make_decoder_fits_pls_da_inside_probability_pipeline():
+    rng = np.random.default_rng(29)
+    labels = np.array([0, 1, 2] * 20)
+    features = rng.normal(size=(60, 20))
+    features[labels == 1, 0] += 0.75
+    features[labels == 2, 1] -= 0.75
+
+    model = make_decoder("logistic", max_iter=2000, feature_preprocessor="pls-da", pca_components=5)
+    model.fit(features, labels)
+    probabilities = model.predict_proba(features[:6])
+
+    transformer = model.named_steps["plsdiscriminanttransformer"]
+    assert isinstance(transformer, PLSDiscriminantTransformer)
+    assert transformer.n_components_ == 5
+    assert probabilities.shape == (6, 3)
+    assert probabilities.sum(axis=1).round(6).tolist() == [1.0] * 6
+
+
 def test_pca_components_are_only_allowed_with_pca_preprocessing():
     with pytest.raises(ValueError, match="pca_components"):
         make_decoder("logistic", feature_preprocessor="none", pca_components=3)
@@ -200,9 +220,11 @@ def test_pca_components_are_only_allowed_with_pca_preprocessing():
 def test_normalize_feature_preprocessor_and_components():
     assert normalize_feature_preprocessor("pca-whiten") == "pca_whiten"
     assert normalize_feature_preprocessor("select-percentile") == "anova_select"
+    assert normalize_feature_preprocessor("pls-da") == "pls_da"
     assert normalize_feature_preprocessor("identity") == "none"
     assert normalize_pca_components("3") == 3
     assert normalize_pca_components("0.95") == 0.95
+    assert normalize_pls_components("8") == 8
     assert normalize_pca_components("auto") is None
     assert normalize_anova_select_percentile(None) == 20
     assert normalize_anova_select_percentile("25") == 25
