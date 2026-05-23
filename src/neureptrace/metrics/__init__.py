@@ -5,6 +5,14 @@ import numpy as np
 from neureptrace.metrics.confusion import confusion_category_enrichment, confusion_category_matrix, confusion_counts, confusion_pair_summary, per_class_accuracy
 from neureptrace.metrics.prepost import compare_prepost_windows, summarize_window_metric
 from neureptrace.metrics.ranking import rank_class_scores
+from neureptrace.metrics.weighted import (
+    validate_sample_weight,
+    weighted_brier_score_multiclass,
+    weighted_expected_calibration_error,
+    weighted_negative_log_likelihood,
+    weighted_reliability_bins,
+    weighted_top_k_accuracy,
+)
 
 __all__ = [
     "brier_score_multiclass",
@@ -21,6 +29,12 @@ __all__ = [
     "summarize_window_metric",
     "top_k_accuracy",
     "validate_probability_inputs",
+    "validate_sample_weight",
+    "weighted_brier_score_multiclass",
+    "weighted_expected_calibration_error",
+    "weighted_negative_log_likelihood",
+    "weighted_reliability_bins",
+    "weighted_top_k_accuracy",
 ]
 
 
