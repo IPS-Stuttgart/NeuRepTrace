@@ -46,3 +46,22 @@ def test_average_phases_matches_circular_mean() -> None:
 
     with pytest.raises(ValueError, match="At least one"):
         average_phases([])
+
+
+def test_average_phases_preserves_multidimensional_shape() -> None:
+    phases = [
+        np.array([[0.0, np.pi], [np.pi / 2.0, -np.pi / 2.0]]),
+        np.array([[0.0, np.pi], [np.pi / 2.0, -np.pi / 2.0]]),
+    ]
+
+    averaged = average_phases(phases)
+
+    assert averaged.shape == phases[0].shape
+    np.testing.assert_allclose(averaged, phases[0])
+
+
+def test_average_phases_rejects_mismatched_shapes() -> None:
+    phases = [np.zeros((2, 2)), np.zeros((4,))]
+
+    with pytest.raises(ValueError, match="same shape"):
+        average_phases(phases)
