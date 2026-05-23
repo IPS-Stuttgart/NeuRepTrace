@@ -70,10 +70,10 @@ source_loso:
     sample_weightings: [none, subject_class_balanced]
     class_bias_modes: [none, balanced_accuracy]
     window_sets:
-      - {name: single_125ms, centers: [0.125], window_size: 0.100}
-      - {name: single_150ms, centers: [0.150], window_size: 0.100}
-      - {name: single_175ms, centers: [0.175], window_size: 0.100}
-      - {name: single_200ms, centers: [0.200], window_size: 0.100}
+      - { name: single_125ms, centers: [0.125], window_size: 0.100 }
+      - { name: single_150ms, centers: [0.150], window_size: 0.100 }
+      - { name: single_175ms, centers: [0.175], window_size: 0.100 }
+      - { name: single_200ms, centers: [0.200], window_size: 0.100 }
       - name: triplet_125_175ms
         centers: [0.125, 0.150, 0.175]
         window_size: 0.100
