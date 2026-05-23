@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.temporal_model import fit_temporal_models, probability_columns, read_probability_observations
 
@@ -44,6 +45,33 @@ def test_read_probability_observations_adds_source_file(tmp_path: Path):
 
     assert probability_columns(observations) == ["prob_class_0", "prob_class_1"]
     assert observations["source_file"].unique().tolist() == ["observations.csv"]
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    [
+        ("prob_class_0", -0.1, "non-negative"),
+        ("prob_class_1", float("nan"), "finite"),
+    ],
+)
+def test_read_probability_observations_rejects_invalid_probability_values(tmp_path: Path, column: str, value: float, message: str):
+    csv_path = tmp_path / "invalid_observations.csv"
+    frame = _observation_frame()
+    frame.loc[0, column] = value
+    frame.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        read_probability_observations([csv_path])
+
+
+def test_read_probability_observations_rejects_zero_probability_mass(tmp_path: Path):
+    csv_path = tmp_path / "zero_mass_observations.csv"
+    frame = _observation_frame()
+    frame.loc[0, ["prob_class_0", "prob_class_1"]] = 0.0
+    frame.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="positive mass"):
+        read_probability_observations([csv_path])
 
 
 def test_fit_temporal_models_compares_observed_to_controls(tmp_path: Path):
