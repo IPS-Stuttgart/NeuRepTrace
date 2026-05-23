@@ -8,6 +8,7 @@ removed once the overridden functions are folded directly into
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Sequence
 from typing import Any
 
@@ -19,6 +20,26 @@ from sklearn.preprocessing import StandardScaler
 
 
 _PATCH_MARKER = "_neureptrace_regularization_patch_installed"
+
+
+def _uses_l1_ratio_logistic_api() -> bool:
+    """Return whether scikit-learn expects logistic regularization via ``l1_ratio``."""
+
+    penalty = inspect.signature(LogisticRegression).parameters.get("penalty")
+    return penalty is not None and penalty.default == "deprecated"
+
+
+def _logistic_regularization_kwargs(l1_ratio: float) -> dict[str, float | str]:
+    """Build version-compatible ``LogisticRegression`` regularization kwargs."""
+
+    l1_ratio = float(l1_ratio)
+    if _uses_l1_ratio_logistic_api():
+        return {"l1_ratio": l1_ratio}
+    if l1_ratio >= 1.0:
+        return {"penalty": "l1", "l1_ratio": 1.0}
+    if l1_ratio <= 0.0:
+        return {"penalty": "l2", "l1_ratio": 0.0}
+    return {"penalty": "elasticnet", "l1_ratio": l1_ratio}
 
 
 def install() -> None:
@@ -47,11 +68,11 @@ def install() -> None:
                 *feature_steps,
                 LogisticRegression(
                     class_weight="balanced",
-                    l1_ratio=1.0,
+                    C=1.0,
                     max_iter=max_iter,
-                    penalty="l1",
                     random_state=random_state,
                     solver="saga",
+                    **_logistic_regularization_kwargs(1.0),
                 ),
             )
         if normalized == "elastic_net_logistic":
@@ -60,11 +81,11 @@ def install() -> None:
                 *feature_steps,
                 LogisticRegression(
                     class_weight="balanced",
-                    l1_ratio=decoding.DEFAULT_ELASTIC_NET_L1_RATIO,
+                    C=1.0,
                     max_iter=max_iter,
-                    penalty="elasticnet",
                     random_state=random_state,
                     solver="saga",
+                    **_logistic_regularization_kwargs(decoding.DEFAULT_ELASTIC_NET_L1_RATIO),
                 ),
             )
         raise ValueError(f"Unsupported regularized logistic decoder: {normalized}")
