@@ -40,3 +40,16 @@ def test_dataset_cli_writes_pymegdec_bushmeg_spec(tmp_path: Path) -> None:
     assert "dataset_id: bushmeg" in text
     assert "include: \"2\"" in text
     assert "Part{subject}CueData.mat" in text
+
+
+def test_dataset_cli_pymegdec_writer_aliases(tmp_path: Path) -> None:
+    for command in ("write-pymegdec-bushmeg", "write-pymegdec-spec"):
+        out = tmp_path / f"{command}.yml"
+
+        assert dataset_spec_main([command, "--out", str(out), "--participants", "3"]) == 0
+
+        text = out.read_text(encoding="utf-8")
+        assert "dataset_id: bushmeg" in text
+        assert "include: \"3\"" in text
+        assert "stimulus_transfer_reverse" in text
+        assert "transfer_direction: cue-to-main" in text
