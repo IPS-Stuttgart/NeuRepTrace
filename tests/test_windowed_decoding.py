@@ -4,6 +4,7 @@ import pytest
 from neureptrace.decoding.windowed import (
     fit_window_model,
     permutation_p_from_accuracy,
+    permutation_score_curves,
     predict_window_model,
     score_windowed_decoding,
 )
@@ -83,6 +84,27 @@ def test_score_windowed_decoding_returns_accuracy_predictions_and_permutation_p(
     assert result.predictions.tolist() == [0, 1]
     assert result.permutation_accuracy.shape == (4,)
     assert result.permutation_p_value == permutation_p_from_accuracy(1.0, result.permutation_accuracy)
+    assert result.permutation_balanced_accuracy.shape == (4,)
+    assert result.balanced_accuracy_p_value == permutation_p_from_accuracy(
+        result.balanced_accuracy,
+        result.permutation_balanced_accuracy,
+    )
+
+
+def test_permutation_score_curves_returns_accuracy_and_balanced_accuracy():
+    accuracy, balanced_accuracy = permutation_score_curves(
+        train_features=np.array([[-2.0], [-1.0], [1.0], [2.0]]),
+        train_labels=np.array([0, 0, 1, 1]),
+        validation_features=np.array([[-2.0], [-1.0], [0.0], [1.0], [2.0]]),
+        validation_labels=np.array([0, 0, 0, 0, 1]),
+        fit_model=_fit_sign_classifier,
+        n_permutations=3,
+        permutation_rng=np.random.default_rng(13),
+    )
+
+    assert accuracy.shape == (3,)
+    assert balanced_accuracy.shape == (3,)
+    assert np.all((0.0 <= balanced_accuracy) & (balanced_accuracy <= 1.0))
 
 
 def test_score_windowed_decoding_rejects_mismatched_validation_labels():

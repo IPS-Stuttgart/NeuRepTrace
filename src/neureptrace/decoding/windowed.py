@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -35,6 +35,8 @@ class WindowedDecodingResult:
     permutation_accuracy: np.ndarray
     permutation_p_value: float
     balanced_accuracy: float = np.nan
+    permutation_balanced_accuracy: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    balanced_accuracy_p_value: float = np.nan
 
 
 FitModel = Callable[[np.ndarray, np.ndarray], Any]
@@ -132,11 +134,13 @@ def score_windowed_decoding(
     balanced_accuracy = _balanced_accuracy(predictions, validation_labels)
 
     permutation_accuracy = np.array([], dtype=float)
+    permutation_balanced_accuracy = np.array([], dtype=float)
     permutation_p_value = np.nan
+    balanced_accuracy_p_value = np.nan
     if n_permutations > 0:
         transformed_train = transform_window_features(model_bundle, train_features)
         transformed_validation = transform_window_features(model_bundle, validation_features)
-        permutation_accuracy = permutation_accuracy_curve(
+        permutation_accuracy, permutation_balanced_accuracy = permutation_score_curves(
             transformed_train,
             validation_features=transformed_validation,
             validation_labels=validation_labels,
@@ -149,6 +153,10 @@ def score_windowed_decoding(
             accuracy,
             permutation_accuracy,
         )
+        balanced_accuracy_p_value = permutation_p_from_accuracy(
+            balanced_accuracy,
+            permutation_balanced_accuracy,
+        )
 
     return WindowedDecodingResult(
         model_bundle=model_bundle,
@@ -158,6 +166,8 @@ def score_windowed_decoding(
         permutation_accuracy=permutation_accuracy,
         permutation_p_value=permutation_p_value,
         balanced_accuracy=balanced_accuracy,
+        permutation_balanced_accuracy=permutation_balanced_accuracy,
+        balanced_accuracy_p_value=balanced_accuracy_p_value,
     )
 
 
@@ -173,6 +183,30 @@ def permutation_accuracy_curve(
 ) -> np.ndarray:
     """Train shuffled-label models and return validation accuracies."""
 
+    accuracy, _ = permutation_score_curves(
+        train_features,
+        validation_features=validation_features,
+        validation_labels=validation_labels,
+        train_labels=train_labels,
+        fit_model=fit_model,
+        n_permutations=n_permutations,
+        permutation_rng=permutation_rng,
+    )
+    return accuracy
+
+
+def permutation_score_curves(
+    train_features: Sequence[Sequence[float]] | np.ndarray,
+    *,
+    validation_features: Sequence[Sequence[float]] | np.ndarray,
+    validation_labels: Sequence | np.ndarray,
+    train_labels: Sequence | np.ndarray,
+    fit_model: FitModel,
+    n_permutations: int,
+    permutation_rng: np.random.Generator | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Train shuffled-label models and return accuracy and balanced-accuracy null curves."""
+
     if n_permutations < 0:
         raise ValueError("n_permutations must be non-negative.")
     train_features = _feature_matrix(train_features, name="train_features")
@@ -186,14 +220,16 @@ def permutation_accuracy_curve(
     if permutation_rng is None:
         permutation_rng = np.random.default_rng()
 
-    permuted_scores = []
+    permuted_accuracy = []
+    permuted_balanced_accuracy = []
     for _ in range(int(n_permutations)):
         permuted_train_labels = np.array(train_labels, copy=True)
         permutation_rng.shuffle(permuted_train_labels)
         model = fit_model(train_features, permuted_train_labels)
         predictions = np.asarray(model.predict(validation_features))
-        permuted_scores.append(float(np.mean(predictions == validation_labels)))
-    return np.asarray(permuted_scores, dtype=float)
+        permuted_accuracy.append(float(np.mean(predictions == validation_labels)))
+        permuted_balanced_accuracy.append(_balanced_accuracy(predictions, validation_labels))
+    return np.asarray(permuted_accuracy, dtype=float), np.asarray(permuted_balanced_accuracy, dtype=float)
 
 
 def permutation_p_from_accuracy(accuracy: float, permutation_accuracy: Sequence[float] | np.ndarray) -> float:
