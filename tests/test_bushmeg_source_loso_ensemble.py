@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import numpy as np
+from sklearn.metrics import balanced_accuracy_score
 
 from neureptrace.bushmeg_source_loso_ensemble import (
+    _apply_topk_pairwise_reranker,
     _fit_stacking_weights,
+    _fit_topk_pairwise_reranker,
     _normalize_ensemble_class_bias,
+    _normalize_rerank_top_k,
     _normalize_weighting,
+    _parse_float_grid,
 )
 
 
@@ -35,3 +40,38 @@ def test_fit_stacking_weights_prefers_source_oof_winner():
     assert np.isclose(weights.sum(), 1.0)
     assert weights[0] > 0.95
     assert weights[1] < 0.05
+
+
+def test_parse_reranker_config_aliases():
+    assert _normalize_rerank_top_k("off") == 0
+    assert _normalize_rerank_top_k(3) == 3
+    assert _parse_float_grid("0,0.5,1.0", [0.0]) == [0.0, 0.5, 1.0]
+
+
+def test_topk_pairwise_reranker_can_flip_consistent_source_pair_confusion():
+    probabilities = np.array(
+        [
+            [0.45, 0.50, 0.05],
+            [0.40, 0.55, 0.05],
+            [0.55, 0.40, 0.05],
+            [0.50, 0.45, 0.05],
+            [0.05, 0.10, 0.85],
+            [0.10, 0.05, 0.85],
+        ],
+        dtype=float,
+    )
+    labels = np.array([0, 0, 1, 1, 2, 2])
+    baseline = balanced_accuracy_score(labels, probabilities.argmax(axis=1))
+
+    reranker = _fit_topk_pairwise_reranker(
+        probabilities,
+        labels,
+        n_classes=3,
+        top_k=2,
+        alpha_grid=[0.0, 1.0, 2.0],
+    )
+
+    assert reranker is not None
+    adjusted = _apply_topk_pairwise_reranker(probabilities, reranker)
+    assert reranker.alpha > 0.0
+    assert balanced_accuracy_score(labels, adjusted.argmax(axis=1)) > baseline

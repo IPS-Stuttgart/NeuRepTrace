@@ -30,6 +30,10 @@ def test_grouped_cli_exposes_mne_decoder_variants():
     assert cli.COMMAND_MODULES["mne-time-decode-ensemble"] == "neureptrace.mne_time_decode_ensemble"
 
 
+def test_grouped_cli_exposes_synthetic_fieldtrip_generator():
+    assert cli.COMMAND_MODULES["synthetic-fieldtrip"] == "neureptrace.synthetic_fieldtrip"
+
+
 def test_poetry_scripts_expose_mne_decoder_variants():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject["tool"]["poetry"]["scripts"]

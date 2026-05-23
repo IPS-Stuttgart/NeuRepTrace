@@ -25,6 +25,7 @@ COMMAND_MODULES = {
     "event-detect": "neureptrace.event_detection",
     "event-detection": "neureptrace.event_detection",
     "fieldtrip-to-mne": "neureptrace.fieldtrip_mat",
+    "synthetic-fieldtrip": "neureptrace.synthetic_fieldtrip",
     "loso-time-decode": "neureptrace.loso_time_decode",
     "metadata": "neureptrace.metadata",
     "mne-transfer-decode": "neureptrace.epoch_transfer_decode",
