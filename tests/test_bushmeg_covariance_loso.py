@@ -104,7 +104,7 @@ def test_covariance_loso_runs_on_in_memory_subjects():
 
 
 def test_label_shuffle_control_is_deterministic_and_count_preserving():
-    labels = np.repeat(np.arange(4), 5)
+    labels = np.array([0, 0, 1, 1, 2, 2])
     shuffled_a = _shuffle_training_labels(labels, seed=7, context=("outer", "inner", "candidate"))
     shuffled_b = _shuffle_training_labels(labels, seed=7, context=("outer", "inner", "candidate"))
     shuffled_c = _shuffle_training_labels(labels, seed=8, context=("outer", "inner", "candidate"))
