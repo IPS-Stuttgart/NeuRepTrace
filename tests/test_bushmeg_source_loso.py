@@ -24,6 +24,7 @@ from neureptrace.bushmeg_source_loso import (
     _window_features,
     _window_bin_mean_features,
     _window_evoked_slope_features,
+    _window_evoked_dct_features,
     _window_evoked_stat_features,
     normalize_source_feature_family,
 )
@@ -80,6 +81,29 @@ def test_window_evoked_slope_features_append_within_bin_linear_contrasts():
 
     np.testing.assert_allclose(features[:, : evoked.shape[1]], evoked)
     np.testing.assert_allclose(features, expected, rtol=1e-6)
+
+
+def test_window_evoked_dct_features_capture_shape_beyond_the_mean():
+    data = np.array(
+        [
+            [[1.0, 0.0, -1.0, 0.0]],
+            [[-1.0, 0.0, 1.0, 0.0]],
+        ],
+        dtype=np.float32,
+    )
+    times = np.array([0.10, 0.20, 0.30, 0.40])
+
+    features = _window_evoked_dct_features(
+        data,
+        times,
+        WindowSpec(center=0.25, width=0.30),
+        temporal_bins=2,
+    )
+
+    assert features.shape == (2, 2)
+    np.testing.assert_allclose(features[:, 0], np.zeros(2), atol=1e-7)
+    assert abs(float(features[0, 1])) > 1e-7
+    np.testing.assert_allclose(features[0, 1], -features[1, 1], rtol=1e-6, atol=1e-7)
 
 
 def test_window_evoked_stat_features_capture_extrema_and_trend():
@@ -194,6 +218,7 @@ def test_window_feature_kinds_add_logvar_and_covariance_branches():
 
     evoked = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked")
     evoked_slope = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_slope")
+    evoked_dct = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_dct")
     evoked_stats = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_stats")
     logvar = _window_features(data, times, window, temporal_bins=2, feature_kind="logvar")
     evoked_logvar = _window_features(data, times, window, temporal_bins=2, feature_kind="evoked_logvar")
@@ -202,6 +227,7 @@ def test_window_feature_kinds_add_logvar_and_covariance_branches():
 
     assert evoked.shape == (2, 6)
     assert evoked_slope.shape == (2, 12)
+    assert evoked_dct.shape == (2, 6)
     assert evoked_stats.shape == (2, 30)
     assert logvar.shape == (2, 6)
     assert evoked_logvar.shape == (2, 12)
@@ -210,6 +236,7 @@ def test_window_feature_kinds_add_logvar_and_covariance_branches():
     assert np.all(np.isfinite(logvar))
     assert np.all(np.isfinite(evoked_slope))
     assert np.all(np.isfinite(evoked_stats))
+    assert np.all(np.isfinite(evoked_dct))
     assert np.all(np.isfinite(covariance))
 
 

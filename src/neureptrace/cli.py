@@ -41,6 +41,7 @@ COMMAND_MODULES = {
     "onset-detection": "neureptrace.onset_detection",
     "openneuro-meg": "neureptrace.openneuro_meg",
     "plot-time-decode": "neureptrace.plot_time_decode",
+    "pymegdec-bushmeg-spec": "neureptrace.datasets.pymegdec",
     "results": "neureptrace.results",
     "stimulus-detect": "neureptrace.stimulus_detection",
     "stimulus-detection": "neureptrace.stimulus_detection",
