@@ -1,6 +1,6 @@
 import numpy as np
 
-from neureptrace.bushmeg_source_loso import WindowSpec, _window_features
+from neureptrace.bushmeg_source_loso import WindowSpec, _window_features, normalize_source_feature_kind
 
 
 def test_bandpower_window_features_return_finite_band_bin_matrix():
@@ -67,3 +67,7 @@ def test_evoked_dct_window_features_return_compact_temporal_coefficients():
 
     assert features.shape == (5, 4 * 4)
     assert np.isfinite(features).all()
+
+
+def test_temporal_dct_alias_normalizes_to_evoked_dct():
+    assert normalize_source_feature_kind("temporal-dct") == "evoked_dct"

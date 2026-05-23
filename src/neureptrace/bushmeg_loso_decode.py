@@ -25,6 +25,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy.fft import dct
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 from sklearn.preprocessing import LabelEncoder
 
@@ -58,6 +59,16 @@ DEFAULT_BUSHMEG_PARTICIPANTS = "1-4,6,8-10,13-27"
 DEFAULT_MAIN_TEMPLATE = "Part{participant}Data.mat"
 DEFAULT_DECODE_WINDOW = (0.125, 0.225)
 DEFAULT_DECODERS = ("logistic", "linear_svm", "correlation-prototype")
+WINDOW_FEATURE_MODE_CHOICES = (
+    "sensor_flat",
+    "bin_means",
+    "mean_slope",
+    "dct",
+    "stats",
+    "sensor_flat_plus_stats",
+)
+DEFAULT_WINDOW_FEATURE_MODE = "sensor_flat"
+DEFAULT_TEMPORAL_BINS = 4
 EPSILON = 1e-12
 TimeWindow = tuple[int, int, float]
 
@@ -101,6 +112,57 @@ def _decode_window_tuple(value: Sequence[float] | None) -> tuple[float, float] |
     if stop < start:
         raise ValueError("decode_window stop must be greater than or equal to start.")
     return start, stop
+
+
+def normalize_window_feature_mode(value: str | None) -> str:
+    """Normalize source-only BUSH-MEG window feature representations."""
+
+    normalized = DEFAULT_WINDOW_FEATURE_MODE if value is None else str(value).strip().lower().replace("-", "_")
+    aliases = {
+        "flat": "sensor_flat",
+        "sensor": "sensor_flat",
+        "sensor_flattened": "sensor_flat",
+        "sensorflat": "sensor_flat",
+        "raw": "sensor_flat",
+        "bin_mean": "bin_means",
+        "binmeans": "bin_means",
+        "evoked": "bin_means",
+        "evoked_bin_means": "bin_means",
+        "temporal_bin_means": "bin_means",
+        "slope": "mean_slope",
+        "temporal_slope": "mean_slope",
+        "evoked_slope": "mean_slope",
+        "mean_slope": "mean_slope",
+        "meanslope": "mean_slope",
+        "temporal_dct": "dct",
+        "evoked_dct": "dct",
+        "dct_coefficients": "dct",
+        "summary": "stats",
+        "summaries": "stats",
+        "temporal_stats": "stats",
+        "evoked_stats": "stats",
+        "statistical_summary": "stats",
+        "flat_stats": "sensor_flat_plus_stats",
+        "flat_plus_stats": "sensor_flat_plus_stats",
+        "sensor_flat_stats": "sensor_flat_plus_stats",
+        "sensor_flat_plus_summary": "sensor_flat_plus_stats",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in WINDOW_FEATURE_MODE_CHOICES:
+        raise ValueError(
+            f"Unknown window feature mode '{value}'. Available modes: {', '.join(WINDOW_FEATURE_MODE_CHOICES)}."
+        )
+    return normalized
+
+
+def _normalize_temporal_bins(value: int | str) -> int:
+    try:
+        bins = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("temporal_bins must be a positive integer.") from exc
+    if bins < 1:
+        raise ValueError("temporal_bins must be a positive integer.")
+    return bins
 
 
 def _crop_time_axis(data: np.ndarray, times: np.ndarray, *, tmin: float | None, tmax: float | None) -> tuple[np.ndarray, np.ndarray]:
@@ -261,12 +323,144 @@ def _subject_times(subject: CachedSubject) -> np.ndarray:
     return np.load(subject.times_path, allow_pickle=False)
 
 
-def _features_for_window(data: np.ndarray, window: TimeWindow) -> np.ndarray:
+def _window_sample_indices(window: TimeWindow) -> np.ndarray:
+    start, stop, _center = window
+    if stop <= start:
+        raise ValueError("Time windows must contain at least one sample.")
+    return np.arange(int(start), int(stop), dtype=int)
+
+
+def _split_window_indices(window: TimeWindow, temporal_bins: int) -> list[np.ndarray]:
+    bins = _normalize_temporal_bins(temporal_bins)
+    indices = _window_sample_indices(window)
+    split = [np.asarray(bin_indices, dtype=int) for bin_indices in np.array_split(indices, bins)]
+    if any(bin_indices.size == 0 for bin_indices in split):
+        raise ValueError(
+            f"Window has only {indices.size} samples, not enough for {bins} temporal bins."
+        )
+    return split
+
+
+def _window_times_for_indices(times: np.ndarray | None, indices: np.ndarray) -> np.ndarray:
+    if times is None:
+        return indices.astype(float, copy=False)
+    time_values = np.asarray(times, dtype=float)
+    if time_values.ndim != 1:
+        raise ValueError("times must be a one-dimensional array when extracting temporal window features.")
+    if int(indices[-1]) >= time_values.shape[0]:
+        raise ValueError("Window indices extend past the provided time axis.")
+    return time_values[indices]
+
+
+def _linear_temporal_contrast(segment: np.ndarray, bin_times: np.ndarray) -> np.ndarray:
+    if segment.shape[2] < 2:
+        return np.zeros(segment.shape[:2], dtype=np.float64)
+    weights = np.asarray(bin_times, dtype=np.float64) - float(np.mean(bin_times))
+    norm = float(np.linalg.norm(weights))
+    if norm <= EPSILON:
+        return np.zeros(segment.shape[:2], dtype=np.float64)
+    weights = weights / norm
+    return np.tensordot(segment, weights, axes=([2], [0]))
+
+
+def _sensor_flat_features(data: np.ndarray, window: TimeWindow) -> np.ndarray:
     start, stop, _center = window
     # Materialize only one window.  mmap slices can be non-contiguous and many
     # sklearn estimators copy them anyway, so an explicit float32 matrix keeps
     # peak memory predictable.
     return np.asarray(data[:, :, start:stop].reshape(data.shape[0], -1), dtype=np.float32)
+
+
+def _window_bin_mean_features(data: np.ndarray, window: TimeWindow, *, temporal_bins: int) -> np.ndarray:
+    features: list[np.ndarray] = []
+    for bin_indices in _split_window_indices(window, temporal_bins):
+        segment = np.asarray(data[:, :, bin_indices], dtype=np.float64)
+        features.append(segment.mean(axis=2))
+    return np.concatenate(features, axis=1).astype(np.float32, copy=False)
+
+
+def _window_mean_slope_features(
+    data: np.ndarray,
+    window: TimeWindow,
+    *,
+    times: np.ndarray | None,
+    temporal_bins: int,
+) -> np.ndarray:
+    mean_features: list[np.ndarray] = []
+    slope_features: list[np.ndarray] = []
+    for bin_indices in _split_window_indices(window, temporal_bins):
+        segment = np.asarray(data[:, :, bin_indices], dtype=np.float64)
+        mean_features.append(segment.mean(axis=2))
+        slope_features.append(_linear_temporal_contrast(segment, _window_times_for_indices(times, bin_indices)))
+    return np.concatenate([*mean_features, *slope_features], axis=1).astype(np.float32, copy=False)
+
+
+def _window_dct_features(data: np.ndarray, window: TimeWindow, *, temporal_bins: int) -> np.ndarray:
+    n_coefficients = _normalize_temporal_bins(temporal_bins)
+    start, stop, _center = window
+    n_samples = int(stop) - int(start)
+    if n_samples < n_coefficients:
+        raise ValueError(
+            f"Window has only {n_samples} samples, not enough for {n_coefficients} DCT coefficients."
+        )
+    segment = np.asarray(data[:, :, start:stop], dtype=np.float64)
+    coefficients = dct(segment, type=2, norm="ortho", axis=2)[:, :, :n_coefficients]
+    return (
+        np.transpose(coefficients, (0, 2, 1))
+        .reshape(segment.shape[0], -1)
+        .astype(np.float32, copy=False)
+    )
+
+
+def _window_stat_features(
+    data: np.ndarray,
+    window: TimeWindow,
+    *,
+    times: np.ndarray | None,
+    temporal_bins: int,
+) -> np.ndarray:
+    features: list[np.ndarray] = []
+    for bin_indices in _split_window_indices(window, temporal_bins):
+        segment = np.asarray(data[:, :, bin_indices], dtype=np.float64)
+        mean = segment.mean(axis=2)
+        std = segment.std(axis=2, ddof=1 if segment.shape[2] > 1 else 0)
+        minimum = segment.min(axis=2)
+        maximum = segment.max(axis=2)
+        slope = _linear_temporal_contrast(segment, _window_times_for_indices(times, bin_indices))
+        features.extend([mean, std, minimum, maximum, slope])
+    return np.concatenate(features, axis=1).astype(np.float32, copy=False)
+
+
+def _features_for_window(
+    data: np.ndarray,
+    window: TimeWindow,
+    *,
+    times: np.ndarray | None = None,
+    window_feature_mode: str = DEFAULT_WINDOW_FEATURE_MODE,
+    temporal_bins: int = DEFAULT_TEMPORAL_BINS,
+) -> np.ndarray:
+    """Return a trial-by-feature matrix for one temporal decoding window.
+
+    ``sensor_flat`` preserves the historical representation.  The compact modes
+    summarize each channel inside a few temporal bins, reducing sample-level
+    noise and peak memory while keeping the transform strictly source-only.
+    """
+
+    mode = normalize_window_feature_mode(window_feature_mode)
+    if mode == "sensor_flat":
+        return _sensor_flat_features(data, window)
+    if mode == "bin_means":
+        return _window_bin_mean_features(data, window, temporal_bins=temporal_bins)
+    if mode == "mean_slope":
+        return _window_mean_slope_features(data, window, times=times, temporal_bins=temporal_bins)
+    if mode == "dct":
+        return _window_dct_features(data, window, temporal_bins=temporal_bins)
+    if mode == "stats":
+        return _window_stat_features(data, window, times=times, temporal_bins=temporal_bins)
+    if mode == "sensor_flat_plus_stats":
+        stats = _window_stat_features(data, window, times=times, temporal_bins=temporal_bins)
+        return np.concatenate([_sensor_flat_features(data, window), stats], axis=1).astype(np.float32, copy=False)
+    raise AssertionError(f"Unhandled window feature mode: {mode}")
 
 
 def make_source_pseudotrials(
@@ -343,12 +537,15 @@ def _fit_predict_window(
     source_subjects: Sequence[CachedSubject],
     heldout_subject: CachedSubject,
     window: TimeWindow,
+    times: np.ndarray,
     encoder: LabelEncoder,
     classes: np.ndarray,
     decoders: Sequence[str],
     emission_mode: str,
     feature_preprocessor: str,
     pca_components: int | float | str | None,
+    window_feature_mode: str,
+    temporal_bins: int,
     max_iter: int,
     pseudotrials_per_class: int,
     pseudotrial_seed: int,
@@ -359,7 +556,13 @@ def _fit_predict_window(
     for source_index, subject in enumerate(source_subjects):
         source_data = _subject_data(subject)
         source_labels = encoder.transform(_subject_labels(subject))
-        source_features = _features_for_window(source_data, window)
+        source_features = _features_for_window(
+            source_data,
+            window,
+            times=times,
+            window_feature_mode=window_feature_mode,
+            temporal_bins=temporal_bins,
+        )
         rng = np.random.default_rng(int(pseudotrial_seed) + 1009 * source_index + 9173 * int(round(window[2] * 1000.0)))
         subject_features, subject_labels = make_source_pseudotrials(
             source_features,
@@ -373,7 +576,13 @@ def _fit_predict_window(
 
     x_train = np.vstack(train_features)
     y_train = np.concatenate(train_labels)
-    heldout_features = _features_for_window(_subject_data(heldout_subject), window)
+    heldout_features = _features_for_window(
+        _subject_data(heldout_subject),
+        window,
+        times=times,
+        window_feature_mode=window_feature_mode,
+        temporal_bins=temporal_bins,
+    )
     effective_pca = _safe_pca_components(
         pca_components,
         feature_preprocessor=feature_preprocessor,
@@ -417,6 +626,8 @@ def _metric_row(
     emission_mode: str,
     feature_preprocessor: str,
     pca_components: int | float | str | None,
+    window_feature_mode: str,
+    temporal_bins: int,
     normalization: str,
     baseline_window: tuple[float, float],
     pseudotrials_per_class: int,
@@ -446,6 +657,8 @@ def _metric_row(
         "emission_mode": emission_mode,
         "feature_preprocessor": feature_preprocessor,
         "pca_components": "" if pca_components is None else pca_components,
+        "window_feature_mode": window_feature_mode,
+        "temporal_bins": temporal_bins,
         "normalization": normalization,
         "baseline_window_start": baseline_window[0],
         "baseline_window_stop": baseline_window[1],
@@ -503,6 +716,27 @@ def _drop_incomplete_resume_rows(rows: Sequence[dict[str, Any]]) -> list[dict[st
     return [row for row in rows if str(row.get("heldout_subject")) in completed]
 
 
+def _resume_rows_for_window_feature_config(
+    rows: Sequence[dict[str, Any]],
+    *,
+    window_feature_mode: str,
+    temporal_bins: int,
+) -> list[dict[str, Any]]:
+    """Keep resume rows that match the current window-feature extraction mode."""
+
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        if str(row.get("window_feature_mode", "")) != window_feature_mode:
+            continue
+        try:
+            row_bins = int(row.get("temporal_bins"))
+        except (TypeError, ValueError):
+            continue
+        if row_bins == int(temporal_bins):
+            kept.append(row)
+    return kept
+
+
 def _select_centered_windows(windows: Sequence[TimeWindow], decode_window: tuple[float, float] | None) -> list[TimeWindow]:
     if decode_window is None:
         selected = list(windows)
@@ -539,6 +773,8 @@ def run_bushmeg_loso_decode(
     emission_mode: str = "uncalibrated",
     feature_preprocessor: str = "pca_whiten",
     pca_components: int | float | str | None = 128,
+    window_feature_mode: str = DEFAULT_WINDOW_FEATURE_MODE,
+    temporal_bins: int = DEFAULT_TEMPORAL_BINS,
     normalization: str = "subject_baseline_whiten",
     baseline_window: Sequence[float] | None = DEFAULT_BASELINE_WINDOW,
     pseudotrials_per_class: int = 4,
@@ -556,6 +792,8 @@ def run_bushmeg_loso_decode(
     normalized_decoders = tuple(normalize_decoder_name(decoder) for decoder in _split_csv_tokens(decoders))
     emission_mode = normalize_emission_mode(emission_mode)
     feature_preprocessor = normalize_feature_preprocessor(feature_preprocessor)
+    window_feature_mode = normalize_window_feature_mode(window_feature_mode)
+    temporal_bins_value = _normalize_temporal_bins(temporal_bins)
     normalization = normalize_epoch_normalization(normalization)
     baseline_window_value = _normalize_baseline_window(None if baseline_window is None else tuple(baseline_window))
     decode_window_value = _decode_window_tuple(None if decode_window is None else tuple(decode_window))
@@ -596,6 +834,7 @@ def run_bushmeg_loso_decode(
 
     rows = _load_existing_rows(out_path, resume=resume)
     if resume:
+        rows = _resume_rows_for_window_feature_config(rows, window_feature_mode=window_feature_mode, temporal_bins=temporal_bins_value)
         rows = _drop_incomplete_resume_rows(rows)
     completed = _completed_ensemble_subjects(rows)
     fold_subjects = [subject for subject in cached_subjects if subject.participant not in completed]
@@ -612,12 +851,15 @@ def run_bushmeg_loso_decode(
                 source_subjects=source_subjects,
                 heldout_subject=heldout_subject,
                 window=window,
+                times=times,
                 encoder=encoder,
                 classes=classes,
                 decoders=normalized_decoders,
                 emission_mode=emission_mode,
                 feature_preprocessor=feature_preprocessor,
                 pca_components=pca_components,
+                window_feature_mode=window_feature_mode,
+                temporal_bins=temporal_bins_value,
                 max_iter=max_iter,
                 pseudotrials_per_class=int(pseudotrials_per_class),
                 pseudotrial_seed=int(pseudotrial_seed),
@@ -642,6 +884,8 @@ def run_bushmeg_loso_decode(
                     emission_mode=emission_mode,
                     feature_preprocessor=feature_preprocessor,
                     pca_components=pca_components,
+                    window_feature_mode=window_feature_mode,
+                    temporal_bins=temporal_bins_value,
                     normalization=normalization,
                     baseline_window=baseline_window_value,
                     pseudotrials_per_class=int(pseudotrials_per_class),
@@ -666,6 +910,8 @@ def run_bushmeg_loso_decode(
                 emission_mode=emission_mode,
                 feature_preprocessor=feature_preprocessor,
                 pca_components=pca_components,
+                window_feature_mode=window_feature_mode,
+                temporal_bins=temporal_bins_value,
                 normalization=normalization,
                 baseline_window=baseline_window_value,
                 pseudotrials_per_class=int(pseudotrials_per_class),
@@ -711,6 +957,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--emission-mode", choices=EMISSION_MODE_CHOICES, default="uncalibrated")
     parser.add_argument("--feature-preprocessor", choices=FEATURE_PREPROCESSOR_CHOICES, default="pca_whiten")
     parser.add_argument("--pca-components", default="128")
+    parser.add_argument(
+        "--window-feature-mode",
+        "--feature-mode",
+        dest="window_feature_mode",
+        default=DEFAULT_WINDOW_FEATURE_MODE,
+        help=(
+            "Feature representation inside each time window. "
+            f"Available: {', '.join(WINDOW_FEATURE_MODE_CHOICES)}. "
+            "Use compact modes such as mean_slope, dct, or stats to reduce sample-level noise and memory."
+        ),
+    )
+    parser.add_argument("--temporal-bins", type=int, default=DEFAULT_TEMPORAL_BINS, help="Number of bins/DCT coefficients used by compact window feature modes.")
     parser.add_argument("--normalization", choices=EPOCH_NORMALIZATION_RUN_CHOICES, default="subject_baseline_whiten")
     parser.add_argument("--baseline-window", nargs=2, type=float, default=DEFAULT_BASELINE_WINDOW, metavar=("START", "STOP"))
     parser.add_argument("--pseudotrials-per-class", type=int, default=4)
@@ -742,6 +1000,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         emission_mode=args.emission_mode,
         feature_preprocessor=args.feature_preprocessor,
         pca_components=args.pca_components,
+        window_feature_mode=args.window_feature_mode,
+        temporal_bins=args.temporal_bins,
         normalization=args.normalization,
         baseline_window=tuple(args.baseline_window),
         pseudotrials_per_class=args.pseudotrials_per_class,
