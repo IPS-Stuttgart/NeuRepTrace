@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.metadata
-import importlib.util
 import json
 import platform
 import sys
@@ -50,8 +49,14 @@ def _distribution_version(distribution_name: str) -> str | None:
         return None
 
 
-def _module_is_available(module_name: str) -> bool:
-    return importlib.util.find_spec(module_name) is not None
+def _import_module_for_diagnostics(module_name: str) -> tuple[bool, str | None]:
+    """Import a module and return a compact diagnostic error when it fails."""
+
+    try:
+        importlib.import_module(module_name)
+    except Exception as exc:  # pragma: no cover - exercised with monkeypatched imports
+        return False, f"{type(exc).__name__}: {exc}"
+    return True, None
 
 
 def _check_python_version() -> DoctorCheck:
@@ -74,7 +79,7 @@ def _check_neureptrace_package() -> DoctorCheck:
 
 def _check_dependency(distribution_name: str, module_name: str, *, required: bool) -> DoctorCheck:
     version = _distribution_version(distribution_name)
-    module_available = _module_is_available(module_name)
+    module_available, import_error = _import_module_for_diagnostics(module_name)
     name = f"dependency:{distribution_name}"
     if version is not None and module_available:
         return DoctorCheck(name, "ok", f"{distribution_name} {version}", required=required)
@@ -83,15 +88,22 @@ def _check_dependency(distribution_name: str, module_name: str, *, required: boo
 
     status = "error" if required else "warning"
     kind = "required" if required else "optional"
-    return DoctorCheck(name, status, f"{kind} module '{module_name}' is not importable", required=required)
+    details = f"{kind} module '{module_name}' is not importable"
+    if import_error:
+        details += f": {import_error}"
+    return DoctorCheck(name, status, details, required=required)
 
 
 def _check_required_module(module_name: str) -> DoctorCheck:
-    if _module_is_available(module_name):
+    module_available, import_error = _import_module_for_diagnostics(module_name)
+    if module_available:
         version = _distribution_version(module_name)
         details = f"{module_name} {version}" if version else f"{module_name} is importable"
         return DoctorCheck(f"module:{module_name}", "ok", details)
-    return DoctorCheck(f"module:{module_name}", "error", f"Required module '{module_name}' is not importable")
+    details = f"Required module '{module_name}' is not importable"
+    if import_error:
+        details += f": {import_error}"
+    return DoctorCheck(f"module:{module_name}", "error", details)
 
 
 def _check_dataset_config(path: Path, *, check_files: bool) -> DoctorCheck:
