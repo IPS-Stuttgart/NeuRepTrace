@@ -8,6 +8,7 @@ from neureptrace.decoding import make_decoder, normalize_decoder_name
 from neureptrace.bushmeg_source_loso import (
     CandidateSpec,
     FeatureCache,
+    _baseline_channel_whitener,
     SubjectEpochs,
     WindowSpec,
     _apply_class_bias,
@@ -158,6 +159,28 @@ def test_window_feature_kinds_add_logvar_and_covariance_branches():
     assert evoked_covariance.shape == (2, 9)
     assert np.all(np.isfinite(logvar))
     assert np.all(np.isfinite(covariance))
+
+
+def test_mnn_feature_kinds_noise_normalize_before_feature_extraction():
+    data = np.array(
+        [
+            [[1.0, 2.0, 5.0, 6.0], [2.0, 4.0, 4.0, 8.0]],
+            [[2.0, 3.0, 6.0, 8.0], [4.0, 6.0, 8.0, 10.0]],
+            [[-1.0, -2.0, -5.0, -6.0], [-2.0, -4.0, -4.0, -8.0]],
+        ],
+        dtype=np.float32,
+    )
+    times = np.array([-0.30, -0.10, 0.15, 0.20])
+    window = WindowSpec(center=0.175, width=0.10)
+
+    whitener = _baseline_channel_whitener(data, times)
+    evoked = _window_features(data, times, window, temporal_bins=1, feature_kind="mnn_evoked")
+    evoked_logvar = _window_features(data, times, window, temporal_bins=1, feature_kind="mnn_evoked_logvar")
+
+    assert whitener.shape == (2, 2)
+    assert evoked.shape == (3, 2)
+    assert evoked_logvar.shape == (3, 4)
+    assert np.all(np.isfinite(evoked_logvar))
 
 
 def test_preprocessing_normalization_accepts_epoch_normalization_alias():
