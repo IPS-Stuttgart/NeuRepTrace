@@ -4,10 +4,22 @@ import argparse
 import glob
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 CALIBRATION_METRICS = ("log_loss", "brier", "ece")
 GROUP_COLUMNS = ("decoder", "emission_mode")
+RELIABILITY_BIN_REQUIRED_COLUMNS = (
+    "time",
+    "bin",
+    "bin_left",
+    "bin_right",
+    "n_samples",
+    "accuracy",
+    "confidence",
+)
+RELIABILITY_BIN_NUMERIC_COLUMNS = RELIABILITY_BIN_REQUIRED_COLUMNS
+RELIABILITY_BIN_UNIT_INTERVAL_COLUMNS = ("bin_left", "bin_right", "accuracy", "confidence")
 
 
 def _expand_paths(patterns: list[str]) -> list[Path]:
@@ -78,6 +90,43 @@ def summarize_calibration_metrics(
     return pd.DataFrame(rows).sort_values(["effect_ece_mean", "effect_brier_mean", "effect_log_loss_mean"]).reset_index(drop=True)
 
 
+def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFrame:
+    missing = sorted(set(RELIABILITY_BIN_REQUIRED_COLUMNS).difference(frame.columns))
+    if missing:
+        raise ValueError(f"{csv_path} is missing required columns: {missing}")
+
+    validated = frame.copy()
+    for column in RELIABILITY_BIN_NUMERIC_COLUMNS:
+        values = pd.to_numeric(validated[column], errors="coerce")
+        if values.isna().any():
+            bad_rows = values[values.isna()].index.tolist()[:5]
+            raise ValueError(f"{csv_path} contains non-numeric values in column '{column}' at row(s) {bad_rows}.")
+        if not np.isfinite(values.to_numpy(dtype=float)).all():
+            raise ValueError(f"{csv_path} contains non-finite values in column '{column}'.")
+        validated[column] = values
+
+    for column in RELIABILITY_BIN_UNIT_INTERVAL_COLUMNS:
+        outside = (validated[column] < 0.0) | (validated[column] > 1.0)
+        if outside.any():
+            bad_rows = outside[outside].index.tolist()[:5]
+            raise ValueError(f"{csv_path} contains values outside [0, 1] in column '{column}' at row(s) {bad_rows}.")
+
+    if (validated["bin_right"] < validated["bin_left"]).any():
+        bad_rows = validated.index[validated["bin_right"] < validated["bin_left"]].tolist()[:5]
+        raise ValueError(f"{csv_path} contains reliability bins with bin_right < bin_left at row(s) {bad_rows}.")
+
+    if (validated["n_samples"] < 0).any():
+        bad_rows = validated.index[validated["n_samples"] < 0].tolist()[:5]
+        raise ValueError(f"{csv_path} contains negative n_samples at row(s) {bad_rows}.")
+    fractional_samples = validated["n_samples"] % 1 != 0
+    if fractional_samples.any():
+        bad_rows = validated.index[fractional_samples].tolist()[:5]
+        raise ValueError(f"{csv_path} contains non-integer n_samples at row(s) {bad_rows}.")
+    validated["n_samples"] = validated["n_samples"].astype(int)
+
+    return validated
+
+
 def aggregate_reliability_bins(csv_paths: list[Path]) -> pd.DataFrame:
     """Aggregate reliability-bin CSVs emitted by ``neureptrace.mne_time_decode``."""
     if not csv_paths:
@@ -85,10 +134,7 @@ def aggregate_reliability_bins(csv_paths: list[Path]) -> pd.DataFrame:
 
     frames = []
     for csv_path in csv_paths:
-        frame = pd.read_csv(csv_path)
-        missing = sorted({"time", "bin", "bin_left", "bin_right", "n_samples", "accuracy", "confidence"}.difference(frame.columns))
-        if missing:
-            raise ValueError(f"{csv_path} is missing required columns: {missing}")
+        frame = _validate_reliability_bins(pd.read_csv(csv_path), csv_path)
         if "decoder" not in frame.columns:
             frame["decoder"] = "overall"
         if "emission_mode" not in frame.columns:
@@ -100,7 +146,7 @@ def aggregate_reliability_bins(csv_paths: list[Path]) -> pd.DataFrame:
     group_columns = ["decoder", "emission_mode", "time", "bin", "bin_left", "bin_right"]
     rows = []
     for keys, group in bins.groupby(group_columns, sort=True):
-        n_samples = group["n_samples"].sum()
+        n_samples = int(group["n_samples"].sum())
         if n_samples:
             weights = group["n_samples"] / n_samples
             accuracy = float((group["accuracy"].fillna(0.0) * weights).sum())
@@ -110,8 +156,8 @@ def aggregate_reliability_bins(csv_paths: list[Path]) -> pd.DataFrame:
             confidence = float("nan")
         rows.append(
             {
-                **dict(zip(group_columns, keys)),
-                "n_samples": int(n_samples),
+                **dict(zip(group_columns, keys, strict=True)),
+                "n_samples": n_samples,
                 "accuracy": accuracy,
                 "confidence": confidence,
                 "gap": accuracy - confidence if n_samples else float("nan"),
