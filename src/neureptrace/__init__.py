@@ -10,9 +10,11 @@ from neureptrace import (  # noqa: E402
     _decoding_probability_patch,
     _decoding_regularization_patch,
     _event_detection_extensions,
+    _observation_schema_probability_patch,
 )
 
 _event_detection_extensions.install()
 _decoding_regularization_patch.install()
 _decoding_c_grid_patch.install()
 _decoding_probability_patch.install()
+_observation_schema_probability_patch.install()
