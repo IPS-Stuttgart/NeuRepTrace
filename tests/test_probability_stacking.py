@@ -91,6 +91,22 @@ def test_stack_probability_observations_applies_source_weights_to_target() -> No
     assert stacked["is_correct"].tolist() == [True, True, True]
 
 
+def test_stack_probability_observations_allows_unlabeled_targets() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0]).drop(columns=["true_label", "true_class"])
+
+    stacked = stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+    assert stacked["decoder"].unique().tolist() == [DEFAULT_OUTPUT_DECODER]
+    assert np.allclose(stacked[["prob_class_0", "prob_class_1"]].sum(axis=1), 1.0)
+    assert _weights_from_output(stacked)[1] > 0.80
+    assert stacked["predicted_label"].tolist() == [0, 1, 0]
+    assert stacked["predicted_class"].tolist() == ["zero", "one", "zero"]
+    assert stacked["true_label"].astype(str).tolist() == ["", "", ""]
+    assert stacked["probability_true_class"].astype(str).tolist() == ["", "", ""]
+    assert stacked["is_correct"].astype(str).tolist() == ["", "", ""]
+
+
 def test_target_labels_do_not_affect_fitted_source_weights() -> None:
     source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
     target = _observation_rows(subject="target", labels=[0, 1, 0])
