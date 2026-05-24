@@ -89,6 +89,28 @@ def test_probability_sum_deviation_can_be_required_as_error() -> None:
     assert any(issue.code == "probability_sum_error" for issue in report.errors)
 
 
+def test_probability_above_one_is_validation_error() -> None:
+    frame = _valid_observations()
+    frame.loc[0, "prob_class_0"] = 1.2
+    frame.loc[0, "prob_class_1"] = 0.0
+
+    report = validate_probability_observations(frame)
+
+    assert not report.is_valid
+    assert any(issue.code == "probability_above_one" and issue.column == "prob_class_0" for issue in report.errors)
+
+
+def test_non_finite_probability_is_validation_error() -> None:
+    frame = _valid_observations()
+    frame.loc[0, "prob_class_0"] = float("inf")
+    frame.loc[0, "prob_class_1"] = 0.0
+
+    report = validate_probability_observations(frame)
+
+    assert not report.is_valid
+    assert any(issue.code == "non_finite_probability" and issue.column == "prob_class_0" for issue in report.errors)
+
+
 def test_temporal_profile_requires_sequence_identifier() -> None:
     report = validate_probability_observations(_valid_observations().drop(columns=["sequence_id"]), profile="temporal-model")
 
