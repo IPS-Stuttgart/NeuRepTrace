@@ -19,6 +19,7 @@ RELIABILITY_BIN_REQUIRED_COLUMNS = (
     "confidence",
 )
 RELIABILITY_BIN_NUMERIC_COLUMNS = RELIABILITY_BIN_REQUIRED_COLUMNS
+RELIABILITY_BIN_INTEGER_COLUMNS = ("bin", "n_samples")
 RELIABILITY_BIN_UNIT_INTERVAL_COLUMNS = ("bin_left", "bin_right", "accuracy", "confidence")
 
 
@@ -105,6 +106,17 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
             raise ValueError(f"{csv_path} contains non-finite values in column '{column}'.")
         validated[column] = values
 
+    for column in RELIABILITY_BIN_INTEGER_COLUMNS:
+        fractional = validated[column] % 1 != 0
+        if fractional.any():
+            bad_rows = validated.index[fractional].tolist()[:5]
+            raise ValueError(f"{csv_path} contains non-integer {column} at row(s) {bad_rows}.")
+        negative = validated[column] < 0
+        if negative.any():
+            bad_rows = validated.index[negative].tolist()[:5]
+            raise ValueError(f"{csv_path} contains negative {column} at row(s) {bad_rows}.")
+        validated[column] = validated[column].astype(int)
+
     for column in RELIABILITY_BIN_UNIT_INTERVAL_COLUMNS:
         outside = (validated[column] < 0.0) | (validated[column] > 1.0)
         if outside.any():
@@ -114,15 +126,6 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
     if (validated["bin_right"] < validated["bin_left"]).any():
         bad_rows = validated.index[validated["bin_right"] < validated["bin_left"]].tolist()[:5]
         raise ValueError(f"{csv_path} contains reliability bins with bin_right < bin_left at row(s) {bad_rows}.")
-
-    if (validated["n_samples"] < 0).any():
-        bad_rows = validated.index[validated["n_samples"] < 0].tolist()[:5]
-        raise ValueError(f"{csv_path} contains negative n_samples at row(s) {bad_rows}.")
-    fractional_samples = validated["n_samples"] % 1 != 0
-    if fractional_samples.any():
-        bad_rows = validated.index[fractional_samples].tolist()[:5]
-        raise ValueError(f"{csv_path} contains non-integer n_samples at row(s) {bad_rows}.")
-    validated["n_samples"] = validated["n_samples"].astype(int)
 
     return validated
 
