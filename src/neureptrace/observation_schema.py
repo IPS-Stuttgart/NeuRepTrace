@@ -420,6 +420,41 @@ def _numeric_label_to_probability_columns(prob_columns: Sequence[str]) -> dict[i
     return label_columns
 
 
+def _integer_label_series(frame: pd.DataFrame, column: str, issues: list[ObservationValidationIssue]) -> pd.Series:
+    """Return finite integer labels and report malformed label values."""
+    values = _numeric_series(frame, column, issues, allow_nan=True)
+    finite = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=values.index) & values.notna()
+    non_finite = values.notna() & ~finite
+    for row_index, value in values.loc[non_finite].head(20).items():
+        _issue(
+            issues,
+            "error",
+            f"non_finite_{column}",
+            f"Column '{column}' must contain finite integer labels.",
+            column=column,
+            row=int(row_index),
+            value=float(value),
+        )
+
+    rounded = pd.Series(np.rint(values.to_numpy(dtype=float)), index=values.index)
+    integral = pd.Series(np.isclose(values.to_numpy(dtype=float), rounded.to_numpy(dtype=float)), index=values.index) & finite
+    non_integer = finite & ~integral
+    for row_index, value in values.loc[non_integer].head(20).items():
+        _issue(
+            issues,
+            "error",
+            f"non_integer_{column}",
+            f"Column '{column}' must contain integer labels.",
+            column=column,
+            row=int(row_index),
+            value=float(value),
+        )
+
+    valid = values.copy()
+    valid.loc[~integral] = np.nan
+    return valid
+
+
 def _validate_probability_consistency(
     frame: pd.DataFrame,
     probabilities: pd.DataFrame,
@@ -437,6 +472,8 @@ def _validate_probability_consistency(
     argmax_positions = filled.argmax(axis=1)
     label_columns = _numeric_label_to_probability_columns(prob_columns)
     ordered_labels = [int(column.removeprefix("prob_class_")) if column.removeprefix("prob_class_").isdigit() else None for column in prob_columns]
+    predicted_label = _integer_label_series(frame, "predicted_label", issues) if "predicted_label" in frame.columns else None
+    true_label = _integer_label_series(frame, "true_label", issues) if "true_label" in frame.columns else None
 
     if "confidence" in frame.columns:
         confidence = _numeric_series(frame, "confidence", issues, allow_nan=True)
@@ -453,8 +490,7 @@ def _validate_probability_consistency(
                 value=float(value),
             )
 
-    if "predicted_label" in frame.columns and all(label is not None for label in ordered_labels):
-        predicted_label = _numeric_series(frame, "predicted_label", issues, allow_nan=True)
+    if predicted_label is not None and all(label is not None for label in ordered_labels):
         expected = pd.Series([ordered_labels[position] for position in argmax_positions], index=frame.index, dtype=float)
         bad_prediction = predicted_label.notna() & finite_row & (predicted_label.astype(float) != expected)
         for row_index, value in predicted_label.loc[bad_prediction].head(20).items():
@@ -468,8 +504,7 @@ def _validate_probability_consistency(
                 value=int(value),
             )
 
-    if "probability_true_class" in frame.columns and "true_label" in frame.columns and label_columns:
-        true_label = _numeric_series(frame, "true_label", issues, allow_nan=True)
+    if "probability_true_class" in frame.columns and true_label is not None and label_columns:
         probability_true_class = _numeric_series(frame, "probability_true_class", issues, allow_nan=True)
         for row_index, label_value in true_label.dropna().items():
             label = int(label_value)
@@ -489,8 +524,7 @@ def _validate_probability_consistency(
                     value=observed_probability,
                 )
 
-    if "predicted_class" in frame.columns and "predicted_label" in frame.columns:
-        predicted_label = pd.to_numeric(frame["predicted_label"], errors="coerce")
+    if "predicted_class" in frame.columns and predicted_label is not None:
         for row_index, label_value in predicted_label.dropna().items():
             class_column = f"class_{int(label_value)}"
             if class_column not in frame.columns or pd.isna(frame.loc[row_index, "predicted_class"]):
