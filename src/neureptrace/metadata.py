@@ -23,7 +23,7 @@ def add_binary_label(
     When ``negative_pattern`` is omitted, every non-null source value that does
     not match ``positive_pattern`` receives the negative label. When
     ``negative_pattern`` is provided, unmatched rows receive missing labels and
-    can be excluded by the decoder.
+    rows that match both patterns keep the positive label.
     """
     if source_column not in metadata.columns:
         raise ValueError(f"Source column '{source_column}' not found in metadata.")
@@ -36,7 +36,7 @@ def add_binary_label(
     if negative_pattern is None:
         negative = source.notna() & ~positive
     else:
-        negative = source.str.contains(negative_pattern, flags=flags, regex=True, na=False)
+        negative = source.str.contains(negative_pattern, flags=flags, regex=True, na=False) & ~positive
 
     labeled = metadata.copy()
     labeled[label_column] = pd.NA
