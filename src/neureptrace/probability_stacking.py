@@ -71,7 +71,7 @@ class AlignedProbabilityCube:
 
     base: pd.DataFrame
     cube: np.ndarray
-    label_positions: np.ndarray
+    label_positions: np.ndarray | None
     label_values: tuple[int, ...]
     probability_columns: tuple[str, ...]
     candidates: tuple[str, ...]
@@ -91,6 +91,11 @@ def _label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
 
 def _class_columns_for_probabilities(frame: pd.DataFrame, prob_columns: Sequence[str]) -> tuple[str, ...]:
     return tuple(column for column in (f"class_{suffix}" for suffix in _class_suffixes(prob_columns)) if column in frame.columns)
+
+
+def _label_present_mask(labels: Sequence[object] | np.ndarray | pd.Series) -> pd.Series:
+    label_series = pd.Series(labels)
+    return ~(label_series.isna() | label_series.astype(str).str.strip().eq(""))
 
 
 def _label_positions(labels: Sequence[object] | np.ndarray | pd.Series, label_values: Sequence[int]) -> np.ndarray:
@@ -158,19 +163,22 @@ def align_probability_cube(
     candidates: Sequence[str] | None = None,
     alignment_columns: Sequence[str] | None = None,
     min_probability: float = DEFAULT_MIN_PROBABILITY,
+    require_labels: bool = True,
 ) -> AlignedProbabilityCube:
     """Align candidate probability rows into a candidate × sample × class cube.
 
     The default alignment keys use the canonical NeuRepTrace observation columns
     but deliberately exclude the candidate column.  If no such columns are
     present, rows are aligned by order and all candidates must have the same
-    number of rows.
+    number of rows.  Source OOF rows must be labeled for fitting.  Target rows
+    may pass ``require_labels=False`` so source-fitted weights can be applied to
+    unlabeled deployment streams.
     """
 
     prob_columns = probability_columns(observations)
     if not prob_columns:
         raise ValueError("Observation table must contain prob_class_* columns.")
-    if "true_label" not in observations.columns:
+    if require_labels and "true_label" not in observations.columns:
         raise ValueError("Observation table must contain true_label for source-OOF stacking.")
     candidates = _normalize_candidates(candidates, observations, candidate_column)
     keys = tuple(alignment_columns) if alignment_columns is not None else _infer_alignment_columns(observations, prob_columns, candidate_column)
@@ -206,7 +214,15 @@ def align_probability_cube(
             matrices.append(_renormalize_probabilities(subset.loc[:, list(prob_columns)].to_numpy(dtype=float), min_probability=min_probability))
 
     label_values = _label_values(prob_columns)
-    label_positions = _label_positions(reference["true_label"], label_values)
+    label_positions: np.ndarray | None = None
+    if "true_label" in reference.columns:
+        label_mask = _label_present_mask(reference["true_label"])
+        if bool(label_mask.any()):
+            if not bool(label_mask.all()):
+                raise ValueError("true_label must be present for all rows when provided.")
+            label_positions = _label_positions(reference["true_label"], label_values)
+    if require_labels and label_positions is None:
+        raise ValueError("Observation table must contain true_label for source-OOF stacking.")
     return AlignedProbabilityCube(
         base=reference,
         cube=np.stack(matrices, axis=0),
@@ -383,7 +399,14 @@ def stack_probability_observations(
     output_decoder: str = DEFAULT_OUTPUT_DECODER,
     output_emission_mode: str = DEFAULT_OUTPUT_EMISSION_MODE,
 ) -> pd.DataFrame:
-    """Fit source-OOF stacking weights and apply them to target observations."""
+    """Fit source-OOF stacking weights and apply them to target observations.
+
+    Source OOF observations must include numeric ``true_label`` values because
+    those labels define the leakage-safe stacking objective.  Target labels are
+    optional: when omitted, the returned table still contains predictions,
+    confidences, stacked probabilities, and source-fit diagnostics, while
+    label-dependent reporting fields are left blank.
+    """
 
     source = align_probability_cube(
         source_oof_observations,
@@ -392,12 +415,15 @@ def stack_probability_observations(
         alignment_columns=alignment_columns,
         min_probability=min_probability,
     )
+    if source.label_positions is None:
+        raise ValueError("Source OOF observations must contain true_label for stacking.")
     target = align_probability_cube(
         target_observations,
         candidate_column=candidate_column,
         candidates=source.candidates,
         alignment_columns=alignment_columns,
         min_probability=min_probability,
+        require_labels=False,
     )
     if target.probability_columns != source.probability_columns:
         raise ValueError("Source-OOF and target observations must use the same prob_class_* columns.")
@@ -417,16 +443,28 @@ def stack_probability_observations(
     label_values = target.label_values
     predicted_positions = probabilities.argmax(axis=1)
     predicted_labels = np.asarray([label_values[position] for position in predicted_positions], dtype=int)
-    true_labels = pd.to_numeric(output["true_label"], errors="coerce")
-    if true_labels.isna().any():
-        raise ValueError("target true_label values must be numeric.")
-    true_label_values = true_labels.astype(int).to_numpy()
-    label_to_position = {label: position for position, label in enumerate(label_values)}
-    true_probabilities = np.full(len(output), np.nan, dtype=float)
-    for row_index, true_label in enumerate(true_label_values):
-        position = label_to_position.get(int(true_label))
-        if position is not None:
+
+    true_probabilities: np.ndarray
+    correctness: np.ndarray
+    if "true_label" in output.columns and bool(_label_present_mask(output["true_label"]).any()):
+        label_mask = _label_present_mask(output["true_label"])
+        if not bool(label_mask.all()):
+            raise ValueError("target true_label must be present for all rows when provided.")
+        true_labels = pd.to_numeric(output["true_label"], errors="coerce")
+        if true_labels.isna().any():
+            raise ValueError("target true_label values must be numeric.")
+        true_label_values = true_labels.astype(int).to_numpy()
+        label_to_position = {label: position for position, label in enumerate(label_values)}
+        true_probabilities = np.full(len(output), np.nan, dtype=float)
+        for row_index, true_label in enumerate(true_label_values):
+            position = label_to_position.get(int(true_label))
+            if position is None:
+                raise ValueError(f"target true_label values must index probability labels {list(label_values)}; missing label: {int(true_label)}")
             true_probabilities[row_index] = probabilities[row_index, position]
+        correctness = predicted_labels == true_label_values
+    else:
+        true_probabilities = np.full(len(output), "", dtype=object)
+        correctness = np.full(len(output), "", dtype=object)
 
     for column_index, column in enumerate(target.probability_columns):
         output[column] = probabilities[:, column_index]
@@ -438,7 +476,7 @@ def stack_probability_observations(
     output["predicted_class"] = _predicted_classes(output, predicted_labels)
     output["probability_true_class"] = true_probabilities
     output["confidence"] = probabilities.max(axis=1)
-    output["is_correct"] = predicted_labels == true_label_values
+    output["is_correct"] = correctness
     output["calibration_fold"] = "source_oof"
     output["source_oof_candidates"] = "|".join(fit.candidates)
     output["source_oof_weights"] = "|".join(f"{weight:.12g}" for weight in fit.weights)
@@ -518,7 +556,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Fit a leakage-safe source-OOF probability stacker and apply it to target observation rows.")
     parser.add_argument("--source-oof", nargs="+", required=True, help="Source out-of-fold observation CSVs or glob patterns used to fit weights.")
-    parser.add_argument("--target", nargs="+", required=True, help="Target observation CSVs or glob patterns to ensemble with fitted source weights.")
+    parser.add_argument("--target", nargs="+", required=True, help="Target observation CSVs or glob patterns to ensemble with fitted source weights; true_label is optional unless --metrics-out is requested.")
     parser.add_argument("--out", type=Path, required=True, help="CSV path for stacked target observations.")
     parser.add_argument("--metrics-out", type=Path, help="Optional CSV path for grouped metrics computed from the stacked observations.")
     parser.add_argument("--candidate-column", default=DEFAULT_CANDIDATE_COLUMN, help="Column identifying base candidates/decoders. Defaults to decoder.")
