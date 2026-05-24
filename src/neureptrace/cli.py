@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from difflib import get_close_matches
@@ -66,8 +67,40 @@ COMMAND_MODULES = {
 }
 
 
-def _command_listing() -> str:
-    """Return a stable, human-readable inventory of grouped commands."""
+def _aliases_by_module() -> dict[str, tuple[str, ...]]:
+    """Return grouped command aliases for each backing module."""
+
+    aliases: dict[str, list[str]] = {}
+    for command, module_name in COMMAND_MODULES.items():
+        aliases.setdefault(module_name, []).append(command)
+    return {module_name: tuple(sorted(commands)) for module_name, commands in aliases.items()}
+
+
+def _command_records() -> list[dict[str, object]]:
+    """Return a machine-readable inventory of grouped commands."""
+
+    aliases_by_module = _aliases_by_module()
+    records: list[dict[str, object]] = []
+    for command in sorted(COMMAND_MODULES):
+        module_name = COMMAND_MODULES[command]
+        records.append(
+            {
+                "command": command,
+                "module": module_name,
+                "aliases": [alias for alias in aliases_by_module[module_name] if alias != command],
+            }
+        )
+    return records
+
+
+def _command_listing(output_format: str = "text") -> str:
+    """Return a stable inventory of grouped commands."""
+
+    if output_format == "json":
+        return json.dumps({"commands": _command_records()}, indent=2, sort_keys=True)
+    if output_format != "text":
+        raise ValueError(f"Unsupported command listing format: {output_format}")
+
     width = max((len(command) for command in COMMAND_MODULES), default=0)
     rows = [
         f"  {command:<{width}}  {COMMAND_MODULES[command]}"
@@ -133,6 +166,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="List grouped workflow commands and their backing modules, then exit.",
     )
     parser.add_argument(
+        "--list-format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format for --list-commands. Use json for scripts that need command aliases and module targets.",
+    )
+    parser.add_argument(
         "command",
         nargs="?",
         metavar="command",
@@ -144,7 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"unrecognized arguments: {' '.join(remaining)}")
 
     if args.list_commands:
-        print(_command_listing())
+        print(_command_listing(args.list_format))
         return 0
 
     if args.command is None:

@@ -19,6 +19,19 @@ Dataset configs can be checked with the same diagnostic command:
 neureptrace doctor --dataset-config path/to/dataset.yml --skip-optional
 ```
 
+Inspect the grouped CLI before launching a workflow:
+
+```bash
+neureptrace --list-commands
+```
+
+Automation and documentation tooling can use the machine-readable inventory,
+which includes each grouped command, its backing module, and equivalent aliases:
+
+```bash
+neureptrace --list-commands --list-format json
+```
+
 Run the first benchmark against an MNE epochs file with the installed
 fold-local time decoder:
 
