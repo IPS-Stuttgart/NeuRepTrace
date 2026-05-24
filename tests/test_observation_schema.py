@@ -139,6 +139,26 @@ def test_canonical_profile_checks_prediction_consistency() -> None:
     assert any(issue.code == "predicted_label_probability_mismatch" for issue in report.errors)
 
 
+def test_canonical_profile_rejects_non_finite_predicted_label() -> None:
+    frame = _valid_canonical_observations()
+    frame.loc[0, "predicted_label"] = float("inf")
+
+    report = validate_probability_observations(frame, profile="canonical")
+
+    assert not report.is_valid
+    assert any(issue.code == "non_finite_predicted_label" for issue in report.errors)
+
+
+def test_canonical_profile_rejects_fractional_true_label() -> None:
+    frame = _valid_canonical_observations()
+    frame.loc[0, "true_label"] = 0.5
+
+    report = validate_probability_observations(frame, profile="canonical")
+
+    assert not report.is_valid
+    assert any(issue.code == "non_integer_true_label" for issue in report.errors)
+
+
 def test_canonical_profile_checks_confidence_consistency() -> None:
     frame = _valid_canonical_observations()
     frame.loc[0, "confidence"] = 0.1
