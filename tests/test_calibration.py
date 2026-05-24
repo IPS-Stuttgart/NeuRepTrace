@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.calibration import aggregate_reliability_bins, build_calibration_report, summarize_calibration_metrics
 
@@ -65,6 +66,42 @@ def test_aggregate_reliability_bins_weights_by_samples(tmp_path: Path):
     assert aggregated["accuracy"].round(3).tolist() == [0.5]
     assert aggregated["confidence"].round(3).tolist() == [0.525]
     assert aggregated["gap"].round(3).tolist() == [-0.025]
+
+
+def test_aggregate_reliability_bins_rejects_malformed_probability_bins(tmp_path: Path):
+    path = tmp_path / "bad_calibration_bins.csv"
+    pd.DataFrame(
+        {
+            "time": [0.1],
+            "bin": [5],
+            "bin_left": [0.5],
+            "bin_right": [0.6],
+            "n_samples": [10],
+            "accuracy": [1.2],
+            "confidence": [0.6],
+        }
+    ).to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="outside \\[0, 1\\].*accuracy"):
+        aggregate_reliability_bins([path])
+
+
+def test_aggregate_reliability_bins_rejects_non_integer_sample_counts(tmp_path: Path):
+    path = tmp_path / "bad_sample_counts.csv"
+    pd.DataFrame(
+        {
+            "time": [0.1],
+            "bin": [5],
+            "bin_left": [0.5],
+            "bin_right": [0.6],
+            "n_samples": [10.5],
+            "accuracy": [0.8],
+            "confidence": [0.6],
+        }
+    ).to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="non-integer n_samples"):
+        aggregate_reliability_bins([path])
 
 
 def test_build_calibration_report_writes_markdown(tmp_path: Path):
