@@ -251,6 +251,31 @@ def test_summarize_metric_table_reports_rich_chance_and_permutation_fields():
     assert row["n_significant_p_0.01"] == 1
 
 
+def test_summarize_metric_table_rejects_fractional_chance_class_counts():
+    frame = pd.DataFrame(
+        {
+            "decoder": ["logistic"],
+            "accuracy": [0.60],
+            "chance_accuracy": [None],
+            "n_validation_classes": [2.5],
+        }
+    )
+
+    summary = summarize_metric_table(
+        frame,
+        "accuracy",
+        "decoder",
+        chance_column="chance_accuracy",
+        chance_class_columns=("n_validation_classes",),
+    )
+
+    row = summary.iloc[0]
+    assert pd.isna(row["chance_accuracy_mean"])
+    assert pd.isna(row["chance_classes_mean"])
+    assert row["chance_classes_counts"] == ""
+    assert row["accuracy_above_chance_count"] == 0
+
+
 def test_summarize_metric_table_can_zero_singleton_dispersion():
     frame = pd.DataFrame({"decoder": ["logistic"], "accuracy": [0.75], "chance": [0.5]})
 
