@@ -42,6 +42,11 @@ def rank_class_scores(
         raise ValueError("scores and y_true must contain the same samples.")
     if score_matrix.shape[1] != class_order.size:
         raise ValueError("scores columns must match classes.")
+    if not np.all(np.isfinite(score_matrix)):
+        raise ValueError("scores must contain only finite values.")
+    duplicate_class = _find_duplicate_class_label(class_order)
+    if duplicate_class is not None:
+        raise ValueError(f"classes must be unique; duplicate label {duplicate_class!r} found.")
     if score_matrix.shape[1] == 0:
         return _empty_class_rank_result(y_true, top_k)
 
@@ -96,6 +101,27 @@ def _finite_nanmedian(values: Sequence[float] | np.ndarray) -> float:
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
     return float(np.median(values)) if values.size else np.nan
+
+
+def _find_duplicate_class_label(class_order: np.ndarray):
+    for index, label in enumerate(class_order):
+        for previous_label in class_order[:index]:
+            if _class_labels_equal(label, previous_label):
+                return _as_python_scalar(label)
+    return None
+
+
+def _class_labels_equal(left, right) -> bool:
+    left = _as_python_scalar(left)
+    right = _as_python_scalar(right)
+    try:
+        return bool(left == right)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return bool(np.isscalar(left) and np.isscalar(right) and np.isnan(left) and np.isnan(right))
+    except (TypeError, ValueError):
+        return False
 
 
 def _as_python_scalar(value):

@@ -83,6 +83,54 @@ def test_validate_manifest_reports_label_and_group_issues(tmp_path: Path, monkey
     assert "fewer than n_splits" in messages
 
 
+def _write_n_splits_manifest_fixture(tmp_path: Path, n_splits: object) -> Path:
+    metadata_csv = tmp_path / "metadata.csv"
+    pd.DataFrame({"condition": ["face", "face", "house", "house"]}).to_csv(metadata_csv, index=False)
+
+    manifest_csv = tmp_path / "manifest.csv"
+    pd.DataFrame(
+        [
+            {
+                "subject": "sub-01",
+                "epochs": "missing-epo.fif",
+                "metadata_csv": metadata_csv.name,
+                "label_column": "condition",
+                "n_splits": n_splits,
+            }
+        ]
+    ).to_csv(manifest_csv, index=False)
+    return manifest_csv
+
+
+def test_validate_manifest_rejects_fractional_n_splits_without_truncation(tmp_path: Path):
+    manifest_csv = _write_n_splits_manifest_fixture(tmp_path, "2.5")
+
+    validations = validate_manifest(manifest_csv)
+
+    assert len(validations) == 1
+    assert validations[0].subject == "sub-01"
+    assert not validations[0].ok
+    assert any("n_splits must be an integer >= 2, got '2.5'" in message for message in validations[0].messages)
+
+
+def test_validate_manifest_accepts_integer_like_n_splits(tmp_path: Path):
+    manifest_csv = _write_n_splits_manifest_fixture(tmp_path, "2.0")
+
+    validations = validate_manifest(manifest_csv)
+
+    assert len(validations) == 1
+    assert not any("n_splits must be" in message for message in validations[0].messages)
+
+
+def test_validate_manifest_rejects_n_splits_below_two(tmp_path: Path):
+    manifest_csv = _write_n_splits_manifest_fixture(tmp_path, "1")
+
+    validations = validate_manifest(manifest_csv)
+
+    assert len(validations) == 1
+    assert any("n_splits must be an integer >= 2, got '1'" in message for message in validations[0].messages)
+
+
 def test_validation_report_frame_is_tabular():
     frame = validation_report_frame([])
 

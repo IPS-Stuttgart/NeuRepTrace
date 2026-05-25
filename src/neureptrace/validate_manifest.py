@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,7 +33,21 @@ def _value(row: pd.Series, column: str, default: str | None = None) -> str | Non
 
 def _int_value(row: pd.Series, column: str, default: int) -> int:
     value = _value(row, column)
-    return default if value is None else int(float(value))
+    if value is None:
+        return default
+
+    try:
+        numeric_value = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{column} must be an integer >= 2, got {value!r}") from exc
+
+    if not math.isfinite(numeric_value) or not numeric_value.is_integer():
+        raise ValueError(f"{column} must be an integer >= 2, got {value!r}")
+
+    int_value = int(numeric_value)
+    if int_value < 2:
+        raise ValueError(f"{column} must be an integer >= 2, got {value!r}")
+    return int_value
 
 
 def _resolve(value: str | None, base_dir: Path) -> Path | None:
@@ -123,7 +138,11 @@ def validate_manifest(
         epochs_path = _resolve(_value(row, "epochs"), base_dir)
         label_column = _value(row, "label_column", default_label_column)
         group_column = _value(row, "group_column", default_group_column)
-        n_splits = _int_value(row, "n_splits", default_n_splits)
+        try:
+            n_splits = _int_value(row, "n_splits", default_n_splits)
+        except ValueError as exc:
+            messages.append(str(exc))
+            n_splits = default_n_splits
 
         if label_column is None:
             messages.append("label_column is missing")

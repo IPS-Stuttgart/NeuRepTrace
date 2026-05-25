@@ -74,7 +74,14 @@ def _to_float(value: object) -> float:
 
 
 def _to_int(value: object) -> int:
-    return int(float(str(value).strip()))
+    text = "" if value is None else str(value).strip()
+    try:
+        number = float(text)
+    except ValueError as exc:
+        raise ValueError(f"trial values must be finite integers, got {value!r}.") from exc
+    if not np.isfinite(number) or not number.is_integer():
+        raise ValueError(f"trial values must be finite integers, got {value!r}.")
+    return int(number)
 
 
 def _validate_trial_index_base(trial_index_base: int) -> int:
