@@ -111,6 +111,30 @@ def test_ensemble_probability_observations_accepts_hyphenated_decoder_aliases() 
     assert np.allclose(ensemble[["prob_class_0", "prob_class_1"]].sum(axis=1), 1.0)
 
 
+def test_ensemble_probability_observations_accepts_integer_like_float_labels() -> None:
+    observations = _source_observations()
+    observations["true_label"] = observations["true_label"].astype(float)
+
+    ensemble = ensemble_probability_observations(
+        observations,
+        baseline_window=(-0.25, -0.15),
+    )
+
+    assert ensemble["true_label"].tolist() == [0.0, 1.0, 0.0, 0.0]
+    assert ensemble["is_correct"].tolist() == [True, False, True, True]
+
+
+def test_ensemble_probability_observations_rejects_fractional_true_labels() -> None:
+    observations = _source_observations()
+    observations.loc[observations["sequence_id"] == 0, "true_label"] = 0.5
+
+    with pytest.raises(ValueError, match="true_label values must be integer-valued class labels"):
+        ensemble_probability_observations(
+            observations,
+            baseline_window=(-0.25, -0.15),
+        )
+
+
 def test_summarize_ensemble_metrics_returns_time_resolved_rows() -> None:
     ensemble = ensemble_probability_observations(
         _source_observations(),
@@ -123,6 +147,17 @@ def test_summarize_ensemble_metrics_returns_time_resolved_rows() -> None:
     assert metrics["accuracy"].tolist() == [0.5, 1.0]
     assert metrics["n_test"].tolist() == [2, 2]
     assert metrics["class_names"].tolist() == ["zero|one", "zero|one"]
+
+
+def test_summarize_ensemble_metrics_rejects_fractional_true_labels() -> None:
+    ensemble = ensemble_probability_observations(
+        _source_observations(),
+        baseline_window=(-0.25, -0.15),
+    )
+    ensemble.loc[ensemble["time"] == -0.20, "true_label"] = 0.5
+
+    with pytest.raises(ValueError, match="true_label values must be integer-valued class labels"):
+        summarize_ensemble_metrics(ensemble)
 
 
 def test_ensemble_cli_writes_observations_and_metrics(tmp_path: Path) -> None:
