@@ -98,18 +98,33 @@ def _label_present_mask(labels: Sequence[object] | np.ndarray | pd.Series) -> pd
     return ~(label_series.isna() | label_series.astype(str).str.strip().eq(""))
 
 
-def _label_positions(labels: Sequence[object] | np.ndarray | pd.Series, label_values: Sequence[int]) -> np.ndarray:
+def _integer_label_array(labels: Sequence[object] | np.ndarray | pd.Series, *, name: str) -> np.ndarray:
+    """Return labels as integer values after rejecting lossy numeric casts."""
+
     numeric = pd.to_numeric(pd.Series(labels), errors="coerce")
     if numeric.isna().any():
-        raise ValueError("true_label values must be numeric.")
+        raise ValueError(f"{name} values must be numeric.")
+    values = numeric.to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError(f"{name} values must be finite.")
+    rounded = np.rint(values)
+    integer_like = np.isclose(values, rounded, rtol=0.0, atol=1.0e-12)
+    if not bool(integer_like.all()):
+        bad_rows = numeric.index[~integer_like].tolist()[:5]
+        raise ValueError(f"{name} values must be integer-valued; fractional values at row(s) {bad_rows}.")
+    return rounded.astype(int)
+
+
+def _label_positions(labels: Sequence[object] | np.ndarray | pd.Series, label_values: Sequence[int]) -> np.ndarray:
+    integer_labels = _integer_label_array(labels, name="true_label")
     label_to_position = {int(label): position for position, label in enumerate(label_values)}
-    positions = np.full(len(numeric), -1, dtype=int)
-    for row_index, label in enumerate(numeric.astype(int).to_numpy()):
+    positions = np.full(len(integer_labels), -1, dtype=int)
+    for row_index, label in enumerate(integer_labels):
         position = label_to_position.get(int(label))
         if position is not None:
             positions[row_index] = position
     if bool((positions < 0).any()):
-        missing = sorted(set(int(label) for label in numeric.astype(int).to_numpy() if int(label) not in label_to_position))
+        missing = sorted(set(int(label) for label in integer_labels if int(label) not in label_to_position))
         raise ValueError(f"true_label values must index probability labels {list(label_values)}; missing labels: {missing[:5]}")
     return positions
 
@@ -178,6 +193,8 @@ def align_probability_cube(
     prob_columns = probability_columns(observations)
     if not prob_columns:
         raise ValueError("Observation table must contain prob_class_* columns.")
+    if candidate_column not in observations.columns:
+        raise ValueError(f"Observation table is missing candidate column {candidate_column!r}.")
     if require_labels and "true_label" not in observations.columns:
         raise ValueError("Observation table must contain true_label for source-OOF stacking.")
     candidates = _normalize_candidates(candidates, observations, candidate_column)
@@ -237,9 +254,13 @@ def align_probability_cube(
 def class_balanced_sample_weights(labels: Sequence[int] | np.ndarray, *, n_classes: int) -> np.ndarray:
     """Return inverse-frequency sample weights normalized to mean one."""
 
-    labels = np.asarray(labels, dtype=int).reshape(-1)
+    labels = _integer_label_array(labels, name="labels")
     if labels.size == 0:
         raise ValueError("Need at least one source-OOF prediction row for stacking.")
+    if int(n_classes) <= 0:
+        raise ValueError("n_classes must be positive.")
+    if np.any(labels < 0) or np.any(labels >= int(n_classes)):
+        raise ValueError("labels must be integer class positions compatible with n_classes.")
     counts = np.bincount(labels, minlength=int(n_classes)).astype(float)
     weights = np.zeros(labels.shape[0], dtype=float)
     observed = counts[labels] > 0.0
@@ -267,7 +288,7 @@ def fit_stacking_weights(
     """
 
     cube = np.asarray(probability_cube, dtype=float)
-    labels = np.asarray(labels, dtype=int).reshape(-1)
+    labels = _integer_label_array(labels, name="labels")
     if cube.ndim != 3:
         raise ValueError("probability_cube must have shape (n_candidates, n_samples, n_classes).")
     n_candidates, n_samples, cube_classes = cube.shape
@@ -337,12 +358,16 @@ def fit_source_oof_stacking(
     if weighting not in WEIGHTING_MODES:
         raise ValueError(f"Unknown weighting {weighting!r}; choose one of {sorted(WEIGHTING_MODES)}.")
     cube = np.asarray(source_probability_cube, dtype=float)
-    labels = np.asarray(source_labels, dtype=int).reshape(-1)
+    labels = _integer_label_array(source_labels, name="source_labels")
     if cube.ndim != 3:
         raise ValueError("source_probability_cube must have shape (n_candidates, n_samples, n_classes).")
-    n_candidates, _n_samples, n_classes = cube.shape
+    n_candidates, n_samples, n_classes = cube.shape
     if len(candidates) != n_candidates:
         raise ValueError("candidates must contain one name per probability-cube candidate.")
+    if labels.shape[0] != n_samples:
+        raise ValueError("source_labels must contain one label per probability row.")
+    if np.any(labels < 0) or np.any(labels >= int(n_classes)):
+        raise ValueError("source_labels must be integer class positions compatible with source_probability_cube.")
 
     if weighting == "uniform" or n_candidates == 1:
         weights = np.full(n_candidates, 1.0 / float(n_candidates), dtype=float)
@@ -450,10 +475,7 @@ def stack_probability_observations(
         label_mask = _label_present_mask(output["true_label"])
         if not bool(label_mask.all()):
             raise ValueError("target true_label must be present for all rows when provided.")
-        true_labels = pd.to_numeric(output["true_label"], errors="coerce")
-        if true_labels.isna().any():
-            raise ValueError("target true_label values must be numeric.")
-        true_label_values = true_labels.astype(int).to_numpy()
+        true_label_values = _integer_label_array(output["true_label"], name="target true_label")
         label_to_position = {label: position for position, label in enumerate(label_values)}
         true_probabilities = np.full(len(output), np.nan, dtype=float)
         for row_index, true_label in enumerate(true_label_values):
@@ -507,16 +529,17 @@ def summarize_stacked_metrics(observations: pd.DataFrame) -> pd.DataFrame:
     if "true_label" not in observations.columns or not prob_columns:
         raise ValueError("Stacked observations must contain true_label and prob_class_* columns.")
     label_values = _label_values(prob_columns)
+    label_value_set = set(label_values)
     group_columns = [column for column in _METRIC_GROUP_COLUMNS if column in observations.columns]
     rows: list[dict[str, object]] = []
     for group_key, group in observations.groupby(group_columns, dropna=False, sort=True):
         if len(group_columns) == 1 and not isinstance(group_key, tuple):
             group_key = (group_key,)
         probabilities = group.loc[:, list(prob_columns)].to_numpy(dtype=float)
-        true_labels = pd.to_numeric(group["true_label"], errors="coerce")
-        if true_labels.isna().any():
-            raise ValueError("true_label values must be numeric.")
-        true_label_values = true_labels.astype(int).to_numpy()
+        true_label_values = _integer_label_array(group["true_label"], name="true_label")
+        missing_labels = sorted(set(int(label) for label in true_label_values if int(label) not in label_value_set))
+        if missing_labels:
+            raise ValueError(f"true_label values must index probability labels {list(label_values)}; missing labels: {missing_labels[:5]}")
         predicted_label_values = np.asarray([label_values[position] for position in probabilities.argmax(axis=1)], dtype=int)
         row = dict(zip(group_columns, group_key, strict=True))
         row.update(
