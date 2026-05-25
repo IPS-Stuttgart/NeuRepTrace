@@ -264,10 +264,12 @@ def _numeric_column_values(frame: pd.DataFrame, column: str) -> np.ndarray:
 
 def _positive_int(value: object) -> int | None:
     try:
-        parsed = int(float(value))
+        parsed = float(value)
     except (TypeError, ValueError, OverflowError):
         return None
-    return parsed if parsed > 0 else None
+    if not np.isfinite(parsed) or parsed <= 0.0 or not parsed.is_integer():
+        return None
+    return int(parsed)
 
 
 def _positive_float(value: object) -> float | None:
