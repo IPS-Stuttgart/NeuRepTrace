@@ -224,6 +224,13 @@ def _validation_section(config: Mapping[str, Any]) -> dict[str, Any]:
     return validation
 
 
+def _participant_ids(config: Mapping[str, Any]) -> list[int | str]:
+    participants = config.get("participants", {}) or {}
+    if not isinstance(participants, Mapping):
+        raise ConfigValidationError("Config section 'participants' must be a mapping.")
+    return parse_participant_ids(participants.get("ids"))
+
+
 def validate_dataset_config(
     config: Mapping[str, Any],
     *,
@@ -247,8 +254,9 @@ def validate_dataset_config(
     if dataset_type == "mne_epochs":
         if not (dataset.get("epochs") or dataset.get("epochs_file") or dataset.get("epochs_files")):
             raise ConfigValidationError("mne_epochs configs require dataset.epochs, dataset.epochs_file, or dataset.epochs_files.")
+        if isinstance(dataset.get("epochs_files"), Mapping) and not _participant_ids(config):
+            raise ConfigValidationError("mne_epochs dataset.epochs_files mappings require participants.ids.")
     if dataset_type == "fieldtrip_mat":
-        participants = config.get("participants", {}) or {}
         has_participant_template = bool(
             dataset.get("participant_file")
             or dataset.get("file_template")
@@ -258,7 +266,7 @@ def validate_dataset_config(
         has_files = bool(dataset.get("files"))
         if not has_files and not has_participant_template:
             raise ConfigValidationError("fieldtrip_mat configs require dataset.files, dataset.file_templates, or dataset.participant_file.")
-        if has_participant_template and not parse_participant_ids(participants.get("ids")):
+        if has_participant_template and not _participant_ids(config):
             raise ConfigValidationError("fieldtrip_mat participant templates and file_templates require participants.ids.")
 
     metadata = _metadata_section(config)
@@ -318,10 +326,10 @@ def iter_dataset_files(config: Mapping[str, Any], *, base_dir: str | Path = ".")
 
     template_specs = _participant_file_templates(dataset)
     if template_specs:
-        participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
+        participants = _participant_ids(config)
         return [expand_path(template.format(**_format_values_for_participant(participant)), base_dir=base_dir, root=root) for participant in participants for _role, template, _extra in template_specs]
 
-    participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
+    participants = _participant_ids(config)
     template = dataset.get("participant_file") or dataset.get("file_template")
     return [expand_path(str(template).format(participant=participant), base_dir=base_dir, root=root) for participant in participants]
 
@@ -335,7 +343,9 @@ def _mne_epoch_file_specs(config: Mapping[str, Any], *, base_dir: str | Path) ->
             template = epochs_files.get("template") or epochs_files.get("path") or epochs_files.get("file")
             if template is None:
                 raise ConfigValidationError("dataset.epochs_files mappings must contain template, path, or file.")
-            participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
+            participants = _participant_ids(config)
+            if not participants:
+                raise ConfigValidationError("mne_epochs dataset.epochs_files mappings require participants.ids.")
             return [
                 (
                     expand_path(str(template).format(**_format_values_for_participant(participant)), base_dir=base_dir, root=root),
@@ -423,7 +433,7 @@ def _fieldtrip_file_specs(config: Mapping[str, Any], *, base_dir: str | Path) ->
 
     template_specs = _participant_file_templates(dataset)
     if template_specs:
-        participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
+        participants = _participant_ids(config)
         specs = []
         for participant in participants:
             format_values = _format_values_for_participant(participant)
@@ -432,7 +442,7 @@ def _fieldtrip_file_specs(config: Mapping[str, Any], *, base_dir: str | Path) ->
                 specs.append((path, {"participant": str(participant), **extra}))
         return specs
 
-    participants = parse_participant_ids((config.get("participants", {}) or {}).get("ids"))
+    participants = _participant_ids(config)
     template = dataset.get("participant_file") or dataset.get("file_template")
     specs = []
     for participant in participants:
