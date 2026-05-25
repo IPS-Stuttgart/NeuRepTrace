@@ -60,15 +60,21 @@ def install() -> None:
         feature_preprocessor: str,
         pca_components: int | float | str | None,
         random_state: int | None,
+        classifier_param: Any = None,
     ):
         feature_steps = decoding._feature_preprocessor_steps(feature_preprocessor, pca_components)
+        c_value = decoding._positive_float_classifier_param(
+            classifier_param,
+            default=1.0,
+            name="LogisticRegression C",
+        )
         if normalized == "sparse_logistic":
             return make_pipeline(
                 StandardScaler(),
                 *feature_steps,
                 LogisticRegression(
                     class_weight="balanced",
-                    C=1.0,
+                    C=c_value,
                     max_iter=max_iter,
                     random_state=random_state,
                     solver="saga",
@@ -81,7 +87,7 @@ def install() -> None:
                 *feature_steps,
                 LogisticRegression(
                     class_weight="balanced",
-                    C=1.0,
+                    C=c_value,
                     max_iter=max_iter,
                     random_state=random_state,
                     solver="saga",
@@ -138,6 +144,7 @@ def install() -> None:
             feature_preprocessor=feature_preprocessor,
             pca_components=pca_components,
             random_state=random_state,
+            classifier_param=classifier_param,
         )
 
     def make_tuned_decoder(
