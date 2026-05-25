@@ -247,6 +247,13 @@ def validate_dataset_config(
     if dataset_type == "mne_epochs":
         if not (dataset.get("epochs") or dataset.get("epochs_file") or dataset.get("epochs_files")):
             raise ConfigValidationError("mne_epochs configs require dataset.epochs, dataset.epochs_file, or dataset.epochs_files.")
+        epochs_files = dataset.get("epochs_files")
+        if isinstance(epochs_files, Mapping):
+            template = epochs_files.get("template") or epochs_files.get("path") or epochs_files.get("file")
+            if template is None:
+                raise ConfigValidationError("dataset.epochs_files mappings must contain template, path, or file.")
+            if not parse_participant_ids((config.get("participants", {}) or {}).get("ids")):
+                raise ConfigValidationError("mne_epochs dataset.epochs_files mappings require participants.ids.")
     if dataset_type == "fieldtrip_mat":
         participants = config.get("participants", {}) or {}
         has_participant_template = bool(
