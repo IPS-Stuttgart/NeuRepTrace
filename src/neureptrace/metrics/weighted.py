@@ -63,9 +63,17 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
 
 
 def _validate_n_bins(n_bins: int) -> int:
-    n_bins = int(n_bins)
+    if isinstance(n_bins, (bool, np.bool_)):
+        raise ValueError("n_bins must be a positive integer")
+    try:
+        number = float(n_bins)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_bins must be a positive integer") from exc
+    if not np.isfinite(number) or not number.is_integer():
+        raise ValueError("n_bins must be a positive integer")
+    n_bins = int(number)
     if n_bins < 1:
-        raise ValueError("n_bins must be positive")
+        raise ValueError("n_bins must be a positive integer")
     return n_bins
 
 
