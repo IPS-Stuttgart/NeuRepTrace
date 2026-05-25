@@ -115,8 +115,13 @@ def _integer_label_array(labels: Sequence[object] | np.ndarray | pd.Series, *, n
     return rounded.astype(int)
 
 
-def _label_positions(labels: Sequence[object] | np.ndarray | pd.Series, label_values: Sequence[int]) -> np.ndarray:
-    integer_labels = _integer_label_array(labels, name="true_label")
+def _label_positions(
+    labels: Sequence[object] | np.ndarray | pd.Series,
+    label_values: Sequence[int],
+    *,
+    name: str = "true_label",
+) -> np.ndarray:
+    integer_labels = _integer_label_array(labels, name=name)
     label_to_position = {int(label): position for position, label in enumerate(label_values)}
     positions = np.full(len(integer_labels), -1, dtype=int)
     for row_index, label in enumerate(integer_labels):
@@ -125,7 +130,7 @@ def _label_positions(labels: Sequence[object] | np.ndarray | pd.Series, label_va
             positions[row_index] = position
     if bool((positions < 0).any()):
         missing = sorted(set(int(label) for label in integer_labels if int(label) not in label_to_position))
-        raise ValueError(f"true_label values must index probability labels {list(label_values)}; missing labels: {missing[:5]}")
+        raise ValueError(f"{name} values must index probability labels {list(label_values)}; missing labels: {missing[:5]}")
     return positions
 
 
@@ -179,6 +184,7 @@ def align_probability_cube(
     alignment_columns: Sequence[str] | None = None,
     min_probability: float = DEFAULT_MIN_PROBABILITY,
     require_labels: bool = True,
+    label_name: str = "true_label",
 ) -> AlignedProbabilityCube:
     """Align candidate probability rows into a candidate × sample × class cube.
 
@@ -237,7 +243,7 @@ def align_probability_cube(
         if bool(label_mask.any()):
             if not bool(label_mask.all()):
                 raise ValueError("true_label must be present for all rows when provided.")
-            label_positions = _label_positions(reference["true_label"], label_values)
+            label_positions = _label_positions(reference["true_label"], label_values, name=label_name)
     if require_labels and label_positions is None:
         raise ValueError("Observation table must contain true_label for source-OOF stacking.")
     return AlignedProbabilityCube(
@@ -449,6 +455,7 @@ def stack_probability_observations(
         alignment_columns=alignment_columns,
         min_probability=min_probability,
         require_labels=False,
+        label_name="target true_label",
     )
     if target.probability_columns != source.probability_columns:
         raise ValueError("Source-OOF and target observations must use the same prob_class_* columns.")
@@ -579,12 +586,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Fit a leakage-safe source-OOF probability stacker and apply it to target observation rows.")
     parser.add_argument("--source-oof", nargs="+", required=True, help="Source out-of-fold observation CSVs or glob patterns used to fit weights.")
-    parser.add_argument("--target", nargs="+", required=True, help="Target observation CSVs or glob patterns to ensemble with fitted source weights; true_label is optional unless --metrics-out is requested.")
+    parser.add_argument(
+        "--target",
+        nargs="+",
+        required=True,
+        help="Target observation CSVs or glob patterns to ensemble with fitted source weights; true_label is optional unless --metrics-out is requested.",
+    )
     parser.add_argument("--out", type=Path, required=True, help="CSV path for stacked target observations.")
     parser.add_argument("--metrics-out", type=Path, help="Optional CSV path for grouped metrics computed from the stacked observations.")
     parser.add_argument("--candidate-column", default=DEFAULT_CANDIDATE_COLUMN, help="Column identifying base candidates/decoders. Defaults to decoder.")
     parser.add_argument("--candidate", action="append", dest="candidates", help="Candidate/decoder to include. May be repeated; defaults to order in source rows.")
-    parser.add_argument("--alignment-column", action="append", dest="alignment_columns", help="Column used to align candidates. May be repeated; defaults to canonical observation keys.")
+    parser.add_argument(
+        "--alignment-column", action="append", dest="alignment_columns", help="Column used to align candidates. May be repeated; defaults to canonical observation keys."
+    )
     parser.add_argument("--weighting", choices=sorted(WEIGHTING_MODES), default=DEFAULT_WEIGHTING)
     parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE, help="Softmax weighting temperature.")
     parser.add_argument("--max-iter", type=int, default=DEFAULT_MAX_ITER, help="Projected-gradient iterations for stacked weighting.")
