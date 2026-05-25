@@ -83,6 +83,31 @@ def test_validate_manifest_reports_label_and_group_issues(tmp_path: Path, monkey
     assert "fewer than n_splits" in messages
 
 
+def test_validate_manifest_reports_invalid_n_splits(tmp_path: Path, monkeypatch):
+    epochs_path = tmp_path / "sub-01_epo.fif"
+    epochs_path.write_text("placeholder", encoding="utf-8")
+    metadata_path = tmp_path / "sub-01_metadata.csv"
+    metadata_path.write_text(
+        "condition,run\n"
+        "face,1\n"
+        "object,2\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "subject,epochs,metadata_csv,label_column,group_column,n_splits\n"
+        "sub-01,sub-01_epo.fif,sub-01_metadata.csv,condition,run,2.5\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("neureptrace.validate_manifest.mne.read_epochs", lambda *args, **kwargs: FakeEpochs(2))
+
+    validations = validate_manifest(manifest)
+
+    assert not validations[0].ok
+    assert "n_splits must be a finite integer" in " ".join(validations[0].messages)
+
+
 def test_validation_report_frame_is_tabular():
     frame = validation_report_frame([])
 
