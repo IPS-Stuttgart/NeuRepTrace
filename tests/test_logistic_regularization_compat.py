@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from neureptrace import _decoding_regularization_patch
 from neureptrace.decoding import make_decoder
@@ -25,6 +26,22 @@ def test_sparse_logistic_decoder_preserves_l1_semantics():
 
     assert classifier.l1_ratio == 1.0
     assert model.predict_proba(features[:3]).shape == (3, 2)
+
+
+@pytest.mark.parametrize("decoder", ["sparse-logreg", "elasticnet-logistic"])
+def test_regularized_logistic_decoder_respects_classifier_param(decoder):
+    model = make_decoder(decoder, classifier_param=0.25, max_iter=2000, random_state=7)
+    classifier = model.named_steps["logisticregression"]
+
+    assert classifier.C == 0.25
+    assert classifier.random_state == 7
+
+
+@pytest.mark.parametrize("decoder", ["sparse-logreg", "elasticnet-logistic"])
+@pytest.mark.parametrize("classifier_param", [0.0, -1.0, np.inf, np.nan])
+def test_regularized_logistic_decoder_rejects_invalid_classifier_param(decoder, classifier_param):
+    with pytest.raises(ValueError, match="LogisticRegression C"):
+        make_decoder(decoder, classifier_param=classifier_param)
 
 
 def test_elastic_net_logistic_tuning_keeps_l1_ratio_grid():
