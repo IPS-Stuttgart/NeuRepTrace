@@ -78,3 +78,41 @@ def test_grouped_cli_without_command_prints_help(capsys):
     assert cli.main([]) == 0
     captured = capsys.readouterr()
     assert "NeuRepTrace command-line interface" in captured.out
+
+
+def test_grouped_cli_help_without_command_lists_commands(capsys):
+    assert cli.main(["help"]) == 0
+    captured = capsys.readouterr()
+
+    assert "Available commands:" in captured.out
+    assert "benchmark" in captured.out
+    assert "neureptrace.benchmark" in captured.out
+
+
+def test_grouped_cli_help_subcommand_dispatches_module_help(monkeypatch):
+    calls = []
+    fake_module = types.ModuleType("fake_neureptrace_help_command")
+
+    def fake_main():
+        calls.append(tuple(sys.argv))
+        return None
+
+    fake_module.main = fake_main
+    monkeypatch.setitem(sys.modules, "fake_neureptrace_help_command", fake_module)
+    monkeypatch.setitem(cli.COMMAND_MODULES, "fake", "fake_neureptrace_help_command")
+
+    assert cli.main(["help", "fake"]) == 0
+    assert calls == [("neureptrace fake", "--help")]
+
+
+def test_grouped_cli_help_unknown_command_suggests_close_match(capsys):
+    try:
+        cli.main(["help", "benchmrk"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:  # pragma: no cover - the command must exit with an argparse-compatible failure
+        raise AssertionError("Unknown help target did not fail")
+
+    captured = capsys.readouterr()
+    assert "unknown command 'benchmrk'" in captured.err
+    assert "benchmark" in captured.err

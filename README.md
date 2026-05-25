@@ -103,6 +103,10 @@ workflow commands such as `neureptrace-benchmark`, `neureptrace-mne-time-decode`
 `neureptrace-temporal-model`. The equivalent `python -m neureptrace.<module>` forms
 remain available for source-checkout debugging.
 
+Use `neureptrace --list-commands` to inspect the grouped command inventory, or
+`neureptrace help <command>` to open command-specific help without remembering
+whether a workflow also has a direct console-script entry point.
+
 ## Quickstart
 
 Run the pilot NOD-EEG benchmark from a manifest:
