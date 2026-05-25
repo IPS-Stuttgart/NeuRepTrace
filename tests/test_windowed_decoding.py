@@ -68,6 +68,54 @@ def test_fit_window_model_applies_pca_and_predicts_validation_features():
     assert model_bundle.explained_variance_percent == pytest.approx(100.0)
 
 
+def test_fit_window_model_accepts_fractional_pca_variance_ratio():
+    train_features = np.array(
+        [
+            [-3.0, -3.0, 0.2],
+            [-1.0, -1.0, -0.1],
+            [1.0, 1.0, 0.1],
+            [3.0, 3.0, -0.2],
+        ]
+    )
+    train_labels = np.array([0, 0, 1, 1])
+    validation_features = np.array([[-2.0, -2.0, 0.0], [2.0, 2.0, 0.0]])
+
+    model_bundle = fit_window_model(
+        train_features,
+        train_labels,
+        fit_model=_fit_sign_classifier,
+        components_pca=0.90,
+    )
+    predictions, scores = predict_window_model(model_bundle, validation_features)
+
+    assert predictions.tolist() == [0, 1]
+    assert scores.shape == (2,)
+    assert 1 <= model_bundle.actual_components_pca <= train_features.shape[1]
+    assert model_bundle.pca_coeff.shape == (train_features.shape[1], model_bundle.actual_components_pca)
+    assert model_bundle.explained_variance_percent >= 90.0
+
+
+@pytest.mark.parametrize("components_pca", [0, 0.0, 1.5, -1, np.nan, "not-a-pca-value"])
+def test_fit_window_model_rejects_invalid_pca_components(components_pca):
+    with pytest.raises(ValueError, match="components_pca must be"):
+        fit_window_model(
+            np.array([[-1.0], [1.0]]),
+            np.array([0, 1]),
+            fit_model=_fit_sign_classifier,
+            components_pca=components_pca,
+        )
+
+
+def test_fit_window_model_rejects_feature_matrix_without_columns():
+    with pytest.raises(ValueError, match="train_features must contain at least one column"):
+        fit_window_model(
+            np.empty((2, 0)),
+            np.array([0, 1]),
+            fit_model=_fit_sign_classifier,
+            components_pca=float("inf"),
+        )
+
+
 def test_score_windowed_decoding_returns_accuracy_predictions_and_permutation_p():
     result = score_windowed_decoding(
         train_features=np.array([[-2.0], [-1.0], [1.0], [2.0]]),

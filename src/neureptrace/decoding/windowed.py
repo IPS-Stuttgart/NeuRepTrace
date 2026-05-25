@@ -47,13 +47,16 @@ def fit_window_model(
     train_labels: Sequence | np.ndarray,
     *,
     fit_model: FitModel,
-    components_pca: int | float = float("inf"),
+    components_pca: int | float | str | None = float("inf"),
     train_window: tuple[float, float] | None = None,
 ) -> WindowedModelBundle:
     """Fit one model for a precomputed feature window.
 
     Dataset-specific projects provide the windowed feature matrix and a model
     factory. NeuRepTrace owns the reusable PCA fit/transform bookkeeping.
+    ``components_pca`` accepts a positive integer component cap, a float in
+    ``(0, 1)`` interpreted as an explained-variance ratio, or ``None``/infinity
+    to disable PCA.
     """
 
     train_features = _feature_matrix(train_features, name="train_features")
@@ -107,7 +110,7 @@ def score_windowed_decoding(
     validation_labels: Sequence | np.ndarray,
     *,
     fit_model: FitModel,
-    components_pca: int | float = float("inf"),
+    components_pca: int | float | str | None = float("inf"),
     train_window: tuple[float, float] | None = None,
     n_permutations: int = 0,
     permutation_rng: np.random.Generator | None = None,
@@ -251,24 +254,66 @@ def _balanced_accuracy(predictions: Sequence | np.ndarray, labels: Sequence | np
 
 def _fit_pca_transform(
     features: np.ndarray,
-    components_pca: int | float,
+    components_pca: int | float | str | None,
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None, float, int]:
-    actual_components = _actual_pca_components(components_pca, features)
-    if components_pca == float("inf"):
-        return features, None, None, np.nan, actual_components
+    normalized_components = _normalize_pca_components(components_pca, features)
+    if normalized_components is None:
+        return features, None, None, np.nan, int(features.shape[1])
 
     feature_mean = np.mean(features, axis=0)
     centered = features - feature_mean
-    pca = PCA(n_components=actual_components)
+    pca = PCA(n_components=normalized_components)
     transformed = pca.fit_transform(centered)
     explained_variance = float(np.sum(pca.explained_variance_ratio_) * 100.0)
+    actual_components = int(getattr(pca, "n_components_", transformed.shape[1]))
     return transformed, pca.components_.T, feature_mean, explained_variance, actual_components
 
 
-def _actual_pca_components(components_pca: int | float, features: np.ndarray) -> int:
-    if components_pca == float("inf"):
+def _actual_pca_components(components_pca: int | float | str | None, features: np.ndarray) -> int:
+    normalized_components = _normalize_pca_components(components_pca, features)
+    if normalized_components is None:
         return int(features.shape[1])
-    return min(int(components_pca), int(features.shape[0]), int(features.shape[1]))
+    if isinstance(normalized_components, float) and not normalized_components.is_integer():
+        return _max_pca_components(features)
+    return int(normalized_components)
+
+
+def _normalize_pca_components(components_pca: int | float | str | None, features: np.ndarray) -> int | float | None:
+    """Normalize PCA component configuration before constructing ``sklearn`` PCA."""
+
+    if components_pca is None:
+        return None
+    if isinstance(components_pca, str):
+        normalized = components_pca.strip().lower()
+        if normalized in {"", "all", "inf", "infinity", "none"}:
+            return None
+        try:
+            value = float(normalized)
+        except ValueError as exc:
+            raise ValueError(_pca_components_error_message()) from exc
+    else:
+        try:
+            value = float(components_pca)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(_pca_components_error_message()) from exc
+
+    if np.isposinf(value):
+        return None
+    if not np.isfinite(value):
+        raise ValueError(_pca_components_error_message())
+    if 0.0 < value < 1.0:
+        return value
+    if value.is_integer() and value >= 1.0:
+        return min(int(value), _max_pca_components(features))
+    raise ValueError(_pca_components_error_message())
+
+
+def _max_pca_components(features: np.ndarray) -> int:
+    return min(int(features.shape[0]), int(features.shape[1]))
+
+
+def _pca_components_error_message() -> str:
+    return "components_pca must be a positive integer count, a float in (0, 1) explained-variance ratio, or None/infinity to disable PCA."
 
 
 def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
@@ -277,6 +322,8 @@ def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: s
         raise ValueError(f"{name} must be a two-dimensional feature matrix.")
     if matrix.shape[0] == 0:
         raise ValueError(f"{name} must contain at least one row.")
+    if matrix.shape[1] == 0:
+        raise ValueError(f"{name} must contain at least one column.")
     return matrix
 
 
