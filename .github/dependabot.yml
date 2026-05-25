@@ -17,6 +17,15 @@ updates:
           - "pandas"
           - "scikit-learn"
           - "mne"
+      python-ml-extras:
+        patterns:
+          - "xgboost"
+          - "torch"
+          - "pytorch-lightning"
+      python-dev-tools:
+        patterns:
+          - "pytest"
+          - "ruff"
       docs-stack:
         patterns:
           - "mkdocs*"
@@ -34,6 +43,6 @@ updates:
       timezone: "Europe/Berlin"
     open-pull-requests-limit: 5
     groups:
-      github-actions:
+      workflow-actions:
         patterns:
           - "*"
