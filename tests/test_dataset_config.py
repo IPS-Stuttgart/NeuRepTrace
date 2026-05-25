@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import pytest
+
 from neureptrace.dataset_config import (
+    ConfigValidationError,
     apply_overrides,
     effective_config,
     iter_dataset_files,
@@ -12,9 +17,6 @@ from neureptrace.dataset_config import (
 )
 from neureptrace.decode_from_config import _resolve_output
 from neureptrace.io.dataset import EpochDataset
-
-import numpy as np
-import pandas as pd
 
 
 def test_parse_participant_ids_supports_ranges_and_lists():
@@ -86,6 +88,22 @@ def test_iter_dataset_files_expands_mne_epochs_template(tmp_path: Path):
         tmp_path / "staged" / "ds004276" / "sub-001_epo.fif",
         tmp_path / "staged" / "ds004276" / "sub-002_epo.fif",
     ]
+
+
+def test_mne_epochs_template_requires_participants_ids(tmp_path: Path):
+    config = {
+        "dataset": {
+            "type": "mne_epochs",
+            "root": "staged",
+            "epochs_files": {"template": "ds004276/sub-{subject03d}_epo.fif"},
+        },
+        "decoding": {"label_column": "condition"},
+    }
+
+    with pytest.raises(ConfigValidationError, match="participants.ids"):
+        validate_dataset_config(config, base_dir=tmp_path)
+    with pytest.raises(ConfigValidationError, match="participants.ids"):
+        iter_dataset_files(config, base_dir=tmp_path)
 
 
 def test_effective_config_expands_participants_and_files(tmp_path: Path):
