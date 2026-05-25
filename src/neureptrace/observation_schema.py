@@ -214,31 +214,23 @@ def _validate_probabilities(
 
     for column in probabilities.columns:
         values = probabilities[column]
-        present = values.notna()
         finite = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=values.index)
+        present_and_finite = values.notna() & finite
 
-        non_finite_mask = present & ~finite
-        for row_index, value in values.loc[non_finite_mask].head(20).items():
+        non_finite_mask = values.notna() & ~finite
+        for row_index, value in probabilities.loc[non_finite_mask, column].head(20).items():
             _issue(
                 issues,
                 "error",
                 "non_finite_probability",
-                f"Probability column '{column}' must contain finite values.",
+                f"Probability column '{column}' must contain finite values when present.",
                 column=column,
                 row=int(row_index),
                 value=float(value),
             )
-        if int(non_finite_mask.sum()) > 20:
-            _issue(
-                issues,
-                "error",
-                "non_finite_probability_truncated",
-                f"Probability column '{column}' contains {int(non_finite_mask.sum())} non-finite values; first 20 are listed.",
-                column=column,
-            )
 
-        negative_mask = present & finite & (values < 0.0)
-        for row_index, value in values.loc[negative_mask].head(20).items():
+        negative_mask = present_and_finite & (values < 0.0)
+        for row_index, value in probabilities.loc[negative_mask, column].head(20).items():
             _issue(
                 issues,
                 "error",
@@ -249,8 +241,8 @@ def _validate_probabilities(
                 value=float(value),
             )
 
-        above_one_mask = present & finite & (values > 1.0)
-        for row_index, value in values.loc[above_one_mask].head(20).items():
+        above_one_mask = present_and_finite & (values > 1.0)
+        for row_index, value in probabilities.loc[above_one_mask, column].head(20).items():
             _issue(
                 issues,
                 "error",
@@ -259,14 +251,6 @@ def _validate_probabilities(
                 column=column,
                 row=int(row_index),
                 value=float(value),
-            )
-        if int(above_one_mask.sum()) > 20:
-            _issue(
-                issues,
-                "error",
-                "probability_above_one_truncated",
-                f"Probability column '{column}' contains {int(above_one_mask.sum())} values above 1.0; first 20 are listed.",
-                column=column,
             )
 
     all_missing = probabilities.isna().all(axis=1)
@@ -280,6 +264,10 @@ def _validate_probabilities(
         )
 
     valid = probabilities.dropna(how="all")
+    if valid.empty:
+        return
+    finite_rows = pd.Series(np.isfinite(valid.to_numpy(dtype=float)).all(axis=1), index=valid.index)
+    valid = valid.loc[finite_rows]
     if valid.empty:
         return
     row_sums = valid.fillna(0.0).sum(axis=1)
@@ -638,8 +626,9 @@ def validate_probability_observations(
     """
     if profile not in PROFILES:
         raise ValueError(f"profile must be one of {PROFILES}.")
-    if probability_tolerance < 0:
-        raise ValueError("probability_tolerance must be non-negative.")
+    probability_tolerance = float(probability_tolerance)
+    if not np.isfinite(probability_tolerance) or probability_tolerance < 0:
+        raise ValueError("probability_tolerance must be finite and non-negative.")
 
     issues: list[ObservationValidationIssue] = []
     _validate_time(frame, issues)
