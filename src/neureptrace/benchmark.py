@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -78,7 +79,12 @@ def _float_value(row: pd.Series, column: str, default: float | None = None) -> f
 
 def _int_value(row: pd.Series, column: str, default: int) -> int:
     value = _string_value(row, column)
-    return default if value is None else int(float(value))
+    if value is None:
+        return default
+    numeric = float(value)
+    if not math.isfinite(numeric) or not numeric.is_integer():
+        raise ValueError(f"Manifest column '{column}' must be an integer-valued number, got {value!r}.")
+    return int(numeric)
 
 
 def _bool_value(row: pd.Series, column: str, default: bool = False) -> bool:
