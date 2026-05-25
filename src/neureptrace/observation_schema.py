@@ -213,8 +213,32 @@ def _validate_probabilities(
         return
 
     for column in probabilities.columns:
-        negative_mask = probabilities[column].notna() & (probabilities[column] < 0.0)
-        for row_index, value in probabilities.loc[negative_mask, column].head(20).items():
+        values = probabilities[column]
+        present = values.notna()
+        finite = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=values.index)
+
+        non_finite_mask = present & ~finite
+        for row_index, value in values.loc[non_finite_mask].head(20).items():
+            _issue(
+                issues,
+                "error",
+                "non_finite_probability",
+                f"Probability column '{column}' must contain finite values.",
+                column=column,
+                row=int(row_index),
+                value=float(value),
+            )
+        if int(non_finite_mask.sum()) > 20:
+            _issue(
+                issues,
+                "error",
+                "non_finite_probability_truncated",
+                f"Probability column '{column}' contains {int(non_finite_mask.sum())} non-finite values; first 20 are listed.",
+                column=column,
+            )
+
+        negative_mask = present & finite & (values < 0.0)
+        for row_index, value in values.loc[negative_mask].head(20).items():
             _issue(
                 issues,
                 "error",
@@ -223,6 +247,26 @@ def _validate_probabilities(
                 column=column,
                 row=int(row_index),
                 value=float(value),
+            )
+
+        above_one_mask = present & finite & (values > 1.0)
+        for row_index, value in values.loc[above_one_mask].head(20).items():
+            _issue(
+                issues,
+                "error",
+                "probability_above_one",
+                f"Probability column '{column}' contains a value above 1.0.",
+                column=column,
+                row=int(row_index),
+                value=float(value),
+            )
+        if int(above_one_mask.sum()) > 20:
+            _issue(
+                issues,
+                "error",
+                "probability_above_one_truncated",
+                f"Probability column '{column}' contains {int(above_one_mask.sum())} values above 1.0; first 20 are listed.",
+                column=column,
             )
 
     all_missing = probabilities.isna().all(axis=1)
