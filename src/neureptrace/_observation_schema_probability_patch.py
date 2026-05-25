@@ -3,7 +3,9 @@
 NeuRepTrace's observation-schema validator is used as a guardrail before
 probability tables feed temporal models and detection workflows. This patch
 keeps the public validator API stable while rejecting impossible probability
-entries that can otherwise pass through as row-sum warnings.
+entries that can otherwise pass through as row-sum warnings. It also rejects
+non-finite tolerances because they make row-sum and consistency checks
+ill-defined.
 It can be folded directly into ``neureptrace.observation_schema`` later.
 """
 
@@ -14,12 +16,24 @@ import pandas as pd
 
 
 _PATCH_MARKER = "_neureptrace_observation_probability_patch_installed"
+_TOLERANCE_ERROR = "probability_tolerance must be finite and non-negative."
 
 
 def _finite_mask(values: pd.Series) -> pd.Series:
     """Return an index-aligned mask for finite numeric entries."""
 
     return pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=values.index)
+
+
+def _validate_probability_tolerance(probability_tolerance: float) -> None:
+    """Reject tolerances that would disable numeric validation checks."""
+
+    try:
+        tolerance = float(probability_tolerance)
+    except (TypeError, ValueError):
+        raise ValueError(_TOLERANCE_ERROR) from None
+    if tolerance < 0 or not np.isfinite(tolerance):
+        raise ValueError(_TOLERANCE_ERROR)
 
 
 def install() -> None:
@@ -30,7 +44,27 @@ def install() -> None:
     if getattr(observation_schema, _PATCH_MARKER, False):
         return
 
+    original_validate_probability_observations = observation_schema.validate_probability_observations
     original_validate_probabilities = observation_schema._validate_probabilities
+
+    def validate_probability_observations(
+        frame: pd.DataFrame,
+        *,
+        profile: observation_schema.ObservationProfile = "generic",
+        probability_tolerance: float = observation_schema.DEFAULT_PROBABILITY_TOLERANCE,
+        require_normalized: bool = False,
+        group_columns: list[str] | tuple[str, ...] | None = None,
+        stream_columns: list[str] | tuple[str, ...] | None = None,
+    ) -> observation_schema.ObservationValidationReport:
+        _validate_probability_tolerance(probability_tolerance)
+        return original_validate_probability_observations(
+            frame,
+            profile=profile,
+            probability_tolerance=probability_tolerance,
+            require_normalized=require_normalized,
+            group_columns=group_columns,
+            stream_columns=stream_columns,
+        )
 
     def _validate_probabilities(
         probabilities: pd.DataFrame,
@@ -93,6 +127,8 @@ def install() -> None:
                     column=column,
                 )
 
+    validate_probability_observations.__doc__ = original_validate_probability_observations.__doc__
     _validate_probabilities.__doc__ = original_validate_probabilities.__doc__
+    observation_schema.validate_probability_observations = validate_probability_observations
     observation_schema._validate_probabilities = _validate_probabilities
     setattr(observation_schema, _PATCH_MARKER, True)
