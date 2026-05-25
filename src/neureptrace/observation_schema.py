@@ -213,13 +213,41 @@ def _validate_probabilities(
         return
 
     for column in probabilities.columns:
-        negative_mask = probabilities[column].notna() & (probabilities[column] < 0.0)
+        values = probabilities[column]
+        finite = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=values.index)
+        present_and_finite = values.notna() & finite
+
+        non_finite_mask = values.notna() & ~finite
+        for row_index, value in probabilities.loc[non_finite_mask, column].head(20).items():
+            _issue(
+                issues,
+                "error",
+                "non_finite_probability",
+                f"Probability column '{column}' must contain finite values when present.",
+                column=column,
+                row=int(row_index),
+                value=float(value),
+            )
+
+        negative_mask = present_and_finite & (values < 0.0)
         for row_index, value in probabilities.loc[negative_mask, column].head(20).items():
             _issue(
                 issues,
                 "error",
                 "negative_probability",
                 f"Probability column '{column}' contains a negative value.",
+                column=column,
+                row=int(row_index),
+                value=float(value),
+            )
+
+        above_one_mask = present_and_finite & (values > 1.0)
+        for row_index, value in probabilities.loc[above_one_mask, column].head(20).items():
+            _issue(
+                issues,
+                "error",
+                "probability_above_one",
+                f"Probability column '{column}' contains a value above 1.0.",
                 column=column,
                 row=int(row_index),
                 value=float(value),
@@ -236,6 +264,10 @@ def _validate_probabilities(
         )
 
     valid = probabilities.dropna(how="all")
+    if valid.empty:
+        return
+    finite_rows = pd.Series(np.isfinite(valid.to_numpy(dtype=float)).all(axis=1), index=valid.index)
+    valid = valid.loc[finite_rows]
     if valid.empty:
         return
     row_sums = valid.fillna(0.0).sum(axis=1)
