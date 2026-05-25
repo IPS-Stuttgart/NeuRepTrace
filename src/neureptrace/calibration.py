@@ -31,7 +31,7 @@ RELIABILITY_BIN_REQUIRED_COLUMNS = (
 RELIABILITY_BIN_NUMERIC_COLUMNS = RELIABILITY_BIN_REQUIRED_COLUMNS
 RELIABILITY_BIN_INTEGER_COLUMNS = ("bin", "n_samples")
 RELIABILITY_BIN_UNIT_INTERVAL_COLUMNS = ("bin_left", "bin_right", "accuracy", "confidence")
-RELIABILITY_BIN_EMPTY_METRIC_COLUMNS = ("accuracy", "confidence")
+RELIABILITY_BIN_OPTIONAL_EMPTY_COLUMNS = ("accuracy", "confidence")
 
 
 def _expand_paths(patterns: list[str]) -> list[Path]:
@@ -149,15 +149,15 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
         values = pd.to_numeric(validated[column], errors="coerce")
         missing_values = values.isna()
         allowed_missing = pd.Series(False, index=values.index)
-        if column in RELIABILITY_BIN_EMPTY_METRIC_COLUMNS:
+        if column in RELIABILITY_BIN_OPTIONAL_EMPTY_COLUMNS:
             allowed_missing = missing_values & validated["n_samples"].eq(0)
         invalid_missing = missing_values & ~allowed_missing
         if invalid_missing.any():
             bad_rows = invalid_missing[invalid_missing].index.tolist()[:5]
-            if column in RELIABILITY_BIN_EMPTY_METRIC_COLUMNS:
+            if column in RELIABILITY_BIN_OPTIONAL_EMPTY_COLUMNS:
                 raise ValueError(
-                    f"{csv_path} contains missing values in column '{column}' for non-empty reliability bin(s) "
-                    f"at row(s) {bad_rows}."
+                    f"{csv_path} contains missing or non-finite values in column '{column}' "
+                    f"for row(s) with positive n_samples: {bad_rows}."
                 )
             raise ValueError(f"{csv_path} contains non-numeric values in column '{column}' at row(s) {bad_rows}.")
         finite_values = pd.Series(np.isfinite(values.to_numpy(dtype=float)), index=values.index)
@@ -177,6 +177,14 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
             bad_rows = validated.index[negative].tolist()[:5]
             raise ValueError(f"{csv_path} contains negative {column} at row(s) {bad_rows}.")
         validated[column] = validated[column].astype(int)
+
+    non_empty_rows = validated["n_samples"] > 0
+    for column in RELIABILITY_BIN_OPTIONAL_EMPTY_COLUMNS:
+        missing_or_non_finite = ~np.isfinite(validated[column].to_numpy(dtype=float))
+        invalid = missing_or_non_finite & non_empty_rows.to_numpy(dtype=bool)
+        if invalid.any():
+            bad_rows = validated.index[invalid].tolist()[:5]
+            raise ValueError(f"{csv_path} contains missing or non-finite values in column '{column}' for row(s) with positive n_samples: {bad_rows}.")
 
     for column in RELIABILITY_BIN_UNIT_INTERVAL_COLUMNS:
         present = validated[column].notna()

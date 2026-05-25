@@ -94,6 +94,28 @@ def test_aggregate_reliability_bins_weights_by_samples(tmp_path: Path):
     assert aggregated["gap"].round(3).tolist() == [-0.025]
 
 
+def test_aggregate_reliability_bins_accepts_empty_bins_from_reliability_output(tmp_path: Path):
+    path = tmp_path / "empty_calibration_bins.csv"
+    pd.DataFrame(
+        {
+            "time": [0.1],
+            "bin": [0],
+            "bin_left": [0.0],
+            "bin_right": [0.1],
+            "n_samples": [0],
+            "accuracy": [np.nan],
+            "confidence": [np.nan],
+        }
+    ).to_csv(path, index=False)
+
+    aggregated = aggregate_reliability_bins([path])
+
+    assert aggregated["n_samples"].tolist() == [0]
+    assert pd.isna(aggregated.loc[0, "accuracy"])
+    assert pd.isna(aggregated.loc[0, "confidence"])
+    assert pd.isna(aggregated.loc[0, "gap"])
+
+
 def test_aggregate_reliability_bins_rejects_malformed_probability_bins(tmp_path: Path):
     path = tmp_path / "bad_calibration_bins.csv"
     pd.DataFrame(
@@ -109,6 +131,24 @@ def test_aggregate_reliability_bins_rejects_malformed_probability_bins(tmp_path:
     ).to_csv(path, index=False)
 
     with pytest.raises(ValueError, match="outside \\[0, 1\\].*accuracy"):
+        aggregate_reliability_bins([path])
+
+
+def test_aggregate_reliability_bins_rejects_missing_positive_bin_values(tmp_path: Path):
+    path = tmp_path / "missing_positive_calibration_bins.csv"
+    pd.DataFrame(
+        {
+            "time": [0.1],
+            "bin": [5],
+            "bin_left": [0.5],
+            "bin_right": [0.6],
+            "n_samples": [10],
+            "accuracy": [np.nan],
+            "confidence": [0.6],
+        }
+    ).to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="missing or non-finite values.*accuracy.*positive n_samples"):
         aggregate_reliability_bins([path])
 
 
