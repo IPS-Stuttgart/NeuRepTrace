@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -30,6 +31,31 @@ def test_summarize_calibration_metrics_orders_by_effect_ece():
     assert summary["decoder"].tolist() == ["logistic", "lda"]
     assert summary["effect_ece_mean"].round(3).tolist() == [0.06, 0.12]
     assert summary["best_ece_time"].tolist() == [0.15, 0.15]
+
+
+def test_summarize_calibration_metrics_rejects_non_finite_values():
+    frame = _summary_frame()
+    frame.loc[0, "log_loss_mean"] = np.inf
+
+    with pytest.raises(ValueError, match="non-finite values.*log_loss_mean"):
+        summarize_calibration_metrics(frame)
+
+
+def test_summarize_calibration_metrics_rejects_out_of_range_rates():
+    frame = _summary_frame()
+    frame.loc[0, "ece_mean"] = 1.2
+
+    with pytest.raises(ValueError, match=r"outside \[0, 1\].*ece_mean"):
+        summarize_calibration_metrics(frame)
+
+
+def test_summarize_calibration_metrics_rejects_malformed_subject_counts():
+    frame = _summary_frame()
+    frame["n_subjects"] = frame["n_subjects"].astype(float)
+    frame.loc[0, "n_subjects"] = 4.5
+
+    with pytest.raises(ValueError, match="non-integer n_subjects"):
+        summarize_calibration_metrics(frame)
 
 
 def test_aggregate_reliability_bins_weights_by_samples(tmp_path: Path):
