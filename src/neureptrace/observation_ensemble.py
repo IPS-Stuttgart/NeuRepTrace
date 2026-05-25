@@ -67,18 +67,27 @@ def _label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
     return tuple(int(suffix) for suffix in suffixes)
 
 
+def _integer_label_values(labels: Sequence[object] | np.ndarray | pd.Series, *, column_name: str = "true_label") -> np.ndarray:
+    numeric = pd.to_numeric(pd.Series(labels), errors="coerce").to_numpy(dtype=float)
+    if not np.isfinite(numeric).all():
+        raise ValueError(f"{column_name} values must be finite numeric values.")
+    integer_mask = numeric == np.floor(numeric)
+    if not bool(integer_mask.all()):
+        examples = numeric[~integer_mask][:5].tolist()
+        raise ValueError(f"{column_name} values must be integer-valued class labels; invalid values: {examples}")
+    return numeric.astype(int)
+
+
 def _label_positions(labels: Sequence[object] | np.ndarray | pd.Series, label_values: Sequence[int]) -> np.ndarray:
-    numeric = pd.to_numeric(pd.Series(labels), errors="coerce")
-    if numeric.isna().any():
-        raise ValueError("true_label values must be numeric.")
+    integer_labels = _integer_label_values(labels)
     label_to_position = {int(label): position for position, label in enumerate(label_values)}
-    positions = np.full(len(numeric), -1, dtype=int)
-    for row_index, label in enumerate(numeric.astype(int).to_numpy()):
+    positions = np.full(len(integer_labels), -1, dtype=int)
+    for row_index, label in enumerate(integer_labels):
         position = label_to_position.get(int(label))
         if position is not None:
             positions[row_index] = position
     if bool((positions < 0).any()):
-        missing = sorted(set(int(label) for label in numeric.astype(int).to_numpy() if int(label) not in label_to_position))
+        missing = sorted(set(int(label) for label in integer_labels if int(label) not in label_to_position))
         raise ValueError(f"true_label values must index probability labels {list(label_values)}; missing labels: {missing[:5]}")
     return positions
 
@@ -260,10 +269,7 @@ def ensemble_probability_observations(
     label_values = _label_values(prob_columns)
     predicted_positions = probabilities.argmax(axis=1)
     predicted_labels = np.asarray([label_values[position] for position in predicted_positions], dtype=int)
-    true_labels = pd.to_numeric(output["true_label"], errors="coerce")
-    if true_labels.isna().any():
-        raise ValueError("true_label values must be numeric.")
-    true_labels_array = true_labels.astype(int).to_numpy()
+    true_labels_array = _integer_label_values(output["true_label"])
     label_to_position = {label: position for position, label in enumerate(label_values)}
     true_probabilities = np.full(len(output), np.nan, dtype=float)
     for row_index, true_label in enumerate(true_labels_array):
@@ -355,10 +361,7 @@ def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10
         if len(group_columns) == 1 and not isinstance(group_key, tuple):
             group_key = (group_key,)
         probabilities = group.loc[:, list(prob_columns)].to_numpy(dtype=float)
-        true_labels = pd.to_numeric(group["true_label"], errors="coerce")
-        if true_labels.isna().any():
-            raise ValueError("true_label values must be numeric.")
-        true_label_values = true_labels.astype(int).to_numpy()
+        true_label_values = _integer_label_values(group["true_label"])
         true_positions = _label_positions(true_label_values, label_values)
         prediction_positions = probabilities.argmax(axis=1)
         predicted_label_values = np.asarray([label_values[position] for position in prediction_positions], dtype=int)
