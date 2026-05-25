@@ -38,6 +38,24 @@ def window_mask(frame: pd.DataFrame, window: tuple[float, float]) -> pd.Series:
     return (frame["time"] >= start) & (frame["time"] <= stop)
 
 
+def _integer_labels(values: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+    numeric = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+    valid = np.isfinite(numeric) & (numeric == np.floor(numeric))
+    labels = np.zeros(len(numeric), dtype=int)
+    labels[valid] = numeric[valid].astype(int)
+    return labels, valid
+
+
+def _integer_label(value: object) -> int | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(numeric) or not numeric.is_integer():
+        return None
+    return int(numeric)
+
+
 def score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
     if score_column in frame.columns:
         return pd.to_numeric(frame[score_column], errors="coerce")
@@ -46,13 +64,11 @@ def score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
         return frame[prob_columns].max(axis=1)
     if score_column == "probability_true_class" and "true_label" in frame.columns:
         probabilities = frame[prob_columns].to_numpy(dtype=float)
-        true_labels = pd.to_numeric(frame["true_label"], errors="coerce").to_numpy()
+        true_labels, valid_labels = _integer_labels(frame["true_label"])
         scores = np.full(len(frame), np.nan, dtype=float)
-        valid = np.isfinite(true_labels)
-        valid_indices = true_labels[valid].astype(int)
-        in_bounds = (valid_indices >= 0) & (valid_indices < probabilities.shape[1])
-        valid_positions = np.flatnonzero(valid)[in_bounds]
-        scores[valid_positions] = probabilities[valid_positions, valid_indices[in_bounds]]
+        in_bounds = valid_labels & (true_labels >= 0) & (true_labels < probabilities.shape[1])
+        valid_positions = np.flatnonzero(in_bounds)
+        scores[valid_positions] = probabilities[valid_positions, true_labels[valid_positions]]
         return pd.Series(scores, index=frame.index)
     raise ValueError(f"Score column '{score_column}' is missing and cannot be inferred.")
 
@@ -80,9 +96,8 @@ def ensure_prediction_columns(frame: pd.DataFrame) -> pd.DataFrame:
     probabilities = frame[prob_columns].to_numpy(dtype=float)
     predicted_labels = probabilities.argmax(axis=1)
     if "predicted_label" in frame.columns:
-        parsed_labels = pd.to_numeric(frame["predicted_label"], errors="coerce")
-        if parsed_labels.notna().all():
-            predicted_labels = parsed_labels.astype(int).to_numpy()
+        parsed_labels, valid_labels = _integer_labels(frame["predicted_label"])
+        predicted_labels[valid_labels] = parsed_labels[valid_labels]
     if "predicted_label" not in frame.columns:
         frame["predicted_label"] = predicted_labels
     if "predicted_class" not in frame.columns:
@@ -120,7 +135,9 @@ def sequence_identity(row: pd.Series) -> dict:
 
 def is_correct_detection(row: pd.Series) -> bool:
     if "true_label" in row and "predicted_label" in row and pd.notna(row["true_label"]) and pd.notna(row["predicted_label"]):
-        return int(row["true_label"]) == int(row["predicted_label"])
+        true_label = _integer_label(row["true_label"])
+        predicted_label = _integer_label(row["predicted_label"])
+        return true_label is not None and predicted_label is not None and true_label == predicted_label
     if "true_class" in row and "predicted_class" in row and pd.notna(row["true_class"]) and pd.notna(row["predicted_class"]):
         return str(row["true_class"]) == str(row["predicted_class"])
     return False
