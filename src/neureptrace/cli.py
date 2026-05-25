@@ -139,10 +139,42 @@ def _run_module_main(command: str, argv: Sequence[str]) -> int:
     return int(result) if isinstance(result, int) else 0
 
 
+def _handle_help_command(argv: Sequence[str]) -> int:
+    """Show grouped-command help without requiring users to remember argument order."""
+
+    if not argv:
+        print(_command_listing())
+        return 0
+
+    if len(argv) != 1:
+        print("usage: neureptrace help [command]", file=sys.stderr)
+        raise SystemExit(2)
+
+    command = argv[0]
+    if command in {"--list", "--list-commands"}:
+        print(_command_listing())
+        return 0
+
+    if command in {"-h", "--help"}:
+        print("usage: neureptrace help [command]\n")
+        print("Show command-specific help for a grouped NeuRepTrace workflow.\n")
+        print(_command_listing())
+        return 0
+
+    if command not in COMMAND_MODULES:
+        print(_format_unknown_command_error(command), file=sys.stderr)
+        raise SystemExit(2)
+
+    return _run_module_main(command, ["--help"])
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Dispatch installed NeuRepTrace subcommands."""
     if argv is None:
         argv = sys.argv[1:]
+
+    if argv and argv[0] == "help":
+        return _handle_help_command(argv[1:])
 
     if argv and argv[0] in COMMAND_MODULES:
         return _run_module_main(argv[0], argv[1:])
