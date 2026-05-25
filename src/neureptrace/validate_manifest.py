@@ -35,16 +35,19 @@ def _int_value(row: pd.Series, column: str, default: int) -> int:
     value = _value(row, column)
     if value is None:
         return default
+
     try:
-        number = float(value)
+        numeric_value = float(value)
     except ValueError as exc:
-        raise ValueError(f"{column} must be a finite integer") from exc
-    if not math.isfinite(number) or not number.is_integer():
-        raise ValueError(f"{column} must be a finite integer")
-    parsed = int(number)
-    if parsed < 1:
-        raise ValueError(f"{column} must be at least 1")
-    return parsed
+        raise ValueError(f"{column} must be an integer >= 2, got {value!r}") from exc
+
+    if not math.isfinite(numeric_value) or not numeric_value.is_integer():
+        raise ValueError(f"{column} must be an integer >= 2, got {value!r}")
+
+    int_value = int(numeric_value)
+    if int_value < 2:
+        raise ValueError(f"{column} must be an integer >= 2, got {value!r}")
+    return int_value
 
 
 def _resolve(value: str | None, base_dir: Path) -> Path | None:
@@ -184,12 +187,7 @@ def validate_manifest(
 
 def validation_report_frame(validations: list[ManifestValidation]) -> pd.DataFrame:
     """Return a tabular validation report."""
-    return pd.DataFrame(
-        [
-            {"subject": validation.subject, "ok": validation.ok, "messages": " | ".join(validation.messages)}
-            for validation in validations
-        ]
-    )
+    return pd.DataFrame([{"subject": validation.subject, "ok": validation.ok, "messages": " | ".join(validation.messages)} for validation in validations])
 
 
 def main() -> None:
