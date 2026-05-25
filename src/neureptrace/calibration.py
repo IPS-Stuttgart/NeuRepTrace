@@ -9,6 +9,16 @@ import pandas as pd
 
 CALIBRATION_METRICS = ("log_loss", "brier", "ece")
 GROUP_COLUMNS = ("decoder", "emission_mode")
+SUMMARY_REQUIRED_COLUMNS = (
+    "time",
+    "accuracy_mean",
+    "log_loss_mean",
+    "brier_mean",
+    "ece_mean",
+    "n_subjects",
+)
+SUMMARY_NUMERIC_COLUMNS = SUMMARY_REQUIRED_COLUMNS
+SUMMARY_UNIT_INTERVAL_COLUMNS = ("accuracy_mean", "ece_mean")
 RELIABILITY_BIN_REQUIRED_COLUMNS = (
     "time",
     "bin",
@@ -49,6 +59,46 @@ def _present_group_columns(frame: pd.DataFrame) -> list[str]:
     return [column for column in GROUP_COLUMNS if column in frame.columns]
 
 
+def _validate_calibration_summary(summary: pd.DataFrame) -> pd.DataFrame:
+    missing = sorted(set(SUMMARY_REQUIRED_COLUMNS).difference(summary.columns))
+    if missing:
+        raise ValueError(f"Summary is missing required columns: {missing}")
+
+    validated = summary.copy()
+    for column in SUMMARY_NUMERIC_COLUMNS:
+        values = pd.to_numeric(validated[column], errors="coerce")
+        if values.isna().any():
+            bad_rows = values[values.isna()].index.tolist()[:5]
+            raise ValueError(f"Summary contains non-numeric or missing values in column '{column}' at row(s) {bad_rows}.")
+        if not np.isfinite(values.to_numpy(dtype=float)).all():
+            raise ValueError(f"Summary contains non-finite values in column '{column}'.")
+        validated[column] = values
+
+    for column in SUMMARY_UNIT_INTERVAL_COLUMNS:
+        outside = (validated[column] < 0.0) | (validated[column] > 1.0)
+        if outside.any():
+            bad_rows = outside[outside].index.tolist()[:5]
+            raise ValueError(f"Summary contains values outside [0, 1] in column '{column}' at row(s) {bad_rows}.")
+
+    negative_log_loss = validated["log_loss_mean"] < 0.0
+    if negative_log_loss.any():
+        bad_rows = negative_log_loss[negative_log_loss].index.tolist()[:5]
+        raise ValueError(f"Summary contains negative log_loss_mean at row(s) {bad_rows}.")
+
+    fractional_subjects = validated["n_subjects"] % 1 != 0
+    if fractional_subjects.any():
+        bad_rows = validated.index[fractional_subjects].tolist()[:5]
+        raise ValueError(f"Summary contains non-integer n_subjects at row(s) {bad_rows}.")
+
+    non_positive_subjects = validated["n_subjects"] <= 0
+    if non_positive_subjects.any():
+        bad_rows = validated.index[non_positive_subjects].tolist()[:5]
+        raise ValueError(f"Summary contains non-positive n_subjects at row(s) {bad_rows}.")
+    validated["n_subjects"] = validated["n_subjects"].astype(int)
+
+    return validated
+
+
 def summarize_calibration_metrics(
     summary: pd.DataFrame,
     *,
@@ -56,10 +106,7 @@ def summarize_calibration_metrics(
     effect_window: tuple[float, float] = (0.1, 0.8),
 ) -> pd.DataFrame:
     """Summarize accuracy and calibration metrics over benchmark time windows."""
-    required = {"time", "accuracy_mean", "log_loss_mean", "brier_mean", "ece_mean", "n_subjects"}
-    missing = sorted(required.difference(summary.columns))
-    if missing:
-        raise ValueError(f"Summary is missing required columns: {missing}")
+    summary = _validate_calibration_summary(summary)
 
     group_columns = _present_group_columns(summary)
     group_items = summary.groupby(group_columns, sort=True) if group_columns else [("overall", summary)]
