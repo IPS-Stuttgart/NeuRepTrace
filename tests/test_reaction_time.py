@@ -31,6 +31,31 @@ def test_load_reaction_time_csv_converts_one_based_trials(tmp_path: Path):
     ]
 
 
+@pytest.mark.parametrize("trial_value", ["1.5", "nan", "inf", ""])
+def test_load_reaction_time_csv_rejects_invalid_trial_values(tmp_path: Path, trial_value: str):
+    csv_path = tmp_path / "rt.csv"
+    csv_path.write_text(
+        "participant,dataset,trial,rt\n"
+        f"2,main,{trial_value},0.41\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="trial values must be finite integers"):
+        load_reaction_time_csv(csv_path)
+
+
+def test_join_reaction_times_rejects_invalid_trial_values():
+    metric_rows = [
+        {"participant": "2", "dataset": "main", "trial": 0, "score": 1.0},
+    ]
+    reaction_time_rows = [
+        {"participant": "2", "dataset": "main", "trial": 0.5, "reaction_time": 0.4},
+    ]
+
+    with pytest.raises(ValueError, match="trial values must be finite integers"):
+        join_reaction_times(metric_rows, reaction_time_rows)
+
+
 def test_join_reaction_times_detects_likely_one_based_trials():
     metric_rows = [
         {"participant": "2", "dataset": "main", "trial": 0, "score": 1.0},
