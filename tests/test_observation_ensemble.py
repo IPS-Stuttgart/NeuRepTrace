@@ -126,6 +126,7 @@ def test_ensemble_probability_observations_accepts_integer_like_float_labels() -
 
 def test_ensemble_probability_observations_rejects_fractional_true_labels() -> None:
     observations = _source_observations()
+    observations["true_label"] = observations["true_label"].astype(float)
     observations.loc[observations["sequence_id"] == 0, "true_label"] = 0.5
 
     with pytest.raises(ValueError, match="true_label values must be integer-valued class labels"):
@@ -154,6 +155,7 @@ def test_summarize_ensemble_metrics_rejects_fractional_true_labels() -> None:
         _source_observations(),
         baseline_window=(-0.25, -0.15),
     )
+    ensemble["true_label"] = ensemble["true_label"].astype(float)
     ensemble.loc[ensemble["time"] == -0.20, "true_label"] = 0.5
 
     with pytest.raises(ValueError, match="true_label values must be integer-valued class labels"):
