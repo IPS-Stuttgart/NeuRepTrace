@@ -44,7 +44,7 @@ Use `--require-normalized` when downstream code assumes each `prob_class_*` row 
 Run the doctor command in every fresh environment and archive its output with large benchmark runs:
 
 ```bash
-neureptrace-doctor --output-json results/neureptrace_doctor.json
+neureptrace-doctor --json > results/neureptrace_doctor.json
 ```
 
 This records required and optional dependency status, which makes later failures easier to distinguish from data or model issues.
