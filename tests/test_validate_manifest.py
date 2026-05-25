@@ -17,8 +17,7 @@ class FakeEpochs:
 def test_validate_manifest_reports_missing_files(tmp_path: Path):
     manifest = tmp_path / "manifest.csv"
     manifest.write_text(
-        "subject,epochs,metadata_csv,label_column\n"
-        "sub-01,missing-epo.fif,missing.csv,condition\n",
+        "subject,epochs,metadata_csv,label_column\nsub-01,missing-epo.fif,missing.csv,condition\n",
         encoding="utf-8",
     )
 
@@ -34,11 +33,7 @@ def test_validate_manifest_accepts_events_metadata(tmp_path: Path, monkeypatch):
     epochs_path.write_text("placeholder", encoding="utf-8")
     events_path = tmp_path / "sub-01_events.csv"
     events_path.write_text(
-        "category,run\n"
-        "face,1\n"
-        "chair,1\n"
-        "person,2\n"
-        "car,2\n",
+        "category,run\nface,1\nchair,1\nperson,2\ncar,2\n",
         encoding="utf-8",
     )
     manifest = tmp_path / "manifest.csv"
@@ -60,16 +55,12 @@ def test_validate_manifest_reports_label_and_group_issues(tmp_path: Path, monkey
     epochs_path.write_text("placeholder", encoding="utf-8")
     metadata_path = tmp_path / "sub-01_metadata.csv"
     metadata_path.write_text(
-        "condition,run\n"
-        "face,1\n"
-        "face,1\n"
-        "object,1\n",
+        "condition,run\nface,1\nface,1\nobject,1\n",
         encoding="utf-8",
     )
     manifest = tmp_path / "manifest.csv"
     manifest.write_text(
-        "subject,epochs,metadata_csv,label_column,group_column,n_splits\n"
-        "sub-01,sub-01_epo.fif,sub-01_metadata.csv,condition,run,2\n",
+        "subject,epochs,metadata_csv,label_column,group_column,n_splits\nsub-01,sub-01_epo.fif,sub-01_metadata.csv,condition,run,2\n",
         encoding="utf-8",
     )
 

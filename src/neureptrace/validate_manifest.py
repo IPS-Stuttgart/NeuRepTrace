@@ -110,9 +110,7 @@ def _validate_class_balance(metadata: pd.DataFrame, label_column: str, n_splits:
     if len(class_counts) < 2:
         messages.append(f"label column '{label_column}' must contain at least two classes")
     if not class_counts.empty and int(class_counts.min()) < n_splits:
-        messages.append(
-            f"smallest class has {int(class_counts.min())} trial(s), fewer than n_splits={n_splits}"
-        )
+        messages.append(f"smallest class has {int(class_counts.min())} trial(s), fewer than n_splits={n_splits}")
     return messages
 
 
@@ -124,6 +122,8 @@ def validate_manifest(
     default_n_splits: int = 5,
 ) -> list[ManifestValidation]:
     """Validate staged files and metadata referenced by a benchmark manifest."""
+    if default_n_splits < 1:
+        raise ValueError("default_n_splits must be at least 1")
     manifest = pd.read_csv(manifest_csv)
     required = {"subject", "epochs"}
     missing_columns = sorted(required.difference(manifest.columns))
@@ -165,9 +165,7 @@ def validate_manifest(
                 n_epochs = None
             else:
                 if metadata is not None and len(metadata) != n_epochs:
-                    messages.append(
-                        f"metadata rows ({len(metadata)}) do not match epochs ({n_epochs})"
-                    )
+                    messages.append(f"metadata rows ({len(metadata)}) do not match epochs ({n_epochs})")
         else:
             n_epochs = None
 
@@ -181,34 +179,19 @@ def validate_manifest(
                 if group_column not in effective_metadata.columns:
                     messages.append(f"group column '{group_column}' is missing")
                 elif effective_metadata[group_column].dropna().nunique() < n_splits:
-                    messages.append(
-                        f"group column '{group_column}' has fewer than n_splits={n_splits} unique groups"
-                    )
+                    messages.append(f"group column '{group_column}' has fewer than n_splits={n_splits} unique groups")
 
-        validations.append(
-            ManifestValidation(subject=subject, ok=not messages, messages=messages)
-        )
+        validations.append(ManifestValidation(subject=subject, ok=not messages, messages=messages))
     return validations
 
 
 def validation_report_frame(validations: list[ManifestValidation]) -> pd.DataFrame:
     """Return a tabular validation report."""
-    rows = []
-    for validation in validations:
-        rows.append(
-            {
-                "subject": validation.subject,
-                "ok": validation.ok,
-                "messages": " | ".join(validation.messages),
-            }
-        )
-    return pd.DataFrame(rows)
+    return pd.DataFrame([{"subject": validation.subject, "ok": validation.ok, "messages": " | ".join(validation.messages)} for validation in validations])
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Validate files and metadata referenced by a NeuRepTrace benchmark manifest."
-    )
+    parser = argparse.ArgumentParser(description="Validate files and metadata referenced by a NeuRepTrace benchmark manifest.")
     parser.add_argument("manifest_csv", type=Path)
     parser.add_argument("--label-column")
     parser.add_argument("--group-column")
