@@ -9,6 +9,7 @@ from neureptrace.probability_stacking import (
     fit_source_oof_stacking,
     main,
     stack_probability_observations,
+    summarize_stacked_metrics,
 )
 
 
@@ -76,6 +77,18 @@ def test_fit_source_oof_stacking_prefers_better_source_candidate() -> None:
     assert fit.source_oof_balanced_accuracy == 1.0
 
 
+def test_fit_source_oof_stacking_rejects_fractional_source_labels() -> None:
+    cube = np.array(
+        [
+            [[0.9, 0.1], [0.1, 0.9]],
+            [[0.6, 0.4], [0.4, 0.6]],
+        ]
+    )
+
+    with pytest.raises(ValueError, match="source_labels values must be integer-valued"):
+        fit_source_oof_stacking(cube, [0.0, 0.5], candidates=("strong", "weak"))
+
+
 def test_stack_probability_observations_applies_source_weights_to_target() -> None:
     source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
     target = _observation_rows(subject="target", labels=[0, 1, 0])
@@ -105,6 +118,27 @@ def test_stack_probability_observations_allows_unlabeled_targets() -> None:
     assert stacked["true_label"].astype(str).tolist() == ["", "", ""]
     assert stacked["probability_true_class"].astype(str).tolist() == ["", "", ""]
     assert stacked["is_correct"].astype(str).tolist() == ["", "", ""]
+
+
+def test_stack_probability_observations_rejects_fractional_target_labels() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    target["true_label"] = target["true_label"].astype(float)
+    target.loc[target["sample_index"] == 1, "true_label"] = 0.5
+
+    with pytest.raises(ValueError, match="target true_label values must be integer-valued"):
+        stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+
+def test_summarize_stacked_metrics_rejects_fractional_true_labels() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    stacked = stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+    stacked["true_label"] = stacked["true_label"].astype(float)
+    stacked.loc[0, "true_label"] = 0.5
+
+    with pytest.raises(ValueError, match="true_label values must be integer-valued"):
+        summarize_stacked_metrics(stacked)
 
 
 def test_target_labels_do_not_affect_fitted_source_weights() -> None:
