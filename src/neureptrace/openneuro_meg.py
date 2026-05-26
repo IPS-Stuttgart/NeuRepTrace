@@ -236,18 +236,32 @@ def _event_id(metadata: pd.DataFrame, *, label_column: str) -> dict[str, int]:
     return {label: index + 1 for index, label in enumerate(labels)}
 
 
+def _ds004276_sound_events(events: pd.DataFrame) -> pd.DataFrame:
+    """Return ds004276 rows corresponding to auditory word events."""
+    if "trial_type" not in events.columns:
+        return events
+    trial_type = events["trial_type"].astype(str)
+    sound_events = events[trial_type.isin({"item", "item_post_probe"})].copy()
+    return sound_events.reset_index(drop=True) if not sound_events.empty else events
+
+
 def _derive_metadata(spec: OpenNeuroMegSpec, files: RunFiles, events: pd.DataFrame) -> pd.DataFrame:
     metadata = events.copy().reset_index(drop=True)
     if "trial_type" in metadata.columns:
         metadata["trial_type"] = metadata["trial_type"].astype(str)
 
     if spec.dataset_id == "ds004276":
+        metadata = _ds004276_sound_events(metadata)
         if files.behavior_path is None or not files.behavior_path.is_file():
             raise FileNotFoundError(f"Missing ds004276 behavior file: {files.behavior_path}")
         behavior = pd.read_csv(files.behavior_path, sep="\t")
         sound_rows = behavior[behavior["Event_Type"].astype(str) == "Sound"].reset_index(drop=True)
         if len(sound_rows) != len(metadata):
-            raise ValueError(f"{files.events_path} has {len(metadata)} events but {files.behavior_path} has {len(sound_rows)} sound rows.")
+            trial_type_counts = events.get("trial_type", pd.Series(dtype=str)).astype(str).value_counts().to_dict()
+            raise ValueError(
+                f"{files.events_path} has {len(metadata)} word events but {files.behavior_path} has "
+                f"{len(sound_rows)} sound rows. Event trial_type counts: {trial_type_counts}."
+            )
         words = sound_rows["Code"].astype(str)
         word_lengths = words.str.len()
         metadata["word"] = words
@@ -282,6 +296,28 @@ def _filter_metadata(
     if include_labels:
         wanted = {str(label) for label in include_labels}
         filtered = filtered[filtered[label_column].isin(wanted)].copy()
+    filtered = _limit_metadata_per_label(
+        filtered,
+        label_column=label_column,
+        max_events_per_label=max_events_per_label,
+        selection=selection,
+        seed=seed,
+    )
+    if filtered.empty:
+        raise ValueError(f"No events remain after filtering label column '{label_column}'.")
+    filtered["condition"] = filtered[label_column].astype(str)
+    return filtered.reset_index(drop=True)
+
+
+def _limit_metadata_per_label(
+    metadata: pd.DataFrame,
+    *,
+    label_column: str,
+    max_events_per_label: int | None,
+    selection: str,
+    seed: int,
+) -> pd.DataFrame:
+    filtered = metadata.copy()
     if max_events_per_label is not None:
         if selection not in {"first", "random"}:
             raise ValueError("--selection must be first or random.")
@@ -293,14 +329,33 @@ def _filter_metadata(
                 group = group.head(max_events_per_label)
             pieces.append(group.sort_index())
         filtered = pd.concat(pieces).sort_index().reset_index(drop=True) if pieces else filtered.iloc[0:0].copy()
-    if filtered.empty:
-        raise ValueError(f"No events remain after filtering label column '{label_column}'.")
-    filtered["condition"] = filtered[label_column].astype(str)
     return filtered.reset_index(drop=True)
 
 
 def stable_label_seed(label: object) -> int:
     return sum((index + 1) * ord(character) for index, character in enumerate(str(label))) % 100_000
+
+
+def _drop_non_epochable_metadata(
+    raw: mne.io.BaseRaw,
+    metadata: pd.DataFrame,
+    *,
+    label_column: str,
+    tmin: float,
+    tmax: float,
+) -> pd.DataFrame:
+    """Remove events whose requested epoch window falls outside raw data."""
+    event_samples = _events_from_metadata(raw, metadata, label_column=label_column)[:, 0]
+    sfreq = float(raw.info["sfreq"])
+    starts = event_samples + int(np.floor(tmin * sfreq))
+    stops = event_samples + int(np.ceil(tmax * sfreq))
+    keep = (starts >= raw.first_samp) & (stops <= raw.last_samp)
+    if keep.all():
+        return metadata.reset_index(drop=True)
+    kept = metadata.loc[keep].reset_index(drop=True)
+    if kept.empty:
+        raise ValueError(f"No events remain after dropping epochs outside raw bounds ({raw.first_samp}..{raw.last_samp} samples).")
+    return kept
 
 
 def stage_run(
@@ -330,10 +385,20 @@ def stage_run(
         metadata,
         label_column=label_column,
         include_labels=include_labels,
+        max_events_per_label=None,
+        selection=selection,
+        seed=seed,
+    )
+    metadata = _drop_non_epochable_metadata(raw, metadata, label_column=label_column, tmin=tmin, tmax=tmax)
+    metadata = _limit_metadata_per_label(
+        metadata,
+        label_column=label_column,
         max_events_per_label=max_events_per_label,
         selection=selection,
         seed=seed,
     )
+    if metadata.empty:
+        raise ValueError(f"No events remain after filtering label column '{label_column}'.")
     metadata["dataset"] = spec.dataset_id
     metadata["subject"] = files.subject
     metadata["run"] = "" if files.run is None else files.run

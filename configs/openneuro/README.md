@@ -18,3 +18,21 @@ Supported recipes:
   `trial_type` (`Stand`, `Large dev`, `Inter dev`).
 - `ds004330_object_drawing.yml`: object drawing dynamics, default label is the
   visual form derived from `trial_type` (`Drawing`, `Sketch`, `Photo`).
+
+The `OpenNeuro MEG LOSO` GitHub Actions workflow can stage and decode these
+recipes directly. On self-hosted runners it stores raw BIDS files and staged
+Epochs under `/home/github-runner/.cache/datasets/openneuro`; on GitHub-hosted
+runners it uses `actions/cache`. If `OPENNEURO_API_KEY` is configured as a
+repository secret, the workflow logs in to `openneuro-py` before downloading
+missing files.
+
+Dataset-specific staging hardening:
+
+- `ds004276` event files include probe rows that do not correspond to auditory
+  word sounds. Staging filters to auditory word event rows before joining the
+  behavior table.
+- All recipes drop events whose requested epoch window would fall outside the
+  raw file bounds before applying per-label trial caps.
+- Integer PCA component requests are capped inside each training fold, so small
+  smoke runs and inner calibration folds keep the requested provenance while
+  avoiding infeasible `n_components` failures.

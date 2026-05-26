@@ -8,7 +8,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.cross_decomposition import PLSRegression
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA as SklearnPCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.feature_selection import SelectPercentile, f_classif
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
@@ -94,6 +94,35 @@ DEFAULT_ELASTIC_NET_L1_RATIO = 0.5
 ELASTIC_NET_L1_RATIO_GRID = (0.15, 0.5, 0.85)
 DEFAULT_TUNING_ALPHA_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
 DEFAULT_TUNING_VAR_SMOOTHING_GRID = (1e-12, 1e-10, 1e-9, 1e-8, 1e-6)
+
+
+class PCA(SklearnPCA):
+    """PCA that caps explicit component counts to the current training fold.
+
+    Cross-subject MEG folds can become smaller than a requested PCA dimension,
+    especially inside nested calibration or small OpenNeuro smoke runs. Sklearn's
+    PCA raises in that case; this subclass keeps the public ``n_components``
+    parameter unchanged for provenance and grid-search names, but uses the
+    largest feasible integer component count during each fit.
+    """
+
+    def _fit(self, X):
+        requested_n_components = self.n_components
+        effective_n_components = requested_n_components
+        if isinstance(requested_n_components, (int, np.integer)) and not isinstance(requested_n_components, bool):
+            n_samples, n_features = X.shape
+            effective_n_components = min(int(requested_n_components), max(1, min(int(n_samples), int(n_features))))
+
+        self.n_components = effective_n_components
+        try:
+            result = super()._fit(X)
+        except Exception:
+            self.n_components = requested_n_components
+            raise
+        self.n_components = requested_n_components
+        self.requested_n_components_ = requested_n_components
+        self.effective_n_components_ = getattr(self, "n_components_", effective_n_components)
+        return result
 
 
 def _positive_float_classifier_param(
