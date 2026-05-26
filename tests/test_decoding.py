@@ -113,6 +113,22 @@ def test_make_decoder_fits_pca_inside_probability_pipeline():
     assert probabilities.sum(axis=1).round(6).tolist() == [1.0] * 5
 
 
+def test_make_decoder_caps_integer_pca_components_to_training_fold():
+    rng = np.random.default_rng(17)
+    features = rng.normal(size=(18, 80))
+    labels = np.array([0, 1, 2] * 6)
+
+    model = make_decoder("logistic", max_iter=2000, feature_preprocessor="pca", pca_components=64)
+    model.fit(features, labels)
+    probabilities = model.predict_proba(features[:5])
+
+    pca = model.named_steps["pca"]
+    assert pca.n_components == 64
+    assert pca.requested_n_components_ == 64
+    assert pca.effective_n_components_ == 18
+    assert probabilities.shape == (5, 3)
+
+
 def test_sparse_logistic_uses_l1_saga_regularization():
     rng = np.random.default_rng(13)
     features = rng.normal(size=(30, 6))
