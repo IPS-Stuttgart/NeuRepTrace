@@ -626,8 +626,9 @@ def validate_probability_observations(
     """
     if profile not in PROFILES:
         raise ValueError(f"profile must be one of {PROFILES}.")
-    if probability_tolerance < 0:
-        raise ValueError("probability_tolerance must be non-negative.")
+    probability_tolerance = float(probability_tolerance)
+    if not np.isfinite(probability_tolerance) or probability_tolerance < 0:
+        raise ValueError("probability_tolerance must be finite and non-negative.")
 
     issues: list[ObservationValidationIssue] = []
     _validate_time(frame, issues)
