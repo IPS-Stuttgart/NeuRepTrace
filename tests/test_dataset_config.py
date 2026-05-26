@@ -24,6 +24,18 @@ def test_parse_participant_ids_supports_ranges_and_lists():
     assert parse_participant_ids(["2-1", 5]) == [2, 1, 5]
 
 
+def test_parse_participant_ids_rejects_boolean_values():
+    for value in (True, False, [1, True], [False], ["true"], ["no"]):
+        with pytest.raises(ValueError, match="booleans|boolean"):
+            parse_participant_ids(value)
+
+
+def test_parse_participant_ids_rejects_mapping_values():
+    for value in ({"subject": 1}, [1, {"subject": 2}]):
+        with pytest.raises(ValueError, match="mapping|mappings"):
+            parse_participant_ids(value)
+
+
 def test_apply_overrides_updates_nested_values():
     config = {"dataset": {"type": "fieldtrip_mat"}, "participants": {"ids": "1-2"}}
 
