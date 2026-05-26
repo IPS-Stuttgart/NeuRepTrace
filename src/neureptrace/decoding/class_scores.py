@@ -24,6 +24,13 @@ def model_classes(model: Any, fallback_labels: Sequence | np.ndarray | None = No
     return np.asarray(classes).ravel()
 
 
+def _finite_score_matrix_or_none(scores: np.ndarray) -> np.ndarray | None:
+    """Return score matrix only when every entry is finite."""
+
+    scores = np.asarray(scores, dtype=float)
+    return scores if np.all(np.isfinite(scores)) else None
+
+
 def as_class_score_matrix(
     raw_scores: Sequence[Sequence[float]] | Sequence[float] | np.ndarray,
     classes: Sequence | np.ndarray,
@@ -34,7 +41,9 @@ def as_class_score_matrix(
 
     Binary ``decision_function`` outputs are expanded so column 0 scores the
     first class and column 1 scores the second class, matching sklearn's
-    ``classes_`` convention for linear binary decision scores.
+    ``classes_`` convention for linear binary decision scores. Non-finite score
+    output is treated as unavailable so callers can fall back to the next
+    scoring API instead of propagating NaN or infinite values.
     """
 
     classes = np.asarray(classes).ravel()
@@ -42,14 +51,14 @@ def as_class_score_matrix(
     if scores.ndim == 1:
         if scores.shape[0] != n_samples or classes.size != 2:
             return None
-        return np.column_stack((-scores, scores))
+        return _finite_score_matrix_or_none(np.column_stack((-scores, scores)))
     if scores.ndim != 2 or scores.shape[0] != n_samples:
         return None
     if scores.shape[1] == classes.size:
-        return scores
+        return _finite_score_matrix_or_none(scores)
     if scores.shape[1] == 1 and classes.size == 2:
         column = scores[:, 0]
-        return np.column_stack((-column, column))
+        return _finite_score_matrix_or_none(np.column_stack((-column, column)))
     return None
 
 
