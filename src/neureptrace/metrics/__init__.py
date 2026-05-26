@@ -38,6 +38,30 @@ __all__ = [
 ]
 
 
+def _validate_non_negative_finite_float(value: object, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a non-negative finite value")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative finite value") from exc
+    if not np.isfinite(numeric) or numeric < 0.0:
+        raise ValueError(f"{name} must be a non-negative finite value")
+    return numeric
+
+
+def _validate_positive_integer(value: object, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(numeric)
+
+
 def validate_probability_inputs(
     probabilities: np.ndarray,
     labels: np.ndarray | None = None,
@@ -59,6 +83,7 @@ def validate_probability_inputs(
     normalization_atol:
         Absolute tolerance for row-sum checks.
     """
+    normalization_atol = _validate_non_negative_finite_float(normalization_atol, "normalization_atol")
     probabilities = np.asarray(probabilities, dtype=float)
     if probabilities.ndim != 2:
         raise ValueError("probabilities must have shape (n_samples, n_classes)")
@@ -109,8 +134,7 @@ def expected_calibration_error(
     """
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
-    if n_bins < 1:
-        raise ValueError("n_bins must be positive")
+    n_bins = _validate_positive_integer(n_bins, "n_bins")
 
     predictions = probabilities.argmax(axis=1)
     confidences = probabilities.max(axis=1)
@@ -141,8 +165,7 @@ def reliability_bins(
     """Summarize top-label reliability bins for calibration plots."""
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
-    if n_bins < 1:
-        raise ValueError("n_bins must be positive")
+    n_bins = _validate_positive_integer(n_bins, "n_bins")
 
     predictions = probabilities.argmax(axis=1)
     confidences = probabilities.max(axis=1)
@@ -202,9 +225,7 @@ def top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int = 1)
     """Compute top-k classification accuracy from probability rows."""
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
-    k = int(k)
-    if k < 1:
-        raise ValueError("k must be positive")
+    k = _validate_positive_integer(k, "k")
     if k >= probabilities.shape[1]:
         return 1.0
 
