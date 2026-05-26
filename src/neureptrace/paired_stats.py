@@ -139,6 +139,8 @@ def sign_flip_p_value(
         raise ValueError("differences must be one-dimensional.")
     if len(differences) < 2:
         raise ValueError("Need at least two paired subjects.")
+    if not np.isfinite(differences).all():
+        raise ValueError("differences must contain only finite values.")
     if n_permutations < 1:
         raise ValueError("n_permutations must be at least 1.")
 

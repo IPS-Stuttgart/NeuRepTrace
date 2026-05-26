@@ -101,6 +101,43 @@ def test_validate_probability_inputs_can_accept_unnormalized_scores_when_request
     np.testing.assert_allclose(probabilities, scores)
 
 
+@pytest.mark.parametrize("normalization_atol", [-1e-6, np.inf, np.nan, True])
+def test_validate_probability_inputs_rejects_malformed_normalization_tolerance(normalization_atol):
+    probabilities = np.array([[0.6, 0.4]])
+
+    with pytest.raises(ValueError, match="normalization_atol must be a non-negative finite value"):
+        validate_probability_inputs(probabilities, normalization_atol=normalization_atol)
+
+
+@pytest.mark.parametrize("n_bins", [0, -1, 2.5, np.inf, np.nan, False])
+def test_calibration_bin_metrics_reject_malformed_bin_counts(n_bins):
+    probabilities = np.array([[0.6, 0.4], [0.2, 0.8]])
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+        expected_calibration_error(probabilities, labels, n_bins=n_bins)
+
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+        reliability_bins(probabilities, labels, n_bins=n_bins)
+
+
+def test_calibration_bin_metrics_accept_integer_like_bin_counts():
+    probabilities = np.array([[0.6, 0.4], [0.2, 0.8]])
+    labels = np.array([0, 1])
+
+    assert expected_calibration_error(probabilities, labels, n_bins=2.0) == pytest.approx(0.3)
+    assert len(reliability_bins(probabilities, labels, n_bins=2.0)) == 2
+
+
+@pytest.mark.parametrize("k", [0, -1, 1.5, np.inf, np.nan, True])
+def test_top_k_accuracy_rejects_malformed_k(k):
+    probabilities = np.array([[0.7, 0.2, 0.1], [0.4, 0.25, 0.35]])
+    labels = np.array([0, 2])
+
+    with pytest.raises(ValueError, match="k must be a positive integer"):
+        top_k_accuracy(probabilities, labels, k=k)
+
+
 def test_reliability_bins_reports_confidence_accuracy_gap():
     probabilities = np.array([[0.8, 0.2], [0.7, 0.3], [0.4, 0.6]])
     labels = np.array([0, 1, 1])
