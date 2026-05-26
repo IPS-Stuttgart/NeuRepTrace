@@ -6,6 +6,7 @@ __all__ = ["__version__"]
 __version__ = "0.1.1"
 
 from neureptrace import (  # noqa: E402
+    _dataset_config_participant_patch,
     _decoding_adaptive_calibration,
     _decoding_c_grid_patch,
     _decoding_probability_patch,
@@ -14,6 +15,7 @@ from neureptrace import (  # noqa: E402
     _observation_schema_probability_patch,
 )
 
+_dataset_config_participant_patch.install()
 _event_detection_extensions.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
