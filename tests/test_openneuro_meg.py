@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import mne
+import numpy as np
 import pandas as pd
 
 from neureptrace.openneuro_meg import (
     DATASET_SPECS,
     RunFiles,
     _derive_metadata,
+    _drop_non_epochable_metadata,
     _filter_metadata,
     expected_relative_files,
     invalid_raw_fif_files,
@@ -61,6 +64,56 @@ def test_ds004276_word_metadata_joins_behavior_file(tmp_path: Path):
 
     assert filtered["word"].tolist() == ["cat", "elephant"]
     assert filtered["condition"].tolist() == ["short", "long"]
+
+
+def test_ds004276_word_metadata_ignores_probe_events(tmp_path: Path):
+    behavior = pd.DataFrame(
+        {
+            "Event_Type": ["Sound", "Sound"],
+            "Code": ["cat", "elephant"],
+            "Trial": [1, 2],
+            "Stim_Type": ["other", "other"],
+        }
+    )
+    behavior_path = tmp_path / "sub-001_task-words_beh.tsv"
+    behavior.to_csv(behavior_path, sep="\t", index=False)
+    events = pd.DataFrame(
+        {
+            "onset": [0.1, 0.2, 0.3],
+            "duration": [0.0, 0.0, 0.0],
+            "trial_type": ["item", "probe", "item_post_probe"],
+        }
+    )
+
+    metadata = _derive_metadata(
+        DATASET_SPECS["ds004276"],
+        RunFiles(
+            subject="sub-001",
+            run=None,
+            raw_path=tmp_path / "sub-001_task-words_meg.fif",
+            events_path=tmp_path / "sub-001_task-words_events.tsv",
+            behavior_path=behavior_path,
+        ),
+        events,
+    )
+
+    assert metadata["trial_type"].tolist() == ["item", "item_post_probe"]
+    assert metadata["word"].tolist() == ["cat", "elephant"]
+
+
+def test_drop_non_epochable_metadata_removes_out_of_bounds_events():
+    info = mne.create_info(["MEG001"], sfreq=10.0, ch_types=["mag"])
+    raw = mne.io.RawArray(np.zeros((1, 100)), info, verbose="error")
+    metadata = pd.DataFrame(
+        {
+            "onset": [0.1, 1.0, 9.9],
+            "condition": ["a", "b", "c"],
+        }
+    )
+
+    filtered = _drop_non_epochable_metadata(raw, metadata, label_column="condition", tmin=-0.2, tmax=0.5)
+
+    assert filtered["condition"].tolist() == ["b"]
 
 
 def test_ds004330_derives_stimulus_form_and_id():
