@@ -3,8 +3,33 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
+from typing import Pattern
 
 import pandas as pd
+
+
+def _non_empty_text(value: str, *, name: str) -> str:
+    text = str(value)
+    if text.strip() == "":
+        raise ValueError(f"{name} must be a non-empty string.")
+    return text
+
+
+def _compile_pattern(pattern: str, *, name: str, case_sensitive: bool) -> Pattern[str]:
+    text = _non_empty_text(pattern, name=name)
+    flags = 0 if case_sensitive else re.IGNORECASE
+    try:
+        return re.compile(text, flags=flags)
+    except re.error as exc:
+        raise ValueError(f"{name} must be a valid regular expression: {exc}.") from exc
+
+
+def _validate_binary_labels(positive_label: str, negative_label: str) -> tuple[str, str]:
+    positive = _non_empty_text(positive_label, name="positive_label")
+    negative = _non_empty_text(negative_label, name="negative_label")
+    if positive == negative:
+        raise ValueError("positive_label and negative_label must be distinct.")
+    return positive, negative
 
 
 def add_binary_label(
@@ -25,18 +50,23 @@ def add_binary_label(
     ``negative_pattern`` is provided, unmatched rows receive missing labels and
     rows that match both patterns keep the positive label.
     """
+    source_column = _non_empty_text(source_column, name="source_column")
+    label_column = _non_empty_text(label_column, name="label_column")
+    positive_regex = _compile_pattern(positive_pattern, name="positive_pattern", case_sensitive=case_sensitive)
+    negative_regex = None if negative_pattern is None else _compile_pattern(negative_pattern, name="negative_pattern", case_sensitive=case_sensitive)
+    positive_label, negative_label = _validate_binary_labels(positive_label, negative_label)
+
     if source_column not in metadata.columns:
         raise ValueError(f"Source column '{source_column}' not found in metadata.")
     if label_column in metadata.columns:
         raise ValueError(f"Label column '{label_column}' already exists.")
 
-    flags = 0 if case_sensitive else re.IGNORECASE
     source = metadata[source_column].astype("string")
-    positive = source.str.contains(positive_pattern, flags=flags, regex=True, na=False)
-    if negative_pattern is None:
+    positive = source.str.contains(positive_regex, regex=True, na=False)
+    if negative_regex is None:
         negative = source.notna() & ~positive
     else:
-        negative = source.str.contains(negative_pattern, flags=flags, regex=True, na=False) & ~positive
+        negative = source.str.contains(negative_regex, regex=True, na=False) & ~positive
 
     labeled = metadata.copy()
     labeled[label_column] = pd.NA
