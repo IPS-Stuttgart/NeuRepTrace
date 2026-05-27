@@ -6,7 +6,7 @@ from neureptrace.observation_schema import validate_probability_observations
 
 
 def _valid_canonical_observations() -> pd.DataFrame:
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         {
             "subject": ["sub-01", "sub-01"],
             "sequence_id": ["trial-001", "trial-001"],
@@ -35,6 +35,7 @@ def _valid_canonical_observations() -> pd.DataFrame:
             "model_hash": ["model-456", "model-456"],
         }
     )
+    return frame.astype({"true_label": object, "predicted_label": object})
 
 
 def test_canonical_profile_rejects_fractional_predicted_labels() -> None:
