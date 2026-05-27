@@ -5,7 +5,9 @@ from pathlib import Path
 import mne
 import numpy as np
 import pandas as pd
+import pytest
 
+from neureptrace.dataset_config import iter_dataset_files, load_config, validate_dataset_config
 from neureptrace.openneuro_meg import (
     DATASET_SPECS,
     RunFiles,
@@ -17,7 +19,66 @@ from neureptrace.openneuro_meg import (
     parse_runs,
     parse_subjects,
     run_files,
+    subject_label,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+OPENNEURO_DECODE_CONFIGS = {
+    "ds004276": "ds004276_words.yml",
+    "ds006629": "ds006629_singsing.yml",
+    "ds004330": "ds004330_object_drawing.yml",
+}
+
+
+def test_openneuro_decode_configs_match_staged_output_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Keep staging specs, decode configs, and LOSO split counts in sync."""
+
+    monkeypatch.setenv("NEUREPTRACE_OPENNEURO_STAGED_DIR", str(tmp_path))
+
+    assert set(OPENNEURO_DECODE_CONFIGS) == set(DATASET_SPECS)
+    for dataset_id, config_name in OPENNEURO_DECODE_CONFIGS.items():
+        spec = DATASET_SPECS[dataset_id]
+        config_path = REPO_ROOT / "configs" / "openneuro" / config_name
+        config = load_config(config_path)
+
+        assert validate_dataset_config(config, base_dir=config_path.parent, check_files=False) == []
+        participants = tuple(parse_subjects(spec, config["participants"]["ids"]))
+        assert participants == spec.default_subjects
+        assert config["decoding"]["label_column"] == "condition"
+        assert config["decoding"]["group_column"] == "subject"
+        assert config["decoding"]["n_splits"] == len(spec.default_subjects)
+
+        expected_epochs = [
+            tmp_path / dataset_id / f"{subject_label(spec, subject)}_{dataset_id}_{spec.name}_epo.fif"
+            for subject in spec.default_subjects
+        ]
+        assert iter_dataset_files(config, base_dir=config_path.parent) == expected_epochs
+
+
+@pytest.mark.parametrize("dataset_id", sorted(DATASET_SPECS))
+def test_expected_relative_files_cover_default_subjects_runs_and_sidecars(dataset_id: str):
+    spec = DATASET_SPECS[dataset_id]
+    includes = expected_relative_files(dataset_id)
+    expected_run_files = len(spec.default_subjects) * len(spec.runs)
+
+    assert sum(path.endswith("_meg.fif") for path in includes) == expected_run_files
+    assert sum(path.endswith("_events.tsv") for path in includes) == expected_run_files
+    if dataset_id == "ds004276":
+        assert sum("/beh/" in path and path.endswith("_beh.tsv") for path in includes) == len(spec.default_subjects)
+    else:
+        assert all("/beh/" not in path for path in includes)
+
+
+def test_openneuro_workflow_exposes_every_configured_dataset():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "openneuro-meg-loso.yml").read_text(encoding="utf-8")
+
+    for dataset_id, config_name in OPENNEURO_DECODE_CONFIGS.items():
+        assert f"- {dataset_id}" in workflow
+        assert f'{dataset_id}) CONFIG="configs/openneuro/{config_name}" ;;' in workflow
 
 
 def test_expected_relative_files_include_singsing_raw_and_events():
