@@ -81,12 +81,14 @@ class CorrelationPrototypeClassifier(ClassifierMixin, BaseEstimator):
                 raise ValueError("sample_weight must contain one weight per feature row.")
             if not np.all(np.isfinite(sample_weight)) or np.any(sample_weight < 0.0):
                 raise ValueError("sample_weight must contain finite non-negative values.")
-            self.prototypes_ = np.vstack(
-                [
-                    np.average(features[labels == class_label], axis=0, weights=sample_weight[labels == class_label])
-                    for class_label in self.classes_
-                ]
-            )
+            prototypes = []
+            for class_label in self.classes_:
+                class_mask = labels == class_label
+                class_weights = sample_weight[class_mask]
+                if np.sum(class_weights) <= 0.0:
+                    raise ValueError("sample_weight must assign a positive total weight to every class.")
+                prototypes.append(np.average(features[class_mask], axis=0, weights=class_weights))
+            self.prototypes_ = np.vstack(prototypes)
         self.normalized_prototypes_ = self._row_center_normalize(self.prototypes_)
         return self
 
