@@ -36,6 +36,21 @@ def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_sample
     return weights
 
 
+def _coerce_label_indices(labels: np.ndarray) -> np.ndarray:
+    if np.issubdtype(labels.dtype, np.integer):
+        return labels.astype(int, copy=False)
+
+    try:
+        numeric_labels = np.asarray(labels, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("labels must contain integer class indices") from exc
+    if not np.all(np.isfinite(numeric_labels)):
+        raise ValueError("labels must contain finite integer class indices")
+    if not np.all(numeric_labels == np.floor(numeric_labels)):
+        raise ValueError("labels must contain integer class indices")
+    return numeric_labels.astype(int, copy=False)
+
+
 def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     probabilities = np.asarray(probabilities, dtype=float)
     labels = np.asarray(labels)
@@ -53,13 +68,10 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
         raise ValueError("probabilities must be non-negative")
     if not np.allclose(probabilities.sum(axis=1), 1.0, atol=1e-6, rtol=0.0):
         raise ValueError("probability rows must sum to one")
-    if not np.issubdtype(labels.dtype, np.integer):
-        if not np.all(np.equal(labels, np.asarray(labels, dtype=int))):
-            raise ValueError("labels must contain integer class indices")
-        labels = labels.astype(int)
+    labels = _coerce_label_indices(labels)
     if np.any(labels < 0) or np.any(labels >= probabilities.shape[1]):
         raise ValueError("labels must be valid column indices for probabilities")
-    return probabilities, labels.astype(int, copy=False)
+    return probabilities, labels
 
 
 def _validate_n_bins(n_bins: int) -> int:
