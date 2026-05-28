@@ -98,6 +98,8 @@ def run_time_resolved_decode(
     subject: str | None = None,
     temporal_train_window: tuple[float, float] | None = None,
     time_decode_backend: str = "sklearn",
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = 13,
     ensemble_weights: Sequence[float] | None = None,
     ensemble_baseline_window: tuple[float, float] | None = DEFAULT_ENSEMBLE_BASELINE_WINDOW,
     ensemble_baseline_group_columns: Sequence[str] = DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS,
@@ -142,6 +144,8 @@ def run_time_resolved_decode(
             subject=subject,
             temporal_train_window=temporal_train_window,
             time_decode_backend=time_decode_backend,
+            label_shuffle_control=label_shuffle_control,
+            label_shuffle_seed=label_shuffle_seed,
         )
 
     if emission_mode != "calibrated":
@@ -187,6 +191,8 @@ def run_time_resolved_decode(
                     subject=subject,
                     temporal_train_window=temporal_train_window,
                     time_decode_backend=time_decode_backend,
+                    label_shuffle_control=label_shuffle_control,
+                    label_shuffle_seed=label_shuffle_seed,
                 )
             )
             source_observation_paths.append(source_observations)
@@ -221,6 +227,8 @@ def run_time_resolved_decode(
     results["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
     results["ensemble_baseline_window_start"] = "" if ensemble_baseline_window is None else float(ensemble_baseline_window[0])
     results["ensemble_baseline_window_stop"] = "" if ensemble_baseline_window is None else float(ensemble_baseline_window[1])
+    results["label_shuffle_control"] = bool(label_shuffle_control)
+    results["label_shuffle_seed"] = int(label_shuffle_seed)
 
     for column in (
         "temporal_mode",
@@ -303,6 +311,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--observations-out", type=Path, help="Optional held-out trial/time probability observation CSV.")
     parser.add_argument("--subject", help="Optional subject identifier to include in output CSVs.")
     parser.add_argument(
+        "--label-shuffle-control",
+        action="store_true",
+        help="Shuffle training labels inside each outer fold as a deterministic null control. Test labels and splits stay unchanged.",
+    )
+    parser.add_argument("--label-shuffle-seed", type=int, default=13, help="Seed for --label-shuffle-control.")
+    parser.add_argument(
         "--temporal-train-window",
         nargs=2,
         type=float,
@@ -355,6 +369,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         observation_out_path=args.observations_out,
         subject=args.subject,
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
+        label_shuffle_control=args.label_shuffle_control,
+        label_shuffle_seed=args.label_shuffle_seed,
         ensemble_weights=tuple(args.ensemble_weights) if args.ensemble_weights is not None else None,
         ensemble_baseline_window=None if args.no_ensemble_baseline_debiasing else tuple(args.ensemble_baseline_window),
         ensemble_baseline_group_columns=tuple(args.ensemble_baseline_group_columns or DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS),

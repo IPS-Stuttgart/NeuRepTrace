@@ -151,6 +151,8 @@ def run_time_resolved_decode(
     subject: str | None = None,
     temporal_train_window: tuple[float, float] | None = None,
     time_decode_backend: str = "sklearn",
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
     """Run time-resolved decoding with train-fold-local epoch normalization.
 
@@ -177,6 +179,8 @@ def run_time_resolved_decode(
     time_decode_backend = _base.normalize_time_decode_backend(time_decode_backend)
     if time_decode_backend != "sklearn":
         raise ValueError("Fold-local normalization currently supports only the sklearn time-decode backend.")
+    label_shuffle_control = bool(label_shuffle_control)
+    label_shuffle_seed = int(label_shuffle_seed)
     baseline_window_value = _base._normalize_baseline_window(baseline_window)
     if feature_preprocessor_name == "none" and pca_components is not None:
         raise ValueError(
@@ -246,6 +250,8 @@ def run_time_resolved_decode(
         tuning_cv_splits=tuning_cv_splits,
         tuning_scoring=tuning_scoring,
         tuning_c_grid=tuning_c_grid_values,
+        label_shuffle_control=label_shuffle_control,
+        label_shuffle_seed=label_shuffle_seed,
     )
 
     raw_data = epochs.get_data(copy=False)
@@ -267,12 +273,19 @@ def run_time_resolved_decode(
                 train_idx=train_idx,
             )
             test_labels = labels[test_idx]
+            train_labels = _base._fold_training_labels(
+                labels,
+                train_idx,
+                label_shuffle_control=label_shuffle_control,
+                label_shuffle_seed=label_shuffle_seed,
+                context=(split_id, fold, "foldlocal_same_time"),
+            )
             for time_window in windows:
                 features = _base._features_for_window(fold_data, time_window)
                 start, stop, center = time_window
                 for current_emission_mode in emission_modes:
                     tuning_cv = (
-                        make_tuning_cross_validator(labels[train_idx], None if groups is None else groups[train_idx], tuning_cv_splits)
+                        make_tuning_cross_validator(train_labels, None if groups is None else groups[train_idx], tuning_cv_splits)
                         if tune_hyperparameters
                         else 3
                     )
@@ -287,7 +300,7 @@ def run_time_resolved_decode(
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
                     )
-                    model.fit(features[train_idx], labels[train_idx])
+                    model.fit(features[train_idx], train_labels)
 
                     probabilities = _base._align_probability_columns(
                         predict_emission_probabilities(
@@ -321,6 +334,8 @@ def run_time_resolved_decode(
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
                         tuning_metadata=tuning_metadata,
+                        label_shuffle_control=label_shuffle_control,
+                        label_shuffle_seed=label_shuffle_seed,
                     )
                     _base._append_decoded_outputs(
                         rows=rows,
@@ -359,6 +374,8 @@ def run_time_resolved_decode(
                         observation_out_path=observation_out_path,
                         subject=subject,
                         tuning_metadata=tuning_metadata,
+                        label_shuffle_control=label_shuffle_control,
+                        label_shuffle_seed=label_shuffle_seed,
                     )
     else:
         train_time, train_window_start, train_window_stop = _base._train_window_summary(epochs, selected_train_windows)
@@ -373,9 +390,16 @@ def run_time_resolved_decode(
             )
             feature_cache = {time_window: _base._features_for_window(fold_data, time_window) for time_window in windows}
             test_labels = labels[test_idx]
+            train_labels = _base._fold_training_labels(
+                labels,
+                train_idx,
+                label_shuffle_control=label_shuffle_control,
+                label_shuffle_seed=label_shuffle_seed,
+                context=(split_id, fold, "foldlocal_train_window_ensemble", *train_window_centers),
+            )
             for current_emission_mode in emission_modes:
                 tuning_cv = (
-                    make_tuning_cross_validator(labels[train_idx], None if groups is None else groups[train_idx], tuning_cv_splits)
+                    make_tuning_cross_validator(train_labels, None if groups is None else groups[train_idx], tuning_cv_splits)
                     if tune_hyperparameters
                     else 3
                 )
@@ -397,7 +421,7 @@ def run_time_resolved_decode(
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
                     )
-                    model.fit(train_features[train_idx], labels[train_idx])
+                    model.fit(train_features[train_idx], train_labels)
                     fitted_models.append(model)
                     for test_window in windows:
                         probability_sums[test_window] += _base._align_probability_columns(
@@ -433,6 +457,8 @@ def run_time_resolved_decode(
                     tuning_scoring=tuning_scoring,
                     tuning_c_grid=tuning_c_grid_values,
                     tuning_metadata=tuning_metadata,
+                    label_shuffle_control=label_shuffle_control,
+                    label_shuffle_seed=label_shuffle_seed,
                 )
                 for test_window in windows:
                     probabilities = _base._probability_average(probability_sums[test_window], len(selected_train_windows))
@@ -473,6 +499,8 @@ def run_time_resolved_decode(
                         observation_out_path=observation_out_path,
                         subject=subject,
                         tuning_metadata=tuning_metadata,
+                        label_shuffle_control=label_shuffle_control,
+                        label_shuffle_seed=label_shuffle_seed,
                     )
 
     results = pd.DataFrame(rows)
