@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
-from neureptrace.mne_time_decode import _align_probability_columns, normalize_time_decode_backend, run_time_resolved_decode
+from neureptrace.mne_time_decode import (
+    _align_probability_columns,
+    _shuffle_training_labels,
+    normalize_time_decode_backend,
+    run_time_resolved_decode,
+)
 
 
 class FakeEpochs:
@@ -47,6 +52,30 @@ class MissingClassDecoder:
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
         probabilities = np.tile(np.array([[0.7, 0.3]]), (features.shape[0], 1))
         return probabilities[:, : len(self.classes_)]
+
+
+class RecordingDecoder:
+    fit_labels: list[np.ndarray] = []
+
+    def fit(self, features: np.ndarray, labels: np.ndarray):
+        self.classes_ = np.unique(labels)
+        self.fit_labels.append(np.asarray(labels, dtype=int).copy())
+        return self
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        return np.full((features.shape[0], len(self.classes_)), 1.0 / len(self.classes_))
+
+
+def test_label_shuffle_helper_is_deterministic_and_count_preserving():
+    labels = np.array([0, 0, 0, 1, 1, 2, 2, 2])
+
+    shuffled_a = _shuffle_training_labels(labels, seed=7, context=("outer", "fold"))
+    shuffled_b = _shuffle_training_labels(labels, seed=7, context=("outer", "fold"))
+    shuffled_c = _shuffle_training_labels(labels, seed=8, context=("outer", "fold"))
+
+    np.testing.assert_array_equal(shuffled_a, shuffled_b)
+    assert sorted(shuffled_a.tolist()) == sorted(labels.tolist())
+    assert not np.array_equal(shuffled_a, shuffled_c)
 
 
 def test_align_probability_columns_expands_missing_model_classes():
@@ -150,6 +179,49 @@ def test_run_time_resolved_decode_writes_probability_observations(tmp_path: Path
     assert observations["subject"].unique().tolist() == ["sub-01"]
     assert sorted(observations["emission_mode"].unique().tolist()) == ["calibrated", "uncalibrated"]
     assert observations[["prob_class_0", "prob_class_1"]].sum(axis=1).round(6).tolist() == [1.0] * 32
+
+
+def test_run_time_resolved_decode_label_shuffle_keeps_test_labels_and_marks_outputs(tmp_path: Path, monkeypatch):
+    RecordingDecoder.fit_labels = []
+    labels = np.array(["animate", "animate", "inanimate", "inanimate", "animate", "inanimate"])
+    data = np.arange(30, dtype=float).reshape(6, 1, 5)
+    metadata = pd.DataFrame({"condition": labels, "session": ["a", "a", "b", "b", "c", "c"]})
+    epochs = FakeEpochs(data, np.array([0.00, 0.01, 0.02, 0.03, 0.04]), metadata)
+    train_idx = np.array([0, 1, 2, 3])
+    test_idx = np.array([4, 5])
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr(
+        "neureptrace.mne_time_decode.make_cross_validator",
+        lambda labels, groups, n_splits: iter([(train_idx, test_idx)]),
+    )
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingDecoder())
+
+    out = tmp_path / "decode_shuffle.csv"
+    observations_out = tmp_path / "observations_shuffle.csv"
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        out_path=out,
+        n_splits=2,
+        window_ms=20,
+        step_ms=20,
+        emission_mode="uncalibrated",
+        observation_out_path=observations_out,
+        time_decode_backend="sklearn",
+        label_shuffle_control=True,
+        label_shuffle_seed=7,
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert results["label_shuffle_control"].unique().tolist() == [True]
+    assert results["label_shuffle_seed"].unique().tolist() == [7]
+    assert observations["label_shuffle_control"].unique().tolist() == [True]
+    assert observations["label_shuffle_seed"].unique().tolist() == [7]
+    assert observations.sort_values("sample_index")["true_class"].unique().tolist() == ["animate", "inanimate"]
+    assert len(RecordingDecoder.fit_labels) == 2
+    assert all(sorted(fit_labels.tolist()) == [0, 0, 1, 1] for fit_labels in RecordingDecoder.fit_labels)
+    np.testing.assert_array_equal(RecordingDecoder.fit_labels[0], RecordingDecoder.fit_labels[1])
 
 
 def test_normalize_time_decode_backend_accepts_mne_alias():

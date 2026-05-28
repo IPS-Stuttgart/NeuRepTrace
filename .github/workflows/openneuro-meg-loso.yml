@@ -62,6 +62,15 @@ on:
           - sklearn
           - mne
         default: sklearn
+      label_shuffle_control:
+        description: "Shuffle train-fold labels as a matched null control"
+        required: true
+        type: boolean
+        default: false
+      label_shuffle_seed:
+        description: "Seed for label-shuffle null controls"
+        required: true
+        default: "13"
       runner_type:
         description: "Runner family. GitHub-hosted uses actions/cache; self-hosted uses /home/github-runner/.cache/datasets."
         required: true
@@ -88,6 +97,8 @@ jobs:
       NO_DOWNLOAD: ${{ inputs.no_download }}
       DECODER_INPUT: ${{ inputs.decoder }}
       TIME_DECODE_BACKEND: ${{ inputs.time_decode_backend }}
+      LABEL_SHUFFLE_CONTROL: ${{ inputs.label_shuffle_control }}
+      LABEL_SHUFFLE_SEED: ${{ inputs.label_shuffle_seed }}
 
     steps:
       - name: Check out repository
@@ -267,6 +278,8 @@ jobs:
             --set "participants.ids=$OPENNEURO_SUBJECTS"
             --set "decoding.n_splits=$OPENNEURO_N_SPLITS"
             --set "decoding.time_decode_backend=$TIME_DECODE_BACKEND"
+            --set "decoding.label_shuffle_control=$LABEL_SHUFFLE_CONTROL"
+            --set "decoding.label_shuffle_seed=$LABEL_SHUFFLE_SEED"
             --set "outputs.base_dir=$OPENNEURO_OUTPUT_DIR/decode"
           )
           if [[ -n "$DECODER_INPUT" ]]; then
@@ -286,10 +299,21 @@ jobs:
 
           summary = Path(os.environ["OPENNEURO_OUTPUT_DIR"]) / "decode" / "time_decode_summary.csv"
           frame = pd.read_csv(summary)
-          metrics = frame.groupby("time")[["accuracy", "log_loss", "brier", "ece"]].mean()
-          best_time = metrics["accuracy"].idxmax()
+          metrics = frame.groupby("time")[["accuracy", "balanced_accuracy", "top2_accuracy", "top3_accuracy", "log_loss", "brier", "ece"]].mean()
+          best_time = metrics["balanced_accuracy"].idxmax()
           print(metrics.loc[[best_time]].to_string())
           PY
+
+      - name: Write LOSO diagnostics
+        if: env.RUN_DECODE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m neureptrace.loso_observation_diagnostics \
+            "$OPENNEURO_OUTPUT_DIR/decode/observations.csv" \
+            --summary-csv "$OPENNEURO_OUTPUT_DIR/decode/time_decode_summary.csv" \
+            --stage-summary-csv "$OPENNEURO_OUTPUT_DIR/stage_summary.csv" \
+            --out-dir "$OPENNEURO_OUTPUT_DIR/decode/diagnostics"
 
       - name: Upload OpenNeuro MEG outputs
         uses: actions/upload-artifact@v7

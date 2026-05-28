@@ -34,6 +34,8 @@ decoding:
   emission_mode: calibrated
   n_splits: 30
   max_iter: 1000
+  label_shuffle_control: false
+  label_shuffle_seed: 13
 
 outputs:
   base_dir: results/openneuro_ds004330_object_drawing

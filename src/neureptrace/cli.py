@@ -37,6 +37,7 @@ COMMAND_MODULES = {
     "fieldtrip-to-mne": "neureptrace.fieldtrip_mat",
     "synthetic-fieldtrip": "neureptrace.synthetic_fieldtrip",
     "loso-time-decode": "neureptrace.loso_time_decode",
+    "loso-observation-diagnostics": "neureptrace.loso_observation_diagnostics",
     "metadata": "neureptrace.metadata",
     "mne-transfer-decode": "neureptrace.epoch_transfer_decode",
     "mne-time-decode": "neureptrace.mne_time_decode_foldlocal_cli",

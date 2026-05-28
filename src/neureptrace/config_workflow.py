@@ -201,6 +201,11 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_path: Path) -> dict[str,
         "subject": _first(dataset.get("subject"), config.get("subject")),
         "temporal_train_window": temporal_train_window,
         "time_decode_backend": _first(decoding.get("time_decode_backend"), config.get("time_decode_backend"), default="sklearn"),
+        "label_shuffle_control": _as_bool(
+            _first(decoding.get("label_shuffle_control"), config.get("label_shuffle_control")),
+            default=False,
+        ),
+        "label_shuffle_seed": _first(decoding.get("label_shuffle_seed"), config.get("label_shuffle_seed"), default=13),
     }
 
 

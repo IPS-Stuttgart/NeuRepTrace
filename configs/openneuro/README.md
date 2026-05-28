@@ -26,6 +26,13 @@ runners it uses `actions/cache`. If `OPENNEURO_API_KEY` is configured as a
 repository secret, the workflow logs in to `openneuro-py` before downloading
 missing files.
 
+For matched null controls, pass `--set decoding.label_shuffle_control=true`
+to `neureptrace-decode-from-config` or enable `label_shuffle_control` in the
+workflow dispatch form. This shuffles only training labels inside each outer
+fold; held-out labels and group splits stay unchanged. Per-subject, confusion,
+class-count, and time-course diagnostics can be generated from any observation
+CSV with `neureptrace-loso-observation-diagnostics`.
+
 Dataset-specific staging hardening:
 
 - `ds004276` event files include probe rows that do not correspond to auditory
