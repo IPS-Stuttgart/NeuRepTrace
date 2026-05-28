@@ -39,6 +39,15 @@ def test_bandpass_filter_and_hilbert_keep_shape() -> None:
     assert np.iscomplexobj(analytic)
 
 
+def test_bandpass_filter_rejects_too_short_signal_with_clear_error() -> None:
+    sampling_rate = 200.0
+    time = np.arange(10, dtype=float) / sampling_rate
+    signal = np.sin(2 * np.pi * 10.0 * time)
+
+    with pytest.raises(ValueError, match="more than 33 samples along axis 0"):
+        bandpass_filter(signal, sampling_rate, (8.0, 12.0))
+
+
 def test_average_phases_matches_circular_mean() -> None:
     phases = [np.array([0.0, np.pi]), np.array([0.0, np.pi])]
 
