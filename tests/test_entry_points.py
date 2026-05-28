@@ -53,3 +53,10 @@ def test_mne_time_decode_scripts_use_safe_wrappers():
     assert scripts["neureptrace-mne-time-decode-base"] == "neureptrace.mne_time_decode_cli:main"
     assert COMMAND_MODULES["mne-time-decode"] == "neureptrace.mne_time_decode_foldlocal_cli"
     assert COMMAND_MODULES["mne-time-decode-base"] == "neureptrace.mne_time_decode_cli"
+
+
+def test_openneuro_resilient_entry_points_are_exposed():
+    scripts = _poetry_scripts()
+
+    assert scripts["neureptrace-openneuro-resilient"] == "neureptrace.openneuro_resilient:main"
+    assert COMMAND_MODULES["openneuro-resilient"] == "neureptrace.openneuro_resilient"
