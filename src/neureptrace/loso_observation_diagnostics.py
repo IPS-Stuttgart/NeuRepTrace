@@ -18,6 +18,13 @@ MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 SELECTION_METRICS = tuple(sorted(MAXIMIZE_METRICS | MINIMIZE_METRICS))
 
 
+def _sem(values: pd.Series) -> float:
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    if len(numeric) <= 1:
+        return float("nan")
+    return float(numeric.sem())
+
+
 def _subject_column(frame: pd.DataFrame, requested: str | None = None) -> str:
     if requested is not None:
         if requested not in frame.columns:
@@ -54,6 +61,14 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     effective_k = min(int(k), probabilities.shape[1])
     top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
     return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
+
+
+def _top_k_chance(n_classes: int, *, k: int) -> float:
+    return min(int(k), int(n_classes)) / float(n_classes)
+
+
+def _top_k_interpretation(n_classes: int, *, k: int) -> str:
+    return "automatic_ceiling" if int(n_classes) <= int(k) else "informative"
 
 
 def _metrics_for_rows(frame: pd.DataFrame) -> dict[str, float | int | str]:
@@ -95,9 +110,10 @@ def time_course_summary(observations: pd.DataFrame) -> pd.DataFrame:
     rows = []
     n_classes = len(probability_columns(observations))
     chance = 1.0 / float(n_classes)
-    top2_chance = min(2, n_classes) / float(n_classes)
-    top3_chance = min(3, n_classes) / float(n_classes)
-    top3_interpretation = "automatic_ceiling" if n_classes <= 3 else "informative"
+    top2_chance = _top_k_chance(n_classes, k=2)
+    top3_chance = _top_k_chance(n_classes, k=3)
+    top2_interpretation = _top_k_interpretation(n_classes, k=2)
+    top3_interpretation = _top_k_interpretation(n_classes, k=3)
     for time, frame in observations.groupby("time", sort=True):
         rows.append(
             {
@@ -106,6 +122,7 @@ def time_course_summary(observations: pd.DataFrame) -> pd.DataFrame:
                 "chance_accuracy": chance,
                 "top2_chance": top2_chance,
                 "top3_chance": top3_chance,
+                "top2_interpretation": top2_interpretation,
                 "top3_interpretation": top3_interpretation,
             }
         )
@@ -152,6 +169,8 @@ def per_subject_diagnostics(
     fixed = _rows_at_time(observations, fixed_time)
     n_classes = len(probability_columns(observations))
     chance = 1.0 / float(n_classes)
+    top2_chance = _top_k_chance(n_classes, k=2)
+    top3_chance = _top_k_chance(n_classes, k=3)
     staged_trials: dict[str, int] = {}
     if stage_summary is not None and {"subject", "n_trials"}.issubset(stage_summary.columns):
         staged_trials = {
@@ -175,15 +194,21 @@ def per_subject_diagnostics(
                 "balanced_accuracy": best_metrics["balanced_accuracy"],
                 "balanced_minus_chance": float(best_metrics["balanced_accuracy"]) - chance,
                 "top2_accuracy": best_metrics["top2_accuracy"],
+                "top2_minus_chance": float(best_metrics["top2_accuracy"]) - top2_chance,
                 "top3_accuracy": best_metrics["top3_accuracy"],
+                "top3_minus_chance": float(best_metrics["top3_accuracy"]) - top3_chance,
                 "fixed_time": _nearest_time(observations, fixed_time),
                 "fixed_balanced_accuracy": fixed_metrics["balanced_accuracy"],
                 "fixed_balanced_minus_chance": float(fixed_metrics["balanced_accuracy"]) - chance,
                 "fixed_top2_accuracy": fixed_metrics["top2_accuracy"],
+                "fixed_top2_minus_chance": float(fixed_metrics["top2_accuracy"]) - top2_chance,
+                "fixed_top3_accuracy": fixed_metrics["top3_accuracy"],
+                "fixed_top3_minus_chance": float(fixed_metrics["top3_accuracy"]) - top3_chance,
                 "n_trials": n_trials,
                 "staged_n_trials": staged_trials.get(str(subject), ""),
                 "class_counts": _class_count_string(fixed_rows),
-                "top3_interpretation": "automatic_ceiling" if n_classes <= 3 else "informative",
+                "top2_interpretation": _top_k_interpretation(n_classes, k=2),
+                "top3_interpretation": _top_k_interpretation(n_classes, k=3),
             }
         )
     return pd.DataFrame(rows)
@@ -218,6 +243,78 @@ def class_counts(observations: pd.DataFrame, *, subject_column: str, time: float
     )
     counts.insert(0, "time", _nearest_time(observations, time))
     return counts
+
+
+def quality_summary(
+    observations: pd.DataFrame,
+    *,
+    time_summary: pd.DataFrame,
+    per_subject: pd.DataFrame,
+    subject_column: str,
+    fixed_time: float,
+    selection_metric: str = "balanced_accuracy",
+) -> pd.DataFrame:
+    """Return one paper-facing summary row for LOSO decode quality."""
+
+    n_classes = len(probability_columns(observations))
+    chance = 1.0 / float(n_classes)
+    top2_chance = _top_k_chance(n_classes, k=2)
+    top3_chance = _top_k_chance(n_classes, k=3)
+    fixed_rows = _rows_at_time(observations, fixed_time)
+    fixed_metrics = _metrics_for_rows(fixed_rows)
+    global_best_time = _best_time(time_summary, selection_metric)
+    global_best_row = time_summary.loc[np.isclose(time_summary["time"].astype(float), global_best_time)].iloc[0]
+    label_shuffle_values = (
+        sorted(observations["label_shuffle_control"].dropna().astype(str).unique().tolist())
+        if "label_shuffle_control" in observations.columns
+        else []
+    )
+    label_shuffle_seed_values = (
+        sorted(observations["label_shuffle_seed"].dropna().astype(str).unique().tolist())
+        if "label_shuffle_seed" in observations.columns
+        else []
+    )
+    subject_best = pd.to_numeric(per_subject["balanced_accuracy"], errors="coerce")
+    subject_fixed = pd.to_numeric(per_subject["fixed_balanced_accuracy"], errors="coerce")
+
+    return pd.DataFrame(
+        [
+            {
+                "subject_column": subject_column,
+                "n_subjects": int(per_subject["subject"].nunique()),
+                "n_observations": int(len(observations)),
+                "n_observations_fixed_time": int(len(fixed_rows)),
+                "n_classes": int(n_classes),
+                "selection_metric": selection_metric,
+                "global_best_time": global_best_time,
+                "global_best_selection_value": float(global_best_row[selection_metric]),
+                "fixed_time": _nearest_time(observations, fixed_time),
+                "chance_accuracy": chance,
+                "top2_chance": top2_chance,
+                "top3_chance": top3_chance,
+                "top2_interpretation": _top_k_interpretation(n_classes, k=2),
+                "top3_interpretation": _top_k_interpretation(n_classes, k=3),
+                "fixed_accuracy": fixed_metrics["accuracy"],
+                "fixed_balanced_accuracy": fixed_metrics["balanced_accuracy"],
+                "fixed_balanced_minus_chance": float(fixed_metrics["balanced_accuracy"]) - chance,
+                "fixed_top2_accuracy": fixed_metrics["top2_accuracy"],
+                "fixed_top2_minus_chance": float(fixed_metrics["top2_accuracy"]) - top2_chance,
+                "fixed_top3_accuracy": fixed_metrics["top3_accuracy"],
+                "fixed_top3_minus_chance": float(fixed_metrics["top3_accuracy"]) - top3_chance,
+                "fixed_log_loss": fixed_metrics["log_loss"],
+                "fixed_brier": fixed_metrics["brier"],
+                "fixed_ece": fixed_metrics["ece"],
+                "subject_best_balanced_accuracy_mean": float(subject_best.mean()),
+                "subject_best_balanced_accuracy_sem": _sem(subject_best),
+                "subject_fixed_balanced_accuracy_mean": float(subject_fixed.mean()),
+                "subject_fixed_balanced_accuracy_sem": _sem(subject_fixed),
+                "subjects_best_above_chance": int((subject_best > chance).sum()),
+                "subjects_fixed_above_chance": int((subject_fixed > chance).sum()),
+                "label_shuffle_control_values": ",".join(label_shuffle_values),
+                "label_shuffle_seed_values": ",".join(label_shuffle_seed_values),
+            }
+        ]
+    )
 
 
 def write_loso_observation_diagnostics(
@@ -256,6 +353,14 @@ def write_loso_observation_diagnostics(
     )
     confusion = confusion_matrix(observations, time=actual_time)
     counts = class_counts(observations, subject_column=subject_column_name, time=actual_time)
+    quality = quality_summary(
+        observations,
+        time_summary=time_summary,
+        per_subject=per_subject,
+        subject_column=subject_column_name,
+        fixed_time=actual_time,
+        selection_metric=selection_metric,
+    )
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -264,11 +369,13 @@ def write_loso_observation_diagnostics(
         "per_subject": out_dir / "per_subject.csv",
         "confusion_matrix": out_dir / "confusion_matrix.csv",
         "class_counts": out_dir / "class_counts.csv",
+        "quality_summary": out_dir / "quality_summary.csv",
     }
     time_summary.to_csv(paths["time_course"], index=False)
     per_subject.to_csv(paths["per_subject"], index=False)
     confusion.to_csv(paths["confusion_matrix"], index=False)
     counts.to_csv(paths["class_counts"], index=False)
+    quality.to_csv(paths["quality_summary"], index=False)
     return paths
 
 
