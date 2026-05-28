@@ -50,6 +50,15 @@ on:
         required: true
         type: boolean
         default: false
+      skip_failed_subjects:
+        description: "Skip corrupt or missing subjects after download and decode the successful cohort"
+        required: true
+        type: boolean
+        default: true
+      min_successful_subjects:
+        description: "Minimum staged subjects required when skip_failed_subjects is enabled"
+        required: true
+        default: "2"
       decoder:
         description: "Override decoder/classifier, or leave empty for the dataset config default"
         required: false
@@ -95,6 +104,8 @@ jobs:
       MAX_EVENTS_PER_LABEL_INPUT: ${{ inputs.max_events_per_label }}
       RUN_DECODE: ${{ inputs.run_decode }}
       NO_DOWNLOAD: ${{ inputs.no_download }}
+      SKIP_FAILED_SUBJECTS: ${{ inputs.skip_failed_subjects }}
+      MIN_SUCCESSFUL_SUBJECTS: ${{ inputs.min_successful_subjects }}
       DECODER_INPUT: ${{ inputs.decoder }}
       TIME_DECODE_BACKEND: ${{ inputs.time_decode_backend }}
       LABEL_SHUFFLE_CONTROL: ${{ inputs.label_shuffle_control }}
@@ -170,6 +181,7 @@ jobs:
           env_path = Path(os.environ["GITHUB_ENV"])
           with env_path.open("a", encoding="utf-8") as handle:
               handle.write(f"OPENNEURO_SUBJECTS={subjects}\n")
+              handle.write(f"OPENNEURO_REQUESTED_SUBJECTS={subjects}\n")
               handle.write(f"OPENNEURO_RUNS={runs}\n")
               handle.write(f"OPENNEURO_N_SPLITS={subject_count}\n")
               handle.write(f"OPENNEURO_DATA_ROOT={data_root}\n")
@@ -237,21 +249,42 @@ jobs:
       - name: Re-check selected raw files
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
           python -m neureptrace.openneuro_meg check-raw \
             --dataset "$DATASET" \
             --bids-root "$OPENNEURO_DATA_ROOT" \
             --subjects "$OPENNEURO_SUBJECTS" \
             --runs "$OPENNEURO_RUNS" \
             --validate-readable
+          status="$?"
+          if [[ "$status" -eq 0 ]]; then
+            exit 0
+          fi
+          if [[ "$SKIP_FAILED_SUBJECTS" == "true" ]]; then
+            echo "Some selected raw files are still missing or unreadable; resilient staging will skip failed subjects."
+            exit 0
+          fi
+          exit "$status"
 
       - name: Stage OpenNeuro MEG epochs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$OPENNEURO_OUTPUT_DIR"
+          stage_module="neureptrace.openneuro_meg"
+          extra_stage_args=()
+          if [[ "$SKIP_FAILED_SUBJECTS" == "true" ]]; then
+            stage_module="neureptrace.openneuro_resilient"
+            extra_stage_args+=(
+              --skip-failed-subjects
+              --min-successful-subjects "$MIN_SUCCESSFUL_SUBJECTS"
+              --failure-summary-out "$OPENNEURO_OUTPUT_DIR/stage_failures.csv"
+              --successful-subjects-out "$OPENNEURO_OUTPUT_DIR/successful_subjects.txt"
+              --github-env "$GITHUB_ENV"
+            )
+          fi
           # shellcheck disable=SC2086
-          python -m neureptrace.openneuro_meg stage \
+          python -m "$stage_module" stage \
             --dataset "$DATASET" \
             --bids-root "$OPENNEURO_DATA_ROOT" \
             --staged-dir "$NEUREPTRACE_OPENNEURO_STAGED_DIR" \
@@ -260,7 +293,8 @@ jobs:
             --summary-out "$OPENNEURO_OUTPUT_DIR/stage_summary.csv" \
             $OPENNEURO_MAX_EVENTS_ARG \
             --on-mismatch warn \
-            --overwrite
+            --overwrite \
+            "${extra_stage_args[@]}"
 
       - name: Run NeuRepTrace LOSO decode
         if: env.RUN_DECODE == 'true'
@@ -288,7 +322,7 @@ jobs:
           python -m neureptrace.decode_from_config "${args[@]}"
 
       - name: Summarize LOSO decode
-        if: env.RUN_DECODE == 'true'
+        if: ${{ always() && env.RUN_DECODE == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -298,25 +332,44 @@ jobs:
           import pandas as pd
 
           summary = Path(os.environ["OPENNEURO_OUTPUT_DIR"]) / "decode" / "time_decode_summary.csv"
+          if not summary.is_file() or summary.stat().st_size == 0:
+              print(f"No LOSO summary found at {summary}; skipping compact summary.")
+              raise SystemExit(0)
           frame = pd.read_csv(summary)
-          metrics = frame.groupby("time")[["accuracy", "balanced_accuracy", "top2_accuracy", "top3_accuracy", "log_loss", "brier", "ece"]].mean()
-          best_time = metrics["balanced_accuracy"].idxmax()
+          metric_columns = [
+              column
+              for column in ["accuracy", "balanced_accuracy", "top2_accuracy", "top3_accuracy", "log_loss", "brier", "ece"]
+              if column in frame.columns
+          ]
+          if frame.empty or "time" not in frame.columns or not metric_columns:
+              print(f"LOSO summary at {summary} has no summarizable metric rows.")
+              raise SystemExit(0)
+          metrics = frame.groupby("time")[metric_columns].mean(numeric_only=True)
+          best_time = metrics["balanced_accuracy"].idxmax() if "balanced_accuracy" in metrics.columns else metrics.index[0]
           print(metrics.loc[[best_time]].to_string())
           PY
 
       - name: Write LOSO diagnostics
-        if: env.RUN_DECODE == 'true'
+        if: ${{ always() && env.RUN_DECODE == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
+          observations="$OPENNEURO_OUTPUT_DIR/decode/observations.csv"
+          summary="$OPENNEURO_OUTPUT_DIR/decode/time_decode_summary.csv"
+          if [[ ! -s "$observations" || ! -s "$summary" ]]; then
+            echo "Skipping LOSO diagnostics because observations or summary output is missing."
+            exit 0
+          fi
           python -m neureptrace.loso_observation_diagnostics \
-            "$OPENNEURO_OUTPUT_DIR/decode/observations.csv" \
-            --summary-csv "$OPENNEURO_OUTPUT_DIR/decode/time_decode_summary.csv" \
+            "$observations" \
+            --summary-csv "$summary" \
             --stage-summary-csv "$OPENNEURO_OUTPUT_DIR/stage_summary.csv" \
             --out-dir "$OPENNEURO_OUTPUT_DIR/decode/diagnostics"
 
       - name: Upload OpenNeuro MEG outputs
+        if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
           name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}
           path: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}/**
+          if-no-files-found: warn
