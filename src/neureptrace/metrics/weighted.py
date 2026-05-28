@@ -74,11 +74,16 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
     return probabilities, labels
 
 
-def _validate_n_bins(n_bins: int) -> int:
-    n_bins = int(n_bins)
-    if n_bins < 1:
-        raise ValueError("n_bins must be positive")
-    return n_bins
+def _validate_positive_integer(value: object, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(numeric)
 
 
 def weighted_brier_score_multiclass(
@@ -125,9 +130,7 @@ def weighted_top_k_accuracy(
     """Compute weighted top-k classification accuracy."""
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
-    k = int(k)
-    if k < 1:
-        raise ValueError("k must be positive")
+    k = _validate_positive_integer(k, "k")
     if k >= probabilities.shape[1]:
         return 1.0
 
@@ -146,7 +149,7 @@ def weighted_expected_calibration_error(
     """Compute weighted top-label expected calibration error."""
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
-    n_bins = _validate_n_bins(n_bins)
+    n_bins = _validate_positive_integer(n_bins, "n_bins")
 
     predictions = probabilities.argmax(axis=1)
     confidences = probabilities.max(axis=1)
@@ -187,7 +190,7 @@ def weighted_reliability_bins(
     """
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
-    n_bins = _validate_n_bins(n_bins)
+    n_bins = _validate_positive_integer(n_bins, "n_bins")
 
     predictions = probabilities.argmax(axis=1)
     confidences = probabilities.max(axis=1)
