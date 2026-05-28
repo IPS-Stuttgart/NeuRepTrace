@@ -60,3 +60,10 @@ def test_openneuro_resilient_entry_points_are_exposed():
 
     assert scripts["neureptrace-openneuro-resilient"] == "neureptrace.openneuro_resilient:main"
     assert COMMAND_MODULES["openneuro-resilient"] == "neureptrace.openneuro_resilient"
+
+
+def test_emission_compare_entry_points_are_exposed():
+    scripts = _poetry_scripts()
+
+    assert scripts["neureptrace-emission-compare"] == "neureptrace.emission_compare:main"
+    assert COMMAND_MODULES["emission-compare"] == "neureptrace.emission_compare"

@@ -40,6 +40,10 @@ def test_grouped_cli_exposes_openneuro_helpers():
     assert cli.COMMAND_MODULES["openneuro-resilient"] == "neureptrace.openneuro_resilient"
 
 
+def test_grouped_cli_exposes_emission_comparison_helper():
+    assert cli.COMMAND_MODULES["emission-compare"] == "neureptrace.emission_compare"
+
+
 def test_poetry_scripts_expose_mne_decoder_variants():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject["tool"]["poetry"]["scripts"]
@@ -56,6 +60,13 @@ def test_poetry_scripts_expose_openneuro_helpers():
     assert scripts["neureptrace-openneuro-meg"] == "neureptrace.openneuro_meg:main"
     assert scripts["neureptrace-openneuro-diagnostics"] == "neureptrace.openneuro_decode_diagnostics:main"
     assert scripts["neureptrace-openneuro-resilient"] == "neureptrace.openneuro_resilient:main"
+
+
+def test_poetry_scripts_expose_emission_comparison_helper():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    scripts = pyproject["tool"]["poetry"]["scripts"]
+
+    assert scripts["neureptrace-emission-compare"] == "neureptrace.emission_compare:main"
 
 
 def test_primary_grouped_cli_commands_have_direct_console_scripts():
