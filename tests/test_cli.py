@@ -34,6 +34,12 @@ def test_grouped_cli_exposes_synthetic_fieldtrip_generator():
     assert cli.COMMAND_MODULES["synthetic-fieldtrip"] == "neureptrace.synthetic_fieldtrip"
 
 
+def test_grouped_cli_exposes_openneuro_helpers():
+    assert cli.COMMAND_MODULES["openneuro-meg"] == "neureptrace.openneuro_meg"
+    assert cli.COMMAND_MODULES["openneuro-diagnostics"] == "neureptrace.openneuro_decode_diagnostics"
+    assert cli.COMMAND_MODULES["openneuro-resilient"] == "neureptrace.openneuro_resilient"
+
+
 def test_poetry_scripts_expose_mne_decoder_variants():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject["tool"]["poetry"]["scripts"]
@@ -41,6 +47,15 @@ def test_poetry_scripts_expose_mne_decoder_variants():
     assert scripts["neureptrace-mne-time-decode"] == "neureptrace.mne_time_decode_foldlocal_cli:main"
     assert scripts["neureptrace-mne-time-decode-base"] == "neureptrace.mne_time_decode_cli:main"
     assert scripts["neureptrace-mne-time-decode-ensemble"] == "neureptrace.mne_time_decode_ensemble:main"
+
+
+def test_poetry_scripts_expose_openneuro_helpers():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    scripts = pyproject["tool"]["poetry"]["scripts"]
+
+    assert scripts["neureptrace-openneuro-meg"] == "neureptrace.openneuro_meg:main"
+    assert scripts["neureptrace-openneuro-diagnostics"] == "neureptrace.openneuro_decode_diagnostics:main"
+    assert scripts["neureptrace-openneuro-resilient"] == "neureptrace.openneuro_resilient:main"
 
 
 def test_primary_grouped_cli_commands_have_direct_console_scripts():
