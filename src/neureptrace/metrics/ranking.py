@@ -21,7 +21,7 @@ def rank_class_scores(
     rank summaries are undefined and returned as ``NaN``.
     """
 
-    y_true = np.asarray(y_true).ravel()
+    y_true = np.asarray(y_true, dtype=object).ravel()
     top_k = tuple(int(k) for k in top_k)
     row_top_k = int(row_top_k)
     if any(k < 1 for k in top_k):
@@ -35,7 +35,7 @@ def rank_class_scores(
         return _empty_class_rank_result(y_true, top_k)
 
     score_matrix = np.asarray(scores, dtype=float)
-    class_order = np.asarray(classes).ravel()
+    class_order = np.asarray(classes, dtype=object).ravel()
     if score_matrix.ndim != 2:
         raise ValueError("scores must be a two-dimensional matrix.")
     if score_matrix.shape[0] != y_true.shape[0]:
