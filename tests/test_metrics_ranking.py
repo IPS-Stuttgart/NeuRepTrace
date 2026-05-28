@@ -35,6 +35,24 @@ def test_rank_class_scores_reports_true_label_ranks_and_top_hits() -> None:
     }
 
 
+def test_rank_class_scores_matches_nan_class_labels() -> None:
+    result = rank_class_scores(
+        np.array(
+            [
+                [0.9, 0.1],
+                [0.2, 0.8],
+            ]
+        ),
+        [np.nan, "known"],
+        [np.nan, "known"],
+        top_k=(1,),
+    )
+
+    np.testing.assert_array_equal(result["true_label_ranks"], np.array([1.0, 1.0]))
+    assert result["top_k_accuracy"] == {1: pytest.approx(1.0)}
+    assert result["rows"][0]["true_label_score"] == pytest.approx(0.9)
+
+
 @pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])
 def test_rank_class_scores_rejects_nonfinite_scores(bad_value: float) -> None:
     scores = np.array([[0.5, bad_value]])
