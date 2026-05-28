@@ -32,6 +32,7 @@ RELIABILITY_BIN_NUMERIC_COLUMNS = RELIABILITY_BIN_REQUIRED_COLUMNS
 RELIABILITY_BIN_INTEGER_COLUMNS = ("bin", "n_samples")
 RELIABILITY_BIN_UNIT_INTERVAL_COLUMNS = ("bin_left", "bin_right", "accuracy", "confidence")
 RELIABILITY_BIN_OPTIONAL_EMPTY_COLUMNS = ("accuracy", "confidence")
+RELIABILITY_BIN_GROUP_COLUMNS = ("decoder", "emission_mode", "time")
 
 
 def _expand_paths(patterns: list[str]) -> list[Path]:
@@ -139,6 +140,31 @@ def summarize_calibration_metrics(
     return pd.DataFrame(rows).sort_values(["effect_ece_mean", "effect_brier_mean", "effect_log_loss_mean"]).reset_index(drop=True)
 
 
+def _validate_reliability_bin_layout(validated: pd.DataFrame, csv_path: Path) -> None:
+    optional_group_columns = [column for column in RELIABILITY_BIN_GROUP_COLUMNS if column in validated.columns]
+    group_items = validated.groupby(optional_group_columns, sort=True) if optional_group_columns else [("overall", validated)]
+    for _, group in group_items:
+        ordered = group.sort_values("bin", kind="mergesort")
+        if ordered["bin"].duplicated().any():
+            bad_rows = ordered.index[ordered["bin"].duplicated()].tolist()[:5]
+            raise ValueError(f"{csv_path} contains duplicate reliability-bin indices at row(s) {bad_rows}.")
+
+        left = ordered["bin_left"].to_numpy(dtype=float)
+        right = ordered["bin_right"].to_numpy(dtype=float)
+        if len(left) <= 1:
+            continue
+
+        overlap = left[1:] < right[:-1]
+        if overlap.any():
+            bad_rows = ordered.index[np.flatnonzero(overlap) + 1].tolist()[:5]
+            raise ValueError(f"{csv_path} contains overlapping reliability-bin intervals at row(s) {bad_rows}.")
+
+        gap = left[1:] > right[:-1]
+        if gap.any():
+            bad_rows = ordered.index[np.flatnonzero(gap) + 1].tolist()[:5]
+            raise ValueError(f"{csv_path} contains gaps between reliability-bin intervals at row(s) {bad_rows}.")
+
+
 def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFrame:
     missing = sorted(set(RELIABILITY_BIN_REQUIRED_COLUMNS).difference(frame.columns))
     if missing:
@@ -201,6 +227,8 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
     if (validated["bin_right"] < validated["bin_left"]).any():
         bad_rows = validated.index[validated["bin_right"] < validated["bin_left"]].tolist()[:5]
         raise ValueError(f"{csv_path} contains reliability bins with bin_right < bin_left at row(s) {bad_rows}.")
+
+    _validate_reliability_bin_layout(validated, csv_path)
 
     return validated
 
