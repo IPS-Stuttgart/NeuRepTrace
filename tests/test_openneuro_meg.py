@@ -81,11 +81,14 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "GitHub-hosted starts immediately" in workflow
     assert "OPENNEURO_ARTIFACT_SUFFIX" in workflow
     assert "OPENNEURO_OUTPUT_SUFFIX" in workflow
+    assert "run_manifest.json" in workflow
+    assert "OPENNEURO_CONFIG" in workflow
+    assert "artifact_name" in workflow
     assert "openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}" in workflow
     assert "outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ env.OPENNEURO_OUTPUT_SUFFIX }}/**" in workflow
     for dataset_id, config_name in OPENNEURO_DECODE_CONFIGS.items():
         assert f"- {dataset_id}" in workflow
-        assert f'{dataset_id}) CONFIG="configs/openneuro/{config_name}" ;;' in workflow
+        assert f'"{dataset_id}": "{config_name}"' in workflow
 
 
 def test_expected_relative_files_include_singsing_raw_and_events():
