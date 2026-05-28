@@ -21,7 +21,7 @@ def rank_class_scores(
     rank summaries are undefined and returned as ``NaN``.
     """
 
-    y_true = np.asarray(y_true).ravel()
+    y_true = np.asarray(y_true, dtype=object).ravel()
     top_k = tuple(int(k) for k in top_k)
     row_top_k = int(row_top_k)
     if any(k < 1 for k in top_k):
@@ -35,7 +35,7 @@ def rank_class_scores(
         return _empty_class_rank_result(y_true, top_k)
 
     score_matrix = np.asarray(scores, dtype=float)
-    class_order = np.asarray(classes).ravel()
+    class_order = np.asarray(classes, dtype=object).ravel()
     if score_matrix.ndim != 2:
         raise ValueError("scores must be a two-dimensional matrix.")
     if score_matrix.shape[0] != y_true.shape[0]:
@@ -56,13 +56,13 @@ def rank_class_scores(
     rows: list[dict[str, object]] = []
     for sample_index, truth in enumerate(y_true):
         ranked = class_order[order[sample_index]]
+        match = _matching_class_positions(ranked, truth)
         for k in top_k:
-            top_hits[k].append(bool(truth in ranked[:k]))
-        match = np.flatnonzero(ranked == truth)
+            top_hits[k].append(bool(match.size and match[0] < k))
         rank = float(match[0] + 1) if match.size else np.nan
         ranks.append(rank)
         row: dict[str, object] = {"true_label_rank": rank, "true_label_score": np.nan}
-        true_index = np.flatnonzero(class_order == truth)
+        true_index = _matching_class_positions(class_order, truth)
         if true_index.size:
             row["true_label_score"] = float(score_matrix[sample_index, true_index[0]])
         for position, class_index in enumerate(order[sample_index, :row_top_k], start=1):
@@ -103,6 +103,10 @@ def _finite_nanmedian(values: Sequence[float] | np.ndarray) -> float:
     return float(np.median(values)) if values.size else np.nan
 
 
+def _matching_class_positions(labels: np.ndarray, truth) -> np.ndarray:
+    return np.asarray([index for index, label in enumerate(labels) if _class_labels_equal(label, truth)], dtype=int)
+
+
 def _find_duplicate_class_label(class_order: np.ndarray):
     for index, label in enumerate(class_order):
         for previous_label in class_order[:index]:
@@ -115,7 +119,8 @@ def _class_labels_equal(left, right) -> bool:
     left = _as_python_scalar(left)
     right = _as_python_scalar(right)
     try:
-        return bool(left == right)
+        if bool(left == right):
+            return True
     except (TypeError, ValueError):
         pass
     try:
