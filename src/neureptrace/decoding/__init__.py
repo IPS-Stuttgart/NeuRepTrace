@@ -375,12 +375,12 @@ class TorchMLPClassifier(ClassifierMixin, BaseEstimator):
             train_idx, validation_idx = train_test_split(
                 indices,
                 test_size=float(self.validation_fraction),
-                random_state=self.random_state,
                 stratify=y,
+                random_state=self.random_state,
             )
         else:
             train_idx = indices
-            validation_idx = indices
+            validation_idx = np.array([], dtype=int)
 
         model = torch.nn.Sequential(
             torch.nn.Linear(x.shape[1], hidden_units),
@@ -388,144 +388,134 @@ class TorchMLPClassifier(ClassifierMixin, BaseEstimator):
             torch.nn.Dropout(float(self.dropout)),
             torch.nn.Linear(hidden_units, n_classes),
         )
-        if self.class_weight == "balanced":
-            train_counts = np.bincount(y[train_idx], minlength=n_classes).astype(np.float32)
-            weights = train_idx.shape[0] / np.maximum(train_counts, 1.0) / float(n_classes)
-            class_weights = torch.as_tensor(weights, dtype=torch.float32)
-        else:
-            class_weights = None
-        loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights)
-        optimizer = torch.optim.AdamW(
-            model.parameters(),
-            lr=float(self.learning_rate),
-            weight_decay=float(self.weight_decay),
-        )
+        optimizer = torch.optim.AdamW(model.parameters(), lr=float(self.learning_rate), weight_decay=float(self.weight_decay))
 
-        x_tensor = torch.from_numpy(x)
-        y_tensor = torch.from_numpy(y)
-        rng = np.random.default_rng(self.random_state)
-        best_loss = np.inf
+        class_weights = None
+        if self.class_weight == "balanced":
+            weights = y.shape[0] / (n_classes * np.maximum(class_counts, 1))
+            class_weights = torch.tensor(weights, dtype=torch.float32)
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+
+        x_tensor = torch.tensor(x, dtype=torch.float32)
+        y_tensor = torch.tensor(y, dtype=torch.long)
+
         best_state = None
-        patience_left = int(self.patience)
+        best_loss = float("inf")
+        stale_epochs = 0
+        rng = np.random.default_rng(self.random_state)
         for _epoch in range(max_iter):
             model.train()
-            epoch_indices = rng.permutation(train_idx)
-            for start in range(0, train_idx.shape[0], batch_size):
-                batch_idx = epoch_indices[start : start + batch_size]
-                optimizer.zero_grad(set_to_none=True)
-                loss = loss_fn(model(x_tensor[batch_idx]), y_tensor[batch_idx])
+            shuffled = np.array(train_idx, copy=True)
+            rng.shuffle(shuffled)
+            for start in range(0, shuffled.shape[0], batch_size):
+                batch_idx = shuffled[start : start + batch_size]
+                optimizer.zero_grad()
+                logits = model(x_tensor[batch_idx])
+                loss = criterion(logits, y_tensor[batch_idx])
                 loss.backward()
                 optimizer.step()
+
             model.eval()
             with torch.no_grad():
-                validation_loss = float(loss_fn(model(x_tensor[validation_idx]), y_tensor[validation_idx]).detach().cpu())
-            if validation_loss + 1e-6 < best_loss:
-                best_loss = validation_loss
-                best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-                patience_left = int(self.patience)
+                eval_idx = validation_idx if validation_idx.size else train_idx
+                val_loss = float(criterion(model(x_tensor[eval_idx]), y_tensor[eval_idx]).item())
+            if val_loss + 1e-7 < best_loss:
+                best_loss = val_loss
+                best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+                stale_epochs = 0
             else:
-                patience_left -= 1
-                if patience_left <= 0:
+                stale_epochs += 1
+                if validation_idx.size and stale_epochs >= int(self.patience):
                     break
 
         if best_state is not None:
             model.load_state_dict(best_state)
-        self.model_ = model.eval()
+        self.model_ = model
         self.n_features_in_ = x.shape[1]
         return self
 
-    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+    def _predict_logits(self, features: Sequence[Sequence[float]] | np.ndarray):
+        torch = self._torch()
         if not hasattr(self, "model_"):
             raise RuntimeError("TorchMLPClassifier must be fitted before prediction.")
-        torch = self._torch()
-        x = torch.as_tensor(np.asarray(features, dtype=np.float32))
+        x = np.asarray(features, dtype=np.float32)
+        if x.ndim != 2:
+            raise ValueError("TorchMLPClassifier expects a two-dimensional feature matrix.")
         self.model_.eval()
         with torch.no_grad():
-            logits = self.model_(x).detach().cpu().numpy()
-        if logits.shape[1] == 2:
-            return logits[:, 1] - logits[:, 0]
-        return logits
+            return self.model_(torch.tensor(x, dtype=torch.float32))
 
     def predict_proba(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-        if not hasattr(self, "model_"):
-            raise RuntimeError("TorchMLPClassifier must be fitted before prediction.")
         torch = self._torch()
-        x = torch.as_tensor(np.asarray(features, dtype=np.float32))
-        self.model_.eval()
-        with torch.no_grad():
-            probabilities = torch.softmax(self.model_(x), dim=1).detach().cpu().numpy()
-        return probabilities.astype(float, copy=False)
+        probabilities = torch.softmax(self._predict_logits(features), dim=1)
+        return probabilities.detach().cpu().numpy()
+
+    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        logits = self._predict_logits(features)
+        return logits.detach().cpu().numpy()
 
     def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-        return self.classes_[np.argmax(self.predict_proba(features), axis=1)]
+        probabilities = self.predict_proba(features)
+        return self.classes_[np.argmax(probabilities, axis=1)]
 
 
-class ECOCLinearSVC(ClassifierMixin, BaseEstimator):
-    """Output-code linear SVM with class-level decision scores.
+class ECOCLinearSVC(OutputCodeClassifier):
+    """Deterministic output-code linear SVM with probability-like emissions.
 
-    sklearn's ``OutputCodeClassifier`` exposes ``predict`` but not
-    ``decision_function``.  NeuRepTrace needs a score matrix so uncalibrated
-    emissions and ``CalibratedClassifierCV`` can produce probabilities.  This
-    wrapper converts binary code margins into negative distances to each class
-    code word.
+    ``OutputCodeClassifier`` is useful for many-class MEG decoding, but its
+    internal random codebook is otherwise a hidden source of run-to-run variation.
+    This subclass also exposes a score matrix aligned with ``classes_`` so
+    NeuRepTrace's generic emission conversion can be used for downstream state
+    inference.
     """
 
-    def __init__(
-        self,
-        C: float = 1.0,
-        code_size: float = 2.0,
-        max_iter: int = 1000,
-        class_weight: str | dict | None = "balanced",
-        random_state: int | None = 13,
-    ):
+    def __init__(self, C: float = 1.0, code_size: float = 1.5, max_iter: int = 1000, random_state: int | None = 13):
         self.C = C
         self.code_size = code_size
         self.max_iter = max_iter
-        self.class_weight = class_weight
         self.random_state = random_state
+        super().__init__(
+            estimator=LinearSVC(
+                class_weight="balanced",
+                C=C,
+                max_iter=max_iter,
+                random_state=random_state,
+            ),
+            code_size=code_size,
+            random_state=random_state,
+        )
 
-    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence | np.ndarray):
-        base = LinearSVC(
-            class_weight=self.class_weight,
-            C=float(self.C),
-            max_iter=int(self.max_iter),
+    def get_params(self, deep: bool = True):
+        return {
+            "C": self.C,
+            "code_size": self.code_size,
+            "max_iter": self.max_iter,
+            "random_state": self.random_state,
+        }
+
+    def set_params(self, **params):
+        for key, value in params.items():
+            setattr(self, key, value)
+        self.estimator = LinearSVC(
+            class_weight="balanced",
+            C=self.C,
+            max_iter=self.max_iter,
             random_state=self.random_state,
         )
-        self.model_ = OutputCodeClassifier(
-            base,
-            code_size=float(self.code_size),
-            random_state=self.random_state,
-        )
-        self.model_.fit(features, labels)
-        self.classes_ = np.asarray(self.model_.classes_)
+        self.estimator_ = self.estimator
+        return self
+
+    def fit(self, X, y, **fit_params):
+        super().fit(X, y, **fit_params)
+        self.classes_ = np.asarray(self.classes_)
         return self
 
     def _class_score_matrix(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-        if not hasattr(self, "model_"):
-            raise RuntimeError("ECOCLinearSVC must be fitted before prediction.")
-        binary_scores = []
-        for estimator in self.model_.estimators_:
-            if hasattr(estimator, "decision_function"):
-                scores = np.asarray(estimator.decision_function(features), dtype=float)
-                if scores.ndim > 1:
-                    scores = scores[:, -1]
-            else:
-                scores = np.asarray(estimator.predict(features), dtype=float)
-                scores = np.where(scores > 0, 1.0, -1.0)
-            binary_scores.append(scores)
-        code_scores = np.column_stack(binary_scores)
-        code_book = np.asarray(self.model_.code_book_, dtype=float)
-        distances = np.linalg.norm(code_scores[:, None, :] - code_book[None, :, :], axis=2)
-        return -distances
+        decisions = np.asarray(super().decision_function(features), dtype=float)
+        if decisions.ndim == 1:
+            return np.column_stack([-decisions, decisions])
+        return decisions
 
-    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-        class_scores = self._class_score_matrix(features)
-        if self.classes_.size == 2:
-            return class_scores[:, 1] - class_scores[:, 0]
-        return class_scores
-
-    def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-        return self.classes_[np.argmax(self._class_score_matrix(features), axis=1)]
 
 
 def _make_registry_decoder_pipeline(
@@ -556,10 +546,6 @@ def _registry_tuning_param_grid(name: str, c_grid: Sequence[float]) -> dict[str,
     if registry_name in {"random-forest", "gradient-boosting", "xgboost"}:
         return {"registrydecoder__classifier_param": (50, 100, 200)}
     return {}
-
-
-def _calibrated_param_grid(estimator, param_grid: dict[str, Sequence[Any]]) -> dict[str, Sequence[Any]]:
-    return {_calibrated_estimator_param(estimator, parameter): values for parameter, values in param_grid.items()}
 
 
 def make_logistic_decoder(
@@ -628,6 +614,7 @@ def make_decoder(
                 class_weight="balanced",
                 C=c_value,
                 max_iter=max_iter,
+                random_state=random_state,
                 solver="lbfgs",
             ),
         )
@@ -641,7 +628,7 @@ def make_decoder(
                 penalty="l1",
                 C=c_value,
                 max_iter=max_iter,
-                random_state=13,
+                random_state=random_state,
                 solver="saga",
             ),
         )
@@ -656,7 +643,7 @@ def make_decoder(
                 C=c_value,
                 l1_ratio=DEFAULT_ELASTIC_NET_L1_RATIO,
                 max_iter=max_iter,
-                random_state=13,
+                random_state=random_state,
                 solver="saga",
             ),
         )
@@ -685,6 +672,7 @@ def make_decoder(
             RidgeClassifier(
                 class_weight="balanced",
                 max_iter=max_iter,
+                random_state=random_state,
             ),
         )
         if emission_mode == "uncalibrated":
@@ -704,6 +692,7 @@ def make_decoder(
                 class_weight="balanced",
                 C=c_value,
                 max_iter=max_iter,
+                random_state=random_state,
             ),
         )
         if emission_mode == "uncalibrated":
@@ -813,6 +802,7 @@ def make_tuned_decoder(
             LogisticRegression(
                 class_weight="balanced",
                 max_iter=max_iter,
+                random_state=random_state,
                 solver="lbfgs",
             ),
         )
@@ -826,7 +816,7 @@ def make_tuned_decoder(
                 class_weight="balanced",
                 penalty="l1",
                 max_iter=max_iter,
-                random_state=13,
+                random_state=random_state,
                 solver="saga",
             ),
         )
@@ -841,7 +831,7 @@ def make_tuned_decoder(
                 penalty="elasticnet",
                 l1_ratio=DEFAULT_ELASTIC_NET_L1_RATIO,
                 max_iter=max_iter,
-                random_state=13,
+                random_state=random_state,
                 solver="saga",
             ),
         )
@@ -892,6 +882,7 @@ def make_tuned_decoder(
             RidgeClassifier(
                 class_weight="balanced",
                 max_iter=max_iter,
+                random_state=random_state,
             ),
         )
         if emission_mode == "uncalibrated":
@@ -908,6 +899,7 @@ def make_tuned_decoder(
             LinearSVC(
                 class_weight="balanced",
                 max_iter=max_iter,
+                random_state=random_state,
             ),
         )
         if emission_mode == "uncalibrated":
@@ -1251,118 +1243,113 @@ def _feature_preprocessor_steps(
     normalized = normalize_feature_preprocessor(feature_preprocessor)
     if normalized == "none":
         if pca_components is not None:
-            raise ValueError("pca_components can only be set when feature_preprocessor is 'pca', 'pca_whiten', 'anova_select', or 'pls_da'.")
+            raise ValueError("pca_components can only be set when feature_preprocessor is 'pca', 'pca_whiten', or 'pls_da'.")
         return []
+    if normalized == "pca":
+        return [PCA(n_components=normalize_pca_components(pca_components), whiten=False)]
+    if normalized == "pca_whiten":
+        return [PCA(n_components=normalize_pca_components(pca_components), whiten=True)]
     if normalized == "anova_select":
-        return [
-            SelectPercentile(
-                score_func=f_classif,
-                percentile=normalize_anova_select_percentile(pca_components),
-            )
-        ]
+        return [SelectPercentile(f_classif, percentile=normalize_anova_select_percentile(pca_components))]
     if normalized == "pls_da":
         return [PLSDiscriminantTransformer(n_components=normalize_pls_components(pca_components))]
-    return [
-        PCA(
-            n_components=normalize_pca_components(pca_components),
-            whiten=normalized == "pca_whiten",
-            svd_solver="full",
-        )
-    ]
+    raise ValueError(f"Unknown feature preprocessor '{feature_preprocessor}'.")
+
+
+def predict_emission_probabilities(
+    estimator,
+    features: np.ndarray,
+    *,
+    emission_mode: str = "calibrated",
+) -> np.ndarray:
+    """Return class probability emissions from a fitted estimator.
+
+    In calibrated mode, the estimator must expose ``predict_proba``. In
+    uncalibrated mode, margins are converted with a numerically stable softmax so
+    deterministic models such as LinearSVC and RidgeClassifier can be compared in
+    the same downstream state-inference code path without Platt scaling.
+    """
+    emission_mode = normalize_emission_mode(emission_mode)
+    if emission_mode == "calibrated" and hasattr(estimator, "predict_proba"):
+        probabilities = estimator.predict_proba(features)
+    elif hasattr(estimator, "decision_function"):
+        probabilities = score_to_probabilities(estimator.decision_function(features))
+    elif hasattr(estimator, "predict_proba"):
+        probabilities = estimator.predict_proba(features)
+    else:
+        raise AttributeError("Estimator must expose predict_proba or decision_function.")
+    return _normalize_probability_rows(probabilities)
 
 
 def score_to_probabilities(scores: np.ndarray) -> np.ndarray:
-    """Convert uncalibrated decision scores into pseudo-probability emissions."""
     scores = np.asarray(scores, dtype=float)
     if scores.ndim == 1:
-        clipped = np.clip(scores, -50.0, 50.0)
-        positive = 1.0 / (1.0 + np.exp(-clipped))
-        return np.column_stack([1.0 - positive, positive])
-    if scores.ndim != 2:
-        raise ValueError("Decision scores must be one- or two-dimensional.")
-    shifted = scores - scores.max(axis=1, keepdims=True)
-    exp_scores = np.exp(np.clip(shifted, -50.0, 50.0))
-    return exp_scores / exp_scores.sum(axis=1, keepdims=True)
+        scores = np.column_stack([-scores, scores])
+    scores = scores - np.max(scores, axis=1, keepdims=True)
+    probabilities = np.exp(scores)
+    return _normalize_probability_rows(probabilities)
 
 
-def predict_emission_probabilities(model, features: np.ndarray, *, emission_mode: str = "calibrated") -> np.ndarray:
-    """Predict calibrated probabilities or uncalibrated score-derived emissions."""
-    emission_mode = normalize_emission_mode(emission_mode)
-    if emission_mode == "uncalibrated" and hasattr(model, "decision_function"):
-        return score_to_probabilities(model.decision_function(features))
-    if hasattr(model, "predict_proba"):
-        probabilities = np.asarray(model.predict_proba(features), dtype=float)
-        if np.all(np.isfinite(probabilities)):
-            return probabilities
-        if hasattr(model, "predict") and hasattr(model, "classes_"):
-            predictions = np.asarray(model.predict(features))
-            model_classes = np.asarray(model.classes_)
-            fallback = np.zeros((len(predictions), len(model_classes)), dtype=float)
-            class_indices = {label: index for index, label in enumerate(model_classes)}
-            for row_index, label in enumerate(predictions):
-                fallback[row_index, class_indices[label]] = 1.0
-            invalid_rows = ~np.all(np.isfinite(probabilities), axis=1)
-            probabilities[invalid_rows] = fallback[invalid_rows]
-        return probabilities
-    if hasattr(model, "decision_function"):
-        return score_to_probabilities(model.decision_function(features))
-    raise ValueError("Decoder does not provide predict_proba or decision_function.")
+def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
+    probabilities = np.asarray(probabilities, dtype=float)
+    if probabilities.ndim != 2:
+        raise ValueError("Probability predictions must be a two-dimensional array.")
+    if probabilities.shape[1] < 2:
+        raise ValueError("Probability predictions must contain at least two class columns.")
+    probabilities = np.clip(probabilities, 0.0, None)
+    row_sums = probabilities.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0):
+        raise ValueError("Probability rows must have positive total mass.")
+    return probabilities / row_sums
 
 
-def make_cross_validator(labels: np.ndarray, groups: np.ndarray | None, n_splits: int):
-    """Create stratified CV splits, optionally preserving group boundaries."""
-    _, class_counts = np.unique(labels, return_counts=True)
-    if len(class_counts) < 2:
-        raise ValueError("Need at least two classes for decoding.")
-    if np.min(class_counts) < n_splits:
-        raise ValueError(
-            f"Need at least {n_splits} examples per class; smallest class has {np.min(class_counts)}."
-        )
-    if groups is not None:
-        unique_groups = np.unique(groups)
-        if len(unique_groups) < n_splits:
-            raise ValueError(
-                f"Need at least {n_splits} groups for grouped CV, found {len(unique_groups)}."
-            )
-        return StratifiedGroupKFold(n_splits=n_splits).split(
-            np.zeros_like(labels),
-            labels,
-            groups,
-        )
-    return StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=13).split(
-        np.zeros_like(labels),
-        labels,
-    )
-
-
-def make_tuning_cross_validator(labels: np.ndarray, groups: np.ndarray | None, n_splits: int):
-    """Create feasible inner-CV splits for nested decoder hyperparameter tuning."""
-    _, class_counts = np.unique(labels, return_counts=True)
-    if len(class_counts) < 2:
-        raise ValueError("Need at least two classes for decoder hyperparameter tuning.")
-    feasible_splits = min(int(n_splits), int(np.min(class_counts)))
-    if groups is not None:
-        feasible_splits = min(feasible_splits, len(np.unique(groups)))
-    if feasible_splits < 2:
-        raise ValueError("Need at least two examples per class and two groups when grouped to tune decoder hyperparameters.")
-    return list(make_cross_validator(labels, groups, feasible_splits))
-
-
-def time_windows(times: np.ndarray, window_ms: float, step_ms: float) -> list[tuple[int, int, float]]:
-    """Return sample index windows and their center times for time-resolved decoding."""
-    if times.ndim != 1:
-        raise ValueError("times must be one-dimensional")
-    if len(times) < 2:
-        raise ValueError("times must contain at least two samples")
-    if window_ms <= 0 or step_ms <= 0:
-        raise ValueError("window_ms and step_ms must be positive")
-
-    sfreq = 1000.0 / np.median(np.diff(times * 1000.0))
-    window_samples = max(1, int(round((window_ms / 1000.0) * sfreq)))
-    step_samples = max(1, int(round((step_ms / 1000.0) * sfreq)))
-    windows = []
-    for start in range(0, len(times) - window_samples + 1, step_samples):
-        stop = start + window_samples
-        center = float(np.mean(times[start:stop]))
-        windows.append((start, stop, center))
+def time_windows(times: Sequence[float], window_ms: float, step_ms: float) -> list[tuple[int, int, float]]:
+    """Generate sliding time windows over sample times."""
+    times_array = np.asarray(times, dtype=float)
+    if times_array.ndim != 1 or times_array.size == 0:
+        raise ValueError("times must be a non-empty one-dimensional sequence.")
+    window_s = float(window_ms) / 1000.0
+    step_s = float(step_ms) / 1000.0
+    if window_s <= 0 or step_s <= 0:
+        raise ValueError("window_ms and step_ms must be positive.")
+    start_time = float(times_array[0])
+    end_time = float(times_array[-1])
+    windows: list[tuple[int, int, float]] = []
+    current = start_time
+    tolerance = 1e-12
+    while current + window_s <= end_time + tolerance:
+        start = int(np.searchsorted(times_array, current, side="left"))
+        stop = int(np.searchsorted(times_array, current + window_s, side="left"))
+        if stop > start:
+            windows.append((start, stop, float((times_array[start] + times_array[stop - 1]) / 2.0)))
+        current += step_s
     return windows
+
+
+def make_cross_validator(labels: Sequence, groups: Sequence | None = None, n_splits: int = 5):
+    labels = np.asarray(labels)
+    if groups is not None:
+        groups = np.asarray(groups)
+        unique_groups = np.unique(groups)
+        n_splits = min(n_splits, len(unique_groups))
+        return StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=13).split(np.zeros_like(labels), labels, groups)
+    class_counts = np.bincount(labels.astype(int)) if np.issubdtype(labels.dtype, np.integer) else np.array([np.sum(labels == value) for value in np.unique(labels)])
+    n_splits = min(n_splits, int(class_counts.min()))
+    return StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=13).split(np.zeros_like(labels), labels)
+
+
+def make_tuning_cross_validator(labels: Sequence, groups: Sequence | None = None, n_splits: int = 3):
+    labels = np.asarray(labels)
+    if groups is not None:
+        groups = np.asarray(groups)
+        unique_groups = np.unique(groups)
+        feasible_splits = int(min(n_splits, len(unique_groups)))
+        if feasible_splits < 2:
+            raise ValueError("Grouped tuning CV requires at least two groups.")
+        return list(StratifiedGroupKFold(n_splits=feasible_splits, shuffle=True, random_state=13).split(np.zeros_like(labels), labels, groups))
+
+    class_counts = np.bincount(labels.astype(int)) if np.issubdtype(labels.dtype, np.integer) else np.array([np.sum(labels == value) for value in np.unique(labels)])
+    feasible_splits = int(min(n_splits, class_counts.min()))
+    if feasible_splits < 2:
+        raise ValueError("Tuning CV requires at least two samples per class.")
+    return list(StratifiedKFold(n_splits=feasible_splits, shuffle=True, random_state=13).split(np.zeros_like(labels), labels))
