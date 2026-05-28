@@ -35,6 +35,17 @@ def test_best_metric_rows_selects_maximized_and_minimized_metrics():
 def test_write_decode_diagnostics_handles_missing_decode_summary(tmp_path: Path):
     output_dir = tmp_path / "outputs" / "openneuro_ds006629_full"
     output_dir.mkdir(parents=True)
+    (output_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dataset": "ds006629",
+                "mode": "full",
+                "artifact_name": "openneuro-meg-ds006629-full",
+                "label_shuffle_control": "false",
+            }
+        ),
+        encoding="utf-8",
+    )
     pd.DataFrame(
         {
             "dataset_id": ["ds006629", "ds006629"],
@@ -57,16 +68,35 @@ def test_write_decode_diagnostics_handles_missing_decode_summary(tmp_path: Path)
 
     diagnostics_path = output_dir / "decode_diagnostics.json"
     best_path = output_dir / "decode_best_metrics.csv"
+    quality_path = output_dir / "workflow_quality_summary.csv"
     assert diagnostics_path.is_file()
     assert best_path.is_file()
+    assert quality_path.is_file()
     loaded = json.loads(diagnostics_path.read_text(encoding="utf-8"))
     assert loaded["stage_summary"]["subjects"] == ["sub-01", "sub-02"]
+    quality = pd.read_csv(quality_path)
+    assert quality.loc[0, "dataset"] == "ds006629"
+    assert quality.loc[0, "artifact_name"] == "openneuro-meg-ds006629-full"
+    assert not bool(quality.loc[0, "decode_summary_exists"])
 
 
 def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
     output_dir = tmp_path / "outputs" / "openneuro_ds006629_smoke"
     decode_dir = output_dir / "decode"
-    decode_dir.mkdir(parents=True)
+    diagnostics_dir = decode_dir / "diagnostics"
+    diagnostics_dir.mkdir(parents=True)
+    (output_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dataset": "ds006629",
+                "mode": "smoke",
+                "artifact_name": "openneuro-meg-ds006629-smoke-label-shuffle-seed-13",
+                "label_shuffle_control": "true",
+                "label_shuffle_seed": "13",
+            }
+        ),
+        encoding="utf-8",
+    )
     pd.DataFrame(
         {
             "time": [0.1, 0.2],
@@ -74,6 +104,20 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
             "log_loss": [0.9, 0.4],
         }
     ).to_csv(decode_dir / "time_decode_summary.csv", index=False)
+    pd.DataFrame(
+        {
+            "n_classes": [3],
+            "chance_accuracy": [1 / 3],
+            "top2_chance": [2 / 3],
+            "top3_chance": [1.0],
+            "top3_interpretation": ["automatic_ceiling"],
+            "fixed_time": [0.2],
+            "fixed_balanced_accuracy": [0.48],
+            "fixed_balanced_minus_chance": [0.1467],
+            "fixed_top2_accuracy": [0.8],
+            "subjects_fixed_above_chance": [14],
+        }
+    ).to_csv(diagnostics_dir / "quality_summary.csv", index=False)
 
     diagnostics, best = write_decode_diagnostics(output_dir)
 
@@ -82,6 +126,13 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
     assert diagnostics["decode_summary"]["n_times"] == 2
     assert set(best["selection_metric"]) == {"accuracy", "log_loss"}
     assert (output_dir / "decode_best_metrics.csv").is_file()
+    quality = pd.read_csv(output_dir / "workflow_quality_summary.csv")
+    assert bool(quality.loc[0, "label_shuffle_control"])
+    assert quality.loc[0, "n_classes"] == 3
+    assert quality.loc[0, "top3_interpretation"] == "automatic_ceiling"
+    assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(0.48)
+    assert quality.loc[0, "best_selection_metric"] == "accuracy"
+    assert quality.loc[0, "best_selection_value"] == pytest.approx(0.75)
 
 
 def test_main_strict_reports_missing_decode_summary(tmp_path: Path):
