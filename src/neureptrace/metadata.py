@@ -8,11 +8,10 @@ from typing import Pattern
 import pandas as pd
 
 
-def _non_empty_text(value: str, *, name: str) -> str:
-    text = str(value)
-    if text.strip() == "":
+def _non_empty_text(value: object, *, name: str) -> str:
+    if not isinstance(value, str) or value.strip() == "":
         raise ValueError(f"{name} must be a non-empty string.")
-    return text
+    return value
 
 
 def _compile_pattern(pattern: str, *, name: str, case_sensitive: bool) -> Pattern[str]:
