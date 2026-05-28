@@ -82,6 +82,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "manifest":
+        if args.workflow is not None and args.workflow not in spec.workflows:
+            available = ", ".join(sorted(spec.workflows)) or "<none>"
+            parser.error(f"Unknown workflow {args.workflow!r}; available workflows: {available}.")
         manifest = expand_manifest(spec, workflow=args.workflow, subjects=_parse_subject_arg(args.subjects), split=args.split, root=args.root)
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
