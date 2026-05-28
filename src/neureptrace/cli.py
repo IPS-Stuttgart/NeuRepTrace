@@ -29,6 +29,7 @@ COMMAND_MODULES = {
     "decode-from-config": "neureptrace.decode_from_config",
     "dataset-manifest": "neureptrace.dataset_manifest",
     "doctor": "neureptrace.doctor",
+    "emission-compare": "neureptrace.emission_compare",
     "env": "neureptrace.doctor",
     "epoch-transfer-decode": "neureptrace.epoch_transfer_decode",
     "ensemble-observations": "neureptrace.observation_ensemble",
