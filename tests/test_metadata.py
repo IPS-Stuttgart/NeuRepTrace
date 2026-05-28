@@ -75,3 +75,59 @@ def test_add_binary_label_rejects_existing_label_column():
             positive_pattern="face",
             label_column="condition",
         )
+
+
+def test_add_binary_label_rejects_empty_patterns():
+    metadata = pd.DataFrame({"category": ["face", "chair"]})
+
+    with pytest.raises(ValueError, match="positive_pattern must be a non-empty string"):
+        add_binary_label(
+            metadata,
+            source_column="category",
+            positive_pattern="",
+            label_column="condition",
+        )
+
+    with pytest.raises(ValueError, match="negative_pattern must be a non-empty string"):
+        add_binary_label(
+            metadata,
+            source_column="category",
+            positive_pattern="face",
+            negative_pattern="   ",
+            label_column="condition",
+        )
+
+
+def test_add_binary_label_rejects_invalid_regex():
+    metadata = pd.DataFrame({"category": ["face", "chair"]})
+
+    with pytest.raises(ValueError, match="positive_pattern must be a valid regular expression"):
+        add_binary_label(
+            metadata,
+            source_column="category",
+            positive_pattern="[",
+            label_column="condition",
+        )
+
+
+def test_add_binary_label_rejects_ambiguous_label_values():
+    metadata = pd.DataFrame({"category": ["face", "chair"]})
+
+    with pytest.raises(ValueError, match="positive_label must be a non-empty string"):
+        add_binary_label(
+            metadata,
+            source_column="category",
+            positive_pattern="face",
+            label_column="condition",
+            positive_label=" ",
+        )
+
+    with pytest.raises(ValueError, match="positive_label and negative_label must be distinct"):
+        add_binary_label(
+            metadata,
+            source_column="category",
+            positive_pattern="face",
+            label_column="condition",
+            positive_label="target",
+            negative_label="target",
+        )
