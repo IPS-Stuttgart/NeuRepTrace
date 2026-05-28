@@ -24,6 +24,7 @@ from neureptrace.observations import ProbabilityObservationTable, probability_co
 
 DEFAULT_CANDIDATE_COLUMN = "decoder"
 DEFAULT_WEIGHTING = "stacked"
+DEFAULT_POOLING = "linear"
 DEFAULT_TEMPERATURE = 0.02
 DEFAULT_MAX_ITER = 250
 DEFAULT_LEARNING_RATE = 0.25
@@ -31,6 +32,7 @@ DEFAULT_MIN_PROBABILITY = 1.0e-12
 DEFAULT_OUTPUT_DECODER = "source_oof_stacked_ensemble"
 DEFAULT_OUTPUT_EMISSION_MODE = "source_oof_stacked"
 WEIGHTING_MODES = {"uniform", "softmax", "stacked"}
+POOLING_MODES = {"auto", "linear", "log"}
 
 _BASE_ALIGNMENT_COLUMNS = (
     "subject",
@@ -60,6 +62,7 @@ class SourceOOFStackingFit:
     candidates: tuple[str, ...]
     weights: tuple[float, ...]
     weighting: str
+    pooling: str
     temperature: float | None
     source_oof_balanced_accuracy: float
     source_oof_log_loss: float
@@ -176,6 +179,26 @@ def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = D
     return probabilities / row_sums
 
 
+def _normalize_pooling(pooling: str, *, allow_auto: bool = True) -> str:
+    value = str(pooling).strip().lower().replace("-", "_")
+    aliases = {
+        "arithmetic": "linear",
+        "average": "linear",
+        "mixture": "linear",
+        "probability": "linear",
+        "geometric": "log",
+        "log_probability": "log",
+        "log_prob": "log",
+        "product": "log",
+    }
+    value = aliases.get(value, value)
+    allowed = POOLING_MODES if allow_auto else POOLING_MODES - {"auto"}
+    if value not in allowed:
+        suffix = "" if allow_auto else " after resolving 'auto'"
+        raise ValueError(f"Unknown pooling {pooling!r}{suffix}; choose one of {sorted(allowed)}.")
+    return value
+
+
 def align_probability_cube(
     observations: pd.DataFrame,
     *,
@@ -282,17 +305,20 @@ def fit_stacking_weights(
     labels: Sequence[int] | np.ndarray,
     *,
     n_classes: int | None = None,
+    pooling: str = DEFAULT_POOLING,
     max_iter: int = DEFAULT_MAX_ITER,
     learning_rate: float = DEFAULT_LEARNING_RATE,
     min_probability: float = DEFAULT_MIN_PROBABILITY,
 ) -> np.ndarray:
     """Fit non-negative candidate weights from source-only OOF probabilities.
 
-    The objective is class-balanced log loss on source OOF rows.  This mirrors
-    the useful PyMEGDec source-only stacking design while staying independent of
-    any specific dataset loader.
+    The objective is class-balanced log loss on source OOF rows.  Linear pooling
+    fits the historical arithmetic probability mixture.  Log pooling fits a
+    geometric probability pool, which rewards candidates that agree on the true
+    class while suppressing candidate-specific false-positive classes.
     """
 
+    pooling = _normalize_pooling(pooling, allow_auto=False)
     cube = np.asarray(probability_cube, dtype=float)
     labels = _integer_label_array(labels, name="labels")
     if cube.ndim != 3:
@@ -311,12 +337,22 @@ def fit_stacking_weights(
 
     cube = np.stack([_renormalize_probabilities(candidate, min_probability=min_probability) for candidate in cube], axis=0)
     true_probabilities = cube[:, np.arange(n_samples), labels]
+    log_cube = np.log(cube)
+    true_log_probabilities = log_cube[:, np.arange(n_samples), labels]
     sample_weights = class_balanced_sample_weights(labels, n_classes=int(n_classes))
     weights = np.full(n_candidates, 1.0 / float(n_candidates), dtype=float)
 
     for iteration in range(max(1, int(max_iter))):
-        denominator = np.clip(weights @ true_probabilities, float(min_probability), 1.0)
-        gradient = -np.average(true_probabilities / denominator[None, :], axis=1, weights=sample_weights)
+        if pooling == "linear":
+            denominator = np.clip(weights @ true_probabilities, float(min_probability), 1.0)
+            gradient = -np.average(true_probabilities / denominator[None, :], axis=1, weights=sample_weights)
+        else:
+            pooled_log = np.tensordot(weights, log_cube, axes=(0, 0))
+            pooled_log -= pooled_log.max(axis=1, keepdims=True)
+            combined = np.exp(pooled_log)
+            combined /= combined.sum(axis=1, keepdims=True)
+            expected_log_probabilities = np.einsum("nc,inc->in", combined, log_cube)
+            gradient = np.average(expected_log_probabilities - true_log_probabilities, axis=1, weights=sample_weights)
         gradient -= float(np.dot(gradient, weights))
         step = float(learning_rate) / np.sqrt(float(iteration + 1))
         updated = weights * np.exp(np.clip(-step * gradient, -50.0, 50.0))
@@ -327,9 +363,16 @@ def fit_stacking_weights(
     return weights / float(weights.sum())
 
 
-def combine_probability_cube(probability_cube: np.ndarray, weights: Sequence[float], *, min_probability: float = DEFAULT_MIN_PROBABILITY) -> np.ndarray:
+def combine_probability_cube(
+    probability_cube: np.ndarray,
+    weights: Sequence[float],
+    *,
+    pooling: str = DEFAULT_POOLING,
+    min_probability: float = DEFAULT_MIN_PROBABILITY,
+) -> np.ndarray:
     """Return the weighted, row-normalized probability matrix for a candidate cube."""
 
+    pooling = _normalize_pooling(pooling, allow_auto=False)
     cube = np.asarray(probability_cube, dtype=float)
     weights_array = np.asarray(weights, dtype=float).reshape(-1)
     if cube.ndim != 3:
@@ -340,41 +383,34 @@ def combine_probability_cube(probability_cube: np.ndarray, weights: Sequence[flo
         raise ValueError("weights must be finite non-negative values with positive sum.")
     weights_array = weights_array / float(weights_array.sum())
     normalized = np.stack([_renormalize_probabilities(candidate, min_probability=min_probability) for candidate in cube], axis=0)
-    return _renormalize_probabilities(np.tensordot(weights_array, normalized, axes=(0, 0)), min_probability=min_probability)
+    if pooling == "linear":
+        pooled = np.tensordot(weights_array, normalized, axes=(0, 0))
+    else:
+        pooled_log = np.tensordot(weights_array, np.log(normalized), axes=(0, 0))
+        pooled_log -= pooled_log.max(axis=1, keepdims=True)
+        pooled = np.exp(pooled_log)
+    return _renormalize_probabilities(pooled, min_probability=min_probability)
 
 
 def _candidate_balanced_scores(probability_cube: np.ndarray, labels: np.ndarray) -> np.ndarray:
     return np.asarray([balanced_accuracy_score(labels, candidate.argmax(axis=1)) for candidate in probability_cube], dtype=float)
 
 
-def fit_source_oof_stacking(
-    source_probability_cube: np.ndarray,
-    source_labels: Sequence[int] | np.ndarray,
+def _fixed_pooling_fit(
+    cube: np.ndarray,
+    labels: np.ndarray,
     *,
     candidates: Sequence[str],
-    weighting: str = DEFAULT_WEIGHTING,
-    temperature: float | None = DEFAULT_TEMPERATURE,
-    max_iter: int = DEFAULT_MAX_ITER,
-    learning_rate: float = DEFAULT_LEARNING_RATE,
-    min_probability: float = DEFAULT_MIN_PROBABILITY,
+    weighting: str,
+    pooling: str,
+    temperature: float | None,
+    max_iter: int,
+    learning_rate: float,
+    min_probability: float,
 ) -> SourceOOFStackingFit:
-    """Fit source-only ensemble weights and report source-OOF diagnostics."""
+    """Fit weights for one concrete pooling rule."""
 
-    weighting = str(weighting).strip().lower().replace("-", "_")
-    if weighting not in WEIGHTING_MODES:
-        raise ValueError(f"Unknown weighting {weighting!r}; choose one of {sorted(WEIGHTING_MODES)}.")
-    cube = np.asarray(source_probability_cube, dtype=float)
-    labels = _integer_label_array(source_labels, name="source_labels")
-    if cube.ndim != 3:
-        raise ValueError("source_probability_cube must have shape (n_candidates, n_samples, n_classes).")
-    n_candidates, n_samples, n_classes = cube.shape
-    if len(candidates) != n_candidates:
-        raise ValueError("candidates must contain one name per probability-cube candidate.")
-    if labels.shape[0] != n_samples:
-        raise ValueError("source_labels must contain one label per probability row.")
-    if np.any(labels < 0) or np.any(labels >= int(n_classes)):
-        raise ValueError("source_labels must be integer class positions compatible with source_probability_cube.")
-
+    n_candidates, _, n_classes = cube.shape
     if weighting == "uniform" or n_candidates == 1:
         weights = np.full(n_candidates, 1.0 / float(n_candidates), dtype=float)
         used_temperature = None
@@ -387,9 +423,17 @@ def fit_source_oof_stacking(
         weights = weights / float(weights.sum())
     else:
         used_temperature = None
-        weights = fit_stacking_weights(cube, labels, n_classes=n_classes, max_iter=max_iter, learning_rate=learning_rate, min_probability=min_probability)
+        weights = fit_stacking_weights(
+            cube,
+            labels,
+            n_classes=n_classes,
+            pooling=pooling,
+            max_iter=max_iter,
+            learning_rate=learning_rate,
+            min_probability=min_probability,
+        )
 
-    combined = combine_probability_cube(cube, weights, min_probability=min_probability)
+    combined = combine_probability_cube(cube, weights, pooling=pooling, min_probability=min_probability)
     try:
         source_log_loss = float(log_loss(labels, combined, labels=list(range(n_classes))))
     except ValueError:
@@ -398,10 +442,66 @@ def fit_source_oof_stacking(
         candidates=tuple(str(candidate) for candidate in candidates),
         weights=tuple(float(weight) for weight in weights),
         weighting=weighting,
+        pooling=pooling,
         temperature=used_temperature,
         source_oof_balanced_accuracy=float(balanced_accuracy_score(labels, combined.argmax(axis=1))),
         source_oof_log_loss=source_log_loss,
     )
+
+
+def _source_oof_fit_key(fit: SourceOOFStackingFit) -> tuple[float, float, int]:
+    loss = fit.source_oof_log_loss
+    finite_loss = loss if np.isfinite(loss) else float("inf")
+    pooling_tiebreak = 0 if fit.pooling == "linear" else 1
+    return finite_loss, -fit.source_oof_balanced_accuracy, pooling_tiebreak
+
+
+def fit_source_oof_stacking(
+    source_probability_cube: np.ndarray,
+    source_labels: Sequence[int] | np.ndarray,
+    *,
+    candidates: Sequence[str],
+    weighting: str = DEFAULT_WEIGHTING,
+    pooling: str = DEFAULT_POOLING,
+    temperature: float | None = DEFAULT_TEMPERATURE,
+    max_iter: int = DEFAULT_MAX_ITER,
+    learning_rate: float = DEFAULT_LEARNING_RATE,
+    min_probability: float = DEFAULT_MIN_PROBABILITY,
+) -> SourceOOFStackingFit:
+    """Fit source-only ensemble weights and report source-OOF diagnostics."""
+
+    weighting = str(weighting).strip().lower().replace("-", "_")
+    if weighting not in WEIGHTING_MODES:
+        raise ValueError(f"Unknown weighting {weighting!r}; choose one of {sorted(WEIGHTING_MODES)}.")
+    pooling = _normalize_pooling(pooling)
+    cube = np.asarray(source_probability_cube, dtype=float)
+    labels = _integer_label_array(source_labels, name="source_labels")
+    if cube.ndim != 3:
+        raise ValueError("source_probability_cube must have shape (n_candidates, n_samples, n_classes).")
+    n_candidates, n_samples, n_classes = cube.shape
+    if len(candidates) != n_candidates:
+        raise ValueError("candidates must contain one name per probability-cube candidate.")
+    if labels.shape[0] != n_samples:
+        raise ValueError("source_labels must contain one label per probability row.")
+    if np.any(labels < 0) or np.any(labels >= int(n_classes)):
+        raise ValueError("source_labels must be integer class positions compatible with source_probability_cube.")
+
+    pooling_candidates = ("linear", "log") if pooling == "auto" else (pooling,)
+    fits = [
+        _fixed_pooling_fit(
+            cube,
+            labels,
+            candidates=candidates,
+            weighting=weighting,
+            pooling=pooling_candidate,
+            temperature=temperature,
+            max_iter=max_iter,
+            learning_rate=learning_rate,
+            min_probability=min_probability,
+        )
+        for pooling_candidate in pooling_candidates
+    ]
+    return min(fits, key=_source_oof_fit_key)
 
 
 def _predicted_classes(base: pd.DataFrame, predicted_labels: np.ndarray) -> list[str]:
@@ -423,6 +523,7 @@ def stack_probability_observations(
     candidates: Sequence[str] | None = None,
     alignment_columns: Sequence[str] | None = None,
     weighting: str = DEFAULT_WEIGHTING,
+    pooling: str = DEFAULT_POOLING,
     temperature: float | None = DEFAULT_TEMPERATURE,
     max_iter: int = DEFAULT_MAX_ITER,
     learning_rate: float = DEFAULT_LEARNING_RATE,
@@ -465,12 +566,13 @@ def stack_probability_observations(
         source.label_positions,
         candidates=source.candidates,
         weighting=weighting,
+        pooling=pooling,
         temperature=temperature,
         max_iter=max_iter,
         learning_rate=learning_rate,
         min_probability=min_probability,
     )
-    probabilities = combine_probability_cube(target.cube, fit.weights, min_probability=min_probability)
+    probabilities = combine_probability_cube(target.cube, fit.weights, pooling=fit.pooling, min_probability=min_probability)
     output = target.base.copy()
     label_values = target.label_values
     predicted_positions = probabilities.argmax(axis=1)
@@ -510,6 +612,7 @@ def stack_probability_observations(
     output["source_oof_candidates"] = "|".join(fit.candidates)
     output["source_oof_weights"] = "|".join(f"{weight:.12g}" for weight in fit.weights)
     output["source_oof_weighting"] = fit.weighting
+    output["source_oof_pooling"] = fit.pooling
     output["source_oof_temperature"] = "" if fit.temperature is None else fit.temperature
     output["source_oof_balanced_accuracy"] = fit.source_oof_balanced_accuracy
     output["source_oof_log_loss"] = fit.source_oof_log_loss
@@ -521,6 +624,7 @@ def stack_probability_observations(
             "candidates": list(fit.candidates),
             "weights": list(fit.weights),
             "weighting": fit.weighting,
+            "pooling": fit.pooling,
             "temperature": fit.temperature,
             "alignment_columns": list(target.alignment_columns),
             "min_probability": min_probability,
@@ -559,6 +663,7 @@ def summarize_stacked_metrics(observations: pd.DataFrame) -> pd.DataFrame:
                 "source_oof_candidates": str(group.iloc[0].get("source_oof_candidates", "")),
                 "source_oof_weights": str(group.iloc[0].get("source_oof_weights", "")),
                 "source_oof_weighting": str(group.iloc[0].get("source_oof_weighting", "")),
+                "source_oof_pooling": str(group.iloc[0].get("source_oof_pooling", "")),
                 "source_oof_balanced_accuracy": group.iloc[0].get("source_oof_balanced_accuracy", ""),
                 "source_oof_log_loss": group.iloc[0].get("source_oof_log_loss", ""),
             }
@@ -597,9 +702,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--candidate-column", default=DEFAULT_CANDIDATE_COLUMN, help="Column identifying base candidates/decoders. Defaults to decoder.")
     parser.add_argument("--candidate", action="append", dest="candidates", help="Candidate/decoder to include. May be repeated; defaults to order in source rows.")
     parser.add_argument(
-        "--alignment-column", action="append", dest="alignment_columns", help="Column used to align candidates. May be repeated; defaults to canonical observation keys."
+        "--alignment-column",
+        action="append",
+        dest="alignment_columns",
+        help="Column used to align candidates. May be repeated; defaults to canonical observation keys.",
     )
     parser.add_argument("--weighting", choices=sorted(WEIGHTING_MODES), default=DEFAULT_WEIGHTING)
+    parser.add_argument(
+        "--pooling",
+        choices=sorted(POOLING_MODES),
+        default=DEFAULT_POOLING,
+        help="Probability pooling rule. 'linear' preserves the historical arithmetic mixture; 'log' uses geometric pooling; 'auto' selects by source-OOF log loss.",
+    )
     parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE, help="Softmax weighting temperature.")
     parser.add_argument("--max-iter", type=int, default=DEFAULT_MAX_ITER, help="Projected-gradient iterations for stacked weighting.")
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE)
@@ -618,6 +732,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             candidates=args.candidates,
             alignment_columns=args.alignment_columns,
             weighting=args.weighting,
+            pooling=args.pooling,
             temperature=args.temperature,
             max_iter=args.max_iter,
             learning_rate=args.learning_rate,
