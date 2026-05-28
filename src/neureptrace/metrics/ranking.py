@@ -56,13 +56,13 @@ def rank_class_scores(
     rows: list[dict[str, object]] = []
     for sample_index, truth in enumerate(y_true):
         ranked = class_order[order[sample_index]]
+        match = _matching_class_positions(ranked, truth)
         for k in top_k:
-            top_hits[k].append(bool(truth in ranked[:k]))
-        match = np.flatnonzero(ranked == truth)
+            top_hits[k].append(bool(match.size and match[0] < k))
         rank = float(match[0] + 1) if match.size else np.nan
         ranks.append(rank)
         row: dict[str, object] = {"true_label_rank": rank, "true_label_score": np.nan}
-        true_index = np.flatnonzero(class_order == truth)
+        true_index = _matching_class_positions(class_order, truth)
         if true_index.size:
             row["true_label_score"] = float(score_matrix[sample_index, true_index[0]])
         for position, class_index in enumerate(order[sample_index, :row_top_k], start=1):
@@ -101,6 +101,10 @@ def _finite_nanmedian(values: Sequence[float] | np.ndarray) -> float:
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
     return float(np.median(values)) if values.size else np.nan
+
+
+def _matching_class_positions(labels: np.ndarray, truth) -> np.ndarray:
+    return np.asarray([index for index, label in enumerate(labels) if _class_labels_equal(label, truth)], dtype=int)
 
 
 def _find_duplicate_class_label(class_order: np.ndarray):
