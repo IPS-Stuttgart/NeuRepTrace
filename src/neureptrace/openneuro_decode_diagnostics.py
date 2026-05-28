@@ -12,12 +12,71 @@ import pandas as pd
 
 METRIC_COLUMNS = ("balanced_accuracy", "accuracy", "top2_accuracy", "top3_accuracy", "log_loss", "brier", "ece")
 MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
+NULL_CHANCE_TOLERANCE = 0.03
+POSITIVE_CHANCE_MARGIN = 0.05
 
 
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if pd.isna(value):
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _as_float(value: Any) -> float | None:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric):
+        return None
+    return float(numeric)
+
+
+def _as_int(value: Any) -> int | None:
+    numeric = _as_float(value)
+    return None if numeric is None else int(numeric)
+
+
+def _quality_decision(
+    *,
+    decode_summary_exists: bool,
+    quality_summary_exists: bool,
+    label_shuffle_control: bool,
+    fixed_balanced_minus_chance: Any,
+    subjects_fixed_above_chance: Any,
+    n_subjects: Any,
+) -> str:
+    if not decode_summary_exists:
+        return "missing_decode_summary"
+    if not quality_summary_exists:
+        return "missing_quality_summary"
+
+    delta = _as_float(fixed_balanced_minus_chance)
+    if delta is None:
+        return "missing_fixed_balanced_delta"
+
+    if label_shuffle_control:
+        if abs(delta) <= NULL_CHANCE_TOLERANCE:
+            return "null_near_chance"
+        if delta > NULL_CHANCE_TOLERANCE:
+            return "null_above_chance"
+        return "null_below_chance"
+
+    subjects_above = _as_int(subjects_fixed_above_chance)
+    subject_count = _as_int(n_subjects)
+    majority_above = subjects_above is not None and subject_count is not None and subjects_above > subject_count / 2.0
+    if delta >= POSITIVE_CHANCE_MARGIN and majority_above:
+        return "promising_above_chance_consistent"
+    if delta >= POSITIVE_CHANCE_MARGIN:
+        return "promising_above_chance"
+    if delta > 0:
+        return "weak_above_chance"
+    return "not_above_chance"
 
 
 def _relative_files(root: Path, *, max_files: int = 200) -> list[str]:
@@ -108,6 +167,18 @@ def workflow_quality_summary(
     best = best_by_metric.loc[preferred_metric].to_dict() if has_best_metric else {}
     stage_summary = diagnostics.get("stage_summary", {})
     decode_summary = diagnostics.get("decode_summary", {})
+    decode_summary_exists = bool(decode_summary.get("exists", False))
+    quality_summary_exists = bool(quality_path.is_file())
+    n_subjects = stage_summary.get("n_subjects", manifest.get("n_subjects", ""))
+    label_shuffle_control = _as_bool(manifest.get("label_shuffle_control", ""))
+    quality_decision = _quality_decision(
+        decode_summary_exists=decode_summary_exists,
+        quality_summary_exists=quality_summary_exists,
+        label_shuffle_control=label_shuffle_control,
+        fixed_balanced_minus_chance=quality.get("fixed_balanced_minus_chance", ""),
+        subjects_fixed_above_chance=quality.get("subjects_fixed_above_chance", ""),
+        n_subjects=n_subjects,
+    )
 
     return pd.DataFrame(
         [
@@ -122,14 +193,17 @@ def workflow_quality_summary(
                 "subjects": manifest.get("subjects", ""),
                 "runs": manifest.get("runs", ""),
                 "n_subjects_requested": manifest.get("n_subjects", ""),
-                "n_subjects_staged": stage_summary.get("n_subjects", ""),
+                "n_subjects_staged": n_subjects,
                 "total_trials_staged": stage_summary.get("total_trials", ""),
-                "label_shuffle_control": manifest.get("label_shuffle_control", ""),
+                "label_shuffle_control": label_shuffle_control,
                 "label_shuffle_seed": manifest.get("label_shuffle_seed", ""),
                 "time_decode_backend": manifest.get("time_decode_backend", ""),
                 "decoder_override": manifest.get("decoder_override", ""),
-                "decode_summary_exists": bool(decode_summary.get("exists", False)),
-                "quality_summary_exists": bool(quality_path.is_file()),
+                "decode_summary_exists": decode_summary_exists,
+                "quality_summary_exists": quality_summary_exists,
+                "quality_decision": quality_decision,
+                "null_chance_tolerance": NULL_CHANCE_TOLERANCE,
+                "positive_chance_margin": POSITIVE_CHANCE_MARGIN,
                 "n_classes": quality.get("n_classes", ""),
                 "chance_accuracy": quality.get("chance_accuracy", ""),
                 "top2_chance": quality.get("top2_chance", ""),

@@ -78,6 +78,7 @@ def test_write_decode_diagnostics_handles_missing_decode_summary(tmp_path: Path)
     assert quality.loc[0, "dataset"] == "ds006629"
     assert quality.loc[0, "artifact_name"] == "openneuro-meg-ds006629-full"
     assert not bool(quality.loc[0, "decode_summary_exists"])
+    assert quality.loc[0, "quality_decision"] == "missing_decode_summary"
 
 
 def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
@@ -112,8 +113,8 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
             "top3_chance": [1.0],
             "top3_interpretation": ["automatic_ceiling"],
             "fixed_time": [0.2],
-            "fixed_balanced_accuracy": [0.48],
-            "fixed_balanced_minus_chance": [0.1467],
+            "fixed_balanced_accuracy": [0.34],
+            "fixed_balanced_minus_chance": [0.0067],
             "fixed_top2_accuracy": [0.8],
             "subjects_fixed_above_chance": [14],
         }
@@ -129,8 +130,10 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
     quality = pd.read_csv(output_dir / "workflow_quality_summary.csv")
     assert bool(quality.loc[0, "label_shuffle_control"])
     assert quality.loc[0, "n_classes"] == 3
+    assert quality.loc[0, "quality_decision"] == "null_near_chance"
+    assert quality.loc[0, "null_chance_tolerance"] == pytest.approx(0.03)
     assert quality.loc[0, "top3_interpretation"] == "automatic_ceiling"
-    assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(0.48)
+    assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(0.34)
     assert quality.loc[0, "best_selection_metric"] == "accuracy"
     assert quality.loc[0, "best_selection_value"] == pytest.approx(0.75)
 
