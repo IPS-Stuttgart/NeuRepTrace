@@ -76,6 +76,9 @@ def test_expected_relative_files_cover_default_subjects_runs_and_sidecars(datase
 def test_openneuro_workflow_exposes_every_configured_dataset():
     workflow = (REPO_ROOT / ".github" / "workflows" / "openneuro-meg-loso.yml").read_text(encoding="utf-8")
 
+    assert "run-name: OpenNeuro MEG LOSO" in workflow
+    assert "default: github-hosted" in workflow
+    assert "GitHub-hosted starts immediately" in workflow
     for dataset_id, config_name in OPENNEURO_DECODE_CONFIGS.items():
         assert f"- {dataset_id}" in workflow
         assert f'{dataset_id}) CONFIG="configs/openneuro/{config_name}" ;;' in workflow
