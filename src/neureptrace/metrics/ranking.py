@@ -119,7 +119,8 @@ def _class_labels_equal(left, right) -> bool:
     left = _as_python_scalar(left)
     right = _as_python_scalar(right)
     try:
-        return bool(left == right)
+        if bool(left == right):
+            return True
     except (TypeError, ValueError):
         pass
     try:
