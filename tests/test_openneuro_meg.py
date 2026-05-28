@@ -82,8 +82,10 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "OPENNEURO_ARTIFACT_SUFFIX" in workflow
     assert "OPENNEURO_OUTPUT_SUFFIX" in workflow
     assert "run_manifest.json" in workflow
+    assert "workflow_quality_summary.csv" in workflow
     assert "OPENNEURO_CONFIG" in workflow
     assert "artifact_name" in workflow
+    assert "python -m neureptrace.openneuro_decode_diagnostics" in workflow
     assert "openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}" in workflow
     assert "outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ env.OPENNEURO_OUTPUT_SUFFIX }}/**" in workflow
     for dataset_id, config_name in OPENNEURO_DECODE_CONFIGS.items():

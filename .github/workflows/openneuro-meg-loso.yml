@@ -407,6 +407,17 @@ jobs:
             --stage-summary-csv "$OPENNEURO_OUTPUT_DIR/stage_summary.csv" \
             --out-dir "$OPENNEURO_OUTPUT_DIR/decode/diagnostics"
 
+      - name: Write OpenNeuro workflow summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m neureptrace.openneuro_decode_diagnostics \
+            "$OPENNEURO_OUTPUT_DIR" \
+            --diagnostics-out "$OPENNEURO_OUTPUT_DIR/decode_diagnostics.json" \
+            --best-out "$OPENNEURO_OUTPUT_DIR/decode_best_metrics.csv" \
+            --quality-out "$OPENNEURO_OUTPUT_DIR/workflow_quality_summary.csv"
+
       - name: Upload OpenNeuro MEG outputs
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
