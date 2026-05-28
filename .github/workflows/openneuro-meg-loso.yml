@@ -98,6 +98,7 @@ jobs:
       OPENNEURO_API_KEY: ${{ secrets.OPENNEURO_API_KEY }}
       DATASET: ${{ inputs.dataset }}
       MODE: ${{ inputs.mode }}
+      RUNNER_TYPE: ${{ inputs.runner_type }}
       SUBJECTS_INPUT: ${{ inputs.subjects }}
       RUNS_INPUT: ${{ inputs.runs }}
       DATA_ROOT_INPUT: ${{ inputs.data_root }}
@@ -150,6 +151,7 @@ jobs:
           python - <<'PY'
           from __future__ import annotations
 
+          import json
           import os
           from pathlib import Path
 
@@ -158,6 +160,11 @@ jobs:
           dataset = os.environ["DATASET"]
           mode = os.environ["MODE"]
           spec = DATASET_SPECS[dataset]
+          config_names = {
+              "ds004276": "ds004276_words.yml",
+              "ds006629": "ds006629_singsing.yml",
+              "ds004330": "ds004330_object_drawing.yml",
+          }
           smoke_defaults = {
               "ds004276": ("1-2", "all"),
               "ds006629": ("1,2", "0"),
@@ -165,6 +172,7 @@ jobs:
           }
           subjects = os.environ.get("SUBJECTS_INPUT") or (smoke_defaults[dataset][0] if mode == "smoke" else "all")
           runs = os.environ.get("RUNS_INPUT") or (smoke_defaults[dataset][1] if mode == "smoke" else "all")
+          parsed_runs = parse_runs(spec, runs)
           subject_count = len(parse_subjects(spec, subjects))
           max_events = int(os.environ["MAX_EVENTS_PER_LABEL_INPUT"])
           if max_events <= 0:
@@ -182,6 +190,8 @@ jobs:
           staged_root = Path(os.environ.get("STAGED_ROOT_INPUT") or openneuro_cache_root / "staged-epochs")
           output_suffix = os.environ.get("OPENNEURO_OUTPUT_SUFFIX", "")
           output_dir = Path("outputs") / f"openneuro_{dataset}_{mode}{output_suffix}"
+          config_path = f"configs/openneuro/{config_names[dataset]}"
+          artifact_name = f"openneuro-meg-{dataset}-{mode}{os.environ.get('OPENNEURO_ARTIFACT_SUFFIX', '')}"
           env_path = Path(os.environ["GITHUB_ENV"])
           with env_path.open("a", encoding="utf-8") as handle:
               handle.write(f"OPENNEURO_SUBJECTS={subjects}\n")
@@ -192,14 +202,47 @@ jobs:
               handle.write(f"NEUREPTRACE_OPENNEURO_STAGED_DIR={staged_root}\n")
               handle.write(f"OPENNEURO_OUTPUT_DIR={output_dir}\n")
               handle.write(f"OPENNEURO_MAX_EVENTS_ARG={max_events_arg}\n")
+              handle.write(f"OPENNEURO_CONFIG={config_path}\n")
+          output_dir.mkdir(parents=True, exist_ok=True)
+          manifest = {
+              "dataset": dataset,
+              "mode": mode,
+              "subjects": subjects,
+              "runs": runs,
+              "n_subjects": subject_count,
+              "n_runs": len(parsed_runs),
+              "config": config_path,
+              "runner_type_input": os.environ.get("RUNNER_TYPE", ""),
+              "runner_environment": runner_environment or "unknown",
+              "data_root": data_root.as_posix(),
+              "staged_root": staged_root.as_posix(),
+              "output_dir": output_dir.as_posix(),
+              "artifact_name": artifact_name,
+              "max_events_per_label": max_events,
+              "run_decode": os.environ.get("RUN_DECODE", ""),
+              "no_download": os.environ.get("NO_DOWNLOAD", ""),
+              "skip_failed_subjects": os.environ.get("SKIP_FAILED_SUBJECTS", ""),
+              "min_successful_subjects": os.environ.get("MIN_SUCCESSFUL_SUBJECTS", ""),
+              "decoder_override": os.environ.get("DECODER_INPUT", ""),
+              "time_decode_backend": os.environ.get("TIME_DECODE_BACKEND", ""),
+              "label_shuffle_control": os.environ.get("LABEL_SHUFFLE_CONTROL", ""),
+              "label_shuffle_seed": os.environ.get("LABEL_SHUFFLE_SEED", ""),
+              "github_run_id": os.environ.get("GITHUB_RUN_ID", ""),
+              "github_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+              "github_ref": os.environ.get("GITHUB_REF", ""),
+              "github_sha": os.environ.get("GITHUB_SHA", ""),
+          }
+          (output_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
           print(f"Dataset: {dataset}")
           print(f"Subjects: {subjects} ({subject_count})")
-          print(f"Runs: {runs} ({len(parse_runs(spec, runs))})")
+          print(f"Runs: {runs} ({len(parsed_runs)})")
+          print(f"Config: {config_path}")
           print(f"Raw BIDS root: {data_root}")
           print(f"Staged Epochs root: {staged_root}")
           print(f"Runner environment: {runner_environment or 'unknown'}")
           print(f"Dataset cache root: {dataset_cache_root}")
           print(f"Output dir: {output_dir}")
+          print(f"Artifact name: {artifact_name}")
           PY
 
       - name: Check selected raw files
@@ -305,14 +348,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          case "$DATASET" in
-            ds004276) CONFIG="configs/openneuro/ds004276_words.yml" ;;
-            ds006629) CONFIG="configs/openneuro/ds006629_singsing.yml" ;;
-            ds004330) CONFIG="configs/openneuro/ds004330_object_drawing.yml" ;;
-            *) echo "Unknown dataset: $DATASET" >&2; exit 1 ;;
-          esac
           args=(
-            "$CONFIG"
+            "$OPENNEURO_CONFIG"
             --set "participants.ids=$OPENNEURO_SUBJECTS"
             --set "decoding.n_splits=$OPENNEURO_N_SPLITS"
             --set "decoding.time_decode_backend=$TIME_DECODE_BACKEND"
