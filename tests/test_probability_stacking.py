@@ -53,6 +53,46 @@ def _observation_rows(*, subject: str, labels: list[int]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _three_class_observation_rows(*, subject: str) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    labels = [0, 1, 2, 0, 1, 2]
+    for decoder in ("left_confound", "right_confound"):
+        for sample_index, true_label in enumerate(labels):
+            probabilities = np.full(3, 0.1)
+            probabilities[true_label] = 0.6
+            if decoder == "left_confound":
+                probabilities[(true_label + 1) % 3] = 0.3
+            else:
+                probabilities[(true_label + 2) % 3] = 0.3
+            rows.append(
+                {
+                    "subject": subject,
+                    "fold": sample_index % 2,
+                    "split_id": "split-0",
+                    "seed": 7,
+                    "decoder": decoder,
+                    "backend": "sklearn",
+                    "emission_mode": "calibrated",
+                    "train_time": 0.10,
+                    "test_time": 0.10,
+                    "time": 0.10,
+                    "window_start": 0.05,
+                    "window_stop": 0.15,
+                    "sample_index": sample_index,
+                    "sequence_id": sample_index,
+                    "true_label": int(true_label),
+                    "true_class": str(true_label),
+                    "class_0": "zero",
+                    "class_1": "one",
+                    "class_2": "two",
+                    "prob_class_0": float(probabilities[0]),
+                    "prob_class_1": float(probabilities[1]),
+                    "prob_class_2": float(probabilities[2]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def _weights_from_output(stacked: pd.DataFrame) -> list[float]:
     return [float(value) for value in str(stacked["source_oof_weights"].iloc[0]).split("|")]
 
@@ -72,9 +112,25 @@ def test_fit_source_oof_stacking_prefers_better_source_candidate() -> None:
     )
 
     assert fit.candidates == ("weak", "strong")
+    assert fit.pooling == "linear"
     assert np.isclose(sum(fit.weights), 1.0)
     assert fit.weights[1] > 0.80
     assert fit.source_oof_balanced_accuracy == 1.0
+
+
+def test_fit_source_oof_stacking_auto_selects_log_pooling_when_source_loss_improves() -> None:
+    source = _three_class_observation_rows(subject="source")
+    left = source.loc[source["decoder"] == "left_confound", ["prob_class_0", "prob_class_1", "prob_class_2"]].to_numpy(dtype=float)
+    right = source.loc[source["decoder"] == "right_confound", ["prob_class_0", "prob_class_1", "prob_class_2"]].to_numpy(dtype=float)
+    labels = source.loc[source["decoder"] == "left_confound", "true_label"].to_numpy(dtype=int)
+
+    linear = fit_source_oof_stacking(np.stack([left, right], axis=0), labels, candidates=("left_confound", "right_confound"), weighting="uniform", pooling="linear")
+    log = fit_source_oof_stacking(np.stack([left, right], axis=0), labels, candidates=("left_confound", "right_confound"), weighting="uniform", pooling="log")
+    auto = fit_source_oof_stacking(np.stack([left, right], axis=0), labels, candidates=("left_confound", "right_confound"), weighting="uniform", pooling="auto")
+
+    assert log.source_oof_log_loss < linear.source_oof_log_loss
+    assert auto.pooling == "log"
+    assert np.isclose(auto.source_oof_log_loss, log.source_oof_log_loss)
 
 
 def test_fit_source_oof_stacking_rejects_fractional_source_labels() -> None:
@@ -98,10 +154,23 @@ def test_stack_probability_observations_applies_source_weights_to_target() -> No
     assert stacked["decoder"].unique().tolist() == [DEFAULT_OUTPUT_DECODER]
     assert stacked["backend"].unique().tolist() == ["source_oof_stacking"]
     assert stacked["source_oof_candidates"].unique().tolist() == ["weak|strong"]
+    assert stacked["source_oof_pooling"].unique().tolist() == ["linear"]
     assert np.allclose(stacked[["prob_class_0", "prob_class_1"]].sum(axis=1), 1.0)
     assert _weights_from_output(stacked)[1] > 0.80
     assert stacked["predicted_label"].tolist() == [0, 1, 0]
     assert stacked["is_correct"].tolist() == [True, True, True]
+
+
+def test_stack_probability_observations_records_auto_selected_pooling() -> None:
+    source = _three_class_observation_rows(subject="source")
+    target = _three_class_observation_rows(subject="target")
+
+    stacked = stack_probability_observations(source, target, weighting="uniform", pooling="auto")
+    metrics = summarize_stacked_metrics(stacked)
+
+    assert stacked["source_oof_pooling"].unique().tolist() == ["log"]
+    assert set(metrics["source_oof_pooling"]) == {"log"}
+    assert np.allclose(stacked[["prob_class_0", "prob_class_1", "prob_class_2"]].sum(axis=1), 1.0)
 
 
 def test_stack_probability_observations_allows_unlabeled_targets() -> None:
