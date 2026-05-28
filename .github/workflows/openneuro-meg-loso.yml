@@ -111,6 +111,8 @@ jobs:
       TIME_DECODE_BACKEND: ${{ inputs.time_decode_backend }}
       LABEL_SHUFFLE_CONTROL: ${{ inputs.label_shuffle_control }}
       LABEL_SHUFFLE_SEED: ${{ inputs.label_shuffle_seed }}
+      OPENNEURO_ARTIFACT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('-label-shuffle-seed-{0}', inputs.label_shuffle_seed) || '' }}
+      OPENNEURO_OUTPUT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('_label_shuffle_seed_{0}', inputs.label_shuffle_seed) || '' }}
 
     steps:
       - name: Check out repository
@@ -178,7 +180,8 @@ jobs:
           openneuro_cache_root = dataset_cache_root / "openneuro"
           data_root = Path(os.environ.get("DATA_ROOT_INPUT") or openneuro_cache_root / dataset)
           staged_root = Path(os.environ.get("STAGED_ROOT_INPUT") or openneuro_cache_root / "staged-epochs")
-          output_dir = Path("outputs") / f"openneuro_{dataset}_{mode}"
+          output_suffix = os.environ.get("OPENNEURO_OUTPUT_SUFFIX", "")
+          output_dir = Path("outputs") / f"openneuro_{dataset}_{mode}{output_suffix}"
           env_path = Path(os.environ["GITHUB_ENV"])
           with env_path.open("a", encoding="utf-8") as handle:
               handle.write(f"OPENNEURO_SUBJECTS={subjects}\n")
@@ -371,6 +374,6 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
-          name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}
-          path: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}/**
+          name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}
+          path: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ env.OPENNEURO_OUTPUT_SUFFIX }}/**
           if-no-files-found: warn
