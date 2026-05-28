@@ -9,6 +9,7 @@ nav:
   - Getting Started: getting-started.md
   - Diagnostics: doctor.md
   - Data Staging: data-staging.md
+  - Resilient OpenNeuro Staging: openneuro-resilient-staging.md
   - Dataset Configuration: dataset-config.md
   - Dataset Specs: dataset-specs.md
   - Dataset Spec Helpers: dataset-spec.md
