@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.openneuro_decode_diagnostics import best_metric_rows, main, write_decode_diagnostics
 
@@ -22,13 +23,13 @@ def test_best_metric_rows_selects_maximized_and_minimized_metrics():
     best = best_metric_rows(summary).set_index("selection_metric")
 
     assert best.loc["accuracy", "time"] == 0.2
-    assert best.loc["accuracy", "selection_value"] == 0.8
+    assert best.loc["accuracy", "selection_value"] == pytest.approx(0.8)
     assert best.loc["balanced_accuracy", "time"] == 0.2
-    assert best.loc["balanced_accuracy", "selection_value"] == 0.65
+    assert best.loc["balanced_accuracy", "selection_value"] == pytest.approx(0.65)
     assert best.loc["log_loss", "time"] == 0.2
-    assert best.loc["log_loss", "selection_value"] == 0.6
+    assert best.loc["log_loss", "selection_value"] == pytest.approx(0.6)
     assert best.loc["ece", "time"] == 0.2
-    assert best.loc["ece", "selection_value"] == 0.1
+    assert best.loc["ece", "selection_value"] == pytest.approx(0.1)
 
 
 def test_write_decode_diagnostics_handles_missing_decode_summary(tmp_path: Path):
