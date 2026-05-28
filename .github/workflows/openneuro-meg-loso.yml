@@ -1,4 +1,5 @@
 name: OpenNeuro MEG LOSO
+run-name: OpenNeuro MEG LOSO ${{ inputs.dataset }} ${{ inputs.mode }} ${{ inputs.runner_type }} shuffle=${{ inputs.label_shuffle_control }}
 
 on:
   workflow_dispatch:
@@ -81,13 +82,13 @@ on:
         required: true
         default: "13"
       runner_type:
-        description: "Runner family. GitHub-hosted uses actions/cache; self-hosted uses /home/github-runner/.cache/datasets."
+        description: "Runner family. GitHub-hosted starts immediately and uses actions/cache; self-hosted uses /home/github-runner/.cache/datasets."
         required: true
         type: choice
         options:
           - self-hosted
           - github-hosted
-        default: self-hosted
+        default: github-hosted
 
 jobs:
   openneuro-meg-loso:
