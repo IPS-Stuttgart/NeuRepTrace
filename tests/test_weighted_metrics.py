@@ -94,6 +94,23 @@ def test_validate_sample_weight_rejects_invalid_weights() -> None:
         validate_sample_weight(np.array([1.0, np.nan]), 2)
 
 
+def test_weighted_probability_metrics_accept_integer_like_labels() -> None:
+    probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
+    labels = np.array(["0", "1"])
+    sample_weight = np.array([1.0, 1.0])
+
+    assert weighted_negative_log_likelihood(probabilities, labels, sample_weight) == pytest.approx(-np.mean(np.log([0.7, 0.6])))
+
+
+@pytest.mark.parametrize("bad_labels", [np.array([0.0, np.nan]), np.array([0.0, np.inf]), np.array([0.0, 0.5]), np.array([0, "class-a"], dtype=object)])
+def test_weighted_probability_metrics_reject_invalid_label_indices(bad_labels: np.ndarray) -> None:
+    probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
+    sample_weight = np.array([1.0, 1.0])
+
+    with pytest.raises(ValueError, match="integer class indices"):
+        weighted_brier_score_multiclass(probabilities, bad_labels, sample_weight)
+
+
 def test_weighted_probability_metrics_validate_inputs() -> None:
     probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
     labels = np.array([0, 1])
