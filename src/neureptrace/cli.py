@@ -32,7 +32,6 @@ COMMAND_MODULES = {
     "emission-compare": "neureptrace.emission_compare",
     "env": "neureptrace.doctor",
     "epoch-transfer-decode": "neureptrace.epoch_transfer_decode",
-    "emission-compare": "neureptrace.emission_compare",
     "ensemble-observations": "neureptrace.observation_ensemble",
     "event-detect": "neureptrace.event_detection",
     "event-detection": "neureptrace.event_detection",
