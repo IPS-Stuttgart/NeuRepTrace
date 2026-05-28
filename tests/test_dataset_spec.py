@@ -9,6 +9,7 @@ import pytest
 from scipy.io import savemat
 
 from neureptrace.dataset_spec import expand_manifest, load_dataset_spec, load_split_dataset, parse_subjects, resolve_split, validate_dataset_spec
+from neureptrace.dataset_spec_cli import main as dataset_spec_cli_main
 from neureptrace.datasets.spec import (
     build_dataset_file_table as build_dataset_file_table_v1,
     expand_participant_ids,
@@ -70,6 +71,22 @@ def test_json_spec_resolves_paths_and_expands_manifest(tmp_path: Path) -> None:
     assert row["metadata_csv"] == str((root / "sub-01_events.csv").resolve())
     assert row["decoder"] == "logistic"
     assert row["n_splits"] == 3
+
+
+def test_dataset_manifest_cli_rejects_unknown_workflow(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    spec_path = _write_spec(tmp_path / "dataset.json", root)
+    out_path = tmp_path / "manifest.csv"
+
+    with pytest.raises(SystemExit) as exc_info:
+        dataset_spec_cli_main(["manifest", str(spec_path), "--workflow", "benchmrk", "--out", str(out_path)])
+
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert "Unknown workflow 'benchmrk'" in captured.err
+    assert "benchmark" in captured.err
+    assert not out_path.exists()
 
 
 def test_yaml_pymegdec_style_config_loads() -> None:
