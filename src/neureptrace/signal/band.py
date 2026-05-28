@@ -84,7 +84,7 @@ def validate_signal_values(signal_values, *, axis: int = -1) -> np.ndarray:
         raise ValueError("signal_values must have at least one sample dimension.")
     axis = _normalize_axis(axis, signal_values.ndim)
     if signal_values.shape[axis] < 2:
-        raise ValueError("signal_values must contain at least two samples along the last axis.")
+        raise ValueError(f"signal_values must contain at least two samples along axis {axis}.")
     if not np.all(np.isfinite(signal_values)):
         raise ValueError("signal_values must contain only finite values.")
     return signal_values
@@ -137,12 +137,28 @@ def bandpass_sos(sampling_rate, band_hz: Sequence[float] = (8.0, 12.0), *, order
     )
 
 
+def _default_sosfiltfilt_padlen(sos: np.ndarray) -> int:
+    """Return SciPy's default ``sosfiltfilt`` padding length for an SOS filter."""
+
+    return int(3 * (2 * len(sos) + 1 - min((sos[:, 2] == 0).sum(), (sos[:, 5] == 0).sum())))
+
+
+def _validate_sosfiltfilt_length(signal_values: np.ndarray, *, axis: int, sos: np.ndarray) -> None:
+    padlen = _default_sosfiltfilt_padlen(sos)
+    n_samples = signal_values.shape[axis]
+    if n_samples <= padlen:
+        raise ValueError(
+            f"signal_values must contain more than {padlen} samples along axis {axis} for zero-phase filtering; got {n_samples}."
+        )
+
+
 def bandpass_filter(signal_values, sampling_rate, band_hz: Sequence[float] = (8.0, 12.0), *, order: int = 5, axis: int = -1) -> np.ndarray:
     """Zero-phase Butterworth band-pass filter along ``axis``."""
 
     signal_values = validate_signal_values(signal_values, axis=axis)
     axis = _normalize_axis(axis, signal_values.ndim)
     sos = bandpass_sos(sampling_rate, band_hz, order=order)
+    _validate_sosfiltfilt_length(signal_values, axis=axis, sos=sos)
     return scipy.signal.sosfiltfilt(sos, signal_values, axis=axis)
 
 
