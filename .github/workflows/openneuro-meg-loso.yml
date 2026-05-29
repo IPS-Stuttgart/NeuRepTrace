@@ -701,3 +701,65 @@ jobs:
           name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}${{ matrix.outer_test_groups != '' && format('-shard-{0}', matrix.outer_test_groups) || '' }}
           path: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}*/**
           if-no-files-found: warn
+
+  aggregate-openneuro-shards:
+    needs:
+      - resolve-matrix
+      - openneuro-meg-loso
+    if: ${{ always() && needs.openneuro-meg-loso.result == 'success' && inputs.run_decode == true }}
+    runs-on: ubuntu-latest
+    env:
+      DATASET: ${{ inputs.dataset }}
+      MODE: ${{ inputs.mode }}
+      DIAGNOSTICS_BEST_TIME_INPUT: ${{ inputs.diagnostics_best_time }}
+      OPENNEURO_ARTIFACT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('-label-shuffle-seed-{0}', inputs.label_shuffle_seed) || '' }}
+      OPENNEURO_OUTPUT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('_label_shuffle_seed_{0}', inputs.label_shuffle_seed) || '' }}
+      OPENNEURO_AGGREGATE_OUTPUT_DIR: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ inputs.label_shuffle_control == true && format('_label_shuffle_seed_{0}', inputs.label_shuffle_seed) || '' }}_shard_aggregate
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install NeuRepTrace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download OpenNeuro shard artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}*
+          path: downloaded_openneuro_artifacts
+          merge-multiple: false
+
+      - name: Aggregate OpenNeuro shard diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t output_dirs < <(find downloaded_openneuro_artifacts -type f -name run_manifest.json -printf '%h\n' | sort -u)
+          if [[ "${#output_dirs[@]}" -eq 0 ]]; then
+            echo "No shard run_manifest.json files were downloaded; cannot aggregate OpenNeuro diagnostics."
+            exit 1
+          fi
+          printf 'Aggregating OpenNeuro output directories:\n'
+          printf '  %s\n' "${output_dirs[@]}"
+          aggregate_args=("${output_dirs[@]}" --aggregate-out "$OPENNEURO_AGGREGATE_OUTPUT_DIR")
+          if [[ -n "$DIAGNOSTICS_BEST_TIME_INPUT" ]]; then
+            aggregate_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
+          fi
+          python -m neureptrace.openneuro_decode_diagnostics "${aggregate_args[@]}"
+
+      - name: Upload aggregate OpenNeuro MEG output
+        uses: actions/upload-artifact@v7
+        with:
+          name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}-shard-aggregate
+          path: ${{ env.OPENNEURO_AGGREGATE_OUTPUT_DIR }}/**
+          if-no-files-found: error

@@ -99,6 +99,11 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "workflow.outer_test_group_shards_json" in workflow
     assert "outer_test_groups: ${{ fromJSON(needs.resolve-matrix.outputs.outer_test_group_shards_json) }}" in workflow
     assert "OUTER_TEST_GROUPS_SHARD" in workflow
+    assert "aggregate-openneuro-shards" in workflow
+    assert "actions/download-artifact@v7" in workflow
+    assert "merge-multiple: false" in workflow
+    assert "--aggregate-out \"$OPENNEURO_AGGREGATE_OUTPUT_DIR\"" in workflow
+    assert "-shard-aggregate" in workflow
     assert "OPENNEURO_CONFIG" in workflow
     assert "artifact_name" in workflow
     assert "outer_test_groups_shard" in workflow
