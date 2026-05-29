@@ -33,6 +33,20 @@ fold; held-out labels and group splits stay unchanged. Per-subject, confusion,
 class-count, and time-course diagnostics can be generated from any observation
 CSV with `neureptrace-loso-observation-diagnostics`.
 
+For `logistic-svm-ensemble` runs, the config and workflow can also tune the
+probability ensemble without code changes:
+
+```bash
+neureptrace-decode-from-config configs/openneuro/ds006629_singsing.yml \
+  --set decoding.ensemble_weights='[0.7,0.3]' \
+  --set decoding.ensemble_baseline_window='[-0.35,-0.05]'
+```
+
+Use `decoding.ensemble_baseline_window=null` to disable baseline debiasing. The
+same controls are available in the GitHub Actions dispatch form as
+comma-separated values, which makes logistic-heavy versus SVM-heavy follow-up
+runs directly comparable to the current ds006629 result.
+
 Dataset-specific staging hardening:
 
 - `ds004276` event files include probe rows that do not correspond to auditory

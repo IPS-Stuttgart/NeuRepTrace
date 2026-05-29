@@ -46,6 +46,46 @@ def _window_ms(
     return default
 
 
+def _list_value(value: Any, *, name: str) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if text == "":
+            return []
+        if text.startswith("["):
+            loaded = json.loads(text)
+            if not isinstance(loaded, list):
+                raise ValueError(f"{name} must be a list, comma-separated string, or whitespace-separated string.")
+            return loaded
+        return [part.strip() for chunk in text.split(",") for part in chunk.split() if part.strip()]
+    if isinstance(value, Sequence) and not isinstance(value, bytes):
+        return list(value)
+    return [value]
+
+
+def _float_tuple(value: Any, *, name: str, length: int | None = None, allow_none: bool = False) -> tuple[float, ...] | None:
+    if value is None:
+        if allow_none:
+            return None
+        raise ValueError(f"{name} cannot be null.")
+    if isinstance(value, str) and value.strip().lower() in {"none", "null", "off", "false"}:
+        if allow_none:
+            return None
+        raise ValueError(f"{name} cannot be disabled.")
+    values = tuple(float(item) for item in _list_value(value, name=name))
+    if length is not None and len(values) != length:
+        raise ValueError(f"{name} must contain exactly {length} value(s).")
+    return values
+
+
+def _string_tuple(value: Any, *, name: str) -> tuple[str, ...]:
+    values = tuple(str(item).strip() for item in _list_value(value, name=name) if str(item).strip())
+    if not values:
+        raise ValueError(f"{name} must contain at least one value.")
+    return values
+
+
 def _find_project_root(start: Path) -> Path:
     """Find a repository-like project root, falling back to the current directory."""
 
@@ -177,6 +217,25 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
     }
     if temporal_train_mode is not None:
         kwargs["temporal_train_mode"] = temporal_train_mode
+    if normalize_time_decode_decoder_name(str(kwargs["decoder"])) == ENSEMBLE_DECODER:
+        if "ensemble_weights" in decoding or "ensemble_weight" in decoding:
+            ensemble_weights = decoding.get("ensemble_weights", decoding.get("ensemble_weight"))
+            if ensemble_weights is not None and ensemble_weights != "":
+                kwargs["ensemble_weights"] = _float_tuple(ensemble_weights, name="decoding.ensemble_weights", length=2)
+        if "ensemble_baseline_window" in decoding:
+            kwargs["ensemble_baseline_window"] = _float_tuple(
+                decoding["ensemble_baseline_window"],
+                name="decoding.ensemble_baseline_window",
+                length=2,
+                allow_none=True,
+            )
+        if "ensemble_baseline_group_columns" in decoding:
+            kwargs["ensemble_baseline_group_columns"] = _string_tuple(
+                decoding["ensemble_baseline_group_columns"],
+                name="decoding.ensemble_baseline_group_columns",
+            )
+        if "ensemble_min_probability" in decoding:
+            kwargs["ensemble_min_probability"] = float(decoding["ensemble_min_probability"])
     return kwargs
 
 
