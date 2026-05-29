@@ -19,6 +19,7 @@ from neureptrace.mne_time_decode import (
     RESULT_SELECTION_MINIMIZE_METRICS,
     RESULT_SUMMARY_METRIC_COLUMNS,
     _best_time_by_metric,
+    _normalize_outer_test_groups,
     TEMPORAL_TRAIN_MODE_RUN_CHOICES,
 )
 from neureptrace.mne_time_decode_foldlocal import run_time_resolved_decode as _run_time_resolved_decode
@@ -96,6 +97,7 @@ def run_time_resolved_decode(
     *,
     metadata_csv: Path | None = None,
     group_column: str | None = None,
+    outer_test_groups: Sequence[object] | str | None = None,
     picks: str = "data",
     tmin: float | None = None,
     tmax: float | None = None,
@@ -145,6 +147,7 @@ def run_time_resolved_decode(
             metadata_csv=metadata_csv,
             label_column=label_column,
             group_column=group_column,
+            outer_test_groups=outer_test_groups,
             out_path=out_path,
             picks=picks,
             tmin=tmin,
@@ -197,6 +200,7 @@ def run_time_resolved_decode(
                     metadata_csv=metadata_csv,
                     label_column=label_column,
                     group_column=group_column,
+                    outer_test_groups=outer_test_groups,
                     out_path=source_out,
                     picks=picks,
                     tmin=tmin,
@@ -257,6 +261,7 @@ def run_time_resolved_decode(
     results["class_prior_correction"] = str(class_prior_correction).strip().lower().replace("-", "_")
     results["source_decoders"] = "|".join(source_decoders)
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
+    results["outer_test_groups"] = "|".join(_normalize_outer_test_groups(outer_test_groups))
     results["baseline_window_start"] = "" if baseline_window is None else float(baseline_window[0])
     results["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
     results["ensemble_baseline_window_start"] = "" if ensemble_baseline_window is None else float(ensemble_baseline_window[0])
@@ -304,6 +309,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--metadata-csv", type=Path)
     parser.add_argument("--group-column")
+    parser.add_argument(
+        "--outer-test-group",
+        action="append",
+        dest="outer_test_groups",
+        help="Restrict decoding to outer folds whose held-out group matches this value. Repeat for multiple groups.",
+    )
     parser.add_argument("--picks", default="data")
     parser.add_argument("--tmin", type=float)
     parser.add_argument("--tmax", type=float)
@@ -403,6 +414,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         metadata_csv=args.metadata_csv,
         label_column=args.label_column,
         group_column=args.group_column,
+        outer_test_groups=tuple(args.outer_test_groups) if args.outer_test_groups is not None else None,
         out_path=args.out,
         picks=args.picks,
         tmin=args.tmin,
