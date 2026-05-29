@@ -21,7 +21,7 @@ DEFAULT_ENSEMBLE_DECODER = "baseline_debiased_logistic_linear_svm_ensemble"
 DEFAULT_ENSEMBLE_EMISSION_MODE = "baseline_debiased_ensemble"
 DEFAULT_MIN_PROBABILITY = 1e-12
 DEFAULT_SCORE_MODE = "log"
-ENSEMBLE_SCORE_MODE_CHOICES = ("log", "probability", "confidence_probability", "rank")
+ENSEMBLE_SCORE_MODE_CHOICES = ("log", "probability", "confidence_probability", "agreement_probability", "rank")
 
 _REQUIRED_VALUE_COLUMNS = ("time", "true_label")
 _BASE_ALIGNMENT_COLUMNS = (
@@ -83,6 +83,15 @@ def normalize_ensemble_score_mode(score_mode: str) -> str:
         "entropy_weighted_probability",
     }:
         return "confidence_probability"
+    if normalized in {
+        "agreement",
+        "agreement_probability",
+        "agreement_probability_mean",
+        "consensus",
+        "consensus_probability",
+        "consensus_probability_mean",
+    }:
+        return "agreement_probability"
     if normalized in {"rank", "rank_mean", "borda", "borda_count", "borda_mean"}:
         return "rank"
     raise ValueError(f"Unknown ensemble score mode '{score_mode}'. Available modes: {', '.join(ENSEMBLE_SCORE_MODE_CHOICES)}.")
@@ -292,6 +301,24 @@ def _temperature_scaled_probabilities(
     return _softmax(np.log(np.clip(probabilities, min_probability, 1.0)) / float(temperature))
 
 
+def _agreement_weighted_probabilities(
+    source_probabilities: Sequence[np.ndarray],
+    weights: np.ndarray,
+) -> np.ndarray:
+    source_stack = np.stack(source_probabilities, axis=0)
+    consensus = source_stack.mean(axis=0)
+    total_variation_distance = 0.5 * np.abs(source_stack - consensus).sum(axis=2)
+    agreement = np.clip(1.0 - total_variation_distance, 0.0, 1.0) ** 2
+    row_weights = weights[:, None] * agreement
+    fallback = np.einsum("s,src->rc", weights, source_stack)
+    return np.divide(
+        np.einsum("sr,src->rc", row_weights, source_stack),
+        row_weights.sum(axis=0)[:, None],
+        out=fallback,
+        where=row_weights.sum(axis=0)[:, None] > 0.0,
+    )
+
+
 def _baseline_debiased_source_probabilities(
     base: pd.DataFrame,
     probabilities: np.ndarray,
@@ -348,6 +375,7 @@ def ensemble_probability_observations(
     confidence_probability_scores = np.zeros_like(probability_matrices[0], dtype=float)
     confidence_weight_totals = np.zeros((probability_matrices[0].shape[0], 1), dtype=float)
     rank_scores = np.zeros_like(probability_matrices[0], dtype=float)
+    source_probabilities_by_decoder: list[np.ndarray] = []
     for weight, temperature, probabilities in zip(normalized_weights, temperatures, probability_matrices):
         source_probabilities = _temperature_scaled_probabilities(
             probabilities,
@@ -362,6 +390,7 @@ def ensemble_probability_observations(
                 baseline_group_columns=baseline_group_columns,
                 min_probability=min_probability,
             )
+        source_probabilities_by_decoder.append(source_probabilities)
         if score_mode_name == "log":
             log_scores += float(weight) * np.log(np.clip(source_probabilities, min_probability, 1.0))
         elif score_mode_name == "probability":
@@ -371,6 +400,8 @@ def ensemble_probability_observations(
             certainty = _posterior_certainty(source_probabilities, min_probability=min_probability)[:, None]
             confidence_probability_scores += float(weight) * certainty * source_probabilities
             confidence_weight_totals += float(weight) * certainty
+        elif score_mode_name == "agreement_probability":
+            pass
         else:
             rank_scores += float(weight) * _rank_scores(source_probabilities)
 
@@ -383,6 +414,9 @@ def ensemble_probability_observations(
             out=probability_scores.copy(),
             where=confidence_weight_totals > 0.0,
         )
+        log_scores = np.log(np.clip(probabilities, min_probability, 1.0))
+    elif score_mode_name == "agreement_probability":
+        probabilities = _agreement_weighted_probabilities(source_probabilities_by_decoder, normalized_weights)
         log_scores = np.log(np.clip(probabilities, min_probability, 1.0))
     elif score_mode_name == "rank":
         log_scores = rank_scores
@@ -544,7 +578,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--decoder", action="append", dest="decoders", help="Source decoder to ensemble. May be repeated; defaults to logistic and linear_svm.")
     parser.add_argument("--weight", action="append", type=float, dest="weights", help="Source decoder weight. May be repeated in the same order as --decoder.")
     parser.add_argument("--source-temperature", action="append", type=float, dest="source_temperatures", help="Per-source probability temperature before log-space averaging. Repeat in the same order as --decoder; values >1 soften, values <1 sharpen.")
-    parser.add_argument("--score-mode", choices=ENSEMBLE_SCORE_MODE_CHOICES, default=DEFAULT_SCORE_MODE, help="Combine sources as weighted log probabilities, weighted probability means, confidence-weighted probabilities, or weighted rank/Borda scores before baseline debiasing.")
+    parser.add_argument("--score-mode", choices=ENSEMBLE_SCORE_MODE_CHOICES, default=DEFAULT_SCORE_MODE, help="Combine sources as weighted log probabilities, weighted probability means, confidence-weighted probabilities, agreement-weighted probabilities, or weighted rank/Borda scores before baseline debiasing.")
     parser.add_argument("--source-baseline-debiasing", action="store_true", help="Remove each source decoder's baseline log-probability offset before source fusion.")
     parser.add_argument("--source-emission-mode", default="calibrated", help="Source emission_mode to use before ensembling. Defaults to calibrated.")
     parser.add_argument("--no-source-emission-filter", action="store_true", help="Use all source emission modes instead of filtering by --source-emission-mode.")
