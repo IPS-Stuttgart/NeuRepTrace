@@ -6,7 +6,33 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from neureptrace.openneuro_decode_diagnostics import best_metric_rows, main, write_decode_diagnostics
+from neureptrace.openneuro_decode_diagnostics import aggregate_workflow_outputs, best_metric_rows, main, write_decode_diagnostics
+
+
+def _toy_observations(subject: str) -> pd.DataFrame:
+    rows = []
+    for time in (0.10, 0.184):
+        for sample_index, true_label in enumerate((0, 1, 2)):
+            predicted = true_label
+            if subject == "sub-02" and time == 0.184 and true_label == 2:
+                predicted = 1
+            probabilities = [0.1, 0.1, 0.1]
+            probabilities[predicted] = 0.8
+            rows.append(
+                {
+                    "group": subject,
+                    "time": time,
+                    "sample_index": f"{subject}-{sample_index}",
+                    "true_label": true_label,
+                    "true_class": f"class_{true_label}",
+                    "predicted_label": predicted,
+                    "predicted_class": f"class_{predicted}",
+                    "prob_class_0": probabilities[0],
+                    "prob_class_1": probabilities[1],
+                    "prob_class_2": probabilities[2],
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def test_best_metric_rows_selects_maximized_and_minimized_metrics():
@@ -208,6 +234,62 @@ def test_write_decode_diagnostics_adds_temporal_smoothing_quality_row(tmp_path: 
     assert smoothed["temporal_smoothing_fit_window"] == "0.10,0.30"
     assert smoothed["fixed_balanced_accuracy"] == pytest.approx(0.52)
     assert smoothed["best_selection_value"] == pytest.approx(0.52)
+
+
+def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Path):
+    source_dirs = []
+    for subject in ("sub-01", "sub-02"):
+        output_dir = tmp_path / f"shard-{subject}"
+        decode_dir = output_dir / "decode"
+        decode_dir.mkdir(parents=True)
+        source_dirs.append(output_dir)
+        (output_dir / "run_manifest.json").write_text(
+            json.dumps(
+                {
+                    "dataset": "ds006629",
+                    "mode": "full",
+                    "artifact_name": "openneuro-meg-ds006629-full",
+                    "label_shuffle_control": "false",
+                    "outer_test_groups": subject,
+                    "diagnostics_best_time": "0.184",
+                }
+            ),
+            encoding="utf-8",
+        )
+        pd.DataFrame(
+            {
+                "dataset_id": ["ds006629"],
+                "subject": [subject],
+                "epochs_path": [f"{subject}_epo.fif"],
+                "n_trials": [3],
+                "labels": ["class_0|class_1|class_2"],
+                "runs": ["0"],
+            }
+        ).to_csv(output_dir / "stage_summary.csv", index=False)
+        _toy_observations(subject).to_csv(decode_dir / "observations.csv", index=False)
+        pd.DataFrame(
+            {
+                "time": [0.10, 0.184],
+                "balanced_accuracy": [1.0, 1.0 if subject == "sub-01" else 2 / 3],
+                "accuracy": [1.0, 1.0 if subject == "sub-01" else 2 / 3],
+            }
+        ).to_csv(decode_dir / "time_decode_summary.csv", index=False)
+
+    aggregate_dir = tmp_path / "aggregate"
+    diagnostics, best = aggregate_workflow_outputs(source_dirs, out_dir=aggregate_dir)
+
+    assert diagnostics["decode_summary"]["exists"] is True
+    assert diagnostics["decode_summary"]["rows"] == 4
+    assert best.set_index("selection_metric").loc["balanced_accuracy", "selection_value"] == pytest.approx(1.0)
+    assert pd.read_csv(aggregate_dir / "stage_summary.csv")["subject"].tolist() == ["sub-01", "sub-02"]
+    assert len(pd.read_csv(aggregate_dir / "decode" / "observations.csv")) == 12
+    manifest = json.loads((aggregate_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["artifact_name"] == "openneuro-meg-ds006629-full-shard-aggregate"
+    assert manifest["outer_test_groups"] == "sub-01|sub-02"
+    quality = pd.read_csv(aggregate_dir / "workflow_quality_summary.csv")
+    assert quality.loc[0, "quality_decision"] == "promising_above_chance_consistent"
+    assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(5 / 6)
+    assert quality.loc[0, "fixed_balanced_minus_chance"] == pytest.approx(5 / 6 - 1 / 3)
 
 
 def test_main_strict_reports_missing_decode_summary(tmp_path: Path):

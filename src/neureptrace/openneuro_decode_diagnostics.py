@@ -10,6 +10,8 @@ from typing import Any
 
 import pandas as pd
 
+from neureptrace.loso_observation_diagnostics import write_loso_observation_diagnostics
+
 METRIC_COLUMNS = ("balanced_accuracy", "accuracy", "top2_accuracy", "top3_accuracy", "log_loss", "brier", "ece")
 MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 NULL_CHANCE_TOLERANCE = 0.03
@@ -93,6 +95,67 @@ def _csv_shape(path: Path) -> dict[str, Any]:
         return {"exists": False}
     frame = pd.read_csv(path)
     return {"exists": True, "rows": int(len(frame)), "columns": list(frame.columns)}
+
+
+def _concat_existing_csvs(
+    output_dirs: Sequence[Path],
+    relative_path: str,
+    out_path: Path,
+    *,
+    drop_duplicate_columns: Sequence[str] = (),
+) -> Path | None:
+    frames = []
+    for output_dir in output_dirs:
+        path = output_dir / relative_path
+        if path.is_file() and path.stat().st_size > 0:
+            frames.append(pd.read_csv(path))
+    if not frames:
+        return None
+    combined = pd.concat(frames, ignore_index=True)
+    if drop_duplicate_columns and all(column in combined.columns for column in drop_duplicate_columns):
+        combined = combined.drop_duplicates(subset=list(drop_duplicate_columns), keep="first").reset_index(drop=True)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_csv(out_path, index=False)
+    return out_path
+
+
+def _aggregate_manifest(output_dirs: Sequence[Path]) -> dict[str, Any]:
+    manifests = [_read_json(output_dir / "run_manifest.json") for output_dir in output_dirs]
+    first = next((manifest for manifest in manifests if manifest), {})
+    dataset = first.get("dataset", "")
+    mode = first.get("mode", "")
+    artifact_base = first.get("artifact_name") or "-".join(part for part in ("openneuro-meg", dataset, mode) if part)
+    if artifact_base.endswith("-shard-aggregate"):
+        artifact_name = artifact_base
+    else:
+        artifact_name = f"{artifact_base}-shard-aggregate"
+    outer_test_groups = [str(manifest.get("outer_test_groups", "")).strip() for manifest in manifests if str(manifest.get("outer_test_groups", "")).strip()]
+    aggregate = dict(first)
+    aggregate.update(
+        {
+            "artifact_name": artifact_name,
+            "shard_count": len(output_dirs),
+            "source_output_dirs": [output_dir.as_posix() for output_dir in output_dirs],
+            "source_artifacts": [manifest.get("artifact_name", "") for manifest in manifests],
+            "source_github_run_ids": [manifest.get("github_run_id", "") for manifest in manifests],
+            "aggregate_outer_test_groups": outer_test_groups,
+            "outer_test_groups": "|".join(outer_test_groups),
+            "aggregate_source": "openneuro_decode_diagnostics",
+        }
+    )
+    return aggregate
+
+
+def _diagnostics_best_time(output_dirs: Sequence[Path], explicit_best_time: float | None) -> float | None:
+    if explicit_best_time is not None:
+        return explicit_best_time
+    for output_dir in output_dirs:
+        value = _read_json(output_dir / "run_manifest.json").get("diagnostics_best_time", "")
+        if value not in {"", None}:
+            numeric = _as_float(value)
+            if numeric is not None:
+                return numeric
+    return None
 
 
 def _stage_summary(stage_summary_path: Path) -> dict[str, Any]:
@@ -336,21 +399,91 @@ def write_decode_diagnostics(
     return diagnostics, best_rows
 
 
+def aggregate_workflow_outputs(
+    output_dirs: Sequence[str | Path],
+    *,
+    out_dir: str | Path,
+    diagnostics_best_time: float | None = None,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    """Aggregate sharded OpenNeuro workflow outputs into one diagnosable directory."""
+
+    source_dirs = [Path(output_dir) for output_dir in output_dirs]
+    if not source_dirs:
+        raise ValueError("At least one source output directory is required.")
+    aggregate_dir = Path(out_dir)
+    aggregate_dir.mkdir(parents=True, exist_ok=True)
+    decode_dir = aggregate_dir / "decode"
+
+    manifest = _aggregate_manifest(source_dirs)
+    (aggregate_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    stage_summary_path = _concat_existing_csvs(
+        source_dirs,
+        "stage_summary.csv",
+        aggregate_dir / "stage_summary.csv",
+        drop_duplicate_columns=("dataset_id", "subject", "epochs_path"),
+    )
+    summary_path = _concat_existing_csvs(source_dirs, "decode/time_decode_summary.csv", decode_dir / "time_decode_summary.csv")
+    observations_path = _concat_existing_csvs(source_dirs, "decode/observations.csv", decode_dir / "observations.csv")
+
+    best_time = _diagnostics_best_time(source_dirs, diagnostics_best_time)
+    if observations_path is not None and summary_path is not None:
+        write_loso_observation_diagnostics(
+            observations_path,
+            out_dir=decode_dir / "diagnostics",
+            summary_csv=summary_path,
+            stage_summary_csv=stage_summary_path,
+            best_time=best_time,
+        )
+
+    smoothed_dir = decode_dir / "temporal_smoothing"
+    smoothed_summary = _concat_existing_csvs(
+        source_dirs,
+        "decode/temporal_smoothing/time_decode_summary.csv",
+        smoothed_dir / "time_decode_summary.csv",
+    )
+    smoothed_observations = _concat_existing_csvs(
+        source_dirs,
+        "decode/temporal_smoothing/observations.csv",
+        smoothed_dir / "observations.csv",
+    )
+    if smoothed_observations is not None and smoothed_summary is not None:
+        write_loso_observation_diagnostics(
+            smoothed_observations,
+            out_dir=smoothed_dir / "diagnostics",
+            summary_csv=smoothed_summary,
+            stage_summary_csv=stage_summary_path,
+            best_time=best_time,
+        )
+
+    return write_decode_diagnostics(aggregate_dir)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("output_dir", type=Path, help="OpenNeuro workflow output directory, e.g. outputs/openneuro_ds006629_full.")
+    parser.add_argument("output_dir", type=Path, nargs="+", help="OpenNeuro workflow output directory, e.g. outputs/openneuro_ds006629_full.")
+    parser.add_argument("--aggregate-out", type=Path, help="Aggregate multiple sharded workflow output directories before writing diagnostics.")
     parser.add_argument("--diagnostics-out", type=Path)
     parser.add_argument("--best-out", type=Path)
     parser.add_argument("--quality-out", type=Path)
+    parser.add_argument("--best-time", type=float, help="Fixed time for aggregate LOSO observation diagnostics.")
     parser.add_argument("--strict", action="store_true", help="Return a non-zero exit status when the decode summary is missing.")
     args = parser.parse_args(argv)
 
-    diagnostics, _best_rows = write_decode_diagnostics(
-        args.output_dir,
-        diagnostics_out=args.diagnostics_out,
-        best_out=args.best_out,
-        quality_out=args.quality_out,
-    )
+    if args.aggregate_out is not None or len(args.output_dir) > 1:
+        if args.aggregate_out is None:
+            parser.error("--aggregate-out is required when multiple output directories are provided.")
+        diagnostics, _best_rows = aggregate_workflow_outputs(
+            args.output_dir,
+            out_dir=args.aggregate_out,
+            diagnostics_best_time=args.best_time,
+        )
+    else:
+        diagnostics, _best_rows = write_decode_diagnostics(
+            args.output_dir[0],
+            diagnostics_out=args.diagnostics_out,
+            best_out=args.best_out,
+            quality_out=args.quality_out,
+        )
     return int(args.strict and not diagnostics["decode_summary"].get("exists", False))
 
 
