@@ -47,6 +47,23 @@ same controls are available in the GitHub Actions dispatch form as
 comma-separated values, which makes logistic-heavy versus SVM-heavy follow-up
 runs directly comparable to the current ds006629 result.
 
+The workflow dispatch form also exposes the main follow-up sweep controls:
+window size/step, decode-window range, normalization, baseline window, feature
+preprocessor, PCA/components, temporal train-window range/mode, and nested
+regularization tuning. A compact ds006629 peak follow-up can therefore stay in
+the same LOSO protocol while testing, for example:
+
+```text
+window_size=0.075
+window_step=0.024
+decode_window=0.120,0.248
+temporal_train_window=0.120,0.248
+temporal_train_mode=window_ensemble
+tune_hyperparameters=true
+tuning_scoring=balanced_accuracy
+tuning_c_grid=0.03,0.1,0.3,1,3
+```
+
 Dataset-specific staging hardening:
 
 - `ds004276` event files include probe rows that do not correspond to auditory
