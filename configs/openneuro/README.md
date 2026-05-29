@@ -58,6 +58,13 @@ neureptrace-decode-from-config configs/openneuro/ds006629_singsing.yml \
 ```
 
 The workflow exposes the same source override as `ensemble_source_decoders`.
+For a more diverse follow-up, add a third shrinkage-LDA source. If no explicit
+weights are provided, non-default source sets use equal weights:
+
+```bash
+neureptrace-decode-from-config configs/openneuro/ds006629_singsing.yml \
+  --set decoding.ensemble_source_decoders='[multinomial-logistic-weighted,linear_svm,shrinkage_lda]'
+```
 
 The workflow dispatch form also exposes a `config_overrides` field for
 semicolon- or newline-separated `--set` overrides. A compact ds006629 peak

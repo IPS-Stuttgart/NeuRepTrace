@@ -73,11 +73,11 @@ on:
         required: false
         default: ""
       ensemble_weights:
-        description: "Optional two comma-separated logistic_svm_ensemble weights, e.g. 0.7,0.3"
+        description: "Optional comma-separated logistic_svm_ensemble weights in source-decoder order, e.g. 0.5,0.3,0.2"
         required: false
         default: ""
       ensemble_source_decoders:
-        description: "Optional two comma-separated logistic_svm_ensemble source decoders, e.g. multinomial-logistic-weighted,linear_svm"
+        description: "Optional comma-separated logistic_svm_ensemble source decoders, e.g. multinomial-logistic-weighted,linear_svm,shrinkage_lda"
         required: false
         default: ""
       ensemble_baseline_window:
