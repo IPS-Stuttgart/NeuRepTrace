@@ -70,6 +70,17 @@ def _parse_weights(weights: Sequence[float] | None) -> tuple[float, float]:
     return float(weights[0]), float(weights[1])
 
 
+def _parse_source_decoders(source_decoders: Sequence[str] | None) -> tuple[tuple[str, str], tuple[str, str]]:
+    if source_decoders is None:
+        requests = _SOURCE_DECODER_REQUESTS
+    else:
+        requests = tuple(str(decoder).strip() for decoder in source_decoders if str(decoder).strip())
+    if len(requests) != 2:
+        raise ValueError("logistic_svm_ensemble expects exactly two source decoders.")
+    normalized = tuple(normalize_decoder_name(decoder) for decoder in requests)
+    return requests, normalized
+
+
 def run_time_resolved_decode(
     epochs_path: Path,
     label_column: str,
@@ -105,6 +116,7 @@ def run_time_resolved_decode(
     class_prior_correction: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
+    ensemble_source_decoders: Sequence[str] | None = None,
     ensemble_weights: Sequence[float] | None = None,
     ensemble_baseline_window: tuple[float, float] | None = DEFAULT_ENSEMBLE_BASELINE_WINDOW,
     ensemble_baseline_group_columns: Sequence[str] = DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS,
@@ -159,6 +171,7 @@ def run_time_resolved_decode(
     if emission_mode != "calibrated":
         raise ValueError("logistic_svm_ensemble is defined for --emission-mode calibrated only.")
 
+    source_decoder_requests, source_decoders = _parse_source_decoders(ensemble_source_decoders)
     weights = _parse_weights(ensemble_weights)
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
 
@@ -166,7 +179,7 @@ def run_time_resolved_decode(
         tmp_dir = Path(tmp_dir_name)
         source_observation_paths: list[Path] = []
         source_metric_frames: list[pd.DataFrame] = []
-        for source_decoder in _SOURCE_DECODER_REQUESTS:
+        for source_decoder in source_decoder_requests:
             source_out = tmp_dir / f"{normalize_decoder_name(source_decoder)}_time_decode.csv"
             source_observations = tmp_dir / f"{normalize_decoder_name(source_decoder)}_observations.csv"
             source_metric_frames.append(
@@ -215,7 +228,7 @@ def run_time_resolved_decode(
         )
         ensemble = ensemble_probability_observations(
             observations,
-            decoders=_SOURCE_DECODERS,
+            decoders=source_decoders,
             weights=weights,
             source_emission_mode="calibrated",
             baseline_window=ensemble_baseline_window,
@@ -233,7 +246,7 @@ def run_time_resolved_decode(
     results["pca_components"] = "" if pca_components is None else pca_components
     results["normalization"] = normalization.replace("-", "_") if normalization is not None else "none"
     results["class_prior_correction"] = str(class_prior_correction).strip().lower().replace("-", "_")
-    results["source_decoders"] = "|".join(_SOURCE_DECODERS)
+    results["source_decoders"] = "|".join(source_decoders)
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in weights)
     results["baseline_window_start"] = "" if baseline_window is None else float(baseline_window[0])
     results["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
@@ -353,6 +366,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Optional train-fold prior correction applied to source decoder probabilities before ensembling.",
     )
     parser.add_argument(
+        "--ensemble-source-decoder",
+        action="append",
+        dest="ensemble_source_decoders",
+        help="Source decoder for logistic_svm_ensemble. Repeat twice to override the default multinomial-logistic and linear_svm sources.",
+    )
+    parser.add_argument(
         "--ensemble-weight",
         action="append",
         type=float,
@@ -403,6 +422,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         class_prior_correction=args.class_prior_correction,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
+        ensemble_source_decoders=tuple(args.ensemble_source_decoders) if args.ensemble_source_decoders is not None else None,
         ensemble_weights=tuple(args.ensemble_weights) if args.ensemble_weights is not None else None,
         ensemble_baseline_window=None if args.no_ensemble_baseline_debiasing else tuple(args.ensemble_baseline_window),
         ensemble_baseline_group_columns=tuple(args.ensemble_baseline_group_columns or DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS),

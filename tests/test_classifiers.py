@@ -47,6 +47,7 @@ def test_registry_contains_supported_classifiers():
         "multiclass-svm",
         "multiclass-svm-weighted",
         "multinomial-logistic",
+        "multinomial-logistic-weighted",
         "pytorch-mlp",
         "random-forest",
         "scikit-mlp",
@@ -66,6 +67,7 @@ def test_registry_trains_fast_sklearn_classifiers(multiclass_data):
         "multiclass-svm": 1.0,
         "multiclass-svm-weighted": 1.0,
         "multinomial-logistic": 1.0,
+        "multinomial-logistic-weighted": 1.0,
         "random-forest": 5,
         "scikit-mlp": (5, 50),
         "shrinkage-lda": None,
@@ -188,6 +190,7 @@ def test_default_classifier_params_include_shared_and_legacy_helpers():
     assert get_default_classifier_param("binary-svm") == 0.5
     assert get_default_classifier_param("lasso") == 0.005
     assert get_default_classifier_param("multinomial-logistic") == 1.0
+    assert get_default_classifier_param("multinomial-logistic-weighted") == 1.0
     assert get_default_classifier_param("correlation-prototype") is None
     assert get_default_classifier_param("shrinkage-lda") is None
     pytorch_params = get_default_classifier_param("pytorch-mlp")
@@ -196,6 +199,15 @@ def test_default_classifier_params_include_shared_and_legacy_helpers():
     assert should_use_default_classifier_param(np.nan)
     assert not should_use_default_classifier_param(None)
     assert not should_use_default_classifier_param({"hidden_dim": 10})
+
+
+def test_weighted_multinomial_logistic_uses_balanced_class_weights(multiclass_data):
+    features, labels = multiclass_data
+
+    model = train_multiclass_classifier(features, labels, "multinomial-logistic-weighted", 0.5)
+
+    assert model.model.class_weight == "balanced"
+    assert model.model.C == 0.5
 
 
 def test_binary_helper_trainers_fit_binary_labels():

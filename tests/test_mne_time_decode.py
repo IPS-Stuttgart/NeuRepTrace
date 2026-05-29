@@ -375,6 +375,7 @@ def test_mne_sliding_backend_matches_existing_same_time_decode(tmp_path: Path, m
 def test_mne_time_decode_exposes_classifier_registry_decoders():
     assert "correlation-prototype" in DECODER_CHOICES
     assert "multinomial-logistic" in DECODER_CHOICES
+    assert "multinomial-logistic-weighted" in DECODER_CHOICES
     assert "random-forest" in DECODER_CHOICES
     assert normalize_decoder_name("correlation_prototype") == "correlation-prototype"
     assert normalize_decoder_name("multiclass-svm-weighted") == "multiclass-svm-weighted"

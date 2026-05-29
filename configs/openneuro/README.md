@@ -49,6 +49,15 @@ Use `decoding.ensemble_baseline_window=null` to disable baseline debiasing. The
 same controls are available in the GitHub Actions dispatch form as
 comma-separated values, which makes logistic-heavy versus SVM-heavy follow-up
 runs directly comparable to the current ds006629 result.
+For class-imbalanced source folds, test a balanced logistic source while keeping
+the same ensemble protocol:
+
+```bash
+neureptrace-decode-from-config configs/openneuro/ds006629_singsing.yml \
+  --set decoding.ensemble_source_decoders='[multinomial-logistic-weighted,linear_svm]'
+```
+
+The workflow exposes the same source override as `ensemble_source_decoders`.
 
 The workflow dispatch form also exposes a `config_overrides` field for
 semicolon- or newline-separated `--set` overrides. A compact ds006629 peak

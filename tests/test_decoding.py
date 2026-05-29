@@ -72,6 +72,7 @@ def test_make_decoder_produces_probabilities_for_standard_decoders():
 def test_decoder_choices_expose_classifier_registry_entries():
     assert "correlation-prototype" in DECODER_CHOICES
     assert "multinomial-logistic" in DECODER_CHOICES
+    assert "multinomial-logistic-weighted" in DECODER_CHOICES
     assert "random-forest" in DECODER_CHOICES
     assert normalize_decoder_name("correlation_prototype") == "correlation-prototype"
     assert normalize_decoder_name("multiclass-svm-weighted") == "multiclass-svm-weighted"
@@ -85,6 +86,7 @@ def test_make_decoder_exposes_registry_decoders_as_probability_decoders():
     for decoder in (
         "correlation-prototype",
         "multinomial-logistic",
+        "multinomial-logistic-weighted",
         "multiclass-svm-weighted",
     ):
         model = make_decoder(decoder, max_iter=2000)

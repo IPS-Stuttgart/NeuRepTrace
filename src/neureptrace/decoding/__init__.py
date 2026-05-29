@@ -549,7 +549,7 @@ def _make_registry_decoder_pipeline(
 
 def _registry_tuning_param_grid(name: str, c_grid: Sequence[float]) -> dict[str, Sequence[Any]]:
     registry_name = normalize_registry_decoder_name(name)
-    if registry_name in {"multiclass-svm", "multiclass-svm-weighted", "multinomial-logistic"}:
+    if registry_name in {"multiclass-svm", "multiclass-svm-weighted", "multinomial-logistic", "multinomial-logistic-weighted"}:
         return {"registrydecoder__classifier_param": c_grid}
     if registry_name == "knn":
         return {"registrydecoder__classifier_param": (3, 5, 7, 11)}
