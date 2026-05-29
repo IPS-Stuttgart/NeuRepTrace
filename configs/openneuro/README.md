@@ -31,7 +31,10 @@ to `neureptrace-decode-from-config` or enable `label_shuffle_control` in the
 workflow dispatch form. This shuffles only training labels inside each outer
 fold; held-out labels and group splits stay unchanged. Per-subject, confusion,
 class-count, and time-course diagnostics can be generated from any observation
-CSV with `neureptrace-loso-observation-diagnostics`.
+CSV with `neureptrace-loso-observation-diagnostics`. For matched real versus
+shuffle comparisons, set the workflow `diagnostics_best_time` input to the
+predeclared real-run peak, for example `0.184`, so the null is not selected at
+its own best time.
 
 For `logistic-svm-ensemble` runs, the config and workflow can also tune the
 probability ensemble without code changes:
@@ -62,6 +65,9 @@ decoding.tune_hyperparameters=true;
 decoding.tuning_scoring=balanced_accuracy;
 decoding.tuning_c_grid=0.03,0.1,0.3,1,3
 ```
+
+For the same dispatch, set `diagnostics_best_time=0.184` as a workflow input
+when you want the diagnostic tables to report the predeclared ds006629 peak.
 
 Dataset-specific staging hardening:
 
