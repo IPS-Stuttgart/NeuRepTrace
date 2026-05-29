@@ -287,6 +287,9 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
     assert manifest["artifact_name"] == "openneuro-meg-ds006629-full-shard-aggregate"
     assert manifest["outer_test_groups"] == "sub-01|sub-02"
     quality = pd.read_csv(aggregate_dir / "workflow_quality_summary.csv")
+    assert quality.loc[0, "shard_count"] == 2
+    assert quality.loc[0, "aggregate_outer_test_groups"] == "sub-01|sub-02"
+    assert quality.loc[0, "source_artifacts"] == "openneuro-meg-ds006629-full|openneuro-meg-ds006629-full"
     assert quality.loc[0, "quality_decision"] == "promising_above_chance_consistent"
     assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(5 / 6)
     assert quality.loc[0, "fixed_balanced_minus_chance"] == pytest.approx(5 / 6 - 1 / 3)

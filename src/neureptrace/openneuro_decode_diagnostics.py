@@ -44,6 +44,12 @@ def _as_int(value: Any) -> int | None:
     return None if numeric is None else int(numeric)
 
 
+def _join_manifest_list(value: Any) -> str:
+    if isinstance(value, list | tuple):
+        return "|".join(str(item) for item in value if str(item))
+    return "" if value is None else str(value)
+
+
 def _quality_decision(
     *,
     decode_summary_exists: bool,
@@ -289,6 +295,10 @@ def _workflow_quality_row(
         "mode": manifest.get("mode", ""),
         "result_variant": result_variant,
         "artifact_name": manifest.get("artifact_name", ""),
+        "shard_count": manifest.get("shard_count", ""),
+        "aggregate_outer_test_groups": _join_manifest_list(manifest.get("aggregate_outer_test_groups", "")),
+        "source_artifacts": _join_manifest_list(manifest.get("source_artifacts", "")),
+        "source_github_run_ids": _join_manifest_list(manifest.get("source_github_run_ids", "")),
         "github_run_id": manifest.get("github_run_id", ""),
         "github_sha": manifest.get("github_sha", ""),
         "runner_type_input": manifest.get("runner_type_input", ""),
