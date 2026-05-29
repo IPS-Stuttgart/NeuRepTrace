@@ -21,7 +21,7 @@ DEFAULT_ENSEMBLE_DECODER = "baseline_debiased_logistic_linear_svm_ensemble"
 DEFAULT_ENSEMBLE_EMISSION_MODE = "baseline_debiased_ensemble"
 DEFAULT_MIN_PROBABILITY = 1e-12
 DEFAULT_SCORE_MODE = "log"
-ENSEMBLE_SCORE_MODE_CHOICES = ("log", "probability")
+ENSEMBLE_SCORE_MODE_CHOICES = ("log", "probability", "rank")
 
 _REQUIRED_VALUE_COLUMNS = ("time", "true_label")
 _BASE_ALIGNMENT_COLUMNS = (
@@ -74,6 +74,8 @@ def normalize_ensemble_score_mode(score_mode: str) -> str:
         return "log"
     if normalized in {"probability", "probability_mean", "probability_average", "arithmetic", "arithmetic_mean", "mean"}:
         return "probability"
+    if normalized in {"rank", "rank_mean", "borda", "borda_count", "borda_mean"}:
+        return "rank"
     raise ValueError(f"Unknown ensemble score mode '{score_mode}'. Available modes: {', '.join(ENSEMBLE_SCORE_MODE_CHOICES)}.")
 
 
@@ -252,6 +254,16 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     return exponentials / exponentials.sum(axis=1, keepdims=True)
 
 
+def _rank_scores(probabilities: np.ndarray) -> np.ndarray:
+    if probabilities.shape[1] <= 1:
+        return np.zeros_like(probabilities, dtype=float)
+    scores = np.empty_like(probabilities, dtype=float)
+    ascending_order = np.argsort(probabilities, axis=1)
+    row_indices = np.arange(probabilities.shape[0])[:, None]
+    scores[row_indices, ascending_order] = np.arange(probabilities.shape[1], dtype=float)
+    return scores / float(probabilities.shape[1] - 1)
+
+
 def _temperature_scaled_probabilities(
     probabilities: np.ndarray,
     *,
@@ -295,6 +307,7 @@ def ensemble_probability_observations(
 
     log_scores = np.zeros_like(probability_matrices[0], dtype=float)
     probability_scores = np.zeros_like(probability_matrices[0], dtype=float)
+    rank_scores = np.zeros_like(probability_matrices[0], dtype=float)
     for weight, temperature, probabilities in zip(normalized_weights, temperatures, probability_matrices):
         source_probabilities = _temperature_scaled_probabilities(
             probabilities,
@@ -303,11 +316,15 @@ def ensemble_probability_observations(
         )
         if score_mode_name == "log":
             log_scores += float(weight) * np.log(np.clip(source_probabilities, min_probability, 1.0))
-        else:
+        elif score_mode_name == "probability":
             probability_scores += float(weight) * source_probabilities
+        else:
+            rank_scores += float(weight) * _rank_scores(source_probabilities)
 
     if score_mode_name == "probability":
         log_scores = np.log(np.clip(probability_scores, min_probability, 1.0))
+    elif score_mode_name == "rank":
+        log_scores = rank_scores
 
     offsets, n_baseline = _baseline_offsets(
         base,
@@ -464,7 +481,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--decoder", action="append", dest="decoders", help="Source decoder to ensemble. May be repeated; defaults to logistic and linear_svm.")
     parser.add_argument("--weight", action="append", type=float, dest="weights", help="Source decoder weight. May be repeated in the same order as --decoder.")
     parser.add_argument("--source-temperature", action="append", type=float, dest="source_temperatures", help="Per-source probability temperature before log-space averaging. Repeat in the same order as --decoder; values >1 soften, values <1 sharpen.")
-    parser.add_argument("--score-mode", choices=ENSEMBLE_SCORE_MODE_CHOICES, default=DEFAULT_SCORE_MODE, help="Combine sources as weighted log probabilities or as a weighted probability mean before baseline debiasing.")
+    parser.add_argument("--score-mode", choices=ENSEMBLE_SCORE_MODE_CHOICES, default=DEFAULT_SCORE_MODE, help="Combine sources as weighted log probabilities, weighted probability means, or weighted rank/Borda scores before baseline debiasing.")
     parser.add_argument("--source-emission-mode", default="calibrated", help="Source emission_mode to use before ensembling. Defaults to calibrated.")
     parser.add_argument("--no-source-emission-filter", action="store_true", help="Use all source emission modes instead of filtering by --source-emission-mode.")
     parser.add_argument("--baseline-window", nargs=2, type=float, metavar=("START", "STOP"), default=DEFAULT_BASELINE_WINDOW)
