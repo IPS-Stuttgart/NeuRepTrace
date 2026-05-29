@@ -68,6 +68,10 @@ on:
         description: "Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075"
         required: false
         default: ""
+      diagnostics_best_time:
+        description: "Optional fixed diagnostic time in seconds, e.g. 0.184"
+        required: false
+        default: ""
       ensemble_weights:
         description: "Optional two comma-separated logistic_svm_ensemble weights, e.g. 0.7,0.3"
         required: false
@@ -126,6 +130,7 @@ jobs:
       MIN_SUCCESSFUL_SUBJECTS: ${{ inputs.min_successful_subjects }}
       DECODER_INPUT: ${{ inputs.decoder }}
       CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
+      DIAGNOSTICS_BEST_TIME_INPUT: ${{ inputs.diagnostics_best_time }}
       ENSEMBLE_WEIGHTS_INPUT: ${{ inputs.ensemble_weights }}
       ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
       ENSEMBLE_MIN_PROBABILITY_INPUT: ${{ inputs.ensemble_min_probability }}
@@ -245,6 +250,7 @@ jobs:
               "min_successful_subjects": os.environ.get("MIN_SUCCESSFUL_SUBJECTS", ""),
               "decoder_override": os.environ.get("DECODER_INPUT", ""),
               "config_overrides": os.environ.get("CONFIG_OVERRIDES_INPUT", ""),
+              "diagnostics_best_time": os.environ.get("DIAGNOSTICS_BEST_TIME_INPUT", ""),
               "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
               "ensemble_baseline_window": os.environ.get("ENSEMBLE_BASELINE_WINDOW_INPUT", ""),
               "ensemble_min_probability": os.environ.get("ENSEMBLE_MIN_PROBABILITY_INPUT", ""),
@@ -449,11 +455,16 @@ jobs:
             echo "Skipping LOSO diagnostics because observations or summary output is missing."
             exit 0
           fi
-          python -m neureptrace.loso_observation_diagnostics \
-            "$observations" \
-            --summary-csv "$summary" \
-            --stage-summary-csv "$OPENNEURO_OUTPUT_DIR/stage_summary.csv" \
+          diagnostic_args=(
+            "$observations"
+            --summary-csv "$summary"
+            --stage-summary-csv "$OPENNEURO_OUTPUT_DIR/stage_summary.csv"
             --out-dir "$OPENNEURO_OUTPUT_DIR/decode/diagnostics"
+          )
+          if [[ -n "$DIAGNOSTICS_BEST_TIME_INPUT" ]]; then
+            diagnostic_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
+          fi
+          python -m neureptrace.loso_observation_diagnostics "${diagnostic_args[@]}"
 
       - name: Write OpenNeuro workflow summary
         if: ${{ always() }}
