@@ -221,6 +221,51 @@ def test_ensemble_probability_score_mode_can_rescue_geometric_overconfidence() -
     assert rank_mean["ensemble_score_mode"].unique().tolist() == ["rank"]
 
 
+def test_ensemble_confidence_probability_score_mode_downweights_uncertain_sources() -> None:
+    observations = pd.DataFrame(
+        [
+            {
+                "subject": "sub-01",
+                "fold": 0,
+                "decoder": decoder,
+                "emission_mode": "calibrated",
+                "time": 0.1,
+                "sample_index": 0,
+                "sequence_id": 0,
+                "true_label": 1,
+                "true_class": "one",
+                "class_0": "zero",
+                "class_1": "one",
+                "prob_class_0": prob_0,
+                "prob_class_1": prob_1,
+            }
+            for decoder, prob_0, prob_1 in (
+                ("high_weight_uncertain_source", 0.55, 0.45),
+                ("low_weight_confident_source", 0.05, 0.95),
+            )
+        ]
+    )
+
+    probability_mean = ensemble_probability_observations(
+        observations,
+        decoders=("high_weight_uncertain_source", "low_weight_confident_source"),
+        weights=(10.0, 1.0),
+        baseline_window=None,
+        score_mode="probability",
+    )
+    confidence_weighted = ensemble_probability_observations(
+        observations,
+        decoders=("high_weight_uncertain_source", "low_weight_confident_source"),
+        weights=(10.0, 1.0),
+        baseline_window=None,
+        score_mode="confidence_probability",
+    )
+
+    assert probability_mean["predicted_label"].tolist() == [0]
+    assert confidence_weighted["predicted_label"].tolist() == [1]
+    assert confidence_weighted["ensemble_score_mode"].unique().tolist() == ["confidence_probability"]
+
+
 def test_ensemble_probability_observations_rejects_fractional_true_labels() -> None:
     observations = _source_observations()
     observations["true_label"] = observations["true_label"].astype(float)
