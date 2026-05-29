@@ -186,6 +186,17 @@ jobs:
           }
           subjects = os.environ.get("SUBJECTS_INPUT") or (smoke_defaults[dataset] if mode == "smoke" else "all")
           subject_count = len(parse_subjects(spec, subjects))
+          override_lines = [
+              override.strip()
+              for override in os.environ.get("CONFIG_OVERRIDES_INPUT", "").replace(";", "\n").splitlines()
+              if override.strip()
+          ]
+          def override_value(*keys: str) -> str:
+              for override in override_lines:
+                  key, separator, value = override.partition("=")
+                  if separator and key.strip() in keys:
+                      return value.strip()
+              return ""
           runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "")
           dataset_cache_root = (
               Path("/home/github-runner/.cache/datasets")
@@ -229,6 +240,10 @@ jobs:
               "temporal_smoothing_stay_grid_size": "200",
               "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
               "ensemble_source_decoders": os.environ.get("ENSEMBLE_SOURCE_DECODERS_INPUT", ""),
+              "ensemble_source_temperatures": override_value(
+                  "decoding.ensemble_source_temperatures",
+                  "decoding.ensemble_source_temperature",
+              ),
               "ensemble_baseline_window": os.environ.get("ENSEMBLE_BASELINE_WINDOW_INPUT", ""),
               "ensemble_min_probability": os.environ.get("ENSEMBLE_MIN_PROBABILITY_INPUT", ""),
               "time_decode_backend": os.environ.get("TIME_DECODE_BACKEND", ""),
