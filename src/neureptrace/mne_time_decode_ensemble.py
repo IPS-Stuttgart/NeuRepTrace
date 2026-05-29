@@ -17,6 +17,7 @@ from neureptrace.mne_time_decode import (
     RESULT_SELECTION_MINIMIZE_METRICS,
     RESULT_SUMMARY_METRIC_COLUMNS,
     _best_time_by_metric,
+    TEMPORAL_TRAIN_MODE_RUN_CHOICES,
 )
 from neureptrace.mne_time_decode_foldlocal import run_time_resolved_decode as _run_time_resolved_decode
 from neureptrace.observation_ensemble import (
@@ -98,6 +99,7 @@ def run_time_resolved_decode(
     subject: str | None = None,
     decode_window: tuple[float, float] | None = None,
     temporal_train_window: tuple[float, float] | None = None,
+    temporal_train_mode: str = "window_ensemble",
     time_decode_backend: str = "sklearn",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
@@ -145,6 +147,7 @@ def run_time_resolved_decode(
             subject=subject,
             decode_window=decode_window,
             temporal_train_window=temporal_train_window,
+            temporal_train_mode=temporal_train_mode,
             time_decode_backend=time_decode_backend,
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
@@ -193,6 +196,7 @@ def run_time_resolved_decode(
                     subject=subject,
                     decode_window=decode_window,
                     temporal_train_window=temporal_train_window,
+                    temporal_train_mode=temporal_train_mode,
                     time_decode_backend=time_decode_backend,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
@@ -328,6 +332,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Train one model per time-window center in START..STOP seconds, evaluate each model at every test time, and average probabilities.",
     )
     parser.add_argument(
+        "--temporal-train-mode",
+        choices=TEMPORAL_TRAIN_MODE_RUN_CHOICES,
+        default="window_ensemble",
+        help=(
+            "How --temporal-train-window is used: window_ensemble fits one model "
+            "per selected train window; pooled stacks selected train windows as "
+            "fold-local temporal augmentation and fits one model."
+        ),
+    )
+    parser.add_argument(
         "--ensemble-weight",
         action="append",
         type=float,
@@ -374,6 +388,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         subject=args.subject,
         decode_window=tuple(args.decode_window) if args.decode_window is not None else None,
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
+        temporal_train_mode=args.temporal_train_mode,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
         ensemble_weights=tuple(args.ensemble_weights) if args.ensemble_weights is not None else None,
