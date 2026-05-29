@@ -67,14 +67,19 @@ def _probability_columns(frame: pd.DataFrame) -> list[str]:
     return sorted(columns, key=sort_key)
 
 
+def _probability_label_from_column(column: str) -> int | str:
+    suffix = str(column).removeprefix("prob_class_")
+    try:
+        return int(suffix)
+    except ValueError:
+        return suffix
+
+
 def _class_table(frame: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for column in _probability_columns(frame):
         suffix = column.removeprefix("prob_class_")
-        try:
-            label: int | str = int(suffix)
-        except ValueError:
-            label = suffix
+        label = _probability_label_from_column(column)
         class_name = str(label)
         class_column = f"class_{suffix}"
         if class_column in frame.columns and frame[class_column].notna().any():
@@ -109,8 +114,13 @@ def _score_values(frame: pd.DataFrame, *, stimulus_label: int | str, stimulus_cl
     elif "predicted_class" in frame.columns:
         matches = frame["predicted_class"].astype(str).eq(str(stimulus_class))
     else:
-        probabilities = frame[_probability_columns(frame)].to_numpy(dtype=float)
-        matches = pd.Series(probabilities.argmax(axis=1).astype(str) == str(stimulus_label), index=frame.index)
+        probability_columns = _probability_columns(frame)
+        probabilities = frame[probability_columns].to_numpy(dtype=float)
+        finite_probabilities = np.where(np.isfinite(probabilities), probabilities, -np.inf)
+        predicted_indices = finite_probabilities.argmax(axis=1)
+        has_prediction = np.isfinite(finite_probabilities).any(axis=1)
+        probability_labels = np.asarray([str(_probability_label_from_column(column)) for column in probability_columns], dtype=object)
+        matches = pd.Series(has_prediction & (probability_labels[predicted_indices] == str(stimulus_label)), index=frame.index)
     return confidence.where(matches, 0.0)
 
 
