@@ -22,24 +22,21 @@ def test_foldlocal_cli_help_restores_global_state(monkeypatch):
 
 def test_conflict_resolving_parser_wrapper_is_reentrant():
     original_init = mne_time_decode.argparse.ArgumentParser.__init__
+    outer_wrappers: list[object] = []
     wrapper_identities: list[bool] = []
 
     def inner_main() -> int:
-        wrapper_identities.append(mne_time_decode.argparse.ArgumentParser.__init__ is outer_wrapper)
+        wrapper_identities.append(mne_time_decode.argparse.ArgumentParser.__init__ is outer_wrappers[0])
         parser = mne_time_decode.argparse.ArgumentParser()
         assert parser.conflict_handler == "resolve"
         return 11
 
     def outer_main() -> int:
-        global outer_wrapper
         outer_wrapper = mne_time_decode.argparse.ArgumentParser.__init__
+        outer_wrappers.append(outer_wrapper)
         assert outer_wrapper is not original_init
         return run_with_conflict_resolving_parser(mne_time_decode, inner_main)
 
-    try:
-        assert run_with_conflict_resolving_parser(mne_time_decode, outer_main) == 11
-        assert wrapper_identities == [True]
-    finally:
-        globals().pop("outer_wrapper", None)
-
+    assert run_with_conflict_resolving_parser(mne_time_decode, outer_main) == 11
+    assert wrapper_identities == [True]
     assert mne_time_decode.argparse.ArgumentParser.__init__ is original_init
