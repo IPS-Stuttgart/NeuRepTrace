@@ -1,91 +1,91 @@
 # jscpd:ignore-start
 schema_version: neureptrace.dataset.v1
 paths:
-  base: cwd
+    base: cwd
 dataset:
-  name: bush_meg
-  type: fieldtrip_mat
-  root: ${BUSH_MEG_DATA_DIR}
-  participant_file: "Part{participant}Data.mat"
-  variable: data
-  channel_type: mag
-  fields:
-    trial: trial
-    time: time
-    label: label
-    trialinfo: trialinfo
-    sensor_geometry: grad
+    name: bush_meg
+    type: fieldtrip_mat
+    root: ${BUSH_MEG_DATA_DIR}
+    participant_file: "Part{participant}Data.mat"
+    variable: data
+    channel_type: mag
+    fields:
+        trial: trial
+        time: time
+        label: label
+        trialinfo: trialinfo
+        sensor_geometry: grad
 participants:
-  ids: "1-4,6,8,9,10,13-27"
+    ids: "1-4,6,8,9,10,13-27"
 validation:
-  trim_channel_labels_to_data: true
-  channel_policy: exact
+    trim_channel_labels_to_data: true
+    channel_policy: exact
 metadata:
-  columns:
-    - name: stimulus_class
-      index: 0
-    - name: condition
-      index: 1
-      optional: true
+    columns:
+        - name: stimulus_class
+          index: 0
+        - name: condition
+          index: 1
+          optional: true
 preprocessing:
-  tmin: -0.35
-  tmax: 0.25
-  normalization: subject_baseline_whiten
-  baseline_window: [-0.35, -0.05]
-  feature_preprocessor: pca
-  pca_components: 96
-  window_size: 0.100
+    tmin: -0.35
+    tmax: 0.25
+    normalization: subject_baseline_whiten
+    baseline_window: [-0.35, -0.05]
+    feature_preprocessor: pca
+    pca_components: 96
+    window_size: 0.100
 decoding:
-  label_column: stimulus_class
-  group_column: participant
-  classifier: multinomial-logistic
-  emission_mode: uncalibrated
-  max_iter: 2500
+    label_column: stimulus_class
+    group_column: participant
+    classifier: multinomial-logistic
+    emission_mode: uncalibrated
+    max_iter: 2500
 # jscpd:ignore-end
 source_loso:
-  group_column: participant
-  selection_metric: balanced_accuracy
-  ensemble_top_k: 5
-  # Learn non-negative top-k weights from source-subject OOF probabilities.
-  # This remains strict source-only: no Part*CueData.mat and no held-out-subject
-  # labels or unlabeled epochs are used for calibration.
-  ensemble_weighting: stacked
-  ensemble_class_bias: balanced_accuracy
-  ensemble_temperature: 0.01
-  # Optional source-only top-k reranker fitted on inner source-subject OOF
-  # ensemble probabilities.  This targets the observed top-2/top-3 gap.
-  rerank_top_k: 3
-  rerank_alpha_grid: [0.0, 0.25, 0.5, 1.0, 2.0]
-  candidate_grid:
-    temporal_bins: [4]
-    # evoked_slope keeps the evoked bin means as a prefix and appends compact
-    # within-bin temporal contrasts; source-only stacking can ignore it if weak.
-    feature_kinds:
-      - evoked
-      - evoked_slope
-    decoders: [multinomial-logistic, linear_svm]
-    emission_modes: [uncalibrated]
-    feature_preprocessors: [pca]
-    pca_components: [64, 128]
-    c_grid: [0.1, 1.0, 10.0]
-    window_sets:
-      - name: single_150ms
-        centers: [0.150]
-        window_size: 0.100
-      - name: single_175ms
-        centers: [0.175]
-        window_size: 0.100
-      - name: single_200ms
-        centers: [0.200]
-        window_size: 0.100
-      - name: triplet_150_200ms
-        centers: [0.150, 0.175, 0.200]
-        window_size: 0.100
+    group_column: participant
+    selection_metric: balanced_accuracy
+    ensemble_top_k: 5
+    # Learn non-negative top-k weights from source-subject OOF probabilities.
+    # This remains strict source-only: no Part*CueData.mat and no held-out-subject
+    # labels or unlabeled epochs are used for calibration.
+    ensemble_weighting: stacked
+    ensemble_class_bias: balanced_accuracy
+    ensemble_temperature: 0.01
+    # Optional source-only top-k reranker fitted on inner source-subject OOF
+    # ensemble probabilities.  This targets the observed top-2/top-3 gap.
+    rerank_top_k: 3
+    rerank_alpha_grid: [0.0, 0.25, 0.5, 1.0, 2.0]
+    candidate_grid:
+        temporal_bins: [4]
+        # evoked_slope keeps the evoked bin means as a prefix and appends compact
+        # within-bin temporal contrasts; source-only stacking can ignore it if weak.
+        feature_kinds:
+            - evoked
+            - evoked_slope
+        decoders: [multinomial-logistic, linear_svm]
+        emission_modes: [uncalibrated]
+        feature_preprocessors: [pca]
+        pca_components: [64, 128]
+        c_grid: [0.1, 1.0, 10.0]
+        window_sets:
+            - name: single_150ms
+              centers: [0.150]
+              window_size: 0.100
+            - name: single_175ms
+              centers: [0.175]
+              window_size: 0.100
+            - name: single_200ms
+              centers: [0.200]
+              window_size: 0.100
+            - name: triplet_150_200ms
+              centers: [0.150, 0.175, 0.200]
+              window_size: 0.100
 outputs:
-  base_dir: results/{dataset}/source_loso_ensemble
-  source_loso_ensemble_summary_csv: source_loso_ensemble_summary.csv
-  source_loso_ensemble_inner_cv_csv: source_loso_ensemble_inner_cv.csv
-  source_loso_ensemble_candidate_summary_csv: source_loso_ensemble_candidate_summary.csv
-  source_loso_ensemble_predictions_csv: source_loso_ensemble_predictions.csv
-  provenance: true
-  hash_input_files: true
+    base_dir: results/{dataset}/source_loso_ensemble
+    source_loso_ensemble_summary_csv: source_loso_ensemble_summary.csv
+    source_loso_ensemble_inner_cv_csv: source_loso_ensemble_inner_cv.csv
+    source_loso_ensemble_candidate_summary_csv: source_loso_ensemble_candidate_summary.csv
+    source_loso_ensemble_predictions_csv: source_loso_ensemble_predictions.csv
+    provenance: true
+    hash_input_files: true

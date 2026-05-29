@@ -1,66 +1,66 @@
 schema_version: neureptrace.dataset.v1
 
 paths:
-  base: project_root
+    base: project_root
 
 dataset:
-  name: bushmeg_smoke
-  type: fieldtrip_mat
-  root: ${BUSHMEG_DATA_DIR}
-  variable: data
-  channel_type: mag
-  file_templates:
-    main: Part{participant}Data.mat
-    cue: Part{participant}CueData.mat
-  fields:
-    trial: trial
-    time: time
-    label: label
-    trialinfo: trialinfo
-    sensor_geometry: grad
+    name: bushmeg_smoke
+    type: fieldtrip_mat
+    root: ${BUSHMEG_DATA_DIR}
+    variable: data
+    channel_type: mag
+    file_templates:
+        main: Part{participant}Data.mat
+        cue: Part{participant}CueData.mat
+    fields:
+        trial: trial
+        time: time
+        label: label
+        trialinfo: trialinfo
+        sensor_geometry: grad
 
 participants:
-  ids: "2"
+    ids: "2"
 
 metadata:
-  columns:
-    - name: stimulus
-      index: 0
+    columns:
+        - name: stimulus
+          index: 0
 
 validation:
-  channel_policy: intersection
-  trim_channel_labels_to_data: true
-  require_equal_trial_time_lengths: true
-  require_trialinfo_rows_equal_trials: true
+    channel_policy: intersection
+    trim_channel_labels_to_data: true
+    require_equal_trial_time_lengths: true
+    require_trialinfo_rows_equal_trials: true
 
 preprocessing:
-  normalization: none
-  baseline_window: [-0.35, -0.05]
-  tmin: -0.05
-  tmax: 0.25
-  window_size: 0.1
-  window_step: 0.1
-  feature_preprocessor: pca
-  pca_components: 0.95
+    normalization: none
+    baseline_window: [-0.35, -0.05]
+    tmin: -0.05
+    tmax: 0.25
+    window_size: 0.1
+    window_step: 0.1
+    feature_preprocessor: pca
+    pca_components: 0.95
 
 decoding:
-  label_column: stimulus
+    label_column: stimulus
 
 transfer:
-  label_column: stimulus
-  train_filter:
-    split: main
-  test_filter:
-    split: cue
-  classifier: linear_svm
-  emission_mode: uncalibrated
-  feature_preprocessor: pca
-  pca_components: 0.95
-  max_iter: 5000
+    label_column: stimulus
+    train_filter:
+        split: main
+    test_filter:
+        split: cue
+    classifier: linear_svm
+    emission_mode: uncalibrated
+    feature_preprocessor: pca
+    pca_components: 0.95
+    max_iter: 5000
 
 outputs:
-  base_dir: outputs/bushmeg_smoke
-  summary_csv: transfer_summary.csv
-  observations_csv: transfer_observations.csv
-  provenance: false
-  hash_input_files: false
+    base_dir: outputs/bushmeg_smoke
+    summary_csv: transfer_summary.csv
+    observations_csv: transfer_observations.csv
+    provenance: false
+    hash_input_files: false

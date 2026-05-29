@@ -3,49 +3,49 @@ description: Report a reproducible NeuRepTrace problem
 title: "Bug: "
 labels: [bug]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thanks for reporting a problem. Please include a small reproducer whenever possible so we can distinguish a code defect from dataset-specific behavior.
-  - type: textarea
-    id: observed
-    attributes:
-      label: Observed behavior
-      description: What happened? Include the full error message or unexpected output.
-    validations:
-      required: true
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected behavior
-      description: What should have happened instead?
-    validations:
-      required: true
-  - type: textarea
-    id: reproduce
-    attributes:
-      label: Reproduction steps
-      description: Provide commands, minimal input rows, config fragments, or paths to public artifacts.
-      placeholder: |
-        1. Run `neureptrace ...`
-        2. Observe ...
-    validations:
-      required: true
-  - type: textarea
-    id: data-contract
-    attributes:
-      label: Data contract details
-      description: For workflow bugs, paste the relevant manifest/config/observation-schema columns and note whether files are public or private.
-      placeholder: |
-        Manifest columns: subject, epochs, label_column, n_splits, ...
-        Observation columns: sequence_id, time, true_label, prob_class_0, ...
-    validations:
-      required: false
-  - type: textarea
-    id: environment
-    attributes:
-      label: Environment
-      description: Paste `neureptrace doctor` output or list Python, OS, package manager, and installation method.
-      render: text
-    validations:
-      required: false
+    - type: markdown
+      attributes:
+          value: |
+              Thanks for reporting a problem. Please include a small reproducer whenever possible so we can distinguish a code defect from dataset-specific behavior.
+    - type: textarea
+      id: observed
+      attributes:
+          label: Observed behavior
+          description: What happened? Include the full error message or unexpected output.
+      validations:
+          required: true
+    - type: textarea
+      id: expected
+      attributes:
+          label: Expected behavior
+          description: What should have happened instead?
+      validations:
+          required: true
+    - type: textarea
+      id: reproduce
+      attributes:
+          label: Reproduction steps
+          description: Provide commands, minimal input rows, config fragments, or paths to public artifacts.
+          placeholder: |
+              1. Run `neureptrace ...`
+              2. Observe ...
+      validations:
+          required: true
+    - type: textarea
+      id: data-contract
+      attributes:
+          label: Data contract details
+          description: For workflow bugs, paste the relevant manifest/config/observation-schema columns and note whether files are public or private.
+          placeholder: |
+              Manifest columns: subject, epochs, label_column, n_splits, ...
+              Observation columns: sequence_id, time, true_label, prob_class_0, ...
+      validations:
+          required: false
+    - type: textarea
+      id: environment
+      attributes:
+          label: Environment
+          description: Paste `neureptrace doctor` output or list Python, OS, package manager, and installation method.
+          render: text
+      validations:
+          required: false

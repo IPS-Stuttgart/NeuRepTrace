@@ -1,46 +1,46 @@
 schema_version: neureptrace.dataset.v1
 
 paths:
-  base: cwd
+    base: cwd
 
 dataset:
-  name: openneuro_ds004276_words
-  type: mne_epochs
-  root: ${NEUREPTRACE_OPENNEURO_STAGED_DIR}
-  channel_type: mag
-  epochs_files:
-    template: "ds004276/sub-{subject03d}_ds004276_auditory_words_epo.fif"
+    name: openneuro_ds004276_words
+    type: mne_epochs
+    root: ${NEUREPTRACE_OPENNEURO_STAGED_DIR}
+    channel_type: mag
+    epochs_files:
+        template: "ds004276/sub-{subject03d}_ds004276_auditory_words_epo.fif"
 
 participants:
-  ids: "1-18"
+    ids: "1-18"
 
 validation:
-  channel_policy: intersection
+    channel_policy: intersection
 
 preprocessing:
-  tmin: -0.2
-  tmax: 0.8
-  window_size: 0.1
-  window_step: 0.05
-  normalization: subject_baseline_z
-  baseline_window: [-0.2, 0.0]
-  feature_preprocessor: pca
-  pca_components: 64
+    tmin: -0.2
+    tmax: 0.8
+    window_size: 0.1
+    window_step: 0.05
+    normalization: subject_baseline_z
+    baseline_window: [-0.2, 0.0]
+    feature_preprocessor: pca
+    pca_components: 64
 
 decoding:
-  label_column: condition
-  group_column: subject
-  classifier: logistic-svm-ensemble
-  emission_mode: calibrated
-  n_splits: 18
-  max_iter: 1000
-  label_shuffle_control: false
-  label_shuffle_seed: 13
+    label_column: condition
+    group_column: subject
+    classifier: logistic-svm-ensemble
+    emission_mode: calibrated
+    n_splits: 18
+    max_iter: 1000
+    label_shuffle_control: false
+    label_shuffle_seed: 13
 
 outputs:
-  base_dir: results/openneuro_ds004276_words
-  summary_csv: time_decode_summary.csv
-  observations_csv: observations.csv
-  calibration_csv: calibration.csv
-  provenance: true
-  hash_input_files: false
+    base_dir: results/openneuro_ds004276_words
+    summary_csv: time_decode_summary.csv
+    observations_csv: observations.csv
+    calibration_csv: calibration.csv
+    provenance: true
+    hash_input_files: false
