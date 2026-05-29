@@ -1,262 +1,262 @@
 name: NOD Paper 2 temporal state inference
 
 permissions:
-  contents: read
+    contents: read
 
 on:
-  workflow_dispatch:
-    inputs:
-      publish_to_paper_repo:
-        description: "Dispatch paper-repo build-results workflow to fetch this raw artifact"
-        required: true
-        type: boolean
-        default: false
-      data_root:
-        description: "Directory containing sub-*_epo.fif and sub-*_events.csv files"
-        required: true
-        default: "../data/nod"
-      data_remote_path:
-        description: "Optional path below the NODEEG WebDAV share root when data_root is absent"
-        required: false
-        default: ""
-      output_dir:
-        description: "Repository-relative output directory for derived Paper 2 results"
-        required: true
-        default: "results/paper2_temporal_state_inference"
-      paper_export_dir:
-        description: "Optional local export directory for compact raw artifacts"
-        required: false
-        default: ""
-      decoders:
-        description: "Space-separated decoder list"
-        required: true
-        default: "logistic linear_svm"
-      n_permutations:
-        description: "Temporal-model control permutations"
-        required: true
-        default: "100"
-      python_version:
-        description: "Python version for the local Linux runner"
-        required: true
-        default: "3.12"
+    workflow_dispatch:
+        inputs:
+            publish_to_paper_repo:
+                description: "Dispatch paper-repo build-results workflow to fetch this raw artifact"
+                required: true
+                type: boolean
+                default: false
+            data_root:
+                description: "Directory containing sub-*_epo.fif and sub-*_events.csv files"
+                required: true
+                default: "../data/nod"
+            data_remote_path:
+                description: "Optional path below the NODEEG WebDAV share root when data_root is absent"
+                required: false
+                default: ""
+            output_dir:
+                description: "Repository-relative output directory for derived Paper 2 results"
+                required: true
+                default: "results/paper2_temporal_state_inference"
+            paper_export_dir:
+                description: "Optional local export directory for compact raw artifacts"
+                required: false
+                default: ""
+            decoders:
+                description: "Space-separated decoder list"
+                required: true
+                default: "logistic linear_svm"
+            n_permutations:
+                description: "Temporal-model control permutations"
+                required: true
+                default: "100"
+            python_version:
+                description: "Python version for the local Linux runner"
+                required: true
+                default: "3.12"
 
 concurrency:
-  group: nod-paper2-temporal-${{ github.ref }}
-  cancel-in-progress: false
+    group: nod-paper2-temporal-${{ github.ref }}
+    cancel-in-progress: false
 
 jobs:
-  nod-paper2-temporal:
-    runs-on: [self-hosted, Linux]
-    timeout-minutes: 720
-    env:
-      NODEEG_WEBDAV_URL: ${{ secrets.NODEEG_WEBDAV_URL }}
-      NODEEG_DATA_KEY: ${{ secrets.NODEEG_DATA_KEY }}
-      NODEEG_DATA_PASSWORD: ${{ secrets.NODEEG_DATA_PASSWORD }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install dependencies
-        shell: bash
-        run: |
-          PYTHON_CMD=""
-          for CANDIDATE in "python${{ inputs.python_version }}" python3.14 python3.13 python3.12 python3.11 python3 python; do
-            if command -v "$CANDIDATE" >/dev/null 2>&1 && "$CANDIDATE" - <<'PY'
-          import sys
-          raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)
-          PY
-            then
-              PYTHON_CMD="$CANDIDATE"
-              break
-            fi
-          done
-          if [[ -z "$PYTHON_CMD" ]]; then
-            echo "No supported Python found. NeuRepTrace needs Python >=3.11,<3.15."
-            exit 1
-          fi
-          "$PYTHON_CMD" --version
-          echo "PAPER2_PYTHON_CMD=$PYTHON_CMD" >> "$GITHUB_ENV"
-          if "$PYTHON_CMD" -m venv "$GITHUB_WORKSPACE/.workflow-venv"; then
-            "$GITHUB_WORKSPACE/.workflow-venv/bin/python" -m pip install --upgrade pip poetry
-            echo "POETRY_BIN=$GITHUB_WORKSPACE/.workflow-venv/bin/poetry" >> "$GITHUB_ENV"
-            "$GITHUB_WORKSPACE/.workflow-venv/bin/poetry" env use "$GITHUB_WORKSPACE/.workflow-venv/bin/python"
-            "$GITHUB_WORKSPACE/.workflow-venv/bin/poetry" install
-          else
-            rm -rf "$GITHUB_WORKSPACE/.workflow-venv"
-            "$PYTHON_CMD" -m pip install --user --break-system-packages --upgrade pip poetry || "$PYTHON_CMD" -m pip install --user --upgrade pip poetry
-            "$PYTHON_CMD" -m poetry env use "$PYTHON_CMD"
-            "$PYTHON_CMD" -m poetry install
-          fi
-
-      - name: Install rclone
-        if: env.NODEEG_WEBDAV_URL != ''
-        shell: bash
-        run: .github/scripts/install-rclone.sh
-
-      - name: Resolve or download NOD-EEG data
-        shell: bash
-        run: |
-          set -euo pipefail
-          EXPECTED_SUBJECTS=(
-            01 02 03 04 05 06 07 08 09
-            10 11 12 13 14 24 26 27 29 30
-          )
-
-          nod_subject_count() {
-            local root="$1"
-            local count=0
-            if [[ -z "$root" || ! -d "$root" ]]; then
-              echo 0
-              return
-            fi
-            local subject
-            for subject in "${EXPECTED_SUBJECTS[@]}"; do
-              if [[ -f "$root/sub-${subject}_epo.fif" && -f "$root/sub-${subject}_events.csv" ]]; then
-                count=$((count + 1))
-              fi
-            done
-            echo "$count"
-          }
-
-          valid_nod_root() {
-            local root="$1"
-            local required="${2:-19}"
-            [[ "$(nod_subject_count "$root")" -ge "$required" ]]
-          }
-
-          REQUESTED_DATA_ROOT="${{ inputs.data_root }}"
-          CACHE_ROOT="$HOME/github-runner/.cache/datasets/neureptrace/nod-eeg-full-v1"
-          CANDIDATES=(
-            "$REQUESTED_DATA_ROOT"
-            "$GITHUB_WORKSPACE/$REQUESTED_DATA_ROOT"
-            "$CACHE_ROOT"
-            "$GITHUB_WORKSPACE/data/nod"
-            "$GITHUB_WORKSPACE/../data/nod"
-            "$GITHUB_WORKSPACE/../../data/nod"
-            "${RUNNER_WORKSPACE:-}/data/nod"
-            "${RUNNER_WORKSPACE:-}/../data/nod"
-            "$HOME/data/nod"
-            "$HOME/nod"
-          )
-          DATA_ROOT=""
-          for CANDIDATE in "${CANDIDATES[@]}"; do
-            if valid_nod_root "$CANDIDATE" 19; then
-              DATA_ROOT="$(cd "$CANDIDATE" && pwd)"
-              break
-            fi
-          done
-          if [[ -z "$DATA_ROOT" ]]; then
-            if [[ -z "${NODEEG_WEBDAV_URL:-}" || -z "${NODEEG_DATA_KEY:-}" || -z "${NODEEG_DATA_PASSWORD:-}" ]]; then
-              echo "No valid staged NOD-EEG data root found and NODEEG WebDAV secrets are not configured." >&2
-              printf 'Checked: %s\n' "${CANDIDATES[@]}" >&2
-              exit 1
-            fi
-            DATA_ROOT="$CACHE_ROOT"
-            mkdir -p "$DATA_ROOT"
-            "$PAPER2_PYTHON_CMD" scripts/download_nodeeg_data.py --data-root "$DATA_ROOT" --remote-path "${{ inputs.data_remote_path }}" --require-subject-count 19
-            find "$DATA_ROOT" -type f -printf '%s %p\n' | sort > "$DATA_ROOT/MANIFEST.txt"
-            DATA_ROOT="$(cd "$DATA_ROOT" && pwd)"
-          fi
-          SUBJECT_COUNT="$(nod_subject_count "$DATA_ROOT")"
-          echo "NEUREPTRACE_DATA_ROOT=$DATA_ROOT" >> "$GITHUB_ENV"
-          echo "Using data root: $DATA_ROOT"
-          echo "Valid staged NOD-EEG subject pairs: $SUBJECT_COUNT"
-          echo "Persistent NOD-EEG cache root: $CACHE_ROOT"
-          du -sh "$DATA_ROOT" || true
-
-      - name: Run Paper 2 workflow
-        shell: bash
+    nod-paper2-temporal:
+        runs-on: [self-hosted, Linux]
+        timeout-minutes: 720
         env:
-          PYTHONPATH: ${{ github.workspace }}/src
-        run: |
-          DATA_ROOT="${NEUREPTRACE_DATA_ROOT:-}"
-          if [[ -z "$DATA_ROOT" || ! -f "$DATA_ROOT/sub-01_epo.fif" || ! -f "$DATA_ROOT/sub-01_events.csv" ]]; then
-            echo "NEUREPTRACE_DATA_ROOT is not a valid staged NOD-EEG data root: $DATA_ROOT"
-            exit 1
-          fi
-          echo "Using data root: $DATA_ROOT"
-          OUTPUT_DIR="$GITHUB_WORKSPACE/${{ inputs.output_dir }}"
-          read -r -a DECODER_ARGS <<< "${{ inputs.decoders }}"
-          WORKFLOW_ARGS=(
-            "--data-root" "$DATA_ROOT"
-            "--out-dir" "$OUTPUT_DIR"
-            "--n-permutations" "${{ inputs.n_permutations }}"
-            "--decoders" "${DECODER_ARGS[@]}"
-          )
-          PAPER_EXPORT_DIR="${{ inputs.paper_export_dir }}"
-          if [[ -n "$PAPER_EXPORT_DIR" ]]; then
-            WORKFLOW_ARGS+=("--paper-export-dir" "$PAPER_EXPORT_DIR")
-          fi
-          if [[ -n "${POETRY_BIN:-}" ]]; then
-            POETRY_RUN=("$POETRY_BIN")
-          else
-            POETRY_RUN=("$PAPER2_PYTHON_CMD" "-m" "poetry")
-          fi
-          "${POETRY_RUN[@]}" run python -m neureptrace.temporal_state_workflow "${WORKFLOW_ARGS[@]}"
+            NODEEG_WEBDAV_URL: ${{ secrets.NODEEG_WEBDAV_URL }}
+            NODEEG_DATA_KEY: ${{ secrets.NODEEG_DATA_KEY }}
+            NODEEG_DATA_PASSWORD: ${{ secrets.NODEEG_DATA_PASSWORD }}
 
-      - name: Upload compact Paper 2 artifacts
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: nod-paper2-temporal-${{ github.run_id }}
-          path: |
-            ${{ inputs.output_dir }}/paper2_summary.csv
-            ${{ inputs.output_dir }}/paper2_evidence.md
-            ${{ inputs.output_dir }}/paper2_commands.md
-            ${{ inputs.output_dir }}/temporal_model_all.csv
-            ${{ inputs.output_dir }}/emission_compare_all.csv
-            ${{ inputs.output_dir }}/semantic_stage_time_all.csv
-            ${{ inputs.output_dir }}/semantic_stages_all.csv
-            ${{ inputs.output_dir }}/*/validation.csv
-            ${{ inputs.output_dir }}/*/summary.csv
-            ${{ inputs.output_dir }}/*/temporal_model.csv
-            ${{ inputs.output_dir }}/*/emission_compare.csv
-            ${{ inputs.output_dir }}/*/emission_compare.md
-            ${{ inputs.output_dir }}/*/semantic_stage_time.csv
-            ${{ inputs.output_dir }}/*/semantic_stages.csv
-            ${{ inputs.output_dir }}/*/semantic_stages.md
-          if-no-files-found: warn
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v6
 
-  dispatch-paper-results:
-    name: Dispatch paper repository build
-    needs: nod-paper2-temporal
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_to_paper_repo == true }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch paper repository build-results workflow
-        env:
-          PAPER_REPO_TOKEN: ${{ secrets.PAPER_REPO_TOKEN }}
-          PAPER_REPO: FlorianPfaff/NeuRepTrace-Paper
-          SOURCE_REPO: IPS-Stuttgart/NeuRepTrace
-          SOURCE_RUN_ID: ${{ github.run_id }}
-          ARTIFACT_NAME: nod-paper2-temporal-${{ github.run_id }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${PAPER_REPO_TOKEN:-}" ]; then
-            echo "::warning::publish_to_paper_repo=true but PAPER_REPO_TOKEN is not configured; skipping paper workflow dispatch"
-            exit 0
-          fi
-          payload=$(python - <<'PY'
-          import json
-          import os
+            - name: Install dependencies
+              shell: bash
+              run: |
+                  PYTHON_CMD=""
+                  for CANDIDATE in "python${{ inputs.python_version }}" python3.14 python3.13 python3.12 python3.11 python3 python; do
+                    if command -v "$CANDIDATE" >/dev/null 2>&1 && "$CANDIDATE" - <<'PY'
+                  import sys
+                  raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)
+                  PY
+                    then
+                      PYTHON_CMD="$CANDIDATE"
+                      break
+                    fi
+                  done
+                  if [[ -z "$PYTHON_CMD" ]]; then
+                    echo "No supported Python found. NeuRepTrace needs Python >=3.11,<3.15."
+                    exit 1
+                  fi
+                  "$PYTHON_CMD" --version
+                  echo "PAPER2_PYTHON_CMD=$PYTHON_CMD" >> "$GITHUB_ENV"
+                  if "$PYTHON_CMD" -m venv "$GITHUB_WORKSPACE/.workflow-venv"; then
+                    "$GITHUB_WORKSPACE/.workflow-venv/bin/python" -m pip install --upgrade pip poetry
+                    echo "POETRY_BIN=$GITHUB_WORKSPACE/.workflow-venv/bin/poetry" >> "$GITHUB_ENV"
+                    "$GITHUB_WORKSPACE/.workflow-venv/bin/poetry" env use "$GITHUB_WORKSPACE/.workflow-venv/bin/python"
+                    "$GITHUB_WORKSPACE/.workflow-venv/bin/poetry" install
+                  else
+                    rm -rf "$GITHUB_WORKSPACE/.workflow-venv"
+                    "$PYTHON_CMD" -m pip install --user --break-system-packages --upgrade pip poetry || "$PYTHON_CMD" -m pip install --user --upgrade pip poetry
+                    "$PYTHON_CMD" -m poetry env use "$PYTHON_CMD"
+                    "$PYTHON_CMD" -m poetry install
+                  fi
 
-          print(json.dumps({
-              "ref": "main",
-              "inputs": {
-                  "source_repo": os.environ["SOURCE_REPO"],
-                  "source_run_id": os.environ["SOURCE_RUN_ID"],
-                  "artifact_name": os.environ["ARTIFACT_NAME"],
-              },
-          }))
-          PY
-          )
+            - name: Install rclone
+              if: env.NODEEG_WEBDAV_URL != ''
+              shell: bash
+              run: .github/scripts/install-rclone.sh
 
-          curl -fsSL \
-            -X POST \
-            -H "Authorization: Bearer ${PAPER_REPO_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${PAPER_REPO}/actions/workflows/build-results.yml/dispatches" \
-            -d "$payload"
+            - name: Resolve or download NOD-EEG data
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  EXPECTED_SUBJECTS=(
+                    01 02 03 04 05 06 07 08 09
+                    10 11 12 13 14 24 26 27 29 30
+                  )
+
+                  nod_subject_count() {
+                    local root="$1"
+                    local count=0
+                    if [[ -z "$root" || ! -d "$root" ]]; then
+                      echo 0
+                      return
+                    fi
+                    local subject
+                    for subject in "${EXPECTED_SUBJECTS[@]}"; do
+                      if [[ -f "$root/sub-${subject}_epo.fif" && -f "$root/sub-${subject}_events.csv" ]]; then
+                        count=$((count + 1))
+                      fi
+                    done
+                    echo "$count"
+                  }
+
+                  valid_nod_root() {
+                    local root="$1"
+                    local required="${2:-19}"
+                    [[ "$(nod_subject_count "$root")" -ge "$required" ]]
+                  }
+
+                  REQUESTED_DATA_ROOT="${{ inputs.data_root }}"
+                  CACHE_ROOT="$HOME/github-runner/.cache/datasets/neureptrace/nod-eeg-full-v1"
+                  CANDIDATES=(
+                    "$REQUESTED_DATA_ROOT"
+                    "$GITHUB_WORKSPACE/$REQUESTED_DATA_ROOT"
+                    "$CACHE_ROOT"
+                    "$GITHUB_WORKSPACE/data/nod"
+                    "$GITHUB_WORKSPACE/../data/nod"
+                    "$GITHUB_WORKSPACE/../../data/nod"
+                    "${RUNNER_WORKSPACE:-}/data/nod"
+                    "${RUNNER_WORKSPACE:-}/../data/nod"
+                    "$HOME/data/nod"
+                    "$HOME/nod"
+                  )
+                  DATA_ROOT=""
+                  for CANDIDATE in "${CANDIDATES[@]}"; do
+                    if valid_nod_root "$CANDIDATE" 19; then
+                      DATA_ROOT="$(cd "$CANDIDATE" && pwd)"
+                      break
+                    fi
+                  done
+                  if [[ -z "$DATA_ROOT" ]]; then
+                    if [[ -z "${NODEEG_WEBDAV_URL:-}" || -z "${NODEEG_DATA_KEY:-}" || -z "${NODEEG_DATA_PASSWORD:-}" ]]; then
+                      echo "No valid staged NOD-EEG data root found and NODEEG WebDAV secrets are not configured." >&2
+                      printf 'Checked: %s\n' "${CANDIDATES[@]}" >&2
+                      exit 1
+                    fi
+                    DATA_ROOT="$CACHE_ROOT"
+                    mkdir -p "$DATA_ROOT"
+                    "$PAPER2_PYTHON_CMD" scripts/download_nodeeg_data.py --data-root "$DATA_ROOT" --remote-path "${{ inputs.data_remote_path }}" --require-subject-count 19
+                    find "$DATA_ROOT" -type f -printf '%s %p\n' | sort > "$DATA_ROOT/MANIFEST.txt"
+                    DATA_ROOT="$(cd "$DATA_ROOT" && pwd)"
+                  fi
+                  SUBJECT_COUNT="$(nod_subject_count "$DATA_ROOT")"
+                  echo "NEUREPTRACE_DATA_ROOT=$DATA_ROOT" >> "$GITHUB_ENV"
+                  echo "Using data root: $DATA_ROOT"
+                  echo "Valid staged NOD-EEG subject pairs: $SUBJECT_COUNT"
+                  echo "Persistent NOD-EEG cache root: $CACHE_ROOT"
+                  du -sh "$DATA_ROOT" || true
+
+            - name: Run Paper 2 workflow
+              shell: bash
+              env:
+                  PYTHONPATH: ${{ github.workspace }}/src
+              run: |
+                  DATA_ROOT="${NEUREPTRACE_DATA_ROOT:-}"
+                  if [[ -z "$DATA_ROOT" || ! -f "$DATA_ROOT/sub-01_epo.fif" || ! -f "$DATA_ROOT/sub-01_events.csv" ]]; then
+                    echo "NEUREPTRACE_DATA_ROOT is not a valid staged NOD-EEG data root: $DATA_ROOT"
+                    exit 1
+                  fi
+                  echo "Using data root: $DATA_ROOT"
+                  OUTPUT_DIR="$GITHUB_WORKSPACE/${{ inputs.output_dir }}"
+                  read -r -a DECODER_ARGS <<< "${{ inputs.decoders }}"
+                  WORKFLOW_ARGS=(
+                    "--data-root" "$DATA_ROOT"
+                    "--out-dir" "$OUTPUT_DIR"
+                    "--n-permutations" "${{ inputs.n_permutations }}"
+                    "--decoders" "${DECODER_ARGS[@]}"
+                  )
+                  PAPER_EXPORT_DIR="${{ inputs.paper_export_dir }}"
+                  if [[ -n "$PAPER_EXPORT_DIR" ]]; then
+                    WORKFLOW_ARGS+=("--paper-export-dir" "$PAPER_EXPORT_DIR")
+                  fi
+                  if [[ -n "${POETRY_BIN:-}" ]]; then
+                    POETRY_RUN=("$POETRY_BIN")
+                  else
+                    POETRY_RUN=("$PAPER2_PYTHON_CMD" "-m" "poetry")
+                  fi
+                  "${POETRY_RUN[@]}" run python -m neureptrace.temporal_state_workflow "${WORKFLOW_ARGS[@]}"
+
+            - name: Upload compact Paper 2 artifacts
+              uses: actions/upload-artifact@v7
+              if: always()
+              with:
+                  name: nod-paper2-temporal-${{ github.run_id }}
+                  path: |
+                      ${{ inputs.output_dir }}/paper2_summary.csv
+                      ${{ inputs.output_dir }}/paper2_evidence.md
+                      ${{ inputs.output_dir }}/paper2_commands.md
+                      ${{ inputs.output_dir }}/temporal_model_all.csv
+                      ${{ inputs.output_dir }}/emission_compare_all.csv
+                      ${{ inputs.output_dir }}/semantic_stage_time_all.csv
+                      ${{ inputs.output_dir }}/semantic_stages_all.csv
+                      ${{ inputs.output_dir }}/*/validation.csv
+                      ${{ inputs.output_dir }}/*/summary.csv
+                      ${{ inputs.output_dir }}/*/temporal_model.csv
+                      ${{ inputs.output_dir }}/*/emission_compare.csv
+                      ${{ inputs.output_dir }}/*/emission_compare.md
+                      ${{ inputs.output_dir }}/*/semantic_stage_time.csv
+                      ${{ inputs.output_dir }}/*/semantic_stages.csv
+                      ${{ inputs.output_dir }}/*/semantic_stages.md
+                  if-no-files-found: warn
+
+    dispatch-paper-results:
+        name: Dispatch paper repository build
+        needs: nod-paper2-temporal
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_to_paper_repo == true }}
+        runs-on: ubuntu-latest
+        steps:
+            - name: Dispatch paper repository build-results workflow
+              env:
+                  PAPER_REPO_TOKEN: ${{ secrets.PAPER_REPO_TOKEN }}
+                  PAPER_REPO: FlorianPfaff/NeuRepTrace-Paper
+                  SOURCE_REPO: IPS-Stuttgart/NeuRepTrace
+                  SOURCE_RUN_ID: ${{ github.run_id }}
+                  ARTIFACT_NAME: nod-paper2-temporal-${{ github.run_id }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  if [ -z "${PAPER_REPO_TOKEN:-}" ]; then
+                    echo "::warning::publish_to_paper_repo=true but PAPER_REPO_TOKEN is not configured; skipping paper workflow dispatch"
+                    exit 0
+                  fi
+                  payload=$(python - <<'PY'
+                  import json
+                  import os
+
+                  print(json.dumps({
+                      "ref": "main",
+                      "inputs": {
+                          "source_repo": os.environ["SOURCE_REPO"],
+                          "source_run_id": os.environ["SOURCE_RUN_ID"],
+                          "artifact_name": os.environ["ARTIFACT_NAME"],
+                      },
+                  }))
+                  PY
+                  )
+
+                  curl -fsSL \
+                    -X POST \
+                    -H "Authorization: Bearer ${PAPER_REPO_TOKEN}" \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "X-GitHub-Api-Version: 2022-11-28" \
+                    "https://api.github.com/repos/${PAPER_REPO}/actions/workflows/build-results.yml/dispatches" \
+                    -d "$payload"

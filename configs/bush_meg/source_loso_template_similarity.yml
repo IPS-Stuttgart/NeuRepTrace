@@ -1,101 +1,101 @@
 schema_version: neureptrace.dataset.v1
 
 paths:
-  base: cwd
+    base: cwd
 
 dataset:
-  name: bush_meg
-  type: fieldtrip_mat
-  root: ${BUSH_MEG_DATA_DIR}
-  participant_file: "Part{participant}Data.mat"
-  variable: data
-  channel_type: mag
-  fields:
-    trial: trial
-    time: time
-    label: label
-    trialinfo: trialinfo
-    sensor_geometry: grad
+    name: bush_meg
+    type: fieldtrip_mat
+    root: ${BUSH_MEG_DATA_DIR}
+    participant_file: "Part{participant}Data.mat"
+    variable: data
+    channel_type: mag
+    fields:
+        trial: trial
+        time: time
+        label: label
+        trialinfo: trialinfo
+        sensor_geometry: grad
 
 participants:
-  ids: "1-4,6,8,9,10,13-27"
+    ids: "1-4,6,8,9,10,13-27"
 
 validation:
-  trim_channel_labels_to_data: true
-  channel_policy: exact
+    trim_channel_labels_to_data: true
+    channel_policy: exact
 
 metadata:
-  columns:
-    - name: stimulus_class
-      index: 0
-    - name: condition
-      index: 1
-      optional: true
+    columns:
+        - name: stimulus_class
+          index: 0
+        - name: condition
+          index: 1
+          optional: true
 
 preprocessing:
-  tmin: -0.35
-  tmax: 0.25
-  normalization: subject_baseline_whiten
-  baseline_window: [-0.35, -0.05]
-  feature_preprocessor: pca
-  pca_components: 96
-  window_size: 0.100
+    tmin: -0.35
+    tmax: 0.25
+    normalization: subject_baseline_whiten
+    baseline_window: [-0.35, -0.05]
+    feature_preprocessor: pca
+    pca_components: 96
+    window_size: 0.100
 
 decoding:
-  label_column: stimulus_class
-  group_column: participant
-  classifier: multinomial-logistic
-  emission_mode: uncalibrated
-  max_iter: 2000
+    label_column: stimulus_class
+    group_column: participant
+    classifier: multinomial-logistic
+    emission_mode: uncalibrated
+    max_iter: 2000
 
 source_loso:
-  group_column: participant
-  selection_metric: balanced_accuracy
-  # Useful with `neureptrace bushmeg-source-loso-ensemble ...`; harmless for
-  # the single-best-candidate runner.
-  ensemble_top_k: 7
-  ensemble_weighting: softmax
-  ensemble_temperature: 0.01
-  candidate_grid:
-    temporal_bins: [4]
-    # The first entry preserves the current source-only baseline. The template
-    # variants add source-class prototype scores without using cue files or any
-    # held-out-participant labels.
-    feature_families:
-      - bin_means
-      - template_similarity
-      - template_similarity_plus_bin_means
-    decoders:
-      - multinomial-logistic
-      - linear_svm
-    emission_modes:
-      - uncalibrated
-    feature_preprocessors:
-      - pca
-    pca_components: [64, 128]
-    c_grid: [0.1, 1.0, 10.0]
-    window_sets:
-      - name: single_150ms
-        centers: [0.150]
-        window_size: 0.100
-      - name: single_175ms
-        centers: [0.175]
-        window_size: 0.100
-      - name: single_200ms
-        centers: [0.200]
-        window_size: 0.100
-      - name: triplet_150_200ms
-        centers: [0.150, 0.175, 0.200]
-        window_size: 0.100
+    group_column: participant
+    selection_metric: balanced_accuracy
+    # Useful with `neureptrace bushmeg-source-loso-ensemble ...`; harmless for
+    # the single-best-candidate runner.
+    ensemble_top_k: 7
+    ensemble_weighting: softmax
+    ensemble_temperature: 0.01
+    candidate_grid:
+        temporal_bins: [4]
+        # The first entry preserves the current source-only baseline. The template
+        # variants add source-class prototype scores without using cue files or any
+        # held-out-participant labels.
+        feature_families:
+            - bin_means
+            - template_similarity
+            - template_similarity_plus_bin_means
+        decoders:
+            - multinomial-logistic
+            - linear_svm
+        emission_modes:
+            - uncalibrated
+        feature_preprocessors:
+            - pca
+        pca_components: [64, 128]
+        c_grid: [0.1, 1.0, 10.0]
+        window_sets:
+            - name: single_150ms
+              centers: [0.150]
+              window_size: 0.100
+            - name: single_175ms
+              centers: [0.175]
+              window_size: 0.100
+            - name: single_200ms
+              centers: [0.200]
+              window_size: 0.100
+            - name: triplet_150_200ms
+              centers: [0.150, 0.175, 0.200]
+              window_size: 0.100
 
 outputs:
-  base_dir: results/{dataset}
-  source_loso_summary_csv: source_loso_template_similarity_summary.csv
-  source_loso_inner_cv_csv: source_loso_template_similarity_inner_cv.csv
-  source_loso_predictions_csv: source_loso_template_similarity_predictions.csv
-  source_loso_ensemble_summary_csv: source_loso_template_similarity_ensemble_summary.csv
-  source_loso_ensemble_inner_cv_csv: source_loso_template_similarity_ensemble_inner_cv.csv
-  source_loso_ensemble_predictions_csv: source_loso_template_similarity_ensemble_predictions.csv
-  source_loso_ensemble_candidate_summary_csv: source_loso_template_similarity_ensemble_candidates.csv
-  provenance: true
-  hash_input_files: true
+    base_dir: results/{dataset}
+    source_loso_summary_csv: source_loso_template_similarity_summary.csv
+    source_loso_inner_cv_csv: source_loso_template_similarity_inner_cv.csv
+    source_loso_predictions_csv: source_loso_template_similarity_predictions.csv
+    source_loso_ensemble_summary_csv: source_loso_template_similarity_ensemble_summary.csv
+    source_loso_ensemble_inner_cv_csv: source_loso_template_similarity_ensemble_inner_cv.csv
+    source_loso_ensemble_predictions_csv: source_loso_template_similarity_ensemble_predictions.csv
+    source_loso_ensemble_candidate_summary_csv: source_loso_template_similarity_ensemble_candidates.csv
+    provenance: true
+    hash_input_files: true

@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
-  - name: NeuRepTrace documentation
-    url: https://ips-stuttgart.github.io/NeuRepTrace/
-    about: Check the public documentation before opening usage questions.
+    - name: NeuRepTrace documentation
+      url: https://ips-stuttgart.github.io/NeuRepTrace/
+      about: Check the public documentation before opening usage questions.

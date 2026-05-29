@@ -1,16 +1,16 @@
 name: neureptrace
 channels:
-  - conda-forge
+    - conda-forge
 dependencies:
-  - python>=3.11,<3.15
-  - joblib
-  - matplotlib
-  - mne
-  - numpy
-  - pandas
-  - pyyaml
-  - scikit-learn
-  - scipy
-  - pytest
-  - ruff
-  - pip
+    - python>=3.11,<3.15
+    - joblib
+    - matplotlib
+    - mne
+    - numpy
+    - pandas
+    - pyyaml
+    - scikit-learn
+    - scipy
+    - pytest
+    - ruff
+    - pip

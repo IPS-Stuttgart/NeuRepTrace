@@ -1,241 +1,241 @@
 name: NOD decoder comparison
 
 permissions:
-  contents: read
+    contents: read
 
 on:
-  workflow_dispatch:
-    inputs:
-      data_root:
-        description: "Directory containing sub-*_epo.fif and sub-*_events.csv files"
-        required: true
-        default: "../data/nod"
-      data_remote_path:
-        description: "Optional path below the NODEEG WebDAV share root when data_root is absent"
-        required: false
-        default: ""
-      output_dir:
-        description: "Repository-relative output directory for derived results"
-        required: true
-        default: "results/nod_animate_decoders_all"
-      manifest_csv:
-        description: "Repository-relative benchmark manifest to run"
-        required: true
-        default: "benchmarks/nod_animate_decoders_all.csv"
-      n_permutations:
-        description: "Sign-flip permutations for temporal inference"
-        required: true
-        default: "10000"
-      temporal_smoothing:
-        description: "Whether to compare raw decoder probabilities with temporal posterior smoothing"
-        required: true
-        default: "false"
-      temporal_smoothing_fit_window_start:
-        description: "Start time for fitting temporal smoothing stay probability"
-        required: true
-        default: "0.1"
-      temporal_smoothing_fit_window_stop:
-        description: "Stop time for fitting temporal smoothing stay probability"
-        required: true
-        default: "0.8"
-      temporal_smoothing_stay_grid_size:
-        description: "Grid size for temporal smoothing stay-probability fit"
-        required: true
-        default: "200"
-      python_version:
-        description: "Python version for the local py launcher"
-        required: true
-        default: "3.12"
+    workflow_dispatch:
+        inputs:
+            data_root:
+                description: "Directory containing sub-*_epo.fif and sub-*_events.csv files"
+                required: true
+                default: "../data/nod"
+            data_remote_path:
+                description: "Optional path below the NODEEG WebDAV share root when data_root is absent"
+                required: false
+                default: ""
+            output_dir:
+                description: "Repository-relative output directory for derived results"
+                required: true
+                default: "results/nod_animate_decoders_all"
+            manifest_csv:
+                description: "Repository-relative benchmark manifest to run"
+                required: true
+                default: "benchmarks/nod_animate_decoders_all.csv"
+            n_permutations:
+                description: "Sign-flip permutations for temporal inference"
+                required: true
+                default: "10000"
+            temporal_smoothing:
+                description: "Whether to compare raw decoder probabilities with temporal posterior smoothing"
+                required: true
+                default: "false"
+            temporal_smoothing_fit_window_start:
+                description: "Start time for fitting temporal smoothing stay probability"
+                required: true
+                default: "0.1"
+            temporal_smoothing_fit_window_stop:
+                description: "Stop time for fitting temporal smoothing stay probability"
+                required: true
+                default: "0.8"
+            temporal_smoothing_stay_grid_size:
+                description: "Grid size for temporal smoothing stay-probability fit"
+                required: true
+                default: "200"
+            python_version:
+                description: "Python version for the local py launcher"
+                required: true
+                default: "3.12"
 
 concurrency:
-  group: nod-decoder-comparison-${{ github.ref }}
-  cancel-in-progress: false
+    group: nod-decoder-comparison-${{ github.ref }}
+    cancel-in-progress: false
 
 jobs:
-  nod-decoder-comparison:
-    runs-on: [self-hosted, Windows]
-    timeout-minutes: 720
-    env:
-      NODEEG_WEBDAV_URL: ${{ secrets.NODEEG_WEBDAV_URL }}
-      NODEEG_DATA_KEY: ${{ secrets.NODEEG_DATA_KEY }}
-      NODEEG_DATA_PASSWORD: ${{ secrets.NODEEG_DATA_PASSWORD }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install dependencies
-        shell: cmd
-        run: |
-          py -${{ inputs.python_version }} --version
-          py -${{ inputs.python_version }} -m pip install --upgrade pip
-          py -${{ inputs.python_version }} -m pip install poetry
-          for /f "delims=" %%P in ('py -${{ inputs.python_version }} -c "import sys; print(sys.executable)"') do set "PYTHON_EXE=%%P"
-          py -${{ inputs.python_version }} -m poetry env use "%PYTHON_EXE%"
-          py -${{ inputs.python_version }} -m poetry install
-
-      - name: Install rclone
-        if: env.NODEEG_WEBDAV_URL != ''
-        shell: pwsh
-        run: .github/scripts/install-rclone.ps1
-
-      - name: Prepare run manifest
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $expectedSubjects = @(
-            "01", "02", "03", "04", "05", "06", "07", "08", "09",
-            "10", "11", "12", "13", "14", "24", "26", "27", "29", "30"
-          )
-
-          function Get-NodSubjectCount {
-            param([string]$Path)
-            if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path)) {
-              return 0
-            }
-            $count = 0
-            foreach ($subject in $expectedSubjects) {
-              if ((Test-Path (Join-Path $Path "sub-$subject`_epo.fif")) -and (Test-Path (Join-Path $Path "sub-$subject`_events.csv"))) {
-                $count += 1
-              }
-            }
-            return $count
-          }
-
-          function Test-NodDataRoot {
-            param([string]$Path, [int]$RequiredSubjects = 19)
-            return ((Get-NodSubjectCount -Path $Path) -ge $RequiredSubjects)
-          }
-
-          $homeDir = if (-not [string]::IsNullOrWhiteSpace($env:HOME)) { $env:HOME } else { $env:USERPROFILE }
-          if ([string]::IsNullOrWhiteSpace($homeDir)) {
-            throw "Cannot resolve HOME or USERPROFILE for the persistent NOD-EEG cache."
-          }
-          $cacheRoot = Join-Path $homeDir "github-runner"
-          $cacheRoot = Join-Path $cacheRoot ".cache"
-          $cacheRoot = Join-Path $cacheRoot "datasets"
-          $cacheRoot = Join-Path $cacheRoot "neureptrace"
-          $cacheRoot = Join-Path $cacheRoot "nod-eeg-full-v1"
-
-          $requestedDataRoot = "${{ inputs.data_root }}"
-          $candidates = @($requestedDataRoot)
-          if (-not [System.IO.Path]::IsPathRooted($requestedDataRoot)) {
-            $candidates += (Join-Path $env:GITHUB_WORKSPACE $requestedDataRoot)
-          }
-          $candidates += $cacheRoot
-
-          $dataRoot = $null
-          foreach ($candidate in $candidates) {
-            if ([string]::IsNullOrWhiteSpace($candidate)) {
-              continue
-            }
-            if (Test-NodDataRoot -Path $candidate -RequiredSubjects 19) {
-              $dataRoot = (Resolve-Path $candidate).Path
-              break
-            }
-          }
-          if (-not $dataRoot) {
-            if ([string]::IsNullOrWhiteSpace($env:NODEEG_WEBDAV_URL) -or [string]::IsNullOrWhiteSpace($env:NODEEG_DATA_KEY) -or [string]::IsNullOrWhiteSpace($env:NODEEG_DATA_PASSWORD)) {
-              throw "No valid staged NOD-EEG data root found and NODEEG WebDAV secrets are not configured. Checked: $($candidates -join ', ')"
-            }
-            New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
-            & py "-${{ inputs.python_version }}" scripts\download_nodeeg_data.py --data-root $cacheRoot --remote-path "${{ inputs.data_remote_path }}" --require-subject-count 19
-            $dataRoot = (Resolve-Path $cacheRoot).Path
-            Get-ChildItem -Path $dataRoot -Recurse -File |
-              Sort-Object FullName |
-              ForEach-Object { "$($_.Length) $($_.FullName)" } |
-              Set-Content -Path (Join-Path $dataRoot "MANIFEST.txt") -Encoding utf8
-          }
-          $subjectCount = Get-NodSubjectCount -Path $dataRoot
-          $outputDir = Join-Path $env:GITHUB_WORKSPACE "${{ inputs.output_dir }}"
-          $runManifest = Join-Path $outputDir "manifest.csv"
-          $manifestCsv = "${{ inputs.manifest_csv }}"
-          New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-          & py "-${{ inputs.python_version }}" -m poetry run python scripts\prepare_benchmark_manifest.py $manifestCsv $runManifest --data-root $dataRoot
-          "NEUREPTRACE_DATA_ROOT=$dataRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "NEUREPTRACE_OUTPUT_DIR=$outputDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "NEUREPTRACE_RUN_MANIFEST=$runManifest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "Using data root: $dataRoot"
-          "Valid staged NOD-EEG subject pairs: $subjectCount"
-          "Source benchmark manifest: $manifestCsv"
-          "Persistent NOD-EEG cache root: $cacheRoot"
-          "Wrote run manifest: $runManifest"
-
-      - name: Validate staged data
-        shell: cmd
-        run: |
-          set "PYTHONPATH=%GITHUB_WORKSPACE%\src"
-          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.validate_manifest "%NEUREPTRACE_RUN_MANIFEST%" --report-out "%NEUREPTRACE_OUTPUT_DIR%\validation.csv"
-
-      - name: Run all-subject decoder comparison
-        shell: cmd
+    nod-decoder-comparison:
+        runs-on: [self-hosted, Windows]
+        timeout-minutes: 720
         env:
-          PYTHONPATH: ${{ github.workspace }}/src
-        run: |
-          if /I "${{ inputs.temporal_smoothing }}"=="true" (
-            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.benchmark "%NEUREPTRACE_RUN_MANIFEST%" ^
-              --out-dir "%NEUREPTRACE_OUTPUT_DIR%" ^
-              --aggregate-out "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" ^
-              --plot-out "%NEUREPTRACE_OUTPUT_DIR%\summary.png" ^
-              --calibration-dir "%NEUREPTRACE_OUTPUT_DIR%\calibration" ^
-              --observation-dir "%NEUREPTRACE_OUTPUT_DIR%\observations" ^
-              --temporal-smoothing-dir "%NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing" ^
-              --temporal-smoothing-fit-window "${{ inputs.temporal_smoothing_fit_window_start }}" "${{ inputs.temporal_smoothing_fit_window_stop }}" ^
-              --temporal-smoothing-stay-grid-size "${{ inputs.temporal_smoothing_stay_grid_size }}" ^
-              --chance 0.5 ^
-              --resume
-          ) else (
-            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.benchmark "%NEUREPTRACE_RUN_MANIFEST%" --out-dir "%NEUREPTRACE_OUTPUT_DIR%" --aggregate-out "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" --plot-out "%NEUREPTRACE_OUTPUT_DIR%\summary.png" --calibration-dir "%NEUREPTRACE_OUTPUT_DIR%\calibration" --chance 0.5 --resume
-          )
+            NODEEG_WEBDAV_URL: ${{ secrets.NODEEG_WEBDAV_URL }}
+            NODEEG_DATA_KEY: ${{ secrets.NODEEG_DATA_KEY }}
+            NODEEG_DATA_PASSWORD: ${{ secrets.NODEEG_DATA_PASSWORD }}
 
-      - name: Generate reports and inference tables
-        shell: cmd
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src
-        run: |
-          set "NEUREPTRACE_SUBJECT_CSVS=%NEUREPTRACE_OUTPUT_DIR%\sub-*_time_decode.csv"
-          if exist "%NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv" set "NEUREPTRACE_SUBJECT_CSVS=%NEUREPTRACE_SUBJECT_CSVS% %NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv"
-          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.report "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" %NEUREPTRACE_SUBJECT_CSVS% --out "%NEUREPTRACE_OUTPUT_DIR%\report.md" --chance 0.5
-          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.calibration "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" "%NEUREPTRACE_OUTPUT_DIR%\calibration\*_calibration_bins.csv" --out-report "%NEUREPTRACE_OUTPUT_DIR%\calibration_report.md" --out-bins "%NEUREPTRACE_OUTPUT_DIR%\reliability_bins.csv"
-          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.plot_calibration "%NEUREPTRACE_OUTPUT_DIR%\reliability_bins.csv" --out "%NEUREPTRACE_OUTPUT_DIR%\reliability.png" --time-window 0.1 0.8 --title "NOD animate/inanimate decoder calibration"
-          py -${{ inputs.python_version }} -m poetry run python -m neureptrace.paired_stats %NEUREPTRACE_SUBJECT_CSVS% --out-csv "%NEUREPTRACE_OUTPUT_DIR%\paired_stats.csv" --out-report "%NEUREPTRACE_OUTPUT_DIR%\paired_stats.md" --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" || echo Skipping paired stats because fewer than two paired decoder conditions were available.
-          if exist "%NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv" (
-            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference %NEUREPTRACE_SUBJECT_CSVS% --emission-mode calibrated --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_clusters.csv" || exit /b 1
-            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference %NEUREPTRACE_SUBJECT_CSVS% --emission-mode calibrated_temporal_posterior --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_temporal_posterior_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_temporal_posterior_clusters.csv" || exit /b 1
-            goto after_inference
-          )
-          set "NEUREPTRACE_RAN_EXACT_INFERENCE="
-          for %%D in (logistic sparse_logistic elastic_net_logistic ridge gaussian_nb lda shrinkage_lda linear_svm) do (
-            if exist "%NEUREPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" (
-              set "NEUREPTRACE_RAN_EXACT_INFERENCE=1"
-              py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference "%NEUREPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_%%D_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_%%D_clusters.csv"
-            ) else (
-              echo Skipping %%D inference because no exact %%D result files were produced.
-            )
-          )
-          if not defined NEUREPTRACE_RAN_EXACT_INFERENCE (
-            py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference %NEUREPTRACE_SUBJECT_CSVS% --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_manifest_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_manifest_clusters.csv"
-          )
-          :after_inference
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v6
 
-      - name: Upload compact result artifacts
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: nod-animate-decoders-all-${{ github.run_id }}
-          path: |
-            ${{ inputs.output_dir }}/validation.csv
-            ${{ inputs.output_dir }}/manifest.csv
-            ${{ inputs.output_dir }}/summary.csv
-            ${{ inputs.output_dir }}/provenance.csv
-            ${{ inputs.output_dir }}/summary.png
-            ${{ inputs.output_dir }}/reliability.png
-            ${{ inputs.output_dir }}/report.md
-            ${{ inputs.output_dir }}/calibration_report.md
-            ${{ inputs.output_dir }}/paired_stats.csv
-            ${{ inputs.output_dir }}/paired_stats.md
-            ${{ inputs.output_dir }}/temporal_smoothing/smoothed_metrics.csv
-            ${{ inputs.output_dir }}/reliability_bins.csv
-            ${{ inputs.output_dir }}/inference_*_time.csv
-            ${{ inputs.output_dir }}/inference_*_clusters.csv
-          if-no-files-found: warn
+            - name: Install dependencies
+              shell: cmd
+              run: |
+                  py -${{ inputs.python_version }} --version
+                  py -${{ inputs.python_version }} -m pip install --upgrade pip
+                  py -${{ inputs.python_version }} -m pip install poetry
+                  for /f "delims=" %%P in ('py -${{ inputs.python_version }} -c "import sys; print(sys.executable)"') do set "PYTHON_EXE=%%P"
+                  py -${{ inputs.python_version }} -m poetry env use "%PYTHON_EXE%"
+                  py -${{ inputs.python_version }} -m poetry install
+
+            - name: Install rclone
+              if: env.NODEEG_WEBDAV_URL != ''
+              shell: pwsh
+              run: .github/scripts/install-rclone.ps1
+
+            - name: Prepare run manifest
+              shell: pwsh
+              run: |
+                  $ErrorActionPreference = "Stop"
+                  $expectedSubjects = @(
+                    "01", "02", "03", "04", "05", "06", "07", "08", "09",
+                    "10", "11", "12", "13", "14", "24", "26", "27", "29", "30"
+                  )
+
+                  function Get-NodSubjectCount {
+                    param([string]$Path)
+                    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path)) {
+                      return 0
+                    }
+                    $count = 0
+                    foreach ($subject in $expectedSubjects) {
+                      if ((Test-Path (Join-Path $Path "sub-$subject`_epo.fif")) -and (Test-Path (Join-Path $Path "sub-$subject`_events.csv"))) {
+                        $count += 1
+                      }
+                    }
+                    return $count
+                  }
+
+                  function Test-NodDataRoot {
+                    param([string]$Path, [int]$RequiredSubjects = 19)
+                    return ((Get-NodSubjectCount -Path $Path) -ge $RequiredSubjects)
+                  }
+
+                  $homeDir = if (-not [string]::IsNullOrWhiteSpace($env:HOME)) { $env:HOME } else { $env:USERPROFILE }
+                  if ([string]::IsNullOrWhiteSpace($homeDir)) {
+                    throw "Cannot resolve HOME or USERPROFILE for the persistent NOD-EEG cache."
+                  }
+                  $cacheRoot = Join-Path $homeDir "github-runner"
+                  $cacheRoot = Join-Path $cacheRoot ".cache"
+                  $cacheRoot = Join-Path $cacheRoot "datasets"
+                  $cacheRoot = Join-Path $cacheRoot "neureptrace"
+                  $cacheRoot = Join-Path $cacheRoot "nod-eeg-full-v1"
+
+                  $requestedDataRoot = "${{ inputs.data_root }}"
+                  $candidates = @($requestedDataRoot)
+                  if (-not [System.IO.Path]::IsPathRooted($requestedDataRoot)) {
+                    $candidates += (Join-Path $env:GITHUB_WORKSPACE $requestedDataRoot)
+                  }
+                  $candidates += $cacheRoot
+
+                  $dataRoot = $null
+                  foreach ($candidate in $candidates) {
+                    if ([string]::IsNullOrWhiteSpace($candidate)) {
+                      continue
+                    }
+                    if (Test-NodDataRoot -Path $candidate -RequiredSubjects 19) {
+                      $dataRoot = (Resolve-Path $candidate).Path
+                      break
+                    }
+                  }
+                  if (-not $dataRoot) {
+                    if ([string]::IsNullOrWhiteSpace($env:NODEEG_WEBDAV_URL) -or [string]::IsNullOrWhiteSpace($env:NODEEG_DATA_KEY) -or [string]::IsNullOrWhiteSpace($env:NODEEG_DATA_PASSWORD)) {
+                      throw "No valid staged NOD-EEG data root found and NODEEG WebDAV secrets are not configured. Checked: $($candidates -join ', ')"
+                    }
+                    New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+                    & py "-${{ inputs.python_version }}" scripts\download_nodeeg_data.py --data-root $cacheRoot --remote-path "${{ inputs.data_remote_path }}" --require-subject-count 19
+                    $dataRoot = (Resolve-Path $cacheRoot).Path
+                    Get-ChildItem -Path $dataRoot -Recurse -File |
+                      Sort-Object FullName |
+                      ForEach-Object { "$($_.Length) $($_.FullName)" } |
+                      Set-Content -Path (Join-Path $dataRoot "MANIFEST.txt") -Encoding utf8
+                  }
+                  $subjectCount = Get-NodSubjectCount -Path $dataRoot
+                  $outputDir = Join-Path $env:GITHUB_WORKSPACE "${{ inputs.output_dir }}"
+                  $runManifest = Join-Path $outputDir "manifest.csv"
+                  $manifestCsv = "${{ inputs.manifest_csv }}"
+                  New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+                  & py "-${{ inputs.python_version }}" -m poetry run python scripts\prepare_benchmark_manifest.py $manifestCsv $runManifest --data-root $dataRoot
+                  "NEUREPTRACE_DATA_ROOT=$dataRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "NEUREPTRACE_OUTPUT_DIR=$outputDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "NEUREPTRACE_RUN_MANIFEST=$runManifest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                  "Using data root: $dataRoot"
+                  "Valid staged NOD-EEG subject pairs: $subjectCount"
+                  "Source benchmark manifest: $manifestCsv"
+                  "Persistent NOD-EEG cache root: $cacheRoot"
+                  "Wrote run manifest: $runManifest"
+
+            - name: Validate staged data
+              shell: cmd
+              run: |
+                  set "PYTHONPATH=%GITHUB_WORKSPACE%\src"
+                  py -${{ inputs.python_version }} -m poetry run python -m neureptrace.validate_manifest "%NEUREPTRACE_RUN_MANIFEST%" --report-out "%NEUREPTRACE_OUTPUT_DIR%\validation.csv"
+
+            - name: Run all-subject decoder comparison
+              shell: cmd
+              env:
+                  PYTHONPATH: ${{ github.workspace }}/src
+              run: |
+                  if /I "${{ inputs.temporal_smoothing }}"=="true" (
+                    py -${{ inputs.python_version }} -m poetry run python -m neureptrace.benchmark "%NEUREPTRACE_RUN_MANIFEST%" ^
+                      --out-dir "%NEUREPTRACE_OUTPUT_DIR%" ^
+                      --aggregate-out "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" ^
+                      --plot-out "%NEUREPTRACE_OUTPUT_DIR%\summary.png" ^
+                      --calibration-dir "%NEUREPTRACE_OUTPUT_DIR%\calibration" ^
+                      --observation-dir "%NEUREPTRACE_OUTPUT_DIR%\observations" ^
+                      --temporal-smoothing-dir "%NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing" ^
+                      --temporal-smoothing-fit-window "${{ inputs.temporal_smoothing_fit_window_start }}" "${{ inputs.temporal_smoothing_fit_window_stop }}" ^
+                      --temporal-smoothing-stay-grid-size "${{ inputs.temporal_smoothing_stay_grid_size }}" ^
+                      --chance 0.5 ^
+                      --resume
+                  ) else (
+                    py -${{ inputs.python_version }} -m poetry run python -m neureptrace.benchmark "%NEUREPTRACE_RUN_MANIFEST%" --out-dir "%NEUREPTRACE_OUTPUT_DIR%" --aggregate-out "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" --plot-out "%NEUREPTRACE_OUTPUT_DIR%\summary.png" --calibration-dir "%NEUREPTRACE_OUTPUT_DIR%\calibration" --chance 0.5 --resume
+                  )
+
+            - name: Generate reports and inference tables
+              shell: cmd
+              env:
+                  PYTHONPATH: ${{ github.workspace }}/src
+              run: |
+                  set "NEUREPTRACE_SUBJECT_CSVS=%NEUREPTRACE_OUTPUT_DIR%\sub-*_time_decode.csv"
+                  if exist "%NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv" set "NEUREPTRACE_SUBJECT_CSVS=%NEUREPTRACE_SUBJECT_CSVS% %NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv"
+                  py -${{ inputs.python_version }} -m poetry run python -m neureptrace.report "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" %NEUREPTRACE_SUBJECT_CSVS% --out "%NEUREPTRACE_OUTPUT_DIR%\report.md" --chance 0.5
+                  py -${{ inputs.python_version }} -m poetry run python -m neureptrace.calibration "%NEUREPTRACE_OUTPUT_DIR%\summary.csv" "%NEUREPTRACE_OUTPUT_DIR%\calibration\*_calibration_bins.csv" --out-report "%NEUREPTRACE_OUTPUT_DIR%\calibration_report.md" --out-bins "%NEUREPTRACE_OUTPUT_DIR%\reliability_bins.csv"
+                  py -${{ inputs.python_version }} -m poetry run python -m neureptrace.plot_calibration "%NEUREPTRACE_OUTPUT_DIR%\reliability_bins.csv" --out "%NEUREPTRACE_OUTPUT_DIR%\reliability.png" --time-window 0.1 0.8 --title "NOD animate/inanimate decoder calibration"
+                  py -${{ inputs.python_version }} -m poetry run python -m neureptrace.paired_stats %NEUREPTRACE_SUBJECT_CSVS% --out-csv "%NEUREPTRACE_OUTPUT_DIR%\paired_stats.csv" --out-report "%NEUREPTRACE_OUTPUT_DIR%\paired_stats.md" --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" || echo Skipping paired stats because fewer than two paired decoder conditions were available.
+                  if exist "%NEUREPTRACE_OUTPUT_DIR%\temporal_smoothing\smoothed_metrics.csv" (
+                    py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference %NEUREPTRACE_SUBJECT_CSVS% --emission-mode calibrated --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_clusters.csv" || exit /b 1
+                    py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference %NEUREPTRACE_SUBJECT_CSVS% --emission-mode calibrated_temporal_posterior --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_temporal_posterior_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_calibrated_temporal_posterior_clusters.csv" || exit /b 1
+                    goto after_inference
+                  )
+                  set "NEUREPTRACE_RAN_EXACT_INFERENCE="
+                  for %%D in (logistic sparse_logistic elastic_net_logistic ridge gaussian_nb lda shrinkage_lda linear_svm) do (
+                    if exist "%NEUREPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" (
+                      set "NEUREPTRACE_RAN_EXACT_INFERENCE=1"
+                      py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference "%NEUREPTRACE_OUTPUT_DIR%\sub-*_%%D_time_decode.csv" --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_%%D_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_%%D_clusters.csv"
+                    ) else (
+                      echo Skipping %%D inference because no exact %%D result files were produced.
+                    )
+                  )
+                  if not defined NEUREPTRACE_RAN_EXACT_INFERENCE (
+                    py -${{ inputs.python_version }} -m poetry run python -m neureptrace.inference %NEUREPTRACE_SUBJECT_CSVS% --chance 0.5 --n-permutations "${{ inputs.n_permutations }}" --out-time "%NEUREPTRACE_OUTPUT_DIR%\inference_manifest_time.csv" --out-clusters "%NEUREPTRACE_OUTPUT_DIR%\inference_manifest_clusters.csv"
+                  )
+                  :after_inference
+
+            - name: Upload compact result artifacts
+              uses: actions/upload-artifact@v7
+              if: always()
+              with:
+                  name: nod-animate-decoders-all-${{ github.run_id }}
+                  path: |
+                      ${{ inputs.output_dir }}/validation.csv
+                      ${{ inputs.output_dir }}/manifest.csv
+                      ${{ inputs.output_dir }}/summary.csv
+                      ${{ inputs.output_dir }}/provenance.csv
+                      ${{ inputs.output_dir }}/summary.png
+                      ${{ inputs.output_dir }}/reliability.png
+                      ${{ inputs.output_dir }}/report.md
+                      ${{ inputs.output_dir }}/calibration_report.md
+                      ${{ inputs.output_dir }}/paired_stats.csv
+                      ${{ inputs.output_dir }}/paired_stats.md
+                      ${{ inputs.output_dir }}/temporal_smoothing/smoothed_metrics.csv
+                      ${{ inputs.output_dir }}/reliability_bins.csv
+                      ${{ inputs.output_dir }}/inference_*_time.csv
+                      ${{ inputs.output_dir }}/inference_*_clusters.csv
+                  if-no-files-found: warn

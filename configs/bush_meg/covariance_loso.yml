@@ -6,78 +6,78 @@
 # excluded and should be used only by explicit calibration workflows.
 schema_version: neureptrace.dataset.v1
 paths:
-  base: cwd
+    base: cwd
 dataset:
-  name: bush_meg
-  type: fieldtrip_mat
-  root: ${BUSH_MEG_DATA_DIR}
-  participant_file: "Part{participant}Data.mat"
-  variable: data
-  channel_type: mag
-  fields:
-    trial: trial
-    time: time
-    label: label
-    trialinfo: trialinfo
-    sensor_geometry: grad
+    name: bush_meg
+    type: fieldtrip_mat
+    root: ${BUSH_MEG_DATA_DIR}
+    participant_file: "Part{participant}Data.mat"
+    variable: data
+    channel_type: mag
+    fields:
+        trial: trial
+        time: time
+        label: label
+        trialinfo: trialinfo
+        sensor_geometry: grad
 participants:
-  ids: "1-4,6,8,9,10,13-27"
+    ids: "1-4,6,8,9,10,13-27"
 validation:
-  trim_channel_labels_to_data: true
-  channel_policy: exact
+    trim_channel_labels_to_data: true
+    channel_policy: exact
 metadata:
-  columns:
-    - name: stimulus_class
-      index: 0
-    - name: condition
-      index: 1
-      optional: true
+    columns:
+        - name: stimulus_class
+          index: 0
+        - name: condition
+          index: 1
+          optional: true
 preprocessing:
-  tmin: -0.35
-  tmax: 0.70
-  normalization: subject_baseline_whiten
-  baseline_window: [-0.35, -0.05]
+    tmin: -0.35
+    tmax: 0.70
+    normalization: subject_baseline_whiten
+    baseline_window: [-0.35, -0.05]
 decoding:
-  label_column: stimulus_class
-  group_column: participant
-  classifier: multinomial-logistic
-  emission_mode: uncalibrated
-  feature_preprocessor: pca
-  pca_components: 64
-  max_iter: 2500
+    label_column: stimulus_class
+    group_column: participant
+    classifier: multinomial-logistic
+    emission_mode: uncalibrated
+    feature_preprocessor: pca
+    pca_components: 64
+    max_iter: 2500
 covariance_loso:
-  group_column: participant
-  selection_metric: balanced_accuracy
-  label_shuffle_control: false
-  label_shuffle_seed: 0
-  candidate_grid:
-    time_windows:
-      - name: cov_050_300ms
-        start: 0.050
-        stop: 0.300
-      - name: cov_080_350ms
-        start: 0.080
-        stop: 0.350
-      - name: cov_050_450ms
-        start: 0.050
-        stop: 0.450
-    feature_modes:
-      - logeuclidean_covariance
-      - covariance_upper
-      - correlation_upper
-      - variance
-    covariance_shrinkages: [0.05, 0.1, 0.3]
-    covariance_epsilons: [1.0e-6]
-    covariance_max_channels: [64]
-    decoders: [multinomial-logistic]
-    emission_modes: [uncalibrated]
-    feature_preprocessors: [pca]
-    pca_components: [32, 64, 128]
-    c_grid: [0.03, 0.1, 0.3, 1.0, 3.0]
+    group_column: participant
+    selection_metric: balanced_accuracy
+    label_shuffle_control: false
+    label_shuffle_seed: 0
+    candidate_grid:
+        time_windows:
+            - name: cov_050_300ms
+              start: 0.050
+              stop: 0.300
+            - name: cov_080_350ms
+              start: 0.080
+              stop: 0.350
+            - name: cov_050_450ms
+              start: 0.050
+              stop: 0.450
+        feature_modes:
+            - logeuclidean_covariance
+            - covariance_upper
+            - correlation_upper
+            - variance
+        covariance_shrinkages: [0.05, 0.1, 0.3]
+        covariance_epsilons: [1.0e-6]
+        covariance_max_channels: [64]
+        decoders: [multinomial-logistic]
+        emission_modes: [uncalibrated]
+        feature_preprocessors: [pca]
+        pca_components: [32, 64, 128]
+        c_grid: [0.03, 0.1, 0.3, 1.0, 3.0]
 outputs:
-  base_dir: results/{dataset}/covariance_loso
-  covariance_loso_summary_csv: covariance_loso_summary.csv
-  covariance_loso_inner_cv_csv: covariance_loso_inner_cv.csv
-  covariance_loso_predictions_csv: covariance_loso_predictions.csv
-  provenance: true
-  hash_input_files: true
+    base_dir: results/{dataset}/covariance_loso
+    covariance_loso_summary_csv: covariance_loso_summary.csv
+    covariance_loso_inner_cv_csv: covariance_loso_inner_cv.csv
+    covariance_loso_predictions_csv: covariance_loso_predictions.csv
+    provenance: true
+    hash_input_files: true

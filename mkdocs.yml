@@ -5,60 +5,60 @@ repo_url: https://github.com/IPS-Stuttgart/NeuRepTrace
 repo_name: IPS-Stuttgart/NeuRepTrace
 
 nav:
-  - Home: index.md
-  - Getting Started: getting-started.md
-  - Diagnostics: doctor.md
-  - Data Staging: data-staging.md
-  - Resilient OpenNeuro Staging: openneuro-resilient-staging.md
-  - Dataset Configuration: dataset-config.md
-  - Dataset Specs: dataset-specs.md
-  - Dataset Spec Helpers: dataset-spec.md
-  - Validation Checklist: validation-checklist.md
-  - Dependency Maintenance: dependency-maintenance.md
-  - Migrating from PyMEGDec: migrating-from-pymegdec.md
-  - PyMEGDec Upstreaming: pymegdec-upstreaming.md
-  - Transfer from Config: transfer-from-config.md
-  - Benchmarking: benchmarking.md
-  - Examples: examples.md
-  - API Overview: api-overview.md
-  - Reference:
-      - Benchmark: reference/benchmark.md
-      - Calibration: reference/calibration.md
-      - Continuous Stimulus Scan: reference/continuous-stimulus-scan.md
-      - Covariance Features: reference/covariance-features.md
-      - Dataset Specs: reference/dataset-spec.md
-      - Decoding: reference/decoding.md
-      - Emission Compare: reference/emission-compare.md
-      - Inference: reference/inference.md
-      - Metadata: reference/metadata.md
-      - Metrics: reference/metrics.md
-      - Observation Schema: reference/observation-schema.md
-      - Onset Detection: reference/onset-detection.md
-      - Onset Validation: reference/onset-validation.md
-      - Stimulus Detection: reference/stimulus-detection.md
-      - Onset Workflow: reference/onset-workflow.md
-      - Onset Sensitivity: reference/onset-sensitivity.md
-      - Paired Statistics: reference/paired-stats.md
-      - Temporal State Workflow: reference/temporal-state-workflow.md
-      - Results: reference/results.md
-      - Semantic Stages: reference/semantic-stages.md
-      - Temporal Generalization: reference/temporal-generalization.md
-      - Temporal Model: reference/temporal-model.md
+    - Home: index.md
+    - Getting Started: getting-started.md
+    - Diagnostics: doctor.md
+    - Data Staging: data-staging.md
+    - Resilient OpenNeuro Staging: openneuro-resilient-staging.md
+    - Dataset Configuration: dataset-config.md
+    - Dataset Specs: dataset-specs.md
+    - Dataset Spec Helpers: dataset-spec.md
+    - Validation Checklist: validation-checklist.md
+    - Dependency Maintenance: dependency-maintenance.md
+    - Migrating from PyMEGDec: migrating-from-pymegdec.md
+    - PyMEGDec Upstreaming: pymegdec-upstreaming.md
+    - Transfer from Config: transfer-from-config.md
+    - Benchmarking: benchmarking.md
+    - Examples: examples.md
+    - API Overview: api-overview.md
+    - Reference:
+          - Benchmark: reference/benchmark.md
+          - Calibration: reference/calibration.md
+          - Continuous Stimulus Scan: reference/continuous-stimulus-scan.md
+          - Covariance Features: reference/covariance-features.md
+          - Dataset Specs: reference/dataset-spec.md
+          - Decoding: reference/decoding.md
+          - Emission Compare: reference/emission-compare.md
+          - Inference: reference/inference.md
+          - Metadata: reference/metadata.md
+          - Metrics: reference/metrics.md
+          - Observation Schema: reference/observation-schema.md
+          - Onset Detection: reference/onset-detection.md
+          - Onset Validation: reference/onset-validation.md
+          - Stimulus Detection: reference/stimulus-detection.md
+          - Onset Workflow: reference/onset-workflow.md
+          - Onset Sensitivity: reference/onset-sensitivity.md
+          - Paired Statistics: reference/paired-stats.md
+          - Temporal State Workflow: reference/temporal-state-workflow.md
+          - Results: reference/results.md
+          - Semantic Stages: reference/semantic-stages.md
+          - Temporal Generalization: reference/temporal-generalization.md
+          - Temporal Model: reference/temporal-model.md
 
 theme:
-  name: material
-  features:
-    - navigation.sections
-    - navigation.expand
-    - content.code.copy
+    name: material
+    features:
+        - navigation.sections
+        - navigation.expand
+        - content.code.copy
 
 plugins:
-  - search
-  - mkdocstrings:
-      handlers:
-        python:
-          paths: [src]
-          options:
-            docstring_style: numpy
-            show_source: true
-            show_root_heading: true
+    - search
+    - mkdocstrings:
+          handlers:
+              python:
+                  paths: [src]
+                  options:
+                      docstring_style: numpy
+                      show_source: true
+                      show_root_heading: true
