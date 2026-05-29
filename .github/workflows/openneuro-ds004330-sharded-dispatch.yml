@@ -3,162 +3,162 @@ name: Dispatch ds004330 sharded OpenNeuro LOSO
 run-name: Dispatch ds004330 sharded LOSO ${{ inputs.runner_type }} no_download=${{ inputs.no_download }}
 
 on:
-  workflow_dispatch:
-    inputs:
-      runner_type:
-        description: "Runner family for the actual OpenNeuro MEG LOSO workflow"
-        required: true
-        type: choice
-        options:
-          - self-hosted
-          - github-hosted
-        default: self-hosted
-      subjects:
-        description: "Subject ids/ranges for ds004330; leave at all for the full cohort"
-        required: true
-        default: "all"
-      runs:
-        description: "Run ids for ds004330; leave at all for the full configured run set"
-        required: true
-        default: "all"
-      max_events_per_label:
-        description: "Per-run class cap during staging; 0 disables the cap"
-        required: true
-        default: "120"
-      no_download:
-        description: "Use already cached/staged data only; fail instead of downloading missing raw files"
-        required: true
-        type: boolean
-        default: true
-      skip_failed_subjects:
-        description: "Skip corrupt or missing subjects after download and decode the successful cohort"
-        required: true
-        type: boolean
-        default: true
-      min_successful_subjects:
-        description: "Minimum staged subjects required when skip_failed_subjects is enabled"
-        required: true
-        default: "2"
-      decoder:
-        description: "Optional classifier override for the actual decode workflow"
-        required: false
-        default: ""
-      data_root:
-        description: "Optional raw BIDS root override, e.g. persistent self-hosted cache"
-        required: false
-        default: ""
-      staged_root:
-        description: "Optional staged Epochs root override, e.g. persistent self-hosted cache"
-        required: false
-        default: ""
-      shard_groups_json:
-        description: "JSON array of held-out groups. Default is one shard per ds004330 subject."
-        required: true
-        default: '["sub-01","sub-02","sub-03","sub-04","sub-05","sub-06","sub-07","sub-08","sub-09","sub-10","sub-11","sub-12","sub-13","sub-14","sub-15","sub-16","sub-17","sub-18","sub-19","sub-20","sub-21","sub-22","sub-23","sub-24","sub-25","sub-26","sub-27","sub-28","sub-29","sub-30"]'
-      extra_config_overrides:
-        description: "Optional semicolon/newline-separated additional --set overrides for the actual workflow"
-        required: false
-        default: ""
-      diagnostics_best_time:
-        description: "Optional fixed diagnostic time in seconds"
-        required: false
-        default: ""
-      time_decode_backend:
-        description: "Same-time decoder backend for non-ensemble decoders"
-        required: true
-        type: choice
-        options:
-          - sklearn
-          - mne
-        default: sklearn
-      class_prior_correction:
-        description: "Optional train-fold class-prior correction"
-        required: true
-        type: choice
-        options:
-          - none
-          - train_uniform
-        default: none
-      label_shuffle_control:
-        description: "Dispatch a matched label-shuffle null control instead of the real-label run"
-        required: true
-        type: boolean
-        default: false
-      label_shuffle_seed:
-        description: "Seed for label-shuffle null controls"
-        required: true
-        default: "13"
+    workflow_dispatch:
+        inputs:
+            runner_type:
+                description: "Runner family for the actual OpenNeuro MEG LOSO workflow"
+                required: true
+                type: choice
+                options:
+                    - self-hosted
+                    - github-hosted
+                default: self-hosted
+            subjects:
+                description: "Subject ids/ranges for ds004330; leave at all for the full cohort"
+                required: true
+                default: "all"
+            runs:
+                description: "Run ids for ds004330; leave at all for the full configured run set"
+                required: true
+                default: "all"
+            max_events_per_label:
+                description: "Per-run class cap during staging; 0 disables the cap"
+                required: true
+                default: "120"
+            no_download:
+                description: "Use already cached/staged data only; fail instead of downloading missing raw files"
+                required: true
+                type: boolean
+                default: true
+            skip_failed_subjects:
+                description: "Skip corrupt or missing subjects after download and decode the successful cohort"
+                required: true
+                type: boolean
+                default: true
+            min_successful_subjects:
+                description: "Minimum staged subjects required when skip_failed_subjects is enabled"
+                required: true
+                default: "2"
+            decoder:
+                description: "Optional classifier override for the actual decode workflow"
+                required: false
+                default: ""
+            data_root:
+                description: "Optional raw BIDS root override, e.g. persistent self-hosted cache"
+                required: false
+                default: ""
+            staged_root:
+                description: "Optional staged Epochs root override, e.g. persistent self-hosted cache"
+                required: false
+                default: ""
+            shard_groups_json:
+                description: "JSON array of held-out groups. Default is one shard per ds004330 subject."
+                required: true
+                default: '["sub-01","sub-02","sub-03","sub-04","sub-05","sub-06","sub-07","sub-08","sub-09","sub-10","sub-11","sub-12","sub-13","sub-14","sub-15","sub-16","sub-17","sub-18","sub-19","sub-20","sub-21","sub-22","sub-23","sub-24","sub-25","sub-26","sub-27","sub-28","sub-29","sub-30"]'
+            extra_config_overrides:
+                description: "Optional semicolon/newline-separated additional --set overrides for the actual workflow"
+                required: false
+                default: ""
+            diagnostics_best_time:
+                description: "Optional fixed diagnostic time in seconds"
+                required: false
+                default: ""
+            time_decode_backend:
+                description: "Same-time decoder backend for non-ensemble decoders"
+                required: true
+                type: choice
+                options:
+                    - sklearn
+                    - mne
+                default: sklearn
+            class_prior_correction:
+                description: "Optional train-fold class-prior correction"
+                required: true
+                type: choice
+                options:
+                    - none
+                    - train_uniform
+                default: none
+            label_shuffle_control:
+                description: "Dispatch a matched label-shuffle null control instead of the real-label run"
+                required: true
+                type: boolean
+                default: false
+            label_shuffle_seed:
+                description: "Seed for label-shuffle null controls"
+                required: true
+                default: "13"
 
 permissions:
-  actions: write
-  contents: read
+    actions: write
+    contents: read
 
 jobs:
-  dispatch:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Validate shard JSON
-        shell: bash
-        env:
-          SHARD_GROUPS_JSON: ${{ inputs.shard_groups_json }}
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from __future__ import annotations
+    dispatch:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Validate shard JSON
+              shell: bash
+              env:
+                  SHARD_GROUPS_JSON: ${{ inputs.shard_groups_json }}
+              run: |
+                  set -euo pipefail
+                  python - <<'PY'
+                  from __future__ import annotations
 
-          import json
-          import os
+                  import json
+                  import os
 
-          shards = json.loads(os.environ["SHARD_GROUPS_JSON"])
-          if not isinstance(shards, list) or not shards or not all(isinstance(item, str) and item for item in shards):
-              raise SystemExit("shard_groups_json must be a non-empty JSON array of non-empty strings")
-          print(f"Validated {len(shards)} ds004330 held-out shard(s): {shards}")
-          PY
+                  shards = json.loads(os.environ["SHARD_GROUPS_JSON"])
+                  if not isinstance(shards, list) or not shards or not all(isinstance(item, str) and item for item in shards):
+                      raise SystemExit("shard_groups_json must be a non-empty JSON array of non-empty strings")
+                  print(f"Validated {len(shards)} ds004330 held-out shard(s): {shards}")
+                  PY
 
-      - name: Dispatch OpenNeuro MEG LOSO sharded run
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHARD_GROUPS_JSON: ${{ inputs.shard_groups_json }}
-          EXTRA_CONFIG_OVERRIDES: ${{ inputs.extra_config_overrides }}
-        run: |
-          set -euo pipefail
+            - name: Dispatch OpenNeuro MEG LOSO sharded run
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  SHARD_GROUPS_JSON: ${{ inputs.shard_groups_json }}
+                  EXTRA_CONFIG_OVERRIDES: ${{ inputs.extra_config_overrides }}
+              run: |
+                  set -euo pipefail
 
-          overrides="workflow.outer_test_group_shards_json=${SHARD_GROUPS_JSON}"
-          if [[ -n "${EXTRA_CONFIG_OVERRIDES//[[:space:];]/}" ]]; then
-            overrides+=$'\n'
-            overrides+="$EXTRA_CONFIG_OVERRIDES"
-          fi
+                  overrides="workflow.outer_test_group_shards_json=${SHARD_GROUPS_JSON}"
+                  if [[ -n "${EXTRA_CONFIG_OVERRIDES//[[:space:];]/}" ]]; then
+                    overrides+=$'\n'
+                    overrides+="$EXTRA_CONFIG_OVERRIDES"
+                  fi
 
-          echo "Dispatching .github/workflows/openneuro-meg-loso.yml with ds004330 sharding:"
-          printf '%s\n' "$overrides"
+                  echo "Dispatching .github/workflows/openneuro-meg-loso.yml with ds004330 sharding:"
+                  printf '%s\n' "$overrides"
 
-          gh workflow run openneuro-meg-loso.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "$GITHUB_REF_NAME" \
-            -f dataset=ds004330 \
-            -f mode=full \
-            -f subjects='${{ inputs.subjects }}' \
-            -f runs='${{ inputs.runs }}' \
-            -f data_root='${{ inputs.data_root }}' \
-            -f staged_root='${{ inputs.staged_root }}' \
-            -f max_events_per_label='${{ inputs.max_events_per_label }}' \
-            -f run_decode=true \
-            -f no_download='${{ inputs.no_download }}' \
-            -f skip_failed_subjects='${{ inputs.skip_failed_subjects }}' \
-            -f min_successful_subjects='${{ inputs.min_successful_subjects }}' \
-            -f decoder='${{ inputs.decoder }}' \
-            -f config_overrides="$overrides" \
-            -f diagnostics_best_time='${{ inputs.diagnostics_best_time }}' \
-            -f temporal_smoothing=false \
-            -f ensemble_weights='' \
-            -f ensemble_source_decoders='' \
-            -f ensemble_baseline_window='' \
-            -f ensemble_min_probability='1e-12' \
-            -f time_decode_backend='${{ inputs.time_decode_backend }}' \
-            -f class_prior_correction='${{ inputs.class_prior_correction }}' \
-            -f label_shuffle_control='${{ inputs.label_shuffle_control }}' \
-            -f label_shuffle_seed='${{ inputs.label_shuffle_seed }}' \
-            -f runner_type='${{ inputs.runner_type }}'
+                  gh workflow run openneuro-meg-loso.yml \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --ref "$GITHUB_REF_NAME" \
+                    -f dataset=ds004330 \
+                    -f mode=full \
+                    -f subjects='${{ inputs.subjects }}' \
+                    -f runs='${{ inputs.runs }}' \
+                    -f data_root='${{ inputs.data_root }}' \
+                    -f staged_root='${{ inputs.staged_root }}' \
+                    -f max_events_per_label='${{ inputs.max_events_per_label }}' \
+                    -f run_decode=true \
+                    -f no_download='${{ inputs.no_download }}' \
+                    -f skip_failed_subjects='${{ inputs.skip_failed_subjects }}' \
+                    -f min_successful_subjects='${{ inputs.min_successful_subjects }}' \
+                    -f decoder='${{ inputs.decoder }}' \
+                    -f config_overrides="$overrides" \
+                    -f diagnostics_best_time='${{ inputs.diagnostics_best_time }}' \
+                    -f temporal_smoothing=false \
+                    -f ensemble_weights='' \
+                    -f ensemble_source_decoders='' \
+                    -f ensemble_baseline_window='' \
+                    -f ensemble_min_probability='1e-12' \
+                    -f time_decode_backend='${{ inputs.time_decode_backend }}' \
+                    -f class_prior_correction='${{ inputs.class_prior_correction }}' \
+                    -f label_shuffle_control='${{ inputs.label_shuffle_control }}' \
+                    -f label_shuffle_seed='${{ inputs.label_shuffle_seed }}' \
+                    -f runner_type='${{ inputs.runner_type }}'
 
-          echo "Dispatched ds004330 sharded OpenNeuro MEG LOSO run."
+                  echo "Dispatched ds004330 sharded OpenNeuro MEG LOSO run."
