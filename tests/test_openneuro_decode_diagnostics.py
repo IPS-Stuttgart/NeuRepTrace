@@ -76,6 +76,7 @@ def test_write_decode_diagnostics_handles_missing_decode_summary(tmp_path: Path)
     assert loaded["stage_summary"]["subjects"] == ["sub-01", "sub-02"]
     quality = pd.read_csv(quality_path)
     assert quality.loc[0, "dataset"] == "ds006629"
+    assert quality.loc[0, "result_variant"] == "raw"
     assert quality.loc[0, "artifact_name"] == "openneuro-meg-ds006629-full"
     assert not bool(quality.loc[0, "decode_summary_exists"])
     assert quality.loc[0, "quality_decision"] == "missing_decode_summary"
@@ -136,6 +137,77 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
     assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(0.34)
     assert quality.loc[0, "best_selection_metric"] == "accuracy"
     assert quality.loc[0, "best_selection_value"] == pytest.approx(0.75)
+
+
+def test_write_decode_diagnostics_adds_temporal_smoothing_quality_row(tmp_path: Path):
+    output_dir = tmp_path / "outputs" / "openneuro_ds006629_full"
+    decode_dir = output_dir / "decode"
+    diagnostics_dir = decode_dir / "diagnostics"
+    smoothed_dir = decode_dir / "temporal_smoothing"
+    smoothed_diagnostics_dir = smoothed_dir / "diagnostics"
+    smoothed_diagnostics_dir.mkdir(parents=True)
+    diagnostics_dir.mkdir(parents=True)
+    (output_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dataset": "ds006629",
+                "mode": "full",
+                "artifact_name": "openneuro-meg-ds006629-full",
+                "label_shuffle_control": "false",
+                "temporal_smoothing": "true",
+                "temporal_smoothing_fit_window": "0.10,0.30",
+                "temporal_smoothing_stay_grid_size": "200",
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "dataset_id": ["ds006629", "ds006629"],
+            "subject": ["sub-01", "sub-02"],
+            "epochs_path": ["sub-01_epo.fif", "sub-02_epo.fif"],
+            "n_trials": [10, 20],
+            "labels": ["a|b|c", "a|b|c"],
+            "runs": ["0", "0"],
+        }
+    ).to_csv(output_dir / "stage_summary.csv", index=False)
+    pd.DataFrame({"time": [0.184], "balanced_accuracy": [0.48], "top2_accuracy": [0.80]}).to_csv(
+        decode_dir / "time_decode_summary.csv",
+        index=False,
+    )
+    pd.DataFrame({"time": [0.184], "balanced_accuracy": [0.52], "top2_accuracy": [0.82]}).to_csv(
+        smoothed_dir / "time_decode_summary.csv",
+        index=False,
+    )
+    for path, balanced in (
+        (diagnostics_dir / "quality_summary.csv", 0.48),
+        (smoothed_diagnostics_dir / "quality_summary.csv", 0.52),
+    ):
+        pd.DataFrame(
+            {
+                "n_classes": [3],
+                "chance_accuracy": [1 / 3],
+                "top2_chance": [2 / 3],
+                "top3_chance": [1.0],
+                "top3_interpretation": ["automatic_ceiling"],
+                "fixed_time": [0.184],
+                "fixed_balanced_accuracy": [balanced],
+                "fixed_balanced_minus_chance": [balanced - 1 / 3],
+                "fixed_top2_accuracy": [0.8],
+                "subjects_fixed_above_chance": [2],
+            }
+        ).to_csv(path, index=False)
+
+    diagnostics, _best = write_decode_diagnostics(output_dir)
+
+    assert diagnostics["temporal_smoothing_summary"]["exists"] is True
+    quality = pd.read_csv(output_dir / "workflow_quality_summary.csv")
+    assert quality["result_variant"].tolist() == ["raw", "temporal_smoothing"]
+    smoothed = quality.set_index("result_variant").loc["temporal_smoothing"]
+    assert bool(smoothed["temporal_smoothing"])
+    assert smoothed["temporal_smoothing_fit_window"] == "0.10,0.30"
+    assert smoothed["fixed_balanced_accuracy"] == pytest.approx(0.52)
+    assert smoothed["best_selection_value"] == pytest.approx(0.52)
 
 
 def test_main_strict_reports_missing_decode_summary(tmp_path: Path):
