@@ -39,6 +39,7 @@ _BASE_ALIGNMENT_COLUMNS = (
     "true_label",
     "true_class",
     "group",
+    "class_prior_correction",
 )
 _METRIC_GROUP_COLUMNS = ("subject", "fold", "decoder", "emission_mode", "time", "window_start", "window_stop")
 

@@ -68,6 +68,10 @@ decoding.tuning_c_grid=0.03,0.1,0.3,1,3
 
 For the same dispatch, set `diagnostics_best_time=0.184` as a workflow input
 when you want the diagnostic tables to report the predeclared ds006629 peak.
+If source-subject class counts are imbalanced, test
+`decoding.class_prior_correction=train_uniform` as a balanced-accuracy-oriented
+variant; it divides fold-held-out posterior probabilities by the training-fold
+class priors and renormalizes them before scoring.
 
 Dataset-specific staging hardening:
 

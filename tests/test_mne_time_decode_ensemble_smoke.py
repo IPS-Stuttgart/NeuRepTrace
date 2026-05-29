@@ -84,6 +84,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
                 "class_1": "class-1",
                 "prob_class_0": probability if label == 0 else 1.0 - probability,
                 "prob_class_1": 1.0 - probability if label == 0 else probability,
+                "class_prior_correction": kwargs["class_prior_correction"],
             }
             for index, label in enumerate((0, 1))
         ]
@@ -127,6 +128,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         decode_window=(0.12, 0.248),
         temporal_train_window=(0.12, 0.248),
         temporal_train_mode="pooled",
+        class_prior_correction="train_uniform",
         ensemble_baseline_window=None,
     )
 
@@ -135,4 +137,6 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert all(call["decode_window"] == (0.12, 0.248) for call in calls)
     assert all(call["temporal_train_window"] == (0.12, 0.248) for call in calls)
     assert all(call["temporal_train_mode"] == "pooled" for call in calls)
+    assert all(call["class_prior_correction"] == "train_uniform" for call in calls)
+    assert results["class_prior_correction"].unique().tolist() == ["train_uniform"]
     assert results["temporal_mode"].unique().tolist() == ["train_window_pooled"]

@@ -217,6 +217,10 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             tuple(temporal_train_window) if temporal_train_window is not None else None
         ),
         "time_decode_backend": decoding.get("time_decode_backend", "sklearn"),
+        "class_prior_correction": decoding.get(
+            "class_prior_correction",
+            decoding.get("prior_correction", "none"),
+        ),
         "label_shuffle_control": bool(decoding.get("label_shuffle_control", False)),
         "label_shuffle_seed": int(decoding.get("label_shuffle_seed", 13)),
     }
