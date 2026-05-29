@@ -100,8 +100,12 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "outer_test_groups: ${{ fromJSON(needs.resolve-matrix.outputs.outer_test_group_shards_json) }}" in workflow
     assert "OUTER_TEST_GROUPS_SHARD" in workflow
     assert "aggregate-openneuro-shards" in workflow
+    assert "needs.openneuro-meg-loso.result != 'cancelled'" in workflow
     assert "actions/download-artifact@v7" in workflow
     assert "merge-multiple: false" in workflow
+    assert "OPENNEURO_SHARD_MATRIX_RESULT" in workflow
+    assert "OUTER_TEST_GROUP_SHARDS_JSON" in workflow
+    assert "shard_aggregation_status.json" in workflow
     assert "--aggregate-out \"$OPENNEURO_AGGREGATE_OUTPUT_DIR\"" in workflow
     assert "-shard-aggregate" in workflow
     assert "OPENNEURO_CONFIG" in workflow
