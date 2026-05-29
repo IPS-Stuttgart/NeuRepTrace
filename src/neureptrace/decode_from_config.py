@@ -234,6 +234,13 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
     }
     if temporal_train_mode is not None:
         kwargs["temporal_train_mode"] = temporal_train_mode
+    if "outer_test_groups" in decoding or "outer_test_group" in decoding:
+        outer_test_groups = decoding.get("outer_test_groups", decoding.get("outer_test_group"))
+        if outer_test_groups is not None and outer_test_groups != "":
+            kwargs["outer_test_groups"] = _string_tuple(
+                outer_test_groups,
+                name="decoding.outer_test_groups",
+            )
     if normalize_time_decode_decoder_name(str(kwargs["decoder"])) == ENSEMBLE_DECODER:
         if "ensemble_weights" in decoding or "ensemble_weight" in decoding:
             ensemble_weights = decoding.get("ensemble_weights", decoding.get("ensemble_weight"))

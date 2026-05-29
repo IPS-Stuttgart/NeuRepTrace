@@ -26,6 +26,24 @@ def test_decode_from_config_passes_label_shuffle_controls(tmp_path):
     assert kwargs["class_prior_correction"] == "train-uniform"
 
 
+def test_decode_from_config_passes_outer_test_groups(tmp_path):
+    kwargs = _decode_kwargs(
+        {
+            "dataset": {"name": "demo"},
+            "decoding": {
+                "label_column": "condition",
+                "group_column": "subject",
+                "outer_test_groups": "[sub-01,sub-07]",
+            },
+            "preprocessing": {},
+            "outputs": {"summary_csv": "summary.csv"},
+        },
+        config_dir=tmp_path,
+    )
+
+    assert kwargs["outer_test_groups"] == ("sub-01", "sub-07")
+
+
 def test_decode_from_config_passes_ensemble_controls_for_ensemble_decoder(tmp_path):
     kwargs = _decode_kwargs(
         {
