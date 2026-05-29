@@ -266,6 +266,52 @@ def test_ensemble_confidence_probability_score_mode_downweights_uncertain_source
     assert confidence_weighted["ensemble_score_mode"].unique().tolist() == ["confidence_probability"]
 
 
+def test_ensemble_agreement_probability_score_mode_downweights_outlier_sources() -> None:
+    observations = pd.DataFrame(
+        [
+            {
+                "subject": "sub-01",
+                "fold": 0,
+                "decoder": decoder,
+                "emission_mode": "calibrated",
+                "time": 0.1,
+                "sample_index": 0,
+                "sequence_id": 0,
+                "true_label": 1,
+                "true_class": "one",
+                "class_0": "zero",
+                "class_1": "one",
+                "prob_class_0": prob_0,
+                "prob_class_1": prob_1,
+            }
+            for decoder, prob_0, prob_1 in (
+                ("overweighted_outlier", 0.95, 0.05),
+                ("agreeing_source_a", 0.25, 0.75),
+                ("agreeing_source_b", 0.25, 0.75),
+            )
+        ]
+    )
+
+    probability_mean = ensemble_probability_observations(
+        observations,
+        decoders=("overweighted_outlier", "agreeing_source_a", "agreeing_source_b"),
+        weights=(2.0, 1.0, 1.0),
+        baseline_window=None,
+        score_mode="probability",
+    )
+    agreement_weighted = ensemble_probability_observations(
+        observations,
+        decoders=("overweighted_outlier", "agreeing_source_a", "agreeing_source_b"),
+        weights=(2.0, 1.0, 1.0),
+        baseline_window=None,
+        score_mode="agreement_probability",
+    )
+
+    assert probability_mean["predicted_label"].tolist() == [0]
+    assert agreement_weighted["predicted_label"].tolist() == [1]
+    assert agreement_weighted["ensemble_score_mode"].unique().tolist() == ["agreement_probability"]
+
+
 def test_ensemble_source_baseline_debiasing_removes_source_level_bias() -> None:
     observations = pd.DataFrame(
         [
