@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -62,21 +63,28 @@ def _is_ensemble_decoder(decoder: str) -> bool:
     return normalize_time_decode_decoder_name(decoder) == ENSEMBLE_DECODER
 
 
-def _parse_weights(weights: Sequence[float] | None) -> tuple[float, float]:
+def _parse_weights(weights: Sequence[float] | None, n_sources: int) -> tuple[float, ...]:
+    if n_sources < 2:
+        raise ValueError("logistic_svm_ensemble expects at least two source decoders.")
     if weights is None:
-        return float(DEFAULT_WEIGHTS[0]), float(DEFAULT_WEIGHTS[1])
-    if len(weights) != 2:
-        raise ValueError("logistic_svm_ensemble expects exactly two weights: calibrated logistic and calibrated linear_svm.")
-    return float(weights[0]), float(weights[1])
+        if n_sources == len(DEFAULT_WEIGHTS):
+            return tuple(float(weight) for weight in DEFAULT_WEIGHTS)
+        return tuple(1.0 for _ in range(n_sources))
+    if len(weights) != n_sources:
+        raise ValueError(f"logistic_svm_ensemble expects {n_sources} weights for {n_sources} source decoders.")
+    parsed = tuple(float(weight) for weight in weights)
+    if any(not math.isfinite(weight) or weight < 0.0 for weight in parsed) or sum(parsed) <= 0.0:
+        raise ValueError("logistic_svm_ensemble weights must be finite non-negative values with positive sum.")
+    return parsed
 
 
-def _parse_source_decoders(source_decoders: Sequence[str] | None) -> tuple[tuple[str, str], tuple[str, str]]:
+def _parse_source_decoders(source_decoders: Sequence[str] | None) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if source_decoders is None:
         requests = _SOURCE_DECODER_REQUESTS
     else:
         requests = tuple(str(decoder).strip() for decoder in source_decoders if str(decoder).strip())
-    if len(requests) != 2:
-        raise ValueError("logistic_svm_ensemble expects exactly two source decoders.")
+    if len(requests) < 2:
+        raise ValueError("logistic_svm_ensemble expects at least two source decoders.")
     normalized = tuple(normalize_decoder_name(decoder) for decoder in requests)
     return requests, normalized
 
@@ -125,10 +133,10 @@ def run_time_resolved_decode(
     """Run time-resolved decoding with optional baseline-debiased logistic/SVM probability ensembling.
 
     ``logistic_svm_ensemble`` is implemented as a first-class time-decode path
-    around the existing held-out probability pipeline: calibrated multinomial
-    logistic regression and calibrated linear SVM source decoders are fit inside
-    the same outer folds, their observation probabilities are aligned one-to-one,
-    then combined by NeuRepTrace's baseline-debiased log-probability ensemble.
+    around the existing held-out probability pipeline: calibrated source
+    decoders are fit inside the same outer folds, their observation
+    probabilities are aligned one-to-one, then combined by NeuRepTrace's
+    baseline-debiased log-probability ensemble.
     """
 
     if not _is_ensemble_decoder(decoder):
@@ -172,7 +180,8 @@ def run_time_resolved_decode(
         raise ValueError("logistic_svm_ensemble is defined for --emission-mode calibrated only.")
 
     source_decoder_requests, source_decoders = _parse_source_decoders(ensemble_source_decoders)
-    weights = _parse_weights(ensemble_weights)
+    weights = _parse_weights(ensemble_weights, len(source_decoders))
+    normalized_weights = tuple(float(weight) / sum(weights) for weight in weights)
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
 
     with tempfile.TemporaryDirectory(prefix="neureptrace_logistic_svm_ensemble_") as tmp_dir_name:
@@ -247,7 +256,7 @@ def run_time_resolved_decode(
     results["normalization"] = normalization.replace("-", "_") if normalization is not None else "none"
     results["class_prior_correction"] = str(class_prior_correction).strip().lower().replace("-", "_")
     results["source_decoders"] = "|".join(source_decoders)
-    results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in weights)
+    results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
     results["baseline_window_start"] = "" if baseline_window is None else float(baseline_window[0])
     results["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
     results["ensemble_baseline_window_start"] = "" if ensemble_baseline_window is None else float(ensemble_baseline_window[0])
@@ -369,14 +378,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--ensemble-source-decoder",
         action="append",
         dest="ensemble_source_decoders",
-        help="Source decoder for logistic_svm_ensemble. Repeat twice to override the default multinomial-logistic and linear_svm sources.",
+        help="Source decoder for logistic_svm_ensemble. Repeat two or more times to override the default multinomial-logistic and linear_svm sources.",
     )
     parser.add_argument(
         "--ensemble-weight",
         action="append",
         type=float,
         dest="ensemble_weights",
-        help="Weight for logistic_svm_ensemble sources. Repeat twice: first calibrated logistic, then calibrated linear_svm. Defaults to 0.5/0.5.",
+        help="Weight for logistic_svm_ensemble sources. Repeat in the same order as --ensemble-source-decoder.",
     )
     parser.add_argument("--ensemble-baseline-window", nargs=2, type=float, default=DEFAULT_ENSEMBLE_BASELINE_WINDOW, metavar=("START", "STOP"))
     parser.add_argument("--no-ensemble-baseline-debiasing", action="store_true")
