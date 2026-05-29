@@ -706,11 +706,13 @@ jobs:
     needs:
       - resolve-matrix
       - openneuro-meg-loso
-    if: ${{ always() && needs.openneuro-meg-loso.result == 'success' && inputs.run_decode == true }}
+    if: ${{ always() && needs.openneuro-meg-loso.result != 'cancelled' && inputs.run_decode == true }}
     runs-on: ubuntu-latest
     env:
       DATASET: ${{ inputs.dataset }}
       MODE: ${{ inputs.mode }}
+      OPENNEURO_SHARD_MATRIX_RESULT: ${{ needs.openneuro-meg-loso.result }}
+      OUTER_TEST_GROUP_SHARDS_JSON: ${{ needs.resolve-matrix.outputs.outer_test_group_shards_json }}
       DIAGNOSTICS_BEST_TIME_INPUT: ${{ inputs.diagnostics_best_time }}
       OPENNEURO_ARTIFACT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('-label-shuffle-seed-{0}', inputs.label_shuffle_seed) || '' }}
       OPENNEURO_OUTPUT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('_label_shuffle_seed_{0}', inputs.label_shuffle_seed) || '' }}
@@ -749,6 +751,8 @@ jobs:
             echo "No shard run_manifest.json files were downloaded; cannot aggregate OpenNeuro diagnostics."
             exit 1
           fi
+          mkdir -p "$OPENNEURO_AGGREGATE_OUTPUT_DIR"
+          printf '%s\n' "${output_dirs[@]}" > "$OPENNEURO_AGGREGATE_OUTPUT_DIR/source_output_dirs.txt"
           printf 'Aggregating OpenNeuro output directories:\n'
           printf '  %s\n' "${output_dirs[@]}"
           aggregate_args=("${output_dirs[@]}" --aggregate-out "$OPENNEURO_AGGREGATE_OUTPUT_DIR")
@@ -756,6 +760,33 @@ jobs:
             aggregate_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
           fi
           python -m neureptrace.openneuro_decode_diagnostics "${aggregate_args[@]}"
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          out_dir = Path(os.environ["OPENNEURO_AGGREGATE_OUTPUT_DIR"])
+          expected = json.loads(os.environ.get("OUTER_TEST_GROUP_SHARDS_JSON") or '[""]')
+          source_dirs = [
+              line
+              for line in (out_dir / "source_output_dirs.txt").read_text(encoding="utf-8").splitlines()
+              if line.strip()
+          ]
+          status = {
+              "matrix_result": os.environ.get("OPENNEURO_SHARD_MATRIX_RESULT", ""),
+              "expected_shards": expected,
+              "expected_shard_count": len(expected),
+              "downloaded_output_count": len(source_dirs),
+              "complete": len(source_dirs) == len(expected) and os.environ.get("OPENNEURO_SHARD_MATRIX_RESULT") == "success",
+              "source_output_dirs": source_dirs,
+          }
+          (out_dir / "shard_aggregation_status.json").write_text(
+              json.dumps(status, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          PY
 
       - name: Upload aggregate OpenNeuro MEG output
         uses: actions/upload-artifact@v7
