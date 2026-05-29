@@ -175,15 +175,25 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Cache OpenNeuro datasets on GitHub-hosted runners
+      - name: Cache OpenNeuro raw files on GitHub-hosted runners
         if: runner.environment == 'github-hosted'
         uses: actions/cache@v5
         with:
-          path: ~/.cache/datasets/openneuro
-          key: openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-v2
+          path: ~/.cache/datasets/openneuro/${{ inputs.dataset }}
+          key: openneuro-meg-raw-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-v1
           restore-keys: |
-            openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-
-            openneuro-meg-${{ runner.os }}-
+            openneuro-meg-raw-${{ runner.os }}-${{ inputs.dataset }}-
+            openneuro-meg-raw-${{ runner.os }}-
+
+      - name: Cache staged OpenNeuro epochs on GitHub-hosted runners
+        if: runner.environment == 'github-hosted'
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/datasets/openneuro/staged-epochs/${{ inputs.dataset }}
+          key: openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-subjects-${{ inputs.subjects }}-runs-${{ inputs.runs }}-cap-${{ inputs.max_events_per_label }}-v1
+          restore-keys: |
+            openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-
+            openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-
 
       - name: Install NeuRepTrace and OpenNeuro client
         shell: bash
@@ -259,6 +269,7 @@ jobs:
               handle.write(f"OPENNEURO_OUTPUT_DIR={output_dir}\n")
               handle.write(f"OPENNEURO_MAX_EVENTS_ARG={max_events_arg}\n")
               handle.write(f"OPENNEURO_CONFIG={config_path}\n")
+              handle.write(f"RUNNER_ENVIRONMENT={runner_environment}\n")
           output_dir.mkdir(parents=True, exist_ok=True)
           manifest = {
               "dataset": dataset,
@@ -272,6 +283,7 @@ jobs:
               "runner_environment": runner_environment or "unknown",
               "data_root": data_root.as_posix(),
               "staged_root": staged_root.as_posix(),
+              "stage_overwrite": runner_environment == "self-hosted",
               "output_dir": output_dir.as_posix(),
               "artifact_name": artifact_name,
               "max_events_per_label": max_events,
@@ -397,18 +409,25 @@ jobs:
               --github-env "$GITHUB_ENV"
             )
           fi
-          # shellcheck disable=SC2086
-          python -m "$stage_module" stage \
-            --dataset "$DATASET" \
-            --bids-root "$OPENNEURO_DATA_ROOT" \
-            --staged-dir "$NEUREPTRACE_OPENNEURO_STAGED_DIR" \
-            --subjects "$OPENNEURO_SUBJECTS" \
-            --runs "$OPENNEURO_RUNS" \
-            --summary-out "$OPENNEURO_OUTPUT_DIR/stage_summary.csv" \
-            $OPENNEURO_MAX_EVENTS_ARG \
-            --on-mismatch warn \
-            --overwrite \
-            "${extra_stage_args[@]}"
+          max_events_args=()
+          if [[ -n "$OPENNEURO_MAX_EVENTS_ARG" ]]; then
+            read -r -a max_events_args <<< "$OPENNEURO_MAX_EVENTS_ARG"
+          fi
+          stage_args=(
+            stage
+            --dataset "$DATASET"
+            --bids-root "$OPENNEURO_DATA_ROOT"
+            --staged-dir "$NEUREPTRACE_OPENNEURO_STAGED_DIR"
+            --subjects "$OPENNEURO_SUBJECTS"
+            --runs "$OPENNEURO_RUNS"
+            --summary-out "$OPENNEURO_OUTPUT_DIR/stage_summary.csv"
+          )
+          stage_args+=("${max_events_args[@]}")
+          stage_args+=(--on-mismatch warn)
+          if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]]; then
+            stage_args+=(--overwrite)
+          fi
+          python -m "$stage_module" "${stage_args[@]}" "${extra_stage_args[@]}"
 
       - name: Run NeuRepTrace LOSO decode
         if: env.RUN_DECODE == 'true'
