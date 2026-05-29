@@ -79,18 +79,48 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "run-name: OpenNeuro MEG LOSO" in workflow
     assert "default: github-hosted" in workflow
     assert "GitHub-hosted starts immediately" in workflow
+    assert "Cache OpenNeuro raw files on GitHub-hosted runners" in workflow
+    assert "Cache staged OpenNeuro epochs on GitHub-hosted runners" in workflow
+    assert "Check selected staged epochs" in workflow
+    assert "raw-file check/download can be skipped" in workflow
+    assert "steps.staged_check.outputs.ready != 'true'" in workflow
+    assert "openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}" in workflow
+    assert "stage_overwrite" in workflow
+    assert 'if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]]; then' in workflow
+    assert "stage_args+=(--overwrite)" in workflow
     assert "OPENNEURO_ARTIFACT_SUFFIX" in workflow
     assert "OPENNEURO_OUTPUT_SUFFIX" in workflow
     assert "run_manifest.json" in workflow
     assert "workflow_quality_summary.csv" in workflow
     assert "temporal_smoothing" in workflow
+    assert "ensemble_source_temperatures" in workflow
+    assert "decoding.ensemble_source_temperatures" in workflow
     assert "python -m neureptrace.temporal_smoothing" in workflow
     assert "decode/temporal_smoothing/diagnostics" in workflow
+    assert "resolve-matrix" in workflow
+    assert "workflow.outer_test_group_shards_json" in workflow
+    assert "outer_test_groups: ${{ fromJSON(needs.resolve-matrix.outputs.outer_test_group_shards_json) }}" in workflow
+    assert "OUTER_TEST_GROUPS_SHARD" in workflow
+    assert "aggregate-openneuro-shards" in workflow
+    assert "needs.openneuro-meg-loso.result != 'cancelled'" in workflow
+    assert "actions/download-artifact@v7" in workflow
+    assert "merge-multiple: false" in workflow
+    assert "OPENNEURO_SHARD_MATRIX_RESULT" in workflow
+    assert "OUTER_TEST_GROUP_SHARDS_JSON" in workflow
+    assert "shard_aggregation_status.json" in workflow
+    assert "--aggregate-out \"$OPENNEURO_AGGREGATE_OUTPUT_DIR\"" in workflow
+    assert "-shard-aggregate" in workflow
     assert "OPENNEURO_CONFIG" in workflow
     assert "artifact_name" in workflow
+    assert "outer_test_groups_shard" in workflow
+    assert "outer_test_groups" in workflow
+    assert "decoding.outer_test_groups=[sub-01]" in workflow
+    assert "decoding.outer_test_groups=" in workflow
+    assert 'args+=(--set "decoding.outer_test_groups=[$OUTER_TEST_GROUPS_SHARD]")' in workflow
     assert "python -m neureptrace.openneuro_decode_diagnostics" in workflow
     assert "openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}" in workflow
-    assert "outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ env.OPENNEURO_OUTPUT_SUFFIX }}/**" in workflow
+    assert "format('-shard-{0}', matrix.outer_test_groups)" in workflow
+    assert "outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}*/**" in workflow
     for dataset_id, config_name in OPENNEURO_DECODE_CONFIGS.items():
         assert f"- {dataset_id}" in workflow
         assert f'"{dataset_id}": "{config_name}"' in workflow

@@ -94,6 +94,14 @@ def _string_tuple(value: Any, *, name: str) -> tuple[str, ...]:
     return values
 
 
+def _bool_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _find_project_root(start: Path) -> Path:
     """Find a repository-like project root, falling back to the current directory."""
 
@@ -234,6 +242,13 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
     }
     if temporal_train_mode is not None:
         kwargs["temporal_train_mode"] = temporal_train_mode
+    if "outer_test_groups" in decoding or "outer_test_group" in decoding:
+        outer_test_groups = decoding.get("outer_test_groups", decoding.get("outer_test_group"))
+        if outer_test_groups is not None and outer_test_groups != "":
+            kwargs["outer_test_groups"] = _string_tuple(
+                outer_test_groups,
+                name="decoding.outer_test_groups",
+            )
     if normalize_time_decode_decoder_name(str(kwargs["decoder"])) == ENSEMBLE_DECODER:
         parsed_ensemble_source_decoders: tuple[str, ...] | None = None
         if "ensemble_source_decoders" in decoding or "ensemble_source_decoder" in decoding:
@@ -266,6 +281,22 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             )
         if "ensemble_min_probability" in decoding:
             kwargs["ensemble_min_probability"] = float(decoding["ensemble_min_probability"])
+        if "ensemble_source_temperatures" in decoding or "ensemble_source_temperature" in decoding:
+            ensemble_source_temperatures = decoding.get(
+                "ensemble_source_temperatures",
+                decoding.get("ensemble_source_temperature"),
+            )
+            if ensemble_source_temperatures is not None and ensemble_source_temperatures != "":
+                kwargs["ensemble_source_temperatures"] = _float_tuple(
+                    ensemble_source_temperatures,
+                    name="decoding.ensemble_source_temperatures",
+                )
+        if "ensemble_score_mode" in decoding:
+            kwargs["ensemble_score_mode"] = str(decoding["ensemble_score_mode"])
+        if "ensemble_source_baseline_debiasing" in decoding:
+            kwargs["ensemble_source_baseline_debiasing"] = _bool_value(
+                decoding["ensemble_source_baseline_debiasing"]
+            )
     return kwargs
 
 

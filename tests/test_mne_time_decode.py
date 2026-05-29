@@ -7,6 +7,7 @@ from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
 from neureptrace.mne_time_decode import (
     _apply_class_prior_correction,
     _align_probability_columns,
+    _filter_splits_for_outer_test_groups,
     _shuffle_training_labels,
     normalize_class_prior_correction,
     normalize_time_decode_backend,
@@ -78,6 +79,21 @@ def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     np.testing.assert_array_equal(shuffled_a, shuffled_b)
     assert sorted(shuffled_a.tolist()) == sorted(labels.tolist())
     assert not np.array_equal(shuffled_a, shuffled_c)
+
+
+def test_outer_test_group_filter_preserves_fold_ids_and_accepts_subject_aliases():
+    groups = np.array(["sub-01", "sub-01", "sub-02", "sub-02", "sub-03", "sub-03"])
+    splits = [
+        (0, (np.array([2, 3, 4, 5]), np.array([0, 1]))),
+        (1, (np.array([0, 1, 4, 5]), np.array([2, 3]))),
+        (2, (np.array([0, 1, 2, 3]), np.array([4, 5]))),
+    ]
+
+    selected = _filter_splits_for_outer_test_groups(splits, groups, ("1", "sub-03"))
+
+    assert [fold for fold, _ in selected] == [0, 2]
+    np.testing.assert_array_equal(selected[0][1][1], np.array([0, 1]))
+    np.testing.assert_array_equal(selected[1][1][1], np.array([4, 5]))
 
 
 def test_class_prior_correction_rebalances_train_fold_priors():

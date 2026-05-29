@@ -65,7 +65,7 @@ on:
         required: false
         default: ""
       config_overrides:
-        description: "Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075"
+        description: 'Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075, decoding.outer_test_groups=[sub-01], or workflow.outer_test_group_shards_json=["sub-01","sub-02"]'
         required: false
         default: ""
       diagnostics_best_time:
@@ -132,9 +132,52 @@ on:
         default: github-hosted
 
 jobs:
+  resolve-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      outer_test_group_shards_json: ${{ steps.matrix.outputs.outer_test_group_shards_json }}
+    steps:
+      - name: Resolve shard matrix
+        id: matrix
+        shell: bash
+        env:
+          CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          shards_json = '[""]'
+          for override in os.environ.get("CONFIG_OVERRIDES_INPUT", "").replace(";", "\n").splitlines():
+              override = override.strip()
+              if override.startswith("workflow.outer_test_group_shards_json="):
+                  shards_json = override.split("=", 1)[1].strip()
+          try:
+              shards = json.loads(shards_json)
+          except json.JSONDecodeError as exc:
+              raise SystemExit(f"Invalid workflow.outer_test_group_shards_json: {exc}") from exc
+          if not isinstance(shards, list) or not all(isinstance(item, str) for item in shards):
+              raise SystemExit("workflow.outer_test_group_shards_json must be a JSON array of strings.")
+          if not shards:
+              shards = [""]
+          compact = json.dumps(shards, separators=(",", ":"))
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+              handle.write(f"outer_test_group_shards_json={compact}\n")
+          print(f"OpenNeuro held-out shard matrix: {compact}")
+          PY
+
   openneuro-meg-loso:
+    needs: resolve-matrix
     runs-on: ${{ fromJSON(inputs.runner_type == 'github-hosted' && '["ubuntu-latest"]' || '["self-hosted","Linux"]') }}
     timeout-minutes: 720
+    strategy:
+      fail-fast: false
+      matrix:
+        outer_test_groups: ${{ fromJSON(needs.resolve-matrix.outputs.outer_test_group_shards_json) }}
     env:
       OPENNEURO_API_KEY: ${{ secrets.OPENNEURO_API_KEY }}
       DATASET: ${{ inputs.dataset }}
@@ -151,6 +194,7 @@ jobs:
       MIN_SUCCESSFUL_SUBJECTS: ${{ inputs.min_successful_subjects }}
       DECODER_INPUT: ${{ inputs.decoder }}
       CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
+      OUTER_TEST_GROUPS_SHARD: ${{ matrix.outer_test_groups }}
       DIAGNOSTICS_BEST_TIME_INPUT: ${{ inputs.diagnostics_best_time }}
       TEMPORAL_SMOOTHING: ${{ inputs.temporal_smoothing }}
       TEMPORAL_SMOOTHING_FIT_WINDOW: ${{ inputs.temporal_smoothing_fit_window }}
@@ -175,15 +219,25 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Cache OpenNeuro datasets on GitHub-hosted runners
+      - name: Cache OpenNeuro raw files on GitHub-hosted runners
         if: runner.environment == 'github-hosted'
         uses: actions/cache@v5
         with:
-          path: ~/.cache/datasets/openneuro
-          key: openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-v2
+          path: ~/.cache/datasets/openneuro/${{ inputs.dataset }}
+          key: openneuro-meg-raw-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-v1
           restore-keys: |
-            openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-
-            openneuro-meg-${{ runner.os }}-
+            openneuro-meg-raw-${{ runner.os }}-${{ inputs.dataset }}-
+            openneuro-meg-raw-${{ runner.os }}-
+
+      - name: Cache staged OpenNeuro epochs on GitHub-hosted runners
+        if: runner.environment == 'github-hosted'
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/datasets/openneuro/staged-epochs/${{ inputs.dataset }}
+          key: openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-subjects-${{ inputs.subjects }}-runs-${{ inputs.runs }}-cap-${{ inputs.max_events_per_label }}-v1
+          restore-keys: |
+            openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-
+            openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-
 
       - name: Install NeuRepTrace and OpenNeuro client
         shell: bash
@@ -222,6 +276,26 @@ jobs:
           }
           subjects = os.environ.get("SUBJECTS_INPUT") or (smoke_defaults[dataset][0] if mode == "smoke" else "all")
           runs = os.environ.get("RUNS_INPUT") or (smoke_defaults[dataset][1] if mode == "smoke" else "all")
+          outer_test_groups_shard = os.environ.get("OUTER_TEST_GROUPS_SHARD", "").strip()
+          override_lines = [
+              override.strip()
+              for override in os.environ.get("CONFIG_OVERRIDES_INPUT", "").replace(";", "\n").splitlines()
+              if override.strip() and not override.strip().startswith("workflow.outer_test_group_shards_json=")
+          ]
+          def override_value(*keys: str) -> str:
+              for override in override_lines:
+                  key, separator, value = override.partition("=")
+                  if separator and key.strip() in keys:
+                      return value.strip()
+              return ""
+          if outer_test_groups_shard:
+              override_lines.append(f"decoding.outer_test_groups=[{outer_test_groups_shard}]")
+          config_overrides_input = "\n".join(override_lines)
+          outer_test_groups = ""
+          for override in config_overrides_input.replace(";", "\n").splitlines():
+              override = override.strip()
+              if override.startswith("decoding.outer_test_groups=") or override.startswith("decoding.outer_test_group="):
+                  outer_test_groups = override.split("=", 1)[1].strip()
           parsed_runs = parse_runs(spec, runs)
           subject_count = len(parse_subjects(spec, subjects))
           max_events = int(os.environ["MAX_EVENTS_PER_LABEL_INPUT"])
@@ -238,10 +312,12 @@ jobs:
           openneuro_cache_root = dataset_cache_root / "openneuro"
           data_root = Path(os.environ.get("DATA_ROOT_INPUT") or openneuro_cache_root / dataset)
           staged_root = Path(os.environ.get("STAGED_ROOT_INPUT") or openneuro_cache_root / "staged-epochs")
-          output_suffix = os.environ.get("OPENNEURO_OUTPUT_SUFFIX", "")
+          shard_output_suffix = f"_shard_{outer_test_groups_shard}" if outer_test_groups_shard else ""
+          shard_artifact_suffix = f"-shard-{outer_test_groups_shard}" if outer_test_groups_shard else ""
+          output_suffix = f"{os.environ.get('OPENNEURO_OUTPUT_SUFFIX', '')}{shard_output_suffix}"
           output_dir = Path("outputs") / f"openneuro_{dataset}_{mode}{output_suffix}"
           config_path = f"configs/openneuro/{config_names[dataset]}"
-          artifact_name = f"openneuro-meg-{dataset}-{mode}{os.environ.get('OPENNEURO_ARTIFACT_SUFFIX', '')}"
+          artifact_name = f"openneuro-meg-{dataset}-{mode}{os.environ.get('OPENNEURO_ARTIFACT_SUFFIX', '')}{shard_artifact_suffix}"
           env_path = Path(os.environ["GITHUB_ENV"])
           with env_path.open("a", encoding="utf-8") as handle:
               handle.write(f"OPENNEURO_SUBJECTS={subjects}\n")
@@ -253,6 +329,9 @@ jobs:
               handle.write(f"OPENNEURO_OUTPUT_DIR={output_dir}\n")
               handle.write(f"OPENNEURO_MAX_EVENTS_ARG={max_events_arg}\n")
               handle.write(f"OPENNEURO_CONFIG={config_path}\n")
+              handle.write(f"RUNNER_ENVIRONMENT={runner_environment}\n")
+              handle.write(f"OPENNEURO_OUTPUT_SUFFIX={output_suffix}\n")
+              handle.write(f"OPENNEURO_ARTIFACT_NAME={artifact_name}\n")
           output_dir.mkdir(parents=True, exist_ok=True)
           manifest = {
               "dataset": dataset,
@@ -266,6 +345,7 @@ jobs:
               "runner_environment": runner_environment or "unknown",
               "data_root": data_root.as_posix(),
               "staged_root": staged_root.as_posix(),
+              "stage_overwrite": runner_environment == "self-hosted",
               "output_dir": output_dir.as_posix(),
               "artifact_name": artifact_name,
               "max_events_per_label": max_events,
@@ -274,13 +354,19 @@ jobs:
               "skip_failed_subjects": os.environ.get("SKIP_FAILED_SUBJECTS", ""),
               "min_successful_subjects": os.environ.get("MIN_SUCCESSFUL_SUBJECTS", ""),
               "decoder_override": os.environ.get("DECODER_INPUT", ""),
-              "config_overrides": os.environ.get("CONFIG_OVERRIDES_INPUT", ""),
+              "config_overrides": config_overrides_input,
+              "outer_test_groups_shard": outer_test_groups_shard,
+              "outer_test_groups": outer_test_groups,
               "diagnostics_best_time": os.environ.get("DIAGNOSTICS_BEST_TIME_INPUT", ""),
               "temporal_smoothing": os.environ.get("TEMPORAL_SMOOTHING", ""),
               "temporal_smoothing_fit_window": os.environ.get("TEMPORAL_SMOOTHING_FIT_WINDOW", ""),
               "temporal_smoothing_stay_grid_size": "200",
               "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
               "ensemble_source_decoders": os.environ.get("ENSEMBLE_SOURCE_DECODERS_INPUT", ""),
+              "ensemble_source_temperatures": override_value(
+                  "decoding.ensemble_source_temperatures",
+                  "decoding.ensemble_source_temperature",
+              ),
               "ensemble_baseline_window": os.environ.get("ENSEMBLE_BASELINE_WINDOW_INPUT", ""),
               "ensemble_min_probability": os.environ.get("ENSEMBLE_MIN_PROBABILITY_INPUT", ""),
               "time_decode_backend": os.environ.get("TIME_DECODE_BACKEND", ""),
@@ -303,10 +389,48 @@ jobs:
           print(f"Dataset cache root: {dataset_cache_root}")
           print(f"Output dir: {output_dir}")
           print(f"Artifact name: {artifact_name}")
+          if outer_test_groups_shard:
+              print(f"Matrix held-out shard: {outer_test_groups_shard}")
+          PY
+
+      - name: Check selected staged epochs
+        id: staged_check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+
+          from neureptrace.openneuro_meg import DATASET_SPECS, parse_subjects, subject_label
+
+          dataset = os.environ["DATASET"]
+          runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "")
+          staged_root = Path(os.environ["NEUREPTRACE_OPENNEURO_STAGED_DIR"])
+          spec = DATASET_SPECS[dataset]
+          expected = [
+              staged_root / dataset / f"{subject_label(spec, subject)}_{dataset}_{spec.name}_epo.fif"
+              for subject in parse_subjects(spec, os.environ["OPENNEURO_SUBJECTS"])
+          ]
+          missing = [path for path in expected if not path.is_file() or path.stat().st_size <= 0]
+          ready = runner_environment == "github-hosted" and not missing
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"ready={str(ready).lower()}\n")
+              handle.write(f"missing_count={len(missing)}\n")
+          if ready:
+              print(f"Found all {len(expected)} staged Epochs files; raw-file check/download can be skipped.")
+          else:
+              print(f"Staged Epochs cache is incomplete or not reusable; missing {len(missing)} of {len(expected)} file(s).")
+              for path in missing[:20]:
+                  print(path)
           PY
 
       - name: Check selected raw files
         id: raw_check
+        if: steps.staged_check.outputs.ready != 'true'
         shell: bash
         run: |
           set +e
@@ -326,7 +450,7 @@ jobs:
           exit 0
 
       - name: Download selected OpenNeuro files
-        if: steps.raw_check.outputs.ready != 'true' && env.NO_DOWNLOAD != 'true'
+        if: steps.staged_check.outputs.ready != 'true' && steps.raw_check.outputs.ready != 'true' && env.NO_DOWNLOAD != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -354,6 +478,7 @@ jobs:
           done < "$OPENNEURO_OUTPUT_DIR.includes.txt"
 
       - name: Re-check selected raw files
+        if: steps.staged_check.outputs.ready != 'true'
         shell: bash
         run: |
           set +e
@@ -390,18 +515,25 @@ jobs:
               --github-env "$GITHUB_ENV"
             )
           fi
-          # shellcheck disable=SC2086
-          python -m "$stage_module" stage \
-            --dataset "$DATASET" \
-            --bids-root "$OPENNEURO_DATA_ROOT" \
-            --staged-dir "$NEUREPTRACE_OPENNEURO_STAGED_DIR" \
-            --subjects "$OPENNEURO_SUBJECTS" \
-            --runs "$OPENNEURO_RUNS" \
-            --summary-out "$OPENNEURO_OUTPUT_DIR/stage_summary.csv" \
-            $OPENNEURO_MAX_EVENTS_ARG \
-            --on-mismatch warn \
-            --overwrite \
-            "${extra_stage_args[@]}"
+          max_events_args=()
+          if [[ -n "$OPENNEURO_MAX_EVENTS_ARG" ]]; then
+            read -r -a max_events_args <<< "$OPENNEURO_MAX_EVENTS_ARG"
+          fi
+          stage_args=(
+            stage
+            --dataset "$DATASET"
+            --bids-root "$OPENNEURO_DATA_ROOT"
+            --staged-dir "$NEUREPTRACE_OPENNEURO_STAGED_DIR"
+            --subjects "$OPENNEURO_SUBJECTS"
+            --runs "$OPENNEURO_RUNS"
+            --summary-out "$OPENNEURO_OUTPUT_DIR/stage_summary.csv"
+          )
+          stage_args+=("${max_events_args[@]}")
+          stage_args+=(--on-mismatch warn)
+          if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]]; then
+            stage_args+=(--overwrite)
+          fi
+          python -m "$stage_module" "${stage_args[@]}" "${extra_stage_args[@]}"
 
       - name: Run NeuRepTrace LOSO decode
         if: env.RUN_DECODE == 'true'
@@ -426,8 +558,12 @@ jobs:
               override="${override#"${override%%[![:space:]]*}"}"
               override="${override%"${override##*[![:space:]]}"}"
               [[ -z "$override" || "$override" == \#* ]] && continue
+              [[ "$override" == workflow.* ]] && continue
               args+=(--set "$override")
             done < <(printf '%s\n' "$CONFIG_OVERRIDES_INPUT" | tr ';' '\n')
+          fi
+          if [[ -n "$OUTER_TEST_GROUPS_SHARD" ]]; then
+            args+=(--set "decoding.outer_test_groups=[$OUTER_TEST_GROUPS_SHARD]")
           fi
           if [[ -n "$ENSEMBLE_WEIGHTS_INPUT" ]]; then
             args+=(--set "decoding.ensemble_weights=[$ENSEMBLE_WEIGHTS_INPUT]")
@@ -572,6 +708,99 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
-          name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}
-          path: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ env.OPENNEURO_OUTPUT_SUFFIX }}/**
+          name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}${{ matrix.outer_test_groups != '' && format('-shard-{0}', matrix.outer_test_groups) || '' }}
+          path: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}*/**
           if-no-files-found: warn
+
+  aggregate-openneuro-shards:
+    needs:
+      - resolve-matrix
+      - openneuro-meg-loso
+    if: ${{ always() && needs.openneuro-meg-loso.result != 'cancelled' && inputs.run_decode == true }}
+    runs-on: ubuntu-latest
+    env:
+      DATASET: ${{ inputs.dataset }}
+      MODE: ${{ inputs.mode }}
+      OPENNEURO_SHARD_MATRIX_RESULT: ${{ needs.openneuro-meg-loso.result }}
+      OUTER_TEST_GROUP_SHARDS_JSON: ${{ needs.resolve-matrix.outputs.outer_test_group_shards_json }}
+      DIAGNOSTICS_BEST_TIME_INPUT: ${{ inputs.diagnostics_best_time }}
+      OPENNEURO_ARTIFACT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('-label-shuffle-seed-{0}', inputs.label_shuffle_seed) || '' }}
+      OPENNEURO_OUTPUT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('_label_shuffle_seed_{0}', inputs.label_shuffle_seed) || '' }}
+      OPENNEURO_AGGREGATE_OUTPUT_DIR: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ inputs.label_shuffle_control == true && format('_label_shuffle_seed_{0}', inputs.label_shuffle_seed) || '' }}_shard_aggregate
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install NeuRepTrace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Download OpenNeuro shard artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}*
+          path: downloaded_openneuro_artifacts
+          merge-multiple: false
+
+      - name: Aggregate OpenNeuro shard diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t output_dirs < <(find downloaded_openneuro_artifacts -type f -name run_manifest.json -printf '%h\n' | sort -u)
+          if [[ "${#output_dirs[@]}" -eq 0 ]]; then
+            echo "No shard run_manifest.json files were downloaded; cannot aggregate OpenNeuro diagnostics."
+            exit 1
+          fi
+          mkdir -p "$OPENNEURO_AGGREGATE_OUTPUT_DIR"
+          printf '%s\n' "${output_dirs[@]}" > "$OPENNEURO_AGGREGATE_OUTPUT_DIR/source_output_dirs.txt"
+          printf 'Aggregating OpenNeuro output directories:\n'
+          printf '  %s\n' "${output_dirs[@]}"
+          aggregate_args=("${output_dirs[@]}" --aggregate-out "$OPENNEURO_AGGREGATE_OUTPUT_DIR")
+          if [[ -n "$DIAGNOSTICS_BEST_TIME_INPUT" ]]; then
+            aggregate_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
+          fi
+          python -m neureptrace.openneuro_decode_diagnostics "${aggregate_args[@]}"
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          out_dir = Path(os.environ["OPENNEURO_AGGREGATE_OUTPUT_DIR"])
+          expected = json.loads(os.environ.get("OUTER_TEST_GROUP_SHARDS_JSON") or '[""]')
+          source_dirs = [
+              line
+              for line in (out_dir / "source_output_dirs.txt").read_text(encoding="utf-8").splitlines()
+              if line.strip()
+          ]
+          status = {
+              "matrix_result": os.environ.get("OPENNEURO_SHARD_MATRIX_RESULT", ""),
+              "expected_shards": expected,
+              "expected_shard_count": len(expected),
+              "downloaded_output_count": len(source_dirs),
+              "complete": len(source_dirs) == len(expected) and os.environ.get("OPENNEURO_SHARD_MATRIX_RESULT") == "success",
+              "source_output_dirs": source_dirs,
+          }
+          (out_dir / "shard_aggregation_status.json").write_text(
+              json.dumps(status, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload aggregate OpenNeuro MEG output
+        uses: actions/upload-artifact@v7
+        with:
+          name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}-shard-aggregate
+          path: ${{ env.OPENNEURO_AGGREGATE_OUTPUT_DIR }}/**
+          if-no-files-found: error

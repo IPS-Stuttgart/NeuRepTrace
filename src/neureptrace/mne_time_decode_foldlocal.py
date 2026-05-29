@@ -128,6 +128,7 @@ def run_time_resolved_decode(
     fieldtrip_ch_type: str = "grad",
     fieldtrip_trim_overlong_labels: bool = True,
     group_column: str | None = None,
+    outer_test_groups: Sequence[object] | str | None = None,
     picks: str = "data",
     tmin: float | None = None,
     tmax: float | None = None,
@@ -203,6 +204,7 @@ def run_time_resolved_decode(
     normalized_temporal_train_window = _base._normalize_temporal_train_window(temporal_train_window)
     temporal_train_mode_name = _base._normalize_temporal_train_mode(temporal_train_mode)
     class_prior_correction_name = _base.normalize_class_prior_correction(class_prior_correction)
+    outer_test_groups_value = _base._normalize_outer_test_groups(outer_test_groups)
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
@@ -248,6 +250,7 @@ def run_time_resolved_decode(
             "temporal_train_window": normalized_temporal_train_window,
             "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
             "class_prior_correction": class_prior_correction_name,
+            "outer_test_groups": outer_test_groups_value,
         }
     )
     default_model_hash = _base._model_hash(
@@ -277,10 +280,14 @@ def run_time_resolved_decode(
     all_windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
     windows = _base._select_decode_windows(all_windows, normalized_decode_window)
     selected_train_windows = _base._select_temporal_train_windows(all_windows, normalized_temporal_train_window)
-    splits = list(make_cross_validator(labels, groups, n_splits))
+    splits = _base._filter_splits_for_outer_test_groups(
+        list(enumerate(make_cross_validator(labels, groups, n_splits))),
+        groups,
+        outer_test_groups_value,
+    )
 
     if selected_train_windows is None:
-        for fold, (train_idx, test_idx) in enumerate(splits):
+        for fold, (train_idx, test_idx) in splits:
             fold_data = _normalize_epoch_data_for_fold(
                 raw_data,
                 epochs.times,
@@ -400,12 +407,13 @@ def run_time_resolved_decode(
                         class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
+                        outer_test_groups=outer_test_groups_value,
                     )
     elif temporal_train_mode_name == "pooled":
         train_time, train_window_start, train_window_stop = _base._train_window_summary(epochs, selected_train_windows)
         train_window_centers = [window[2] for window in selected_train_windows]
         model_windows = list(dict.fromkeys([*windows, *selected_train_windows]))
-        for fold, (train_idx, test_idx) in enumerate(splits):
+        for fold, (train_idx, test_idx) in splits:
             fold_data = _normalize_epoch_data_for_fold(
                 raw_data,
                 epochs.times,
@@ -532,12 +540,13 @@ def run_time_resolved_decode(
                         class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
+                        outer_test_groups=outer_test_groups_value,
                     )
     else:
         train_time, train_window_start, train_window_stop = _base._train_window_summary(epochs, selected_train_windows)
         train_window_centers = [window[2] for window in selected_train_windows]
         model_windows = list(dict.fromkeys([*windows, *selected_train_windows]))
-        for fold, (train_idx, test_idx) in enumerate(splits):
+        for fold, (train_idx, test_idx) in splits:
             fold_data = _normalize_epoch_data_for_fold(
                 raw_data,
                 epochs.times,
@@ -666,6 +675,7 @@ def run_time_resolved_decode(
                         class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
+                        outer_test_groups=outer_test_groups_value,
                     )
 
     results = pd.DataFrame(rows)

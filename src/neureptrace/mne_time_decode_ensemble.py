@@ -19,15 +19,19 @@ from neureptrace.mne_time_decode import (
     RESULT_SELECTION_MINIMIZE_METRICS,
     RESULT_SUMMARY_METRIC_COLUMNS,
     _best_time_by_metric,
+    _normalize_outer_test_groups,
     TEMPORAL_TRAIN_MODE_RUN_CHOICES,
 )
 from neureptrace.mne_time_decode_foldlocal import run_time_resolved_decode as _run_time_resolved_decode
 from neureptrace.observation_ensemble import (
     DEFAULT_BASELINE_GROUP_COLUMNS as DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS,
     DEFAULT_BASELINE_WINDOW as DEFAULT_ENSEMBLE_BASELINE_WINDOW,
+    DEFAULT_SCORE_MODE as DEFAULT_ENSEMBLE_SCORE_MODE,
+    ENSEMBLE_SCORE_MODE_CHOICES,
     DEFAULT_MIN_PROBABILITY,
     DEFAULT_WEIGHTS,
     ensemble_probability_observations,
+    normalize_ensemble_score_mode,
     summarize_ensemble_metrics,
 )
 from neureptrace.observation_schema import read_validated_probability_observations
@@ -78,6 +82,17 @@ def _parse_weights(weights: Sequence[float] | None, n_sources: int) -> tuple[flo
     return parsed
 
 
+def _parse_source_temperatures(temperatures: Sequence[float] | None, n_sources: int) -> tuple[float, ...]:
+    if temperatures is None:
+        return tuple(1.0 for _ in range(n_sources))
+    if len(temperatures) != n_sources:
+        raise ValueError(f"logistic_svm_ensemble expects {n_sources} temperatures for {n_sources} source decoders.")
+    parsed = tuple(float(temperature) for temperature in temperatures)
+    if any(not math.isfinite(temperature) or temperature <= 0.0 for temperature in parsed):
+        raise ValueError("logistic_svm_ensemble source temperatures must be finite positive values.")
+    return parsed
+
+
 def _parse_source_decoders(source_decoders: Sequence[str] | None) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if source_decoders is None:
         requests = _SOURCE_DECODER_REQUESTS
@@ -96,6 +111,7 @@ def run_time_resolved_decode(
     *,
     metadata_csv: Path | None = None,
     group_column: str | None = None,
+    outer_test_groups: Sequence[object] | str | None = None,
     picks: str = "data",
     tmin: float | None = None,
     tmax: float | None = None,
@@ -126,6 +142,9 @@ def run_time_resolved_decode(
     label_shuffle_seed: int = 13,
     ensemble_source_decoders: Sequence[str] | None = None,
     ensemble_weights: Sequence[float] | None = None,
+    ensemble_source_temperatures: Sequence[float] | None = None,
+    ensemble_score_mode: str = DEFAULT_ENSEMBLE_SCORE_MODE,
+    ensemble_source_baseline_debiasing: bool = False,
     ensemble_baseline_window: tuple[float, float] | None = DEFAULT_ENSEMBLE_BASELINE_WINDOW,
     ensemble_baseline_group_columns: Sequence[str] = DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS,
     ensemble_min_probability: float = DEFAULT_MIN_PROBABILITY,
@@ -145,6 +164,7 @@ def run_time_resolved_decode(
             metadata_csv=metadata_csv,
             label_column=label_column,
             group_column=group_column,
+            outer_test_groups=outer_test_groups,
             out_path=out_path,
             picks=picks,
             tmin=tmin,
@@ -181,6 +201,8 @@ def run_time_resolved_decode(
 
     source_decoder_requests, source_decoders = _parse_source_decoders(ensemble_source_decoders)
     weights = _parse_weights(ensemble_weights, len(source_decoders))
+    source_temperatures = _parse_source_temperatures(ensemble_source_temperatures, len(source_decoders))
+    ensemble_score_mode_name = normalize_ensemble_score_mode(ensemble_score_mode)
     normalized_weights = tuple(float(weight) / sum(weights) for weight in weights)
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
 
@@ -197,6 +219,7 @@ def run_time_resolved_decode(
                     metadata_csv=metadata_csv,
                     label_column=label_column,
                     group_column=group_column,
+                    outer_test_groups=outer_test_groups,
                     out_path=source_out,
                     picks=picks,
                     tmin=tmin,
@@ -243,6 +266,9 @@ def run_time_resolved_decode(
             baseline_window=ensemble_baseline_window,
             baseline_group_columns=ensemble_baseline_group_columns,
             min_probability=ensemble_min_probability,
+            source_temperatures=source_temperatures,
+            score_mode=ensemble_score_mode_name,
+            source_baseline_debiasing=ensemble_source_baseline_debiasing,
             output_decoder=ENSEMBLE_DECODER,
             output_emission_mode=ENSEMBLE_OUTPUT_EMISSION_MODE,
         )
@@ -257,6 +283,10 @@ def run_time_resolved_decode(
     results["class_prior_correction"] = str(class_prior_correction).strip().lower().replace("-", "_")
     results["source_decoders"] = "|".join(source_decoders)
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
+    results["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in source_temperatures)
+    results["ensemble_score_mode"] = ensemble_score_mode_name
+    results["ensemble_source_baseline_debiasing"] = bool(ensemble_source_baseline_debiasing)
+    results["outer_test_groups"] = "|".join(_normalize_outer_test_groups(outer_test_groups))
     results["baseline_window_start"] = "" if baseline_window is None else float(baseline_window[0])
     results["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
     results["ensemble_baseline_window_start"] = "" if ensemble_baseline_window is None else float(ensemble_baseline_window[0])
@@ -304,6 +334,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--metadata-csv", type=Path)
     parser.add_argument("--group-column")
+    parser.add_argument(
+        "--outer-test-group",
+        action="append",
+        dest="outer_test_groups",
+        help="Restrict decoding to outer folds whose held-out group matches this value. Repeat for multiple groups.",
+    )
     parser.add_argument("--picks", default="data")
     parser.add_argument("--tmin", type=float)
     parser.add_argument("--tmax", type=float)
@@ -387,6 +423,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         dest="ensemble_weights",
         help="Weight for logistic_svm_ensemble sources. Repeat in the same order as --ensemble-source-decoder.",
     )
+    parser.add_argument(
+        "--ensemble-source-temperature",
+        action="append",
+        type=float,
+        dest="ensemble_source_temperatures",
+        help="Per-source probability temperature before log-space averaging. Repeat in the same order as --ensemble-source-decoder.",
+    )
+    parser.add_argument(
+        "--ensemble-score-mode",
+        choices=ENSEMBLE_SCORE_MODE_CHOICES,
+        default=DEFAULT_ENSEMBLE_SCORE_MODE,
+        help="Combine ensemble sources as weighted log probabilities, weighted probability means, confidence-weighted probabilities, agreement-weighted probabilities, or weighted rank/Borda scores before baseline debiasing.",
+    )
+    parser.add_argument(
+        "--ensemble-source-baseline-debiasing",
+        action="store_true",
+        help="Remove each source decoder's baseline log-probability offset before logistic_svm_ensemble source fusion.",
+    )
     parser.add_argument("--ensemble-baseline-window", nargs=2, type=float, default=DEFAULT_ENSEMBLE_BASELINE_WINDOW, metavar=("START", "STOP"))
     parser.add_argument("--no-ensemble-baseline-debiasing", action="store_true")
     parser.add_argument(
@@ -403,6 +457,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         metadata_csv=args.metadata_csv,
         label_column=args.label_column,
         group_column=args.group_column,
+        outer_test_groups=tuple(args.outer_test_groups) if args.outer_test_groups is not None else None,
         out_path=args.out,
         picks=args.picks,
         tmin=args.tmin,
@@ -433,6 +488,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         label_shuffle_seed=args.label_shuffle_seed,
         ensemble_source_decoders=tuple(args.ensemble_source_decoders) if args.ensemble_source_decoders is not None else None,
         ensemble_weights=tuple(args.ensemble_weights) if args.ensemble_weights is not None else None,
+        ensemble_source_temperatures=tuple(args.ensemble_source_temperatures) if args.ensemble_source_temperatures is not None else None,
+        ensemble_score_mode=args.ensemble_score_mode,
+        ensemble_source_baseline_debiasing=args.ensemble_source_baseline_debiasing,
         ensemble_baseline_window=None if args.no_ensemble_baseline_debiasing else tuple(args.ensemble_baseline_window),
         ensemble_baseline_group_columns=tuple(args.ensemble_baseline_group_columns or DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS),
         ensemble_min_probability=args.ensemble_min_probability,

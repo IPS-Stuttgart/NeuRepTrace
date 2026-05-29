@@ -83,6 +83,73 @@ def _add_subject(row: dict, subject: str | None) -> dict:
     return row
 
 
+def _group_aliases(value: object) -> set[str]:
+    text = str(value).strip()
+    if not text:
+        return set()
+
+    normalized = text.lower()
+    aliases = {text, normalized}
+    if normalized.startswith("sub-"):
+        suffix = normalized.removeprefix("sub-")
+        aliases.add(suffix)
+        if suffix.isdigit():
+            aliases.add(str(int(suffix)))
+    elif normalized.isdigit():
+        aliases.add(f"sub-{int(normalized):02d}")
+    return {alias for alias in aliases if alias}
+
+
+def _normalize_outer_test_groups(value: object | Sequence[object] | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        values: list[object] = [
+            item.strip().strip("\"'")
+            for comma_part in text.split(",")
+            for item in comma_part.split()
+            if item.strip().strip("\"'")
+        ]
+    elif isinstance(value, Sequence):
+        values = list(value)
+    else:
+        values = [value]
+
+    return tuple(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+
+
+def _filter_splits_for_outer_test_groups(
+    splits: Sequence[tuple[int, tuple[np.ndarray, np.ndarray]]],
+    groups: np.ndarray | None,
+    outer_test_groups: object | Sequence[object] | None,
+) -> list[tuple[int, tuple[np.ndarray, np.ndarray]]]:
+    requested_groups = _normalize_outer_test_groups(outer_test_groups)
+    if not requested_groups:
+        return list(splits)
+    if groups is None:
+        raise ValueError("outer_test_groups requires group_column so held-out groups can be identified.")
+
+    requested_aliases = set().union(*(_group_aliases(group) for group in requested_groups))
+    group_values = np.asarray(groups)
+    selected: list[tuple[int, tuple[np.ndarray, np.ndarray]]] = []
+    available_aliases: set[str] = set()
+    for fold, (train_idx, test_idx) in splits:
+        test_group_values = np.unique(group_values[test_idx])
+        split_aliases = set().union(*(_group_aliases(group) for group in test_group_values))
+        available_aliases.update(split_aliases)
+        if requested_aliases & split_aliases:
+            selected.append((fold, (train_idx, test_idx)))
+
+    if not selected:
+        requested = ", ".join(sorted(requested_aliases))
+        available = ", ".join(sorted(available_aliases))
+        raise ValueError(f"No outer CV split matched outer_test_groups={requested}. Available groups: {available}.")
+    return selected
+
+
 def normalize_input_format(input_format: str | None) -> str:
     """Normalize supported epoch input formats for the direct decoder."""
 
@@ -794,6 +861,7 @@ def _append_decoded_outputs(
     class_prior_correction: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
+    outer_test_groups: Sequence[str] = (),
 ) -> None:
     tuning_metadata = {} if tuning_metadata is None else tuning_metadata
     start, stop, center = time_window
@@ -821,6 +889,7 @@ def _append_decoded_outputs(
         "label_shuffle_control": bool(label_shuffle_control),
         "label_shuffle_seed": int(label_shuffle_seed),
         "class_prior_correction": class_prior_correction,
+        "outer_test_groups": "|".join(outer_test_groups),
     }
     row = {
         **common,
@@ -888,6 +957,7 @@ def run_time_resolved_decode(
     fieldtrip_ch_type: str = "grad",
     fieldtrip_trim_overlong_labels: bool = True,
     group_column: str | None = None,
+    outer_test_groups: Sequence[object] | str | None = None,
     picks: str = "data",
     tmin: float | None = None,
     tmax: float | None = None,
@@ -964,6 +1034,7 @@ def run_time_resolved_decode(
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
+    outer_test_groups_value = _normalize_outer_test_groups(outer_test_groups)
     if requested_time_decode_backend == "mne" and normalized_temporal_train_window is not None:
         raise ValueError("The MNE time-decode backend currently supports same-time decoding only.")
     time_decode_backend = (
@@ -1017,6 +1088,7 @@ def run_time_resolved_decode(
             "temporal_train_window": normalized_temporal_train_window,
             "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
             "class_prior_correction": class_prior_correction_name,
+            "outer_test_groups": outer_test_groups_value,
         }
     )
     default_model_hash = _model_hash(
@@ -1053,10 +1125,14 @@ def run_time_resolved_decode(
     all_windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
     windows = _select_decode_windows(all_windows, normalized_decode_window)
     selected_train_windows = _select_temporal_train_windows(all_windows, normalized_temporal_train_window)
-    splits = list(make_cross_validator(labels, groups, n_splits))
+    splits = _filter_splits_for_outer_test_groups(
+        list(enumerate(make_cross_validator(labels, groups, n_splits))),
+        groups,
+        outer_test_groups_value,
+    )
 
     if selected_train_windows is None and time_decode_backend == "mne":
-        for fold, (train_idx, test_idx) in enumerate(splits):
+        for fold, (train_idx, test_idx) in splits:
             test_labels = labels[test_idx]
             train_labels = _fold_training_labels(
                 labels,
@@ -1168,12 +1244,13 @@ def run_time_resolved_decode(
                         class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
+                        outer_test_groups=outer_test_groups_value,
                     )
     elif selected_train_windows is None:
         for time_window in windows:
             features = _features_for_window(data, time_window)
             start, stop, center = time_window
-            for fold, (train_idx, test_idx) in enumerate(splits):
+            for fold, (train_idx, test_idx) in splits:
                 test_labels = labels[test_idx]
                 train_labels = _fold_training_labels(
                     labels,
@@ -1285,13 +1362,14 @@ def run_time_resolved_decode(
                         class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
+                        outer_test_groups=outer_test_groups_value,
                     )
     elif temporal_train_mode_name == "pooled":
         train_time, train_window_start, train_window_stop = _train_window_summary(epochs, selected_train_windows)
         train_window_centers = [window[2] for window in selected_train_windows]
         model_windows = list(dict.fromkeys([*windows, *selected_train_windows]))
         feature_cache = {time_window: _features_for_window(data, time_window) for time_window in model_windows}
-        for fold, (train_idx, test_idx) in enumerate(splits):
+        for fold, (train_idx, test_idx) in splits:
             test_labels = labels[test_idx]
             train_labels = _fold_training_labels(
                 labels,
@@ -1410,13 +1488,14 @@ def run_time_resolved_decode(
                         class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
+                        outer_test_groups=outer_test_groups_value,
                     )
     else:
         train_time, train_window_start, train_window_stop = _train_window_summary(epochs, selected_train_windows)
         train_window_centers = [window[2] for window in selected_train_windows]
         model_windows = list(dict.fromkeys([*windows, *selected_train_windows]))
         feature_cache = {time_window: _features_for_window(data, time_window) for time_window in model_windows}
-        for fold, (train_idx, test_idx) in enumerate(splits):
+        for fold, (train_idx, test_idx) in splits:
             test_labels = labels[test_idx]
             train_labels = _fold_training_labels(
                 labels,
@@ -1539,6 +1618,7 @@ def run_time_resolved_decode(
                         class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
+                        outer_test_groups=outer_test_groups_value,
                     )
 
     results = pd.DataFrame(rows)
@@ -1588,6 +1668,12 @@ def main() -> None:
     )
     parser.add_argument("--fieldtrip-ch-type", default="grad", help="MNE channel type used for FieldTrip trial rows.")
     parser.add_argument("--group-column")
+    parser.add_argument(
+        "--outer-test-group",
+        action="append",
+        dest="outer_test_groups",
+        help="Restrict decoding to outer folds whose held-out group matches this value. Repeat for multiple groups.",
+    )
     parser.add_argument("--picks", default="data")
     parser.add_argument("--tmin", type=float)
     parser.add_argument("--tmax", type=float)
@@ -1701,6 +1787,7 @@ def main() -> None:
         fieldtrip_trim_overlong_labels=not args.fieldtrip_no_trim_overlong_labels,
         label_column=args.label_column,
         group_column=args.group_column,
+        outer_test_groups=tuple(args.outer_test_groups) if args.outer_test_groups is not None else None,
         out_path=args.out,
         picks=args.picks,
         tmin=args.tmin,
