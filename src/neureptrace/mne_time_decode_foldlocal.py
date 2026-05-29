@@ -153,6 +153,7 @@ def run_time_resolved_decode(
     temporal_train_window: tuple[float, float] | None = None,
     temporal_train_mode: str = "window_ensemble",
     time_decode_backend: str = "sklearn",
+    class_prior_correction: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -201,6 +202,7 @@ def run_time_resolved_decode(
     normalized_decode_window = _base._normalize_decode_window(decode_window)
     normalized_temporal_train_window = _base._normalize_temporal_train_window(temporal_train_window)
     temporal_train_mode_name = _base._normalize_temporal_train_mode(temporal_train_mode)
+    class_prior_correction_name = _base.normalize_class_prior_correction(class_prior_correction)
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
@@ -245,6 +247,7 @@ def run_time_resolved_decode(
             "decode_window": normalized_decode_window,
             "temporal_train_window": normalized_temporal_train_window,
             "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
+            "class_prior_correction": class_prior_correction_name,
         }
     )
     default_model_hash = _base._model_hash(
@@ -261,6 +264,7 @@ def run_time_resolved_decode(
         tuning_cv_splits=tuning_cv_splits,
         tuning_scoring=tuning_scoring,
         tuning_c_grid=tuning_c_grid_values,
+        class_prior_correction=class_prior_correction_name,
         label_shuffle_control=label_shuffle_control,
         label_shuffle_seed=label_shuffle_seed,
     )
@@ -323,6 +327,12 @@ def run_time_resolved_decode(
                         model=model,
                         classes=classes,
                     )
+                    probabilities = _base._apply_class_prior_correction(
+                        probabilities,
+                        train_labels,
+                        classes,
+                        class_prior_correction_name,
+                    )
                     tuning_metadata = _base._tuning_metadata(
                         model,
                         tune_hyperparameters=tune_hyperparameters,
@@ -346,6 +356,7 @@ def run_time_resolved_decode(
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
                         tuning_metadata=tuning_metadata,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -386,6 +397,7 @@ def run_time_resolved_decode(
                         observation_out_path=observation_out_path,
                         subject=subject,
                         tuning_metadata=tuning_metadata,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -460,6 +472,7 @@ def run_time_resolved_decode(
                     tuning_scoring=tuning_scoring,
                     tuning_c_grid=tuning_c_grid_values,
                     tuning_metadata=tuning_metadata,
+                    class_prior_correction=class_prior_correction_name,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
                 )
@@ -472,6 +485,12 @@ def run_time_resolved_decode(
                         ),
                         model=model,
                         classes=classes,
+                    )
+                    probabilities = _base._apply_class_prior_correction(
+                        probabilities,
+                        train_labels,
+                        classes,
+                        class_prior_correction_name,
                     )
                     _base._append_decoded_outputs(
                         rows=rows,
@@ -510,6 +529,7 @@ def run_time_resolved_decode(
                         observation_out_path=observation_out_path,
                         subject=subject,
                         tuning_metadata=tuning_metadata,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -594,11 +614,18 @@ def run_time_resolved_decode(
                     tuning_scoring=tuning_scoring,
                     tuning_c_grid=tuning_c_grid_values,
                     tuning_metadata=tuning_metadata,
+                    class_prior_correction=class_prior_correction_name,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
                 )
                 for test_window in windows:
                     probabilities = _base._probability_average(probability_sums[test_window], len(selected_train_windows))
+                    probabilities = _base._apply_class_prior_correction(
+                        probabilities,
+                        train_labels,
+                        classes,
+                        class_prior_correction_name,
+                    )
                     _base._append_decoded_outputs(
                         rows=rows,
                         calibration_rows=calibration_rows,
@@ -636,6 +663,7 @@ def run_time_resolved_decode(
                         observation_out_path=observation_out_path,
                         subject=subject,
                         tuning_metadata=tuning_metadata,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )

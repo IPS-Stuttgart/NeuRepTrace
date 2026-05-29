@@ -64,6 +64,8 @@ RESULT_SELECTION_METRIC_CHOICES = (
 RESULT_SUMMARY_METRIC_COLUMNS = RESULT_SELECTION_METRIC_CHOICES
 RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 TIME_DECODE_BACKEND_CHOICES = ("auto", "sklearn", "mne")
+CLASS_PRIOR_CORRECTION_CHOICES = ("none", "train_uniform")
+CLASS_PRIOR_CORRECTION_RUN_CHOICES = (*CLASS_PRIOR_CORRECTION_CHOICES, "train-uniform")
 DEFAULT_BASELINE_WINDOW = (-0.35, -0.05)
 BASELINE_WHITENING_SHRINKAGE = 0.1
 BASELINE_WHITENING_EIGENVALUE_FLOOR = 1e-6
@@ -445,6 +447,18 @@ def _select_decode_windows(windows: list[TimeWindow], decode_window: DecodeWindo
     )
 
 
+def normalize_class_prior_correction(mode: str | None) -> str:
+    """Normalize train-fold class-prior correction modes."""
+
+    normalized = "none" if mode is None else str(mode).strip().lower().replace("-", "_")
+    if normalized not in CLASS_PRIOR_CORRECTION_CHOICES:
+        raise ValueError(
+            f"Unknown class_prior_correction '{mode}'. Available modes: "
+            f"{', '.join(CLASS_PRIOR_CORRECTION_CHOICES)}."
+        )
+    return normalized
+
+
 def _features_for_window(data: np.ndarray, window: TimeWindow) -> np.ndarray:
     start, stop, _center = window
     return data[:, :, start:stop].reshape(data.shape[0], -1)
@@ -532,6 +546,33 @@ def _probability_average(probability_sum: np.ndarray, n_models: int) -> np.ndarr
     if np.any(row_sums <= 0.0):
         raise ValueError("Averaged probabilities must have positive row sums.")
     return probabilities / row_sums
+
+
+def _apply_class_prior_correction(
+    probabilities: np.ndarray,
+    train_labels: np.ndarray,
+    classes: np.ndarray,
+    mode: str,
+) -> np.ndarray:
+    """Adjust posterior probabilities by train-fold class priors."""
+
+    mode = normalize_class_prior_correction(mode)
+    probabilities = np.asarray(probabilities, dtype=float)
+    if mode == "none":
+        return probabilities
+
+    train_labels = np.asarray(train_labels, dtype=int)
+    classes = np.asarray(classes, dtype=int)
+    counts = np.asarray([np.count_nonzero(train_labels == class_label) for class_label in classes], dtype=float)
+    if counts.sum() <= 0.0:
+        raise ValueError("Cannot apply class-prior correction without training labels.")
+    priors = counts / counts.sum()
+    safe_priors = np.where(priors > 0.0, priors, 1.0)
+    corrected = probabilities / safe_priors.reshape(1, -1)
+    row_sums = corrected.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("Class-prior-corrected probabilities must have positive row sums.")
+    return corrected / row_sums
 
 
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
@@ -672,6 +713,7 @@ def _model_hash(
     tuning_c_grid: Sequence[float] | None = None,
     tuning_metadata: dict[str, object] | None = None,
     backend: str = "sklearn",
+    class_prior_correction: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> str:
@@ -688,6 +730,8 @@ def _model_hash(
         "temporal_train_window": temporal_train_window,
         "train_window_centers": train_window_centers,
     }
+    if class_prior_correction != "none":
+        payload["class_prior_correction"] = class_prior_correction
     if tune_hyperparameters:
         payload.update(
             {
@@ -747,6 +791,7 @@ def _append_decoded_outputs(
     subject: str | None,
     tuning_metadata: dict[str, object] | None = None,
     backend: str = "sklearn",
+    class_prior_correction: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> None:
@@ -775,6 +820,7 @@ def _append_decoded_outputs(
         "window_stop": float(epochs.times[stop - 1]),
         "label_shuffle_control": bool(label_shuffle_control),
         "label_shuffle_seed": int(label_shuffle_seed),
+        "class_prior_correction": class_prior_correction,
     }
     row = {
         **common,
@@ -867,6 +913,7 @@ def run_time_resolved_decode(
     temporal_train_window: tuple[float, float] | None = None,
     temporal_train_mode: str = "window_ensemble",
     time_decode_backend: str = "auto",
+    class_prior_correction: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -913,6 +960,7 @@ def run_time_resolved_decode(
     normalized_decode_window = _normalize_decode_window(decode_window)
     normalized_temporal_train_window = _normalize_temporal_train_window(temporal_train_window)
     temporal_train_mode_name = _normalize_temporal_train_mode(temporal_train_mode)
+    class_prior_correction_name = normalize_class_prior_correction(class_prior_correction)
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
@@ -968,6 +1016,7 @@ def run_time_resolved_decode(
             "decode_window": normalized_decode_window,
             "temporal_train_window": normalized_temporal_train_window,
             "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
+            "class_prior_correction": class_prior_correction_name,
         }
     )
     default_model_hash = _model_hash(
@@ -985,6 +1034,7 @@ def run_time_resolved_decode(
         tuning_scoring=tuning_scoring,
         tuning_c_grid=tuning_c_grid_values,
         backend=time_decode_backend,
+        class_prior_correction=class_prior_correction_name,
         label_shuffle_control=label_shuffle_control,
         label_shuffle_seed=label_shuffle_seed,
     )
@@ -1042,6 +1092,12 @@ def run_time_resolved_decode(
                     emission_mode=current_emission_mode,
                     classes=classes,
                 ):
+                    probabilities = _apply_class_prior_correction(
+                        probabilities,
+                        train_labels,
+                        classes,
+                        class_prior_correction_name,
+                    )
                     start, stop, center = time_window
                     tuning_metadata = _tuning_metadata(
                         fitted_model,
@@ -1067,6 +1123,7 @@ def run_time_resolved_decode(
                         tuning_c_grid=tuning_c_grid_values,
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -1108,6 +1165,7 @@ def run_time_resolved_decode(
                         subject=subject,
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -1152,6 +1210,12 @@ def run_time_resolved_decode(
                         model=model,
                         classes=classes,
                     )
+                    probabilities = _apply_class_prior_correction(
+                        probabilities,
+                        train_labels,
+                        classes,
+                        class_prior_correction_name,
+                    )
                     tuning_metadata = _tuning_metadata(
                         model,
                         tune_hyperparameters=tune_hyperparameters,
@@ -1176,6 +1240,7 @@ def run_time_resolved_decode(
                         tuning_c_grid=tuning_c_grid_values,
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -1217,13 +1282,15 @@ def run_time_resolved_decode(
                         subject=subject,
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
     elif temporal_train_mode_name == "pooled":
-        feature_cache = {time_window: _features_for_window(data, time_window) for time_window in windows}
         train_time, train_window_start, train_window_stop = _train_window_summary(epochs, selected_train_windows)
         train_window_centers = [window[2] for window in selected_train_windows]
+        model_windows = list(dict.fromkeys([*windows, *selected_train_windows]))
+        feature_cache = {time_window: _features_for_window(data, time_window) for time_window in model_windows}
         for fold, (train_idx, test_idx) in enumerate(splits):
             test_labels = labels[test_idx]
             train_labels = _fold_training_labels(
@@ -1285,6 +1352,7 @@ def run_time_resolved_decode(
                     tuning_metadata=tuning_metadata,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
+                    class_prior_correction=class_prior_correction_name,
                 )
                 for test_window in windows:
                     probabilities = _align_probability_columns(
@@ -1295,6 +1363,12 @@ def run_time_resolved_decode(
                         ),
                         model=model,
                         classes=classes,
+                    )
+                    probabilities = _apply_class_prior_correction(
+                        probabilities,
+                        train_labels,
+                        classes,
+                        class_prior_correction_name,
                     )
                     _append_decoded_outputs(
                         rows=rows,
@@ -1333,13 +1407,15 @@ def run_time_resolved_decode(
                         observation_out_path=observation_out_path,
                         subject=subject,
                         tuning_metadata=tuning_metadata,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
     else:
-        feature_cache = {time_window: _features_for_window(data, time_window) for time_window in windows}
         train_time, train_window_start, train_window_stop = _train_window_summary(epochs, selected_train_windows)
         train_window_centers = [window[2] for window in selected_train_windows]
+        model_windows = list(dict.fromkeys([*windows, *selected_train_windows]))
+        feature_cache = {time_window: _features_for_window(data, time_window) for time_window in model_windows}
         for fold, (train_idx, test_idx) in enumerate(splits):
             test_labels = labels[test_idx]
             train_labels = _fold_training_labels(
@@ -1410,11 +1486,18 @@ def run_time_resolved_decode(
                     tuning_c_grid=tuning_c_grid_values,
                     tuning_metadata=tuning_metadata,
                     backend=time_decode_backend,
+                    class_prior_correction=class_prior_correction_name,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
                 )
                 for test_window in windows:
                     probabilities = _probability_average(probability_sums[test_window], len(selected_train_windows))
+                    probabilities = _apply_class_prior_correction(
+                        probabilities,
+                        train_labels,
+                        classes,
+                        class_prior_correction_name,
+                    )
                     _append_decoded_outputs(
                         rows=rows,
                         calibration_rows=calibration_rows,
@@ -1453,6 +1536,7 @@ def run_time_resolved_decode(
                         subject=subject,
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
+                        class_prior_correction=class_prior_correction_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -1561,6 +1645,12 @@ def main() -> None:
         help="Implementation backend. auto uses mne.decoding.SlidingEstimator for same-time decoding and sklearn for temporal train-window decoding.",
     )
     parser.add_argument(
+        "--class-prior-correction",
+        choices=CLASS_PRIOR_CORRECTION_RUN_CHOICES,
+        default="none",
+        help="Optional train-fold prior correction. train_uniform divides posterior probabilities by train-fold class priors before scoring.",
+    )
+    parser.add_argument(
         "--decode-window",
         nargs=2,
         type=float,
@@ -1637,6 +1727,7 @@ def main() -> None:
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
         temporal_train_mode=args.temporal_train_mode,
         time_decode_backend=args.time_decode_backend,
+        class_prior_correction=args.class_prior_correction,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
     )

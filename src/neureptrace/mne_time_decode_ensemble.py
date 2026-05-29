@@ -9,6 +9,7 @@ import pandas as pd
 
 from neureptrace.decoding import DECODER_CLI_CHOICES, TUNING_SCORING_CHOICES, normalize_decoder_name, normalize_feature_preprocessor
 from neureptrace.mne_time_decode import (
+    CLASS_PRIOR_CORRECTION_RUN_CHOICES,
     DEFAULT_BASELINE_WINDOW as DEFAULT_EPOCH_BASELINE_WINDOW,
     EMISSION_RUN_CHOICES,
     EPOCH_NORMALIZATION_RUN_CHOICES,
@@ -101,6 +102,7 @@ def run_time_resolved_decode(
     temporal_train_window: tuple[float, float] | None = None,
     temporal_train_mode: str = "window_ensemble",
     time_decode_backend: str = "sklearn",
+    class_prior_correction: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
     ensemble_weights: Sequence[float] | None = None,
@@ -149,6 +151,7 @@ def run_time_resolved_decode(
             temporal_train_window=temporal_train_window,
             temporal_train_mode=temporal_train_mode,
             time_decode_backend=time_decode_backend,
+            class_prior_correction=class_prior_correction,
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
         )
@@ -198,6 +201,7 @@ def run_time_resolved_decode(
                     temporal_train_window=temporal_train_window,
                     temporal_train_mode=temporal_train_mode,
                     time_decode_backend=time_decode_backend,
+                    class_prior_correction=class_prior_correction,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
                 )
@@ -228,6 +232,7 @@ def run_time_resolved_decode(
     results["feature_preprocessor"] = feature_preprocessor_name
     results["pca_components"] = "" if pca_components is None else pca_components
     results["normalization"] = normalization.replace("-", "_") if normalization is not None else "none"
+    results["class_prior_correction"] = str(class_prior_correction).strip().lower().replace("-", "_")
     results["source_decoders"] = "|".join(_SOURCE_DECODERS)
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in weights)
     results["baseline_window_start"] = "" if baseline_window is None else float(baseline_window[0])
@@ -342,6 +347,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         ),
     )
     parser.add_argument(
+        "--class-prior-correction",
+        choices=CLASS_PRIOR_CORRECTION_RUN_CHOICES,
+        default="none",
+        help="Optional train-fold prior correction applied to source decoder probabilities before ensembling.",
+    )
+    parser.add_argument(
         "--ensemble-weight",
         action="append",
         type=float,
@@ -389,6 +400,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         decode_window=tuple(args.decode_window) if args.decode_window is not None else None,
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
         temporal_train_mode=args.temporal_train_mode,
+        class_prior_correction=args.class_prior_correction,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
         ensemble_weights=tuple(args.ensemble_weights) if args.ensemble_weights is not None else None,

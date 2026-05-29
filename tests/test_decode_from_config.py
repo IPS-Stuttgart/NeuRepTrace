@@ -12,6 +12,7 @@ def test_decode_from_config_passes_label_shuffle_controls(tmp_path):
                 "label_shuffle_control": True,
                 "label_shuffle_seed": 29,
                 "decode_window": [0.12, 0.248],
+                "class_prior_correction": "train-uniform",
             },
             "preprocessing": {},
             "outputs": {"summary_csv": "summary.csv"},
@@ -22,6 +23,7 @@ def test_decode_from_config_passes_label_shuffle_controls(tmp_path):
     assert kwargs["label_shuffle_control"] is True
     assert kwargs["label_shuffle_seed"] == 29
     assert kwargs["decode_window"] == (0.12, 0.248)
+    assert kwargs["class_prior_correction"] == "train-uniform"
 
 
 def test_decode_from_config_passes_ensemble_controls_for_ensemble_decoder(tmp_path):

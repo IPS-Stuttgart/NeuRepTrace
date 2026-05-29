@@ -5,8 +5,10 @@ import pandas as pd
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
 from neureptrace.mne_time_decode import (
+    _apply_class_prior_correction,
     _align_probability_columns,
     _shuffle_training_labels,
+    normalize_class_prior_correction,
     normalize_time_decode_backend,
     run_time_resolved_decode,
 )
@@ -76,6 +78,23 @@ def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     np.testing.assert_array_equal(shuffled_a, shuffled_b)
     assert sorted(shuffled_a.tolist()) == sorted(labels.tolist())
     assert not np.array_equal(shuffled_a, shuffled_c)
+
+
+def test_class_prior_correction_rebalances_train_fold_priors():
+    probabilities = np.array([[0.6, 0.4], [0.4, 0.6]])
+    train_labels = np.array([0, 0, 0, 1])
+
+    corrected = _apply_class_prior_correction(
+        probabilities,
+        train_labels,
+        classes=np.array([0, 1]),
+        mode="train-uniform",
+    )
+
+    assert normalize_class_prior_correction("train-uniform") == "train_uniform"
+    np.testing.assert_allclose(corrected.sum(axis=1), np.ones(2))
+    assert corrected[0, 1] > corrected[0, 0]
+    assert corrected[1, 1] > probabilities[1, 1]
 
 
 def test_align_probability_columns_expands_missing_model_classes():
