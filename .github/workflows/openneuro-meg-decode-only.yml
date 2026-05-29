@@ -1,0 +1,437 @@
+name: OpenNeuro MEG Decode Only
+run-name: OpenNeuro MEG decode-only ${{ inputs.dataset }} ${{ inputs.mode }} ${{ inputs.runner_type }} shuffle=${{ inputs.label_shuffle_control }} prior=${{ inputs.class_prior_correction }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "OpenNeuro dataset recipe with already staged Epochs"
+        required: true
+        type: choice
+        options:
+          - ds006629
+          - ds004276
+          - ds004330
+        default: ds004330
+      mode:
+        description: "Smoke uses the workflow smoke cohort; full uses all configured subjects unless subjects is set."
+        required: true
+        type: choice
+        options:
+          - smoke
+          - full
+        default: full
+      subjects:
+        description: "Decode subject ids/ranges, or leave empty for mode default"
+        required: false
+        default: ""
+      staged_root:
+        description: "Existing per-subject staged Epochs root, or empty for persistent runner/cache default"
+        required: false
+        default: ""
+      output_suffix:
+        description: "Suffix for outputs/openneuro_<dataset>_<mode>_<suffix>"
+        required: false
+        default: "decode_only"
+      decoder:
+        description: "Override decoder/classifier, or leave empty for the dataset config default"
+        required: false
+        default: ""
+      config_overrides:
+        description: "Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075"
+        required: false
+        default: ""
+      diagnostics_best_time:
+        description: "Optional fixed diagnostic time in seconds, e.g. 0.184"
+        required: false
+        default: ""
+      temporal_smoothing:
+        description: "Also write sticky temporal-posterior smoothed observations, metrics, and diagnostics"
+        required: true
+        type: boolean
+        default: false
+      temporal_smoothing_fit_window:
+        description: "Temporal smoothing fit window START,STOP, or full to fit all time bins"
+        required: false
+        default: "0.10,0.30"
+      ensemble_weights:
+        description: "Optional comma-separated logistic_svm_ensemble weights in source-decoder order, e.g. 0.5,0.3,0.2"
+        required: false
+        default: ""
+      ensemble_source_decoders:
+        description: "Optional comma-separated logistic_svm_ensemble source decoders, e.g. multinomial-logistic-weighted,linear_svm,shrinkage_lda"
+        required: false
+        default: ""
+      ensemble_baseline_window:
+        description: "Optional ensemble baseline-debiasing window START,STOP, or none to disable"
+        required: false
+        default: ""
+      ensemble_min_probability:
+        description: "Minimum probability floor for logistic_svm_ensemble log-space averaging"
+        required: false
+        default: "1e-12"
+      time_decode_backend:
+        description: "Same-time decoder backend for non-ensemble decoders"
+        required: true
+        type: choice
+        options:
+          - sklearn
+          - mne
+        default: sklearn
+      class_prior_correction:
+        description: "Optional train-fold class-prior correction for balanced-accuracy follow-ups"
+        required: true
+        type: choice
+        options:
+          - none
+          - train_uniform
+        default: none
+      label_shuffle_control:
+        description: "Shuffle train-fold labels as a matched null control"
+        required: true
+        type: boolean
+        default: false
+      label_shuffle_seed:
+        description: "Seed for label-shuffle null controls"
+        required: true
+        default: "13"
+      runner_type:
+        description: "Runner family. Self-hosted can reuse /home/github-runner/.cache/datasets/openneuro/staged-epochs."
+        required: true
+        type: choice
+        options:
+          - self-hosted
+          - github-hosted
+        default: self-hosted
+
+jobs:
+  openneuro-meg-decode-only:
+    runs-on: ${{ fromJSON(inputs.runner_type == 'github-hosted' && '["ubuntu-latest"]' || '["self-hosted","Linux"]') }}
+    timeout-minutes: 720
+    env:
+      DATASET: ${{ inputs.dataset }}
+      MODE: ${{ inputs.mode }}
+      RUNNER_TYPE: ${{ inputs.runner_type }}
+      SUBJECTS_INPUT: ${{ inputs.subjects }}
+      STAGED_ROOT_INPUT: ${{ inputs.staged_root }}
+      OUTPUT_SUFFIX_INPUT: ${{ inputs.output_suffix }}
+      DECODER_INPUT: ${{ inputs.decoder }}
+      CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
+      DIAGNOSTICS_BEST_TIME_INPUT: ${{ inputs.diagnostics_best_time }}
+      TEMPORAL_SMOOTHING: ${{ inputs.temporal_smoothing }}
+      TEMPORAL_SMOOTHING_FIT_WINDOW: ${{ inputs.temporal_smoothing_fit_window }}
+      ENSEMBLE_WEIGHTS_INPUT: ${{ inputs.ensemble_weights }}
+      ENSEMBLE_SOURCE_DECODERS_INPUT: ${{ inputs.ensemble_source_decoders }}
+      ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
+      ENSEMBLE_MIN_PROBABILITY_INPUT: ${{ inputs.ensemble_min_probability }}
+      TIME_DECODE_BACKEND: ${{ inputs.time_decode_backend }}
+      CLASS_PRIOR_CORRECTION: ${{ inputs.class_prior_correction }}
+      LABEL_SHUFFLE_CONTROL: ${{ inputs.label_shuffle_control }}
+      LABEL_SHUFFLE_SEED: ${{ inputs.label_shuffle_seed }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Restore OpenNeuro staged-epoch cache on GitHub-hosted runners
+        if: runner.environment == 'github-hosted'
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/datasets/openneuro
+          key: openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-v2
+          restore-keys: |
+            openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-
+            openneuro-meg-${{ runner.os }}-
+
+      - name: Install NeuRepTrace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Resolve decode-only parameters
+        shell: bash
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          from neureptrace.openneuro_meg import DATASET_SPECS, parse_subjects
+
+          dataset = os.environ["DATASET"]
+          mode = os.environ["MODE"]
+          spec = DATASET_SPECS[dataset]
+          config_names = {
+              "ds004276": "ds004276_words.yml",
+              "ds006629": "ds006629_singsing.yml",
+              "ds004330": "ds004330_object_drawing.yml",
+          }
+          smoke_defaults = {
+              "ds004276": "1-2",
+              "ds006629": "1,2",
+              "ds004330": "1,2",
+          }
+          subjects = os.environ.get("SUBJECTS_INPUT") or (smoke_defaults[dataset] if mode == "smoke" else "all")
+          subject_count = len(parse_subjects(spec, subjects))
+          runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "")
+          dataset_cache_root = (
+              Path("/home/github-runner/.cache/datasets")
+              if runner_environment == "self-hosted"
+              else Path.home() / ".cache" / "datasets"
+          )
+          openneuro_cache_root = dataset_cache_root / "openneuro"
+          staged_root = Path(os.environ.get("STAGED_ROOT_INPUT") or openneuro_cache_root / "staged-epochs")
+          suffix = os.environ.get("OUTPUT_SUFFIX_INPUT", "").strip() or "decode_only"
+          safe_suffix = suffix.replace("/", "_").replace("\\", "_").strip("_") or "decode_only"
+          label_suffix = f"_label_shuffle_seed_{os.environ.get('LABEL_SHUFFLE_SEED', '13')}" if os.environ.get("LABEL_SHUFFLE_CONTROL", "").lower() == "true" else ""
+          output_dir = Path("outputs") / f"openneuro_{dataset}_{mode}_{safe_suffix}{label_suffix}"
+          config_path = f"configs/openneuro/{config_names[dataset]}"
+          artifact_name = f"openneuro-meg-{dataset}-{mode}-{safe_suffix}{label_suffix}"
+          env_path = Path(os.environ["GITHUB_ENV"])
+          with env_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"OPENNEURO_SUBJECTS={subjects}\n")
+              handle.write(f"OPENNEURO_N_SPLITS={subject_count}\n")
+              handle.write(f"NEUREPTRACE_OPENNEURO_STAGED_DIR={staged_root}\n")
+              handle.write(f"OPENNEURO_OUTPUT_DIR={output_dir}\n")
+              handle.write(f"OPENNEURO_CONFIG={config_path}\n")
+              handle.write(f"OPENNEURO_ARTIFACT_NAME={artifact_name}\n")
+          output_dir.mkdir(parents=True, exist_ok=True)
+          manifest = {
+              "dataset": dataset,
+              "mode": mode,
+              "subjects": subjects,
+              "n_subjects": subject_count,
+              "config": config_path,
+              "runner_type_input": os.environ.get("RUNNER_TYPE", ""),
+              "runner_environment": runner_environment or "unknown",
+              "staged_root": staged_root.as_posix(),
+              "output_dir": output_dir.as_posix(),
+              "artifact_name": artifact_name,
+              "decode_only": True,
+              "decoder_override": os.environ.get("DECODER_INPUT", ""),
+              "config_overrides": os.environ.get("CONFIG_OVERRIDES_INPUT", ""),
+              "diagnostics_best_time": os.environ.get("DIAGNOSTICS_BEST_TIME_INPUT", ""),
+              "temporal_smoothing": os.environ.get("TEMPORAL_SMOOTHING", ""),
+              "temporal_smoothing_fit_window": os.environ.get("TEMPORAL_SMOOTHING_FIT_WINDOW", ""),
+              "temporal_smoothing_stay_grid_size": "200",
+              "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
+              "ensemble_source_decoders": os.environ.get("ENSEMBLE_SOURCE_DECODERS_INPUT", ""),
+              "ensemble_baseline_window": os.environ.get("ENSEMBLE_BASELINE_WINDOW_INPUT", ""),
+              "ensemble_min_probability": os.environ.get("ENSEMBLE_MIN_PROBABILITY_INPUT", ""),
+              "time_decode_backend": os.environ.get("TIME_DECODE_BACKEND", ""),
+              "class_prior_correction": os.environ.get("CLASS_PRIOR_CORRECTION", ""),
+              "label_shuffle_control": os.environ.get("LABEL_SHUFFLE_CONTROL", ""),
+              "label_shuffle_seed": os.environ.get("LABEL_SHUFFLE_SEED", ""),
+              "github_run_id": os.environ.get("GITHUB_RUN_ID", ""),
+              "github_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+              "github_ref": os.environ.get("GITHUB_REF", ""),
+              "github_sha": os.environ.get("GITHUB_SHA", ""),
+          }
+          (output_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+          print(f"Dataset: {dataset}")
+          print(f"Subjects: {subjects} ({subject_count})")
+          print(f"Config: {config_path}")
+          print(f"Staged Epochs root: {staged_root}")
+          print(f"Output dir: {output_dir}")
+          print(f"Artifact name: {artifact_name}")
+          PY
+
+      - name: Check staged epochs are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+
+          from neureptrace.openneuro_meg import DATASET_SPECS, parse_subjects, subject_label
+
+          dataset = os.environ["DATASET"]
+          spec = DATASET_SPECS[dataset]
+          staged_root = Path(os.environ["NEUREPTRACE_OPENNEURO_STAGED_DIR"])
+          missing = []
+          for subject in parse_subjects(spec, os.environ["OPENNEURO_SUBJECTS"]):
+              label = subject_label(spec, subject)
+              path = staged_root / spec.dataset_id / f"{label}_{spec.dataset_id}_{spec.name}_epo.fif"
+              if not path.is_file():
+                  missing.append(path)
+          if missing:
+              print("Missing staged Epochs files:")
+              for path in missing:
+                  print(f"  {path}")
+              raise SystemExit(1)
+          print(f"Found staged Epochs for {len(parse_subjects(spec, os.environ['OPENNEURO_SUBJECTS']))} subject(s).")
+          PY
+
+      - name: Run NeuRepTrace LOSO decode from staged epochs
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            "$OPENNEURO_CONFIG"
+            --set "participants.ids=$OPENNEURO_SUBJECTS"
+            --set "decoding.n_splits=$OPENNEURO_N_SPLITS"
+            --set "decoding.time_decode_backend=$TIME_DECODE_BACKEND"
+            --set "decoding.class_prior_correction=$CLASS_PRIOR_CORRECTION"
+            --set "decoding.label_shuffle_control=$LABEL_SHUFFLE_CONTROL"
+            --set "decoding.label_shuffle_seed=$LABEL_SHUFFLE_SEED"
+            --set "outputs.base_dir=$OPENNEURO_OUTPUT_DIR/decode"
+          )
+          if [[ -n "$DECODER_INPUT" ]]; then
+            args+=(--set "decoding.classifier=$DECODER_INPUT")
+          fi
+          if [[ -n "$CONFIG_OVERRIDES_INPUT" ]]; then
+            while IFS= read -r override; do
+              override="${override#"${override%%[![:space:]]*}"}"
+              override="${override%"${override##*[![:space:]]}"}"
+              [[ -z "$override" || "$override" == \#* ]] && continue
+              args+=(--set "$override")
+            done < <(printf '%s\n' "$CONFIG_OVERRIDES_INPUT" | tr ';' '\n')
+          fi
+          if [[ -n "$ENSEMBLE_WEIGHTS_INPUT" ]]; then
+            args+=(--set "decoding.ensemble_weights=[$ENSEMBLE_WEIGHTS_INPUT]")
+          fi
+          if [[ -n "$ENSEMBLE_SOURCE_DECODERS_INPUT" ]]; then
+            args+=(--set "decoding.ensemble_source_decoders=[$ENSEMBLE_SOURCE_DECODERS_INPUT]")
+          fi
+          if [[ -n "$ENSEMBLE_BASELINE_WINDOW_INPUT" ]]; then
+            case "${ENSEMBLE_BASELINE_WINDOW_INPUT,,}" in
+              none|null|off|false)
+                args+=(--set "decoding.ensemble_baseline_window=null")
+                ;;
+              *)
+                args+=(--set "decoding.ensemble_baseline_window=[$ENSEMBLE_BASELINE_WINDOW_INPUT]")
+                ;;
+            esac
+          fi
+          if [[ -n "$ENSEMBLE_MIN_PROBABILITY_INPUT" ]]; then
+            args+=(--set "decoding.ensemble_min_probability=$ENSEMBLE_MIN_PROBABILITY_INPUT")
+          fi
+          python -m neureptrace.decode_from_config "${args[@]}"
+
+      - name: Run temporal posterior smoothing
+        if: ${{ always() && env.TEMPORAL_SMOOTHING == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          observations="$OPENNEURO_OUTPUT_DIR/decode/observations.csv"
+          if [[ ! -s "$observations" ]]; then
+            echo "Skipping temporal smoothing because observations are missing: $observations"
+            exit 0
+          fi
+          mkdir -p "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing"
+          smoothing_args=(
+            "$observations"
+            --out-observations "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/observations.csv"
+            --out-metrics "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/time_decode_summary.csv"
+            --stay-grid-size 200
+          )
+          case "${TEMPORAL_SMOOTHING_FIT_WINDOW,,}" in
+            "")
+              smoothing_args+=(--fit-window 0.10 0.30)
+              ;;
+            full|all|none|null)
+              smoothing_args+=(--use-full-sequence-fit)
+              ;;
+            *)
+              IFS=',' read -r fit_start fit_stop <<< "$TEMPORAL_SMOOTHING_FIT_WINDOW"
+              smoothing_args+=(--fit-window "$fit_start" "$fit_stop")
+              ;;
+          esac
+          python -m neureptrace.temporal_smoothing "${smoothing_args[@]}"
+
+      - name: Summarize LOSO decode
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import pandas as pd
+
+          summary = Path(os.environ["OPENNEURO_OUTPUT_DIR"]) / "decode" / "time_decode_summary.csv"
+          if not summary.is_file() or summary.stat().st_size == 0:
+              print(f"No LOSO summary found at {summary}; skipping compact summary.")
+              raise SystemExit(0)
+          frame = pd.read_csv(summary)
+          metric_columns = [
+              column
+              for column in ["accuracy", "balanced_accuracy", "top2_accuracy", "top3_accuracy", "log_loss", "brier", "ece"]
+              if column in frame.columns
+          ]
+          if frame.empty or "time" not in frame.columns or not metric_columns:
+              print(f"LOSO summary at {summary} has no summarizable metric rows.")
+              raise SystemExit(0)
+          metrics = frame.groupby("time")[metric_columns].mean(numeric_only=True)
+          best_time = metrics["balanced_accuracy"].idxmax() if "balanced_accuracy" in metrics.columns else metrics.index[0]
+          print(metrics.loc[[best_time]].to_string())
+          PY
+
+      - name: Write LOSO diagnostics
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          observations="$OPENNEURO_OUTPUT_DIR/decode/observations.csv"
+          summary="$OPENNEURO_OUTPUT_DIR/decode/time_decode_summary.csv"
+          if [[ ! -s "$observations" || ! -s "$summary" ]]; then
+            echo "Skipping LOSO diagnostics because observations or summary output is missing."
+            exit 0
+          fi
+          diagnostic_args=(
+            "$observations"
+            --summary-csv "$summary"
+            --out-dir "$OPENNEURO_OUTPUT_DIR/decode/diagnostics"
+          )
+          if [[ -n "$DIAGNOSTICS_BEST_TIME_INPUT" ]]; then
+            diagnostic_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
+          fi
+          python -m neureptrace.loso_observation_diagnostics "${diagnostic_args[@]}"
+
+          if [[ "$TEMPORAL_SMOOTHING" == "true" && -s "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/observations.csv" ]]; then
+            smoothed_args=(
+              "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/observations.csv"
+              --summary-csv "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/time_decode_summary.csv"
+              --out-dir "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/diagnostics"
+              --selection-metric balanced_accuracy
+            )
+            if [[ -n "$DIAGNOSTICS_BEST_TIME_INPUT" ]]; then
+              smoothed_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
+            fi
+            python -m neureptrace.loso_observation_diagnostics "${smoothed_args[@]}"
+          fi
+
+      - name: Write OpenNeuro decode-only workflow summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m neureptrace.openneuro_decode_diagnostics \
+            "$OPENNEURO_OUTPUT_DIR" \
+            --diagnostics-out "$OPENNEURO_OUTPUT_DIR/decode_diagnostics.json" \
+            --best-out "$OPENNEURO_OUTPUT_DIR/decode_best_metrics.csv" \
+            --quality-out "$OPENNEURO_OUTPUT_DIR/workflow_quality_summary.csv"
+
+      - name: Upload OpenNeuro MEG decode-only outputs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}-${{ inputs.output_suffix }}${{ inputs.label_shuffle_control == true && format('-label-shuffle-seed-{0}', inputs.label_shuffle_seed) || '' }}
+          path: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}_*/**
+          if-no-files-found: warn
