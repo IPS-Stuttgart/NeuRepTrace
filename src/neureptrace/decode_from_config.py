@@ -245,7 +245,7 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
         if "ensemble_weights" in decoding or "ensemble_weight" in decoding:
             ensemble_weights = decoding.get("ensemble_weights", decoding.get("ensemble_weight"))
             if ensemble_weights is not None and ensemble_weights != "":
-                kwargs["ensemble_weights"] = _float_tuple(ensemble_weights, name="decoding.ensemble_weights", length=2)
+                kwargs["ensemble_weights"] = _float_tuple(ensemble_weights, name="decoding.ensemble_weights")
         if "ensemble_source_decoders" in decoding or "ensemble_source_decoder" in decoding:
             ensemble_source_decoders = decoding.get("ensemble_source_decoders", decoding.get("ensemble_source_decoder"))
             if ensemble_source_decoders is not None and ensemble_source_decoders != "":
