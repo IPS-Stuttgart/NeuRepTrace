@@ -64,53 +64,8 @@ on:
         description: "Override decoder/classifier, or leave empty for the dataset config default"
         required: false
         default: ""
-      window_size:
-        description: "Override time-window size in seconds, e.g. 0.075"
-        required: false
-        default: ""
-      window_step:
-        description: "Override time-window step in seconds, e.g. 0.024"
-        required: false
-        default: ""
-      decode_window:
-        description: "Optional decode-window center range START,STOP in seconds"
-        required: false
-        default: ""
-      normalization:
-        description: "Override preprocessing normalization, e.g. subject_baseline_whiten"
-        required: false
-        default: ""
-      baseline_window:
-        description: "Override baseline window START,STOP in seconds"
-        required: false
-        default: ""
-      feature_preprocessor:
-        description: "Override feature preprocessor, e.g. pca or pca_whiten"
-        required: false
-        default: ""
-      pca_components:
-        description: "Override PCA/components value, e.g. 64 or 128"
-        required: false
-        default: ""
-      temporal_train_window:
-        description: "Optional train-window center range START,STOP in seconds, or none"
-        required: false
-        default: ""
-      temporal_train_mode:
-        description: "Temporal train mode when temporal_train_window is set: window_ensemble or pooled"
-        required: false
-        default: ""
-      tune_hyperparameters:
-        description: "Run nested train-fold hyperparameter tuning"
-        required: true
-        type: boolean
-        default: false
-      tuning_scoring:
-        description: "Optional tuning objective, e.g. balanced_accuracy or neg_log_loss"
-        required: false
-        default: ""
-      tuning_c_grid:
-        description: "Optional comma-separated C grid for tuning"
+      config_overrides:
+        description: "Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075"
         required: false
         default: ""
       ensemble_weights:
@@ -170,18 +125,7 @@ jobs:
       SKIP_FAILED_SUBJECTS: ${{ inputs.skip_failed_subjects }}
       MIN_SUCCESSFUL_SUBJECTS: ${{ inputs.min_successful_subjects }}
       DECODER_INPUT: ${{ inputs.decoder }}
-      WINDOW_SIZE_INPUT: ${{ inputs.window_size }}
-      WINDOW_STEP_INPUT: ${{ inputs.window_step }}
-      DECODE_WINDOW_INPUT: ${{ inputs.decode_window }}
-      NORMALIZATION_INPUT: ${{ inputs.normalization }}
-      BASELINE_WINDOW_INPUT: ${{ inputs.baseline_window }}
-      FEATURE_PREPROCESSOR_INPUT: ${{ inputs.feature_preprocessor }}
-      PCA_COMPONENTS_INPUT: ${{ inputs.pca_components }}
-      TEMPORAL_TRAIN_WINDOW_INPUT: ${{ inputs.temporal_train_window }}
-      TEMPORAL_TRAIN_MODE_INPUT: ${{ inputs.temporal_train_mode }}
-      TUNE_HYPERPARAMETERS_INPUT: ${{ inputs.tune_hyperparameters }}
-      TUNING_SCORING_INPUT: ${{ inputs.tuning_scoring }}
-      TUNING_C_GRID_INPUT: ${{ inputs.tuning_c_grid }}
+      CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
       ENSEMBLE_WEIGHTS_INPUT: ${{ inputs.ensemble_weights }}
       ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
       ENSEMBLE_MIN_PROBABILITY_INPUT: ${{ inputs.ensemble_min_probability }}
@@ -300,18 +244,7 @@ jobs:
               "skip_failed_subjects": os.environ.get("SKIP_FAILED_SUBJECTS", ""),
               "min_successful_subjects": os.environ.get("MIN_SUCCESSFUL_SUBJECTS", ""),
               "decoder_override": os.environ.get("DECODER_INPUT", ""),
-              "window_size": os.environ.get("WINDOW_SIZE_INPUT", ""),
-              "window_step": os.environ.get("WINDOW_STEP_INPUT", ""),
-              "decode_window": os.environ.get("DECODE_WINDOW_INPUT", ""),
-              "normalization": os.environ.get("NORMALIZATION_INPUT", ""),
-              "baseline_window": os.environ.get("BASELINE_WINDOW_INPUT", ""),
-              "feature_preprocessor": os.environ.get("FEATURE_PREPROCESSOR_INPUT", ""),
-              "pca_components": os.environ.get("PCA_COMPONENTS_INPUT", ""),
-              "temporal_train_window": os.environ.get("TEMPORAL_TRAIN_WINDOW_INPUT", ""),
-              "temporal_train_mode": os.environ.get("TEMPORAL_TRAIN_MODE_INPUT", ""),
-              "tune_hyperparameters": os.environ.get("TUNE_HYPERPARAMETERS_INPUT", ""),
-              "tuning_scoring": os.environ.get("TUNING_SCORING_INPUT", ""),
-              "tuning_c_grid": os.environ.get("TUNING_C_GRID_INPUT", ""),
+              "config_overrides": os.environ.get("CONFIG_OVERRIDES_INPUT", ""),
               "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
               "ensemble_baseline_window": os.environ.get("ENSEMBLE_BASELINE_WINDOW_INPUT", ""),
               "ensemble_min_probability": os.environ.get("ENSEMBLE_MIN_PROBABILITY_INPUT", ""),
@@ -451,48 +384,13 @@ jobs:
           if [[ -n "$DECODER_INPUT" ]]; then
             args+=(--set "decoding.classifier=$DECODER_INPUT")
           fi
-          if [[ -n "$WINDOW_SIZE_INPUT" ]]; then
-            args+=(--set "preprocessing.window_size=$WINDOW_SIZE_INPUT")
-          fi
-          if [[ -n "$WINDOW_STEP_INPUT" ]]; then
-            args+=(--set "preprocessing.window_step=$WINDOW_STEP_INPUT")
-          fi
-          if [[ -n "$DECODE_WINDOW_INPUT" ]]; then
-            args+=(--set "preprocessing.decode_window=[$DECODE_WINDOW_INPUT]")
-          fi
-          if [[ -n "$NORMALIZATION_INPUT" ]]; then
-            args+=(--set "preprocessing.normalization=$NORMALIZATION_INPUT")
-          fi
-          if [[ -n "$BASELINE_WINDOW_INPUT" ]]; then
-            args+=(--set "preprocessing.baseline_window=[$BASELINE_WINDOW_INPUT]")
-          fi
-          if [[ -n "$FEATURE_PREPROCESSOR_INPUT" ]]; then
-            args+=(--set "preprocessing.feature_preprocessor=$FEATURE_PREPROCESSOR_INPUT")
-          fi
-          if [[ -n "$PCA_COMPONENTS_INPUT" ]]; then
-            args+=(--set "preprocessing.pca_components=$PCA_COMPONENTS_INPUT")
-          fi
-          if [[ -n "$TEMPORAL_TRAIN_WINDOW_INPUT" ]]; then
-            case "${TEMPORAL_TRAIN_WINDOW_INPUT,,}" in
-              none|null|off|false)
-                args+=(--set "decoding.temporal_train_window=null")
-                ;;
-              *)
-                args+=(--set "decoding.temporal_train_window=[$TEMPORAL_TRAIN_WINDOW_INPUT]")
-                ;;
-            esac
-          fi
-          if [[ -n "$TEMPORAL_TRAIN_MODE_INPUT" ]]; then
-            args+=(--set "decoding.temporal_train_mode=$TEMPORAL_TRAIN_MODE_INPUT")
-          fi
-          if [[ "$TUNE_HYPERPARAMETERS_INPUT" == "true" ]]; then
-            args+=(--set "decoding.tune_hyperparameters=true")
-          fi
-          if [[ -n "$TUNING_SCORING_INPUT" ]]; then
-            args+=(--set "decoding.tuning_scoring=$TUNING_SCORING_INPUT")
-          fi
-          if [[ -n "$TUNING_C_GRID_INPUT" ]]; then
-            args+=(--set "decoding.tuning_c_grid=$TUNING_C_GRID_INPUT")
+          if [[ -n "$CONFIG_OVERRIDES_INPUT" ]]; then
+            while IFS= read -r override; do
+              override="${override#"${override%%[![:space:]]*}"}"
+              override="${override%"${override##*[![:space:]]}"}"
+              [[ -z "$override" || "$override" == \#* ]] && continue
+              args+=(--set "$override")
+            done < <(printf '%s\n' "$CONFIG_OVERRIDES_INPUT" | tr ';' '\n')
           fi
           if [[ -n "$ENSEMBLE_WEIGHTS_INPUT" ]]; then
             args+=(--set "decoding.ensemble_weights=[$ENSEMBLE_WEIGHTS_INPUT]")
