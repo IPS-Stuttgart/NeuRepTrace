@@ -94,6 +94,14 @@ def _string_tuple(value: Any, *, name: str) -> tuple[str, ...]:
     return values
 
 
+def _bool_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _find_project_root(start: Path) -> Path:
     """Find a repository-like project root, falling back to the current directory."""
 
@@ -279,6 +287,10 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
                 )
         if "ensemble_score_mode" in decoding:
             kwargs["ensemble_score_mode"] = str(decoding["ensemble_score_mode"])
+        if "ensemble_source_baseline_debiasing" in decoding:
+            kwargs["ensemble_source_baseline_debiasing"] = _bool_value(
+                decoding["ensemble_source_baseline_debiasing"]
+            )
     return kwargs
 
 

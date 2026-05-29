@@ -21,6 +21,7 @@ SUMMARY_PROVENANCE_COLUMNS = (
     "ensemble_weights",
     "ensemble_source_temperatures",
     "ensemble_score_mode",
+    "ensemble_source_baseline_debiasing",
     "ensemble_baseline_window_start",
     "ensemble_baseline_window_stop",
 )
@@ -379,6 +380,11 @@ def _workflow_quality_row(
         ),
         "ensemble_source_temperatures": _provenance_value(manifest, summary_provenance, "ensemble_source_temperatures"),
         "ensemble_score_mode": _provenance_value(manifest, summary_provenance, "ensemble_score_mode"),
+        "ensemble_source_baseline_debiasing": _provenance_value(
+            manifest,
+            summary_provenance,
+            "ensemble_source_baseline_debiasing",
+        ),
         "ensemble_baseline_window": manifest.get("ensemble_baseline_window", ""),
         "ensemble_baseline_window_start": summary_provenance.get("ensemble_baseline_window_start", ""),
         "ensemble_baseline_window_stop": summary_provenance.get("ensemble_baseline_window_stop", ""),
