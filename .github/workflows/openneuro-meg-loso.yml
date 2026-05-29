@@ -65,7 +65,7 @@ on:
         required: false
         default: ""
       config_overrides:
-        description: "Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075"
+        description: "Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075 or decoding.outer_test_groups=[sub-01]"
         required: false
         default: ""
       diagnostics_best_time:
@@ -222,6 +222,12 @@ jobs:
           }
           subjects = os.environ.get("SUBJECTS_INPUT") or (smoke_defaults[dataset][0] if mode == "smoke" else "all")
           runs = os.environ.get("RUNS_INPUT") or (smoke_defaults[dataset][1] if mode == "smoke" else "all")
+          config_overrides_input = os.environ.get("CONFIG_OVERRIDES_INPUT", "")
+          outer_test_groups = ""
+          for override in config_overrides_input.replace(";", "\n").splitlines():
+              override = override.strip()
+              if override.startswith("decoding.outer_test_groups=") or override.startswith("decoding.outer_test_group="):
+                  outer_test_groups = override.split("=", 1)[1].strip()
           parsed_runs = parse_runs(spec, runs)
           subject_count = len(parse_subjects(spec, subjects))
           max_events = int(os.environ["MAX_EVENTS_PER_LABEL_INPUT"])
@@ -274,7 +280,8 @@ jobs:
               "skip_failed_subjects": os.environ.get("SKIP_FAILED_SUBJECTS", ""),
               "min_successful_subjects": os.environ.get("MIN_SUCCESSFUL_SUBJECTS", ""),
               "decoder_override": os.environ.get("DECODER_INPUT", ""),
-              "config_overrides": os.environ.get("CONFIG_OVERRIDES_INPUT", ""),
+              "config_overrides": config_overrides_input,
+              "outer_test_groups": outer_test_groups,
               "diagnostics_best_time": os.environ.get("DIAGNOSTICS_BEST_TIME_INPUT", ""),
               "temporal_smoothing": os.environ.get("TEMPORAL_SMOOTHING", ""),
               "temporal_smoothing_fit_window": os.environ.get("TEMPORAL_SMOOTHING_FIT_WINDOW", ""),
