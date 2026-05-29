@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from neureptrace.decode_from_config import _decode_kwargs
 
 
@@ -98,6 +100,42 @@ def test_decode_from_config_accepts_workflow_style_unquoted_string_lists(tmp_pat
     )
     assert kwargs["ensemble_weights"] == (0.5, 0.3, 0.2)
     assert kwargs["ensemble_source_temperatures"] == (1.25, 1.0, 0.8)
+
+
+def test_decode_from_config_rejects_mismatched_ensemble_weights(tmp_path):
+    with pytest.raises(ValueError, match="decoding.ensemble_weights must contain exactly 3 value"):
+        _decode_kwargs(
+            {
+                "dataset": {"name": "demo"},
+                "decoding": {
+                    "label_column": "condition",
+                    "classifier": "logistic-svm-ensemble",
+                    "ensemble_source_decoders": "[multinomial-logistic-weighted,linear_svm,shrinkage_lda]",
+                    "ensemble_weights": "[0.6,0.4]",
+                },
+                "preprocessing": {},
+                "outputs": {"summary_csv": "summary.csv"},
+            },
+            config_dir=tmp_path,
+        )
+
+
+def test_decode_from_config_rejects_mismatched_ensemble_temperatures(tmp_path):
+    with pytest.raises(ValueError, match="decoding.ensemble_source_temperatures must contain exactly 2 value"):
+        _decode_kwargs(
+            {
+                "dataset": {"name": "demo"},
+                "decoding": {
+                    "label_column": "condition",
+                    "classifier": "logistic-svm-ensemble",
+                    "ensemble_source_decoders": "[multinomial-logistic-weighted,linear_svm]",
+                    "ensemble_source_temperatures": "[1.0,0.9,0.8]",
+                },
+                "preprocessing": {},
+                "outputs": {"summary_csv": "summary.csv"},
+            },
+            config_dir=tmp_path,
+        )
 
 
 def test_decode_from_config_ignores_ensemble_controls_for_regular_decoder(tmp_path):
