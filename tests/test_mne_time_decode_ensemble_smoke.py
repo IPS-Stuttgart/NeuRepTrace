@@ -5,6 +5,7 @@ from neureptrace.mne_time_decode_ensemble import (
     ENSEMBLE_DECODER,
     ENSEMBLE_DECODER_CLI_CHOICES,
     _SOURCE_DECODERS,
+    _parse_source_temperatures,
     _parse_weights,
     _parse_source_decoders,
     normalize_time_decode_decoder_name,
@@ -57,6 +58,11 @@ def test_logistic_svm_ensemble_accepts_weighted_source_decoder_override():
 def test_logistic_svm_ensemble_uses_equal_weights_for_nondefault_sources():
     assert _parse_weights(None, 3) == (1.0, 1.0, 1.0)
     assert _parse_weights((0.5, 0.3, 0.2), 3) == (0.5, 0.3, 0.2)
+
+
+def test_logistic_svm_ensemble_parses_source_temperatures():
+    assert _parse_source_temperatures(None, 3) == (1.0, 1.0, 1.0)
+    assert _parse_source_temperatures((1.25, 1.0, 0.8), 3) == (1.25, 1.0, 0.8)
 
 
 def test_logistic_svm_ensemble_requires_calibrated_emissions(tmp_path):
@@ -149,6 +155,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         temporal_train_mode="pooled",
         class_prior_correction="train_uniform",
         ensemble_source_decoders=("multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"),
+        ensemble_source_temperatures=(1.25, 1.0, 0.8),
         ensemble_baseline_window=None,
     )
 
@@ -161,4 +168,5 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert results["class_prior_correction"].unique().tolist() == ["train_uniform"]
     assert results["source_decoders"].unique().tolist() == ["multinomial-logistic-weighted|linear_svm|shrinkage_lda"]
     assert results["ensemble_weights"].unique().tolist() == ["0.333333333333|0.333333333333|0.333333333333"]
+    assert results["ensemble_source_temperatures"].unique().tolist() == ["1.25|1|0.8"]
     assert results["temporal_mode"].unique().tolist() == ["train_window_pooled"]
