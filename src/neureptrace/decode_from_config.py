@@ -102,6 +102,22 @@ def _bool_value(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _validate_ensemble_vector_lengths(kwargs: Mapping[str, Any]) -> None:
+    """Reject ambiguous per-source ensemble vectors before decoder execution."""
+
+    source_decoders = kwargs.get("ensemble_source_decoders")
+    if not source_decoders:
+        return
+    expected = len(source_decoders)
+    for key in ("ensemble_weights", "ensemble_source_temperatures"):
+        values = kwargs.get(key)
+        if values is not None and len(values) != expected:
+            raise ValueError(
+                f"decoding.{key} must contain exactly {expected} value(s) to match "
+                "decoding.ensemble_source_decoders."
+            )
+
+
 def _find_project_root(start: Path) -> Path:
     """Find a repository-like project root, falling back to the current directory."""
 
@@ -291,6 +307,7 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             kwargs["ensemble_source_baseline_debiasing"] = _bool_value(
                 decoding["ensemble_source_baseline_debiasing"]
             )
+        _validate_ensemble_vector_lengths(kwargs)
     return kwargs
 
 
