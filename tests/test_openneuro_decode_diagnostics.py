@@ -121,6 +121,9 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
                 "artifact_name": "openneuro-meg-ds006629-smoke-label-shuffle-seed-13",
                 "label_shuffle_control": "true",
                 "label_shuffle_seed": "13",
+                "ensemble_weights": "0.5,0.3,0.2",
+                "ensemble_source_decoders": "multinomial-logistic-weighted,linear_svm,shrinkage_lda",
+                "ensemble_source_temperatures": "[1.25,1.0,0.8]",
             }
         ),
         encoding="utf-8",
@@ -166,6 +169,9 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
     assert quality.loc[0, "top3_interpretation"] == "automatic_ceiling"
     assert quality.loc[0, "top2_evidence_role"] == "chance_adjusted_supporting"
     assert quality.loc[0, "top3_evidence_role"] == "uninformative_automatic_ceiling"
+    assert quality.loc[0, "ensemble_weights"] == "0.5,0.3,0.2"
+    assert quality.loc[0, "ensemble_source_decoders"] == "multinomial-logistic-weighted,linear_svm,shrinkage_lda"
+    assert quality.loc[0, "ensemble_source_temperatures"] == "[1.25,1.0,0.8]"
     assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(0.34)
     assert quality.loc[0, "fixed_balanced_minus_chance_pct"] == pytest.approx(0.67)
     assert quality.loc[0, "fixed_top2_minus_chance_pct"] == pytest.approx((0.8 - 2 / 3) * 100.0)
