@@ -138,11 +138,15 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
             "chance_accuracy": [1 / 3],
             "top2_chance": [2 / 3],
             "top3_chance": [1.0],
+            "top2_interpretation": ["informative"],
             "top3_interpretation": ["automatic_ceiling"],
             "fixed_time": [0.2],
             "fixed_balanced_accuracy": [0.34],
             "fixed_balanced_minus_chance": [0.0067],
             "fixed_top2_accuracy": [0.8],
+            "fixed_top2_minus_chance": [0.8 - 2 / 3],
+            "fixed_top3_accuracy": [1.0],
+            "fixed_top3_minus_chance": [0.0],
             "subjects_fixed_above_chance": [14],
         }
     ).to_csv(diagnostics_dir / "quality_summary.csv", index=False)
@@ -160,7 +164,12 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
     assert quality.loc[0, "quality_decision"] == "null_near_chance"
     assert quality.loc[0, "null_chance_tolerance"] == pytest.approx(0.03)
     assert quality.loc[0, "top3_interpretation"] == "automatic_ceiling"
+    assert quality.loc[0, "top2_evidence_role"] == "chance_adjusted_supporting"
+    assert quality.loc[0, "top3_evidence_role"] == "uninformative_automatic_ceiling"
     assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(0.34)
+    assert quality.loc[0, "fixed_balanced_minus_chance_pct"] == pytest.approx(0.67)
+    assert quality.loc[0, "fixed_top2_minus_chance_pct"] == pytest.approx((0.8 - 2 / 3) * 100.0)
+    assert quality.loc[0, "fixed_top3_minus_chance_pct"] == pytest.approx(0.0)
     assert quality.loc[0, "best_selection_metric"] == "accuracy"
     assert quality.loc[0, "best_selection_value"] == pytest.approx(0.75)
 
@@ -293,6 +302,7 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
     assert quality.loc[0, "quality_decision"] == "promising_above_chance_consistent"
     assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(5 / 6)
     assert quality.loc[0, "fixed_balanced_minus_chance"] == pytest.approx(5 / 6 - 1 / 3)
+    assert quality.loc[0, "fixed_balanced_minus_chance_pct"] == pytest.approx(50.0)
 
 
 def test_main_strict_reports_missing_decode_summary(tmp_path: Path):

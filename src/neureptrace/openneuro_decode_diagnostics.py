@@ -44,10 +44,24 @@ def _as_int(value: Any) -> int | None:
     return None if numeric is None else int(numeric)
 
 
+def _as_percent(value: Any) -> float | str:
+    numeric = _as_float(value)
+    return "" if numeric is None else 100.0 * numeric
+
+
 def _join_manifest_list(value: Any) -> str:
     if isinstance(value, list | tuple):
         return "|".join(str(item) for item in value if str(item))
     return "" if value is None else str(value)
+
+
+def _top_k_evidence_role(interpretation: Any) -> str:
+    normalized = str(interpretation).strip().lower()
+    if normalized == "automatic_ceiling":
+        return "uninformative_automatic_ceiling"
+    if normalized == "informative":
+        return "chance_adjusted_supporting"
+    return ""
 
 
 def _quality_decision(
@@ -326,14 +340,19 @@ def _workflow_quality_row(
         "top3_chance": quality.get("top3_chance", ""),
         "top2_interpretation": quality.get("top2_interpretation", ""),
         "top3_interpretation": quality.get("top3_interpretation", ""),
+        "top2_evidence_role": _top_k_evidence_role(quality.get("top2_interpretation", "")),
+        "top3_evidence_role": _top_k_evidence_role(quality.get("top3_interpretation", "")),
         "fixed_time": quality.get("fixed_time", ""),
         "fixed_accuracy": quality.get("fixed_accuracy", ""),
         "fixed_balanced_accuracy": quality.get("fixed_balanced_accuracy", ""),
         "fixed_balanced_minus_chance": quality.get("fixed_balanced_minus_chance", ""),
+        "fixed_balanced_minus_chance_pct": _as_percent(quality.get("fixed_balanced_minus_chance", "")),
         "fixed_top2_accuracy": quality.get("fixed_top2_accuracy", ""),
         "fixed_top2_minus_chance": quality.get("fixed_top2_minus_chance", ""),
+        "fixed_top2_minus_chance_pct": _as_percent(quality.get("fixed_top2_minus_chance", "")),
         "fixed_top3_accuracy": quality.get("fixed_top3_accuracy", ""),
         "fixed_top3_minus_chance": quality.get("fixed_top3_minus_chance", ""),
+        "fixed_top3_minus_chance_pct": _as_percent(quality.get("fixed_top3_minus_chance", "")),
         "subjects_fixed_above_chance": quality.get("subjects_fixed_above_chance", ""),
         "best_selection_metric": preferred_metric if has_best_metric else "",
         "best_time": best.get("time", ""),
