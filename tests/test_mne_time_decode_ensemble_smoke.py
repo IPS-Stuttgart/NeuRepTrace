@@ -156,7 +156,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         class_prior_correction="train_uniform",
         ensemble_source_decoders=("multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"),
         ensemble_source_temperatures=(1.25, 1.0, 0.8),
-        ensemble_score_mode="probability",
+        ensemble_score_mode="rank",
         ensemble_baseline_window=None,
     )
 
@@ -170,5 +170,5 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert results["source_decoders"].unique().tolist() == ["multinomial-logistic-weighted|linear_svm|shrinkage_lda"]
     assert results["ensemble_weights"].unique().tolist() == ["0.333333333333|0.333333333333|0.333333333333"]
     assert results["ensemble_source_temperatures"].unique().tolist() == ["1.25|1|0.8"]
-    assert results["ensemble_score_mode"].unique().tolist() == ["probability"]
+    assert results["ensemble_score_mode"].unique().tolist() == ["rank"]
     assert results["temporal_mode"].unique().tolist() == ["train_window_pooled"]

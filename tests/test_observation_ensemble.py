@@ -205,11 +205,20 @@ def test_ensemble_probability_score_mode_can_rescue_geometric_overconfidence() -
         baseline_window=None,
         score_mode="probability",
     )
+    rank_mean = ensemble_probability_observations(
+        observations,
+        decoders=("overconfident_source", "better_source_a", "better_source_b"),
+        weights=(1.0, 1.0, 1.0),
+        baseline_window=None,
+        score_mode="rank",
+    )
 
     assert geometric["predicted_label"].tolist() == [0]
     assert geometric["ensemble_score_mode"].unique().tolist() == ["log"]
     assert probability_mean["predicted_label"].tolist() == [1]
     assert probability_mean["ensemble_score_mode"].unique().tolist() == ["probability"]
+    assert rank_mean["predicted_label"].tolist() == [1]
+    assert rank_mean["ensemble_score_mode"].unique().tolist() == ["rank"]
 
 
 def test_ensemble_probability_observations_rejects_fractional_true_labels() -> None:

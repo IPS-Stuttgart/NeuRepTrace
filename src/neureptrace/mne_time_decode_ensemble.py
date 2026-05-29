@@ -431,7 +431,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--ensemble-score-mode",
         choices=ENSEMBLE_SCORE_MODE_CHOICES,
         default=DEFAULT_ENSEMBLE_SCORE_MODE,
-        help="Combine ensemble sources as weighted log probabilities or as a weighted probability mean before baseline debiasing.",
+        help="Combine ensemble sources as weighted log probabilities, weighted probability means, or weighted rank/Borda scores before baseline debiasing.",
     )
     parser.add_argument("--ensemble-baseline-window", nargs=2, type=float, default=DEFAULT_ENSEMBLE_BASELINE_WINDOW, metavar=("START", "STOP"))
     parser.add_argument("--no-ensemble-baseline-debiasing", action="store_true")
