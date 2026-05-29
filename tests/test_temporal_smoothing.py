@@ -78,6 +78,9 @@ def test_temporal_smoothing_exports_posteriors_and_metrics(tmp_path: Path):
 
     metric_row = metrics.loc[metrics["time"].eq(0.30)].iloc[0]
     assert metric_row["accuracy"] == 1.0
+    assert metric_row["balanced_accuracy"] == 1.0
+    assert metric_row["top2_accuracy"] == 1.0
+    assert metric_row["top3_accuracy"] == 1.0
     assert metric_row["emission_mode"] == "calibrated_temporal_posterior"
     assert metric_row["feature_preprocessor"] == "pca_whiten"
     assert str(metric_row["tuned_hyperparameters"]).lower() == "true"

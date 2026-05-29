@@ -83,6 +83,9 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "OPENNEURO_OUTPUT_SUFFIX" in workflow
     assert "run_manifest.json" in workflow
     assert "workflow_quality_summary.csv" in workflow
+    assert "temporal_smoothing" in workflow
+    assert "python -m neureptrace.temporal_smoothing" in workflow
+    assert "decode/temporal_smoothing/diagnostics" in workflow
     assert "OPENNEURO_CONFIG" in workflow
     assert "artifact_name" in workflow
     assert "python -m neureptrace.openneuro_decode_diagnostics" in workflow

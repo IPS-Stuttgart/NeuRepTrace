@@ -72,6 +72,15 @@ on:
         description: "Optional fixed diagnostic time in seconds, e.g. 0.184"
         required: false
         default: ""
+      temporal_smoothing:
+        description: "Also write sticky temporal-posterior smoothed observations, metrics, and diagnostics"
+        required: true
+        type: boolean
+        default: false
+      temporal_smoothing_fit_window:
+        description: "Temporal smoothing fit window START,STOP, or full to fit all time bins"
+        required: false
+        default: "0.10,0.30"
       ensemble_weights:
         description: "Optional comma-separated logistic_svm_ensemble weights in source-decoder order, e.g. 0.5,0.3,0.2"
         required: false
@@ -143,6 +152,8 @@ jobs:
       DECODER_INPUT: ${{ inputs.decoder }}
       CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
       DIAGNOSTICS_BEST_TIME_INPUT: ${{ inputs.diagnostics_best_time }}
+      TEMPORAL_SMOOTHING: ${{ inputs.temporal_smoothing }}
+      TEMPORAL_SMOOTHING_FIT_WINDOW: ${{ inputs.temporal_smoothing_fit_window }}
       ENSEMBLE_WEIGHTS_INPUT: ${{ inputs.ensemble_weights }}
       ENSEMBLE_SOURCE_DECODERS_INPUT: ${{ inputs.ensemble_source_decoders }}
       ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
@@ -265,6 +276,9 @@ jobs:
               "decoder_override": os.environ.get("DECODER_INPUT", ""),
               "config_overrides": os.environ.get("CONFIG_OVERRIDES_INPUT", ""),
               "diagnostics_best_time": os.environ.get("DIAGNOSTICS_BEST_TIME_INPUT", ""),
+              "temporal_smoothing": os.environ.get("TEMPORAL_SMOOTHING", ""),
+              "temporal_smoothing_fit_window": os.environ.get("TEMPORAL_SMOOTHING_FIT_WINDOW", ""),
+              "temporal_smoothing_stay_grid_size": "200",
               "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
               "ensemble_source_decoders": os.environ.get("ENSEMBLE_SOURCE_DECODERS_INPUT", ""),
               "ensemble_baseline_window": os.environ.get("ENSEMBLE_BASELINE_WINDOW_INPUT", ""),
@@ -436,6 +450,37 @@ jobs:
           fi
           python -m neureptrace.decode_from_config "${args[@]}"
 
+      - name: Run temporal posterior smoothing
+        if: ${{ always() && env.RUN_DECODE == 'true' && env.TEMPORAL_SMOOTHING == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          observations="$OPENNEURO_OUTPUT_DIR/decode/observations.csv"
+          if [[ ! -s "$observations" ]]; then
+            echo "Skipping temporal smoothing because observations are missing: $observations"
+            exit 0
+          fi
+          mkdir -p "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing"
+          smoothing_args=(
+            "$observations"
+            --out-observations "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/observations.csv"
+            --out-metrics "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/time_decode_summary.csv"
+            --stay-grid-size 200
+          )
+          case "${TEMPORAL_SMOOTHING_FIT_WINDOW,,}" in
+            "")
+              smoothing_args+=(--fit-window 0.10 0.30)
+              ;;
+            full|all|none|null)
+              smoothing_args+=(--use-full-sequence-fit)
+              ;;
+            *)
+              IFS=',' read -r fit_start fit_stop <<< "$TEMPORAL_SMOOTHING_FIT_WINDOW"
+              smoothing_args+=(--fit-window "$fit_start" "$fit_stop")
+              ;;
+          esac
+          python -m neureptrace.temporal_smoothing "${smoothing_args[@]}"
+
       - name: Summarize LOSO decode
         if: ${{ always() && env.RUN_DECODE == 'true' }}
         shell: bash
@@ -493,6 +538,20 @@ jobs:
             diagnostic_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
           fi
           python -m neureptrace.loso_observation_diagnostics "${diagnostic_args[@]}"
+
+          if [[ "$TEMPORAL_SMOOTHING" == "true" && -s "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/observations.csv" ]]; then
+            smoothed_args=(
+              "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/observations.csv"
+              --summary-csv "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/time_decode_summary.csv"
+              --stage-summary-csv "$OPENNEURO_OUTPUT_DIR/stage_summary.csv"
+              --out-dir "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/diagnostics"
+              --selection-metric balanced_accuracy
+            )
+            if [[ -n "$DIAGNOSTICS_BEST_TIME_INPUT" ]]; then
+              smoothed_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
+            fi
+            python -m neureptrace.loso_observation_diagnostics "${smoothed_args[@]}"
+          fi
 
       - name: Write OpenNeuro workflow summary
         if: ${{ always() }}
