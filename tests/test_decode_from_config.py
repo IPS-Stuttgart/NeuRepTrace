@@ -78,6 +78,7 @@ def test_decode_from_config_accepts_workflow_style_unquoted_string_lists(tmp_pat
                 "label_column": "condition",
                 "classifier": "logistic-svm-ensemble",
                 "ensemble_source_decoders": "[multinomial-logistic-weighted,linear_svm,shrinkage_lda]",
+                "ensemble_weights": "[0.5,0.3,0.2]",
             },
             "preprocessing": {},
             "outputs": {"summary_csv": "summary.csv"},
@@ -90,6 +91,7 @@ def test_decode_from_config_accepts_workflow_style_unquoted_string_lists(tmp_pat
         "linear_svm",
         "shrinkage_lda",
     )
+    assert kwargs["ensemble_weights"] == (0.5, 0.3, 0.2)
 
 
 def test_decode_from_config_ignores_ensemble_controls_for_regular_decoder(tmp_path):
