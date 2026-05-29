@@ -5,6 +5,7 @@ from neureptrace.mne_time_decode_ensemble import (
     ENSEMBLE_DECODER,
     ENSEMBLE_DECODER_CLI_CHOICES,
     _SOURCE_DECODERS,
+    _parse_source_decoders,
     normalize_time_decode_decoder_name,
     run_time_resolved_decode,
 )
@@ -43,6 +44,13 @@ def test_logistic_svm_ensemble_source_names_match_normalized_observations():
 
     assert ensemble["source_decoders"].iloc[0] == "|".join(_SOURCE_DECODERS)
     assert ensemble["decoder"].iloc[0] == ENSEMBLE_DECODER
+
+
+def test_logistic_svm_ensemble_accepts_weighted_source_decoder_override():
+    requested, normalized = _parse_source_decoders(("multinomial-logistic-weighted", "linear-svm"))
+
+    assert requested == ("multinomial-logistic-weighted", "linear-svm")
+    assert normalized == ("multinomial-logistic-weighted", "linear_svm")
 
 
 def test_logistic_svm_ensemble_requires_calibrated_emissions(tmp_path):
@@ -129,14 +137,16 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         temporal_train_window=(0.12, 0.248),
         temporal_train_mode="pooled",
         class_prior_correction="train_uniform",
+        ensemble_source_decoders=("multinomial-logistic-weighted", "linear_svm"),
         ensemble_baseline_window=None,
     )
 
     assert len(calls) == 2
-    assert {call["decoder"] for call in calls} == {"multinomial-logistic", "linear_svm"}
+    assert {call["decoder"] for call in calls} == {"multinomial-logistic-weighted", "linear_svm"}
     assert all(call["decode_window"] == (0.12, 0.248) for call in calls)
     assert all(call["temporal_train_window"] == (0.12, 0.248) for call in calls)
     assert all(call["temporal_train_mode"] == "pooled" for call in calls)
     assert all(call["class_prior_correction"] == "train_uniform" for call in calls)
     assert results["class_prior_correction"].unique().tolist() == ["train_uniform"]
+    assert results["source_decoders"].unique().tolist() == ["multinomial-logistic-weighted|linear_svm"]
     assert results["temporal_mode"].unique().tolist() == ["train_window_pooled"]

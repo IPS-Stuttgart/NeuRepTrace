@@ -30,6 +30,7 @@ DEFAULT_CLASSIFIER_PARAMS = {
     "scikit-mlp": (150, 1000),
     "correlation-prototype": None,
     "multinomial-logistic": 1.0,
+    "multinomial-logistic-weighted": 1.0,
     "shrinkage-lda": None,
     "xgboost": 100,
     "pytorch-mlp": {
@@ -288,6 +289,10 @@ def _build_multinomial_logistic(_features: np.ndarray, _labels: np.ndarray, clas
     return LogisticRegression(C=float(classifier_param), max_iter=1000, random_state=random_state)
 
 
+def _build_multinomial_logistic_weighted(_features: np.ndarray, _labels: np.ndarray, classifier_param: Any, random_state: int | None):
+    return LogisticRegression(C=float(classifier_param), class_weight="balanced", max_iter=1000, random_state=random_state)
+
+
 def _normalize_lda_shrinkage(classifier_param: Any):
     if classifier_param is None:
         return "auto"
@@ -326,6 +331,7 @@ CLASSIFIER_REGISTRY = {
     "scikit-mlp": ClassifierSpec(_build_scikit_mlp),
     "correlation-prototype": ClassifierSpec(_build_correlation_prototype),
     "multinomial-logistic": ClassifierSpec(_build_multinomial_logistic),
+    "multinomial-logistic-weighted": ClassifierSpec(_build_multinomial_logistic_weighted),
     "shrinkage-lda": ClassifierSpec(_build_shrinkage_lda),
     "xgboost": ClassifierSpec(_build_xgboost),
     "pytorch-mlp": ClassifierSpec(_build_pytorch_mlp_classifier, fits_in_builder=True),
