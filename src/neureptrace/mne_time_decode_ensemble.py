@@ -96,6 +96,7 @@ def run_time_resolved_decode(
     calibration_bins: int = 10,
     observation_out_path: Path | None = None,
     subject: str | None = None,
+    decode_window: tuple[float, float] | None = None,
     temporal_train_window: tuple[float, float] | None = None,
     time_decode_backend: str = "sklearn",
     label_shuffle_control: bool = False,
@@ -142,6 +143,7 @@ def run_time_resolved_decode(
             calibration_bins=calibration_bins,
             observation_out_path=observation_out_path,
             subject=subject,
+            decode_window=decode_window,
             temporal_train_window=temporal_train_window,
             time_decode_backend=time_decode_backend,
             label_shuffle_control=label_shuffle_control,
@@ -189,6 +191,7 @@ def run_time_resolved_decode(
                     calibration_bins=calibration_bins,
                     observation_out_path=source_observations,
                     subject=subject,
+                    decode_window=decode_window,
                     temporal_train_window=temporal_train_window,
                     time_decode_backend=time_decode_backend,
                     label_shuffle_control=label_shuffle_control,
@@ -310,6 +313,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--calibration-bins", type=int, default=10)
     parser.add_argument("--observations-out", type=Path, help="Optional held-out trial/time probability observation CSV.")
     parser.add_argument("--subject", help="Optional subject identifier to include in output CSVs.")
+    parser.add_argument("--decode-window", nargs=2, type=float, metavar=("START", "STOP"), help="Evaluate only time-window centers in START..STOP seconds.")
     parser.add_argument(
         "--label-shuffle-control",
         action="store_true",
@@ -368,6 +372,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         calibration_bins=args.calibration_bins,
         observation_out_path=args.observations_out,
         subject=args.subject,
+        decode_window=tuple(args.decode_window) if args.decode_window is not None else None,
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,

@@ -64,6 +64,10 @@ on:
         description: "Override decoder/classifier, or leave empty for the dataset config default"
         required: false
         default: ""
+      config_overrides:
+        description: "Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075"
+        required: false
+        default: ""
       ensemble_weights:
         description: "Optional two comma-separated logistic_svm_ensemble weights, e.g. 0.7,0.3"
         required: false
@@ -121,6 +125,7 @@ jobs:
       SKIP_FAILED_SUBJECTS: ${{ inputs.skip_failed_subjects }}
       MIN_SUCCESSFUL_SUBJECTS: ${{ inputs.min_successful_subjects }}
       DECODER_INPUT: ${{ inputs.decoder }}
+      CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
       ENSEMBLE_WEIGHTS_INPUT: ${{ inputs.ensemble_weights }}
       ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
       ENSEMBLE_MIN_PROBABILITY_INPUT: ${{ inputs.ensemble_min_probability }}
@@ -239,6 +244,7 @@ jobs:
               "skip_failed_subjects": os.environ.get("SKIP_FAILED_SUBJECTS", ""),
               "min_successful_subjects": os.environ.get("MIN_SUCCESSFUL_SUBJECTS", ""),
               "decoder_override": os.environ.get("DECODER_INPUT", ""),
+              "config_overrides": os.environ.get("CONFIG_OVERRIDES_INPUT", ""),
               "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
               "ensemble_baseline_window": os.environ.get("ENSEMBLE_BASELINE_WINDOW_INPUT", ""),
               "ensemble_min_probability": os.environ.get("ENSEMBLE_MIN_PROBABILITY_INPUT", ""),
@@ -377,6 +383,14 @@ jobs:
           )
           if [[ -n "$DECODER_INPUT" ]]; then
             args+=(--set "decoding.classifier=$DECODER_INPUT")
+          fi
+          if [[ -n "$CONFIG_OVERRIDES_INPUT" ]]; then
+            while IFS= read -r override; do
+              override="${override#"${override%%[![:space:]]*}"}"
+              override="${override%"${override##*[![:space:]]}"}"
+              [[ -z "$override" || "$override" == \#* ]] && continue
+              args+=(--set "$override")
+            done < <(printf '%s\n' "$CONFIG_OVERRIDES_INPUT" | tr ';' '\n')
           fi
           if [[ -n "$ENSEMBLE_WEIGHTS_INPUT" ]]; then
             args+=(--set "decoding.ensemble_weights=[$ENSEMBLE_WEIGHTS_INPUT]")

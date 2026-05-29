@@ -149,6 +149,10 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
         "temporal_train_window",
         preprocessing.get("temporal_train_window"),
     )
+    decode_window = decoding.get(
+        "decode_window",
+        preprocessing.get("decode_window"),
+    )
     temporal_train_mode = decoding.get(
         "temporal_train_mode",
         preprocessing.get("temporal_train_mode"),
@@ -208,6 +212,7 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             key="observations_csv",
         ),
         "subject": decoding.get("subject"),
+        "decode_window": tuple(decode_window) if decode_window is not None else None,
         "temporal_train_window": (
             tuple(temporal_train_window) if temporal_train_window is not None else None
         ),

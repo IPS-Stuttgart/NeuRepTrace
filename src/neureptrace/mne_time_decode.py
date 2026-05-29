@@ -70,6 +70,7 @@ BASELINE_WHITENING_EIGENVALUE_FLOOR = 1e-6
 MNE_SLIDING_MAX_FEATURE_BYTES = 512 * 1024 * 1024
 TimeWindow = tuple[int, int, float]
 TemporalTrainWindow = tuple[float, float]
+DecodeWindow = tuple[float, float]
 TEMPORAL_TRAIN_MODE_CHOICES = ("window_ensemble", "pooled")
 TEMPORAL_TRAIN_MODE_RUN_CHOICES = (*TEMPORAL_TRAIN_MODE_CHOICES, "window-ensemble")
 
@@ -411,6 +412,35 @@ def _select_temporal_train_windows(
     raise ValueError(
         "No time-window centers fall inside temporal_train_window "
         f"[{train_start}, {train_stop}]. Available centers span "
+        f"[{min(available_centers)}, {max(available_centers)}]."
+    )
+
+
+def _normalize_decode_window(decode_window: tuple[float, float] | list[float] | None) -> DecodeWindow | None:
+    if decode_window is None:
+        return None
+    if len(decode_window) != 2:
+        raise ValueError("decode_window must contain exactly two times: start and stop.")
+    start, stop = map(float, decode_window)
+    if stop < start:
+        raise ValueError("decode_window stop must be greater than or equal to start.")
+    return start, stop
+
+
+def _select_decode_windows(windows: list[TimeWindow], decode_window: DecodeWindow | None) -> list[TimeWindow]:
+    if decode_window is None:
+        return list(windows)
+    decode_start, decode_stop = decode_window
+    selected = [window for window in windows if decode_start <= window[2] <= decode_stop]
+    if selected:
+        return selected
+
+    available_centers = [window[2] for window in windows]
+    if not available_centers:
+        raise ValueError("No time windows are available for decode-window selection.")
+    raise ValueError(
+        "No time-window centers fall inside decode_window "
+        f"[{decode_start}, {decode_stop}]. Available centers span "
         f"[{min(available_centers)}, {max(available_centers)}]."
     )
 
@@ -833,6 +863,7 @@ def run_time_resolved_decode(
     calibration_bins: int = 10,
     observation_out_path: Path | None = None,
     subject: str | None = None,
+    decode_window: tuple[float, float] | None = None,
     temporal_train_window: tuple[float, float] | None = None,
     temporal_train_mode: str = "window_ensemble",
     time_decode_backend: str = "auto",
@@ -841,6 +872,7 @@ def run_time_resolved_decode(
 ) -> pd.DataFrame:
     """Run time-resolved decoding on an MNE epochs file and save metrics as CSV.
 
+    ``decode_window`` restricts the test-time window centers that are evaluated.
     If ``temporal_train_window`` is set, selected train-time windows are used
     according to ``temporal_train_mode``. ``window_ensemble`` trains one model
     per selected train-time window and averages probabilities. ``pooled`` stacks
@@ -878,6 +910,7 @@ def run_time_resolved_decode(
         pca_components_value = None
     tuning_scoring = normalize_tuning_scoring(tuning_scoring)
     tuning_c_grid_values = parse_c_grid(tuning_c_grid)
+    normalized_decode_window = _normalize_decode_window(decode_window)
     normalized_temporal_train_window = _normalize_temporal_train_window(temporal_train_window)
     temporal_train_mode_name = _normalize_temporal_train_mode(temporal_train_mode)
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
@@ -932,6 +965,7 @@ def run_time_resolved_decode(
             "pca_components": pca_components_value,
             "normalization": normalization_name,
             "baseline_window": baseline_window_value,
+            "decode_window": normalized_decode_window,
             "temporal_train_window": normalized_temporal_train_window,
             "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
         }
@@ -966,8 +1000,9 @@ def run_time_resolved_decode(
     rows: list[dict] = []
     calibration_rows: list[dict] = []
     observation_rows: list[dict] = []
-    windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
-    selected_train_windows = _select_temporal_train_windows(windows, normalized_temporal_train_window)
+    all_windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
+    windows = _select_decode_windows(all_windows, normalized_decode_window)
+    selected_train_windows = _select_temporal_train_windows(all_windows, normalized_temporal_train_window)
     splits = list(make_cross_validator(labels, groups, n_splits))
 
     if selected_train_windows is None and time_decode_backend == "mne":
@@ -1526,6 +1561,13 @@ def main() -> None:
         help="Implementation backend. auto uses mne.decoding.SlidingEstimator for same-time decoding and sklearn for temporal train-window decoding.",
     )
     parser.add_argument(
+        "--decode-window",
+        nargs=2,
+        type=float,
+        metavar=("START", "STOP"),
+        help="Evaluate only time-window centers in START..STOP seconds.",
+    )
+    parser.add_argument(
         "--temporal-train-window",
         nargs=2,
         type=float,
@@ -1591,6 +1633,7 @@ def main() -> None:
         calibration_bins=args.calibration_bins,
         observation_out_path=args.observations_out,
         subject=args.subject,
+        decode_window=tuple(args.decode_window) if args.decode_window is not None else None,
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
         temporal_train_mode=args.temporal_train_mode,
         time_decode_backend=args.time_decode_backend,

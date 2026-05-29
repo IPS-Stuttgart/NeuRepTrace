@@ -47,6 +47,22 @@ same controls are available in the GitHub Actions dispatch form as
 comma-separated values, which makes logistic-heavy versus SVM-heavy follow-up
 runs directly comparable to the current ds006629 result.
 
+The workflow dispatch form also exposes a `config_overrides` field for
+semicolon- or newline-separated `--set` overrides. A compact ds006629 peak
+follow-up can therefore stay in the same LOSO protocol while testing, for
+example:
+
+```text
+preprocessing.window_size=0.075;
+preprocessing.window_step=0.024;
+preprocessing.decode_window=[0.120,0.248];
+decoding.temporal_train_window=[0.120,0.248];
+decoding.temporal_train_mode=window_ensemble;
+decoding.tune_hyperparameters=true;
+decoding.tuning_scoring=balanced_accuracy;
+decoding.tuning_c_grid=0.03,0.1,0.3,1,3
+```
+
 Dataset-specific staging hardening:
 
 - `ds004276` event files include probe rows that do not correspond to auditory
