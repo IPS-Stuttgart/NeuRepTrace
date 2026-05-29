@@ -746,7 +746,7 @@ jobs:
                   python -m pip install -e .
 
             - name: Download OpenNeuro shard artifacts
-              uses: actions/download-artifact@v7
+              uses: actions/download-artifact@v8
               with:
                   pattern: openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}*
                   path: downloaded_openneuro_artifacts
