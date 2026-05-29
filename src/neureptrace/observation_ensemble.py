@@ -292,6 +292,26 @@ def _temperature_scaled_probabilities(
     return _softmax(np.log(np.clip(probabilities, min_probability, 1.0)) / float(temperature))
 
 
+def _baseline_debiased_source_probabilities(
+    base: pd.DataFrame,
+    probabilities: np.ndarray,
+    *,
+    baseline_window: tuple[float, float] | None,
+    baseline_group_columns: Sequence[str],
+    min_probability: float,
+) -> np.ndarray:
+    if baseline_window is None:
+        return probabilities
+    source_scores = np.log(np.clip(probabilities, min_probability, 1.0))
+    offsets, _ = _baseline_offsets(
+        base,
+        source_scores,
+        baseline_window=baseline_window,
+        baseline_group_columns=baseline_group_columns,
+    )
+    return _softmax(source_scores - offsets)
+
+
 def ensemble_probability_observations(
     observations: pd.DataFrame,
     *,
@@ -303,6 +323,7 @@ def ensemble_probability_observations(
     min_probability: float = DEFAULT_MIN_PROBABILITY,
     source_temperatures: Sequence[float] | None = None,
     score_mode: str = DEFAULT_SCORE_MODE,
+    source_baseline_debiasing: bool = False,
     output_decoder: str = DEFAULT_ENSEMBLE_DECODER,
     output_emission_mode: str = DEFAULT_ENSEMBLE_EMISSION_MODE,
 ) -> pd.DataFrame:
@@ -333,6 +354,14 @@ def ensemble_probability_observations(
             temperature=temperature,
             min_probability=min_probability,
         )
+        if source_baseline_debiasing:
+            source_probabilities = _baseline_debiased_source_probabilities(
+                base,
+                source_probabilities,
+                baseline_window=baseline_window,
+                baseline_group_columns=baseline_group_columns,
+                min_probability=min_probability,
+            )
         if score_mode_name == "log":
             log_scores += float(weight) * np.log(np.clip(source_probabilities, min_probability, 1.0))
         elif score_mode_name == "probability":
@@ -405,6 +434,7 @@ def ensemble_probability_observations(
     output["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
     output["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in temperatures)
     output["ensemble_score_mode"] = score_mode_name
+    output["source_baseline_debiasing"] = bool(source_baseline_debiasing)
     output["baseline_window_start"] = "" if baseline_window is None else float(baseline_window[0])
     output["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
     output["baseline_group_columns"] = "|".join(column for column in baseline_group_columns if column in output.columns)
@@ -416,6 +446,7 @@ def ensemble_probability_observations(
             "weights": [float(weight) for weight in normalized_weights],
             "source_temperatures": [float(temperature) for temperature in temperatures],
             "score_mode": score_mode_name,
+            "source_baseline_debiasing": bool(source_baseline_debiasing),
             "source_emission_mode": source_emission_mode,
             "baseline_window": baseline_window,
             "baseline_group_columns": [column for column in baseline_group_columns if column in observations.columns],
@@ -514,6 +545,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--weight", action="append", type=float, dest="weights", help="Source decoder weight. May be repeated in the same order as --decoder.")
     parser.add_argument("--source-temperature", action="append", type=float, dest="source_temperatures", help="Per-source probability temperature before log-space averaging. Repeat in the same order as --decoder; values >1 soften, values <1 sharpen.")
     parser.add_argument("--score-mode", choices=ENSEMBLE_SCORE_MODE_CHOICES, default=DEFAULT_SCORE_MODE, help="Combine sources as weighted log probabilities, weighted probability means, confidence-weighted probabilities, or weighted rank/Borda scores before baseline debiasing.")
+    parser.add_argument("--source-baseline-debiasing", action="store_true", help="Remove each source decoder's baseline log-probability offset before source fusion.")
     parser.add_argument("--source-emission-mode", default="calibrated", help="Source emission_mode to use before ensembling. Defaults to calibrated.")
     parser.add_argument("--no-source-emission-filter", action="store_true", help="Use all source emission modes instead of filtering by --source-emission-mode.")
     parser.add_argument("--baseline-window", nargs=2, type=float, metavar=("START", "STOP"), default=DEFAULT_BASELINE_WINDOW)
@@ -550,6 +582,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             min_probability=args.min_probability,
             source_temperatures=source_temperatures,
             score_mode=args.score_mode,
+            source_baseline_debiasing=args.source_baseline_debiasing,
             output_decoder=args.output_decoder,
             output_emission_mode=args.output_emission_mode,
         )

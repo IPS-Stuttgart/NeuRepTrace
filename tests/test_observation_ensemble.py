@@ -266,6 +266,54 @@ def test_ensemble_confidence_probability_score_mode_downweights_uncertain_source
     assert confidence_weighted["ensemble_score_mode"].unique().tolist() == ["confidence_probability"]
 
 
+def test_ensemble_source_baseline_debiasing_removes_source_level_bias() -> None:
+    observations = pd.DataFrame(
+        [
+            {
+                "subject": "sub-01",
+                "fold": 0,
+                "decoder": decoder,
+                "emission_mode": "calibrated",
+                "time": time,
+                "sample_index": 0 if time < 0 else 1,
+                "sequence_id": 0 if time < 0 else 1,
+                "true_label": 1,
+                "true_class": "one",
+                "class_0": "zero",
+                "class_1": "one",
+                "prob_class_0": prob_0,
+                "prob_class_1": 1.0 - prob_0,
+            }
+            for decoder, baseline_prob_0, effect_prob_0 in (
+                ("biased_source", 0.93, 0.72),
+                ("signal_source", 0.37, 0.18),
+            )
+            for time, prob_0 in ((-0.20, baseline_prob_0), (0.10, effect_prob_0))
+        ]
+    )
+
+    plain = ensemble_probability_observations(
+        observations,
+        decoders=("biased_source", "signal_source"),
+        weights=(0.9, 0.38),
+        baseline_window=(-0.25, -0.15),
+        score_mode="probability",
+    )
+    source_debiased = ensemble_probability_observations(
+        observations,
+        decoders=("biased_source", "signal_source"),
+        weights=(0.9, 0.38),
+        baseline_window=(-0.25, -0.15),
+        score_mode="probability",
+        source_baseline_debiasing=True,
+    )
+
+    plain_effect = plain.loc[plain["time"] == 0.10, "prob_class_1"].iloc[0]
+    debiased_effect = source_debiased.loc[source_debiased["time"] == 0.10, "prob_class_1"].iloc[0]
+    assert debiased_effect > plain_effect + 0.05
+    assert source_debiased["source_baseline_debiasing"].unique().tolist() == [True]
+
+
 def test_ensemble_probability_observations_rejects_fractional_true_labels() -> None:
     observations = _source_observations()
     observations["true_label"] = observations["true_label"].astype(float)

@@ -144,6 +144,7 @@ def run_time_resolved_decode(
     ensemble_weights: Sequence[float] | None = None,
     ensemble_source_temperatures: Sequence[float] | None = None,
     ensemble_score_mode: str = DEFAULT_ENSEMBLE_SCORE_MODE,
+    ensemble_source_baseline_debiasing: bool = False,
     ensemble_baseline_window: tuple[float, float] | None = DEFAULT_ENSEMBLE_BASELINE_WINDOW,
     ensemble_baseline_group_columns: Sequence[str] = DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS,
     ensemble_min_probability: float = DEFAULT_MIN_PROBABILITY,
@@ -267,6 +268,7 @@ def run_time_resolved_decode(
             min_probability=ensemble_min_probability,
             source_temperatures=source_temperatures,
             score_mode=ensemble_score_mode_name,
+            source_baseline_debiasing=ensemble_source_baseline_debiasing,
             output_decoder=ENSEMBLE_DECODER,
             output_emission_mode=ENSEMBLE_OUTPUT_EMISSION_MODE,
         )
@@ -283,6 +285,7 @@ def run_time_resolved_decode(
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
     results["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in source_temperatures)
     results["ensemble_score_mode"] = ensemble_score_mode_name
+    results["ensemble_source_baseline_debiasing"] = bool(ensemble_source_baseline_debiasing)
     results["outer_test_groups"] = "|".join(_normalize_outer_test_groups(outer_test_groups))
     results["baseline_window_start"] = "" if baseline_window is None else float(baseline_window[0])
     results["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
@@ -433,6 +436,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=DEFAULT_ENSEMBLE_SCORE_MODE,
         help="Combine ensemble sources as weighted log probabilities, weighted probability means, confidence-weighted probabilities, or weighted rank/Borda scores before baseline debiasing.",
     )
+    parser.add_argument(
+        "--ensemble-source-baseline-debiasing",
+        action="store_true",
+        help="Remove each source decoder's baseline log-probability offset before logistic_svm_ensemble source fusion.",
+    )
     parser.add_argument("--ensemble-baseline-window", nargs=2, type=float, default=DEFAULT_ENSEMBLE_BASELINE_WINDOW, metavar=("START", "STOP"))
     parser.add_argument("--no-ensemble-baseline-debiasing", action="store_true")
     parser.add_argument(
@@ -482,6 +490,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         ensemble_weights=tuple(args.ensemble_weights) if args.ensemble_weights is not None else None,
         ensemble_source_temperatures=tuple(args.ensemble_source_temperatures) if args.ensemble_source_temperatures is not None else None,
         ensemble_score_mode=args.ensemble_score_mode,
+        ensemble_source_baseline_debiasing=args.ensemble_source_baseline_debiasing,
         ensemble_baseline_window=None if args.no_ensemble_baseline_debiasing else tuple(args.ensemble_baseline_window),
         ensemble_baseline_group_columns=tuple(args.ensemble_baseline_group_columns or DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS),
         ensemble_min_probability=args.ensemble_min_probability,
