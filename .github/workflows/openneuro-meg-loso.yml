@@ -324,8 +324,44 @@ jobs:
           print(f"Artifact name: {artifact_name}")
           PY
 
+      - name: Check selected staged epochs
+        id: staged_check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          from pathlib import Path
+
+          from neureptrace.openneuro_meg import DATASET_SPECS, parse_subjects, subject_label
+
+          dataset = os.environ["DATASET"]
+          runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "")
+          staged_root = Path(os.environ["NEUREPTRACE_OPENNEURO_STAGED_DIR"])
+          spec = DATASET_SPECS[dataset]
+          expected = [
+              staged_root / dataset / f"{subject_label(spec, subject)}_{dataset}_{spec.name}_epo.fif"
+              for subject in parse_subjects(spec, os.environ["OPENNEURO_SUBJECTS"])
+          ]
+          missing = [path for path in expected if not path.is_file() or path.stat().st_size <= 0]
+          ready = runner_environment == "github-hosted" and not missing
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"ready={str(ready).lower()}\n")
+              handle.write(f"missing_count={len(missing)}\n")
+          if ready:
+              print(f"Found all {len(expected)} staged Epochs files; raw-file check/download can be skipped.")
+          else:
+              print(f"Staged Epochs cache is incomplete or not reusable; missing {len(missing)} of {len(expected)} file(s).")
+              for path in missing[:20]:
+                  print(path)
+          PY
+
       - name: Check selected raw files
         id: raw_check
+        if: steps.staged_check.outputs.ready != 'true'
         shell: bash
         run: |
           set +e
@@ -345,7 +381,7 @@ jobs:
           exit 0
 
       - name: Download selected OpenNeuro files
-        if: steps.raw_check.outputs.ready != 'true' && env.NO_DOWNLOAD != 'true'
+        if: steps.staged_check.outputs.ready != 'true' && steps.raw_check.outputs.ready != 'true' && env.NO_DOWNLOAD != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -373,6 +409,7 @@ jobs:
           done < "$OPENNEURO_OUTPUT_DIR.includes.txt"
 
       - name: Re-check selected raw files
+        if: steps.staged_check.outputs.ready != 'true'
         shell: bash
         run: |
           set +e
