@@ -277,6 +277,8 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
                     ensemble_source_temperatures,
                     name="decoding.ensemble_source_temperatures",
                 )
+        if "ensemble_score_mode" in decoding:
+            kwargs["ensemble_score_mode"] = str(decoding["ensemble_score_mode"])
     return kwargs
 
 

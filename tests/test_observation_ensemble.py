@@ -166,6 +166,52 @@ def test_ensemble_source_temperature_can_soften_overconfident_source() -> None:
     assert softened["ensemble_source_temperatures"].unique().tolist() == ["10|1"]
 
 
+def test_ensemble_probability_score_mode_can_rescue_geometric_overconfidence() -> None:
+    observations = pd.DataFrame(
+        [
+            {
+                "subject": "sub-01",
+                "fold": 0,
+                "decoder": decoder,
+                "emission_mode": "calibrated",
+                "time": 0.1,
+                "sample_index": 0,
+                "sequence_id": 0,
+                "true_label": 1,
+                "true_class": "one",
+                "class_0": "zero",
+                "class_1": "one",
+                "prob_class_0": prob_0,
+                "prob_class_1": prob_1,
+            }
+            for decoder, prob_0, prob_1 in (
+                ("overconfident_source", 0.99, 0.01),
+                ("better_source_a", 0.20, 0.80),
+                ("better_source_b", 0.20, 0.80),
+            )
+        ]
+    )
+
+    geometric = ensemble_probability_observations(
+        observations,
+        decoders=("overconfident_source", "better_source_a", "better_source_b"),
+        weights=(1.0, 1.0, 1.0),
+        baseline_window=None,
+    )
+    probability_mean = ensemble_probability_observations(
+        observations,
+        decoders=("overconfident_source", "better_source_a", "better_source_b"),
+        weights=(1.0, 1.0, 1.0),
+        baseline_window=None,
+        score_mode="probability",
+    )
+
+    assert geometric["predicted_label"].tolist() == [0]
+    assert geometric["ensemble_score_mode"].unique().tolist() == ["log"]
+    assert probability_mean["predicted_label"].tolist() == [1]
+    assert probability_mean["ensemble_score_mode"].unique().tolist() == ["probability"]
+
+
 def test_ensemble_probability_observations_rejects_fractional_true_labels() -> None:
     observations = _source_observations()
     observations["true_label"] = observations["true_label"].astype(float)

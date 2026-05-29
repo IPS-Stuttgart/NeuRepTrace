@@ -97,6 +97,14 @@ on:
         description: "Minimum probability floor for logistic_svm_ensemble log-space averaging"
         required: false
         default: "1e-12"
+      ensemble_score_mode:
+        description: "How logistic_svm_ensemble combines source probabilities before baseline debiasing"
+        required: true
+        type: choice
+        options:
+          - log
+          - probability
+        default: log
       time_decode_backend:
         description: "Same-time decoder backend for non-ensemble decoders"
         required: true
@@ -202,6 +210,7 @@ jobs:
       ENSEMBLE_SOURCE_DECODERS_INPUT: ${{ inputs.ensemble_source_decoders }}
       ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
       ENSEMBLE_MIN_PROBABILITY_INPUT: ${{ inputs.ensemble_min_probability }}
+      ENSEMBLE_SCORE_MODE_INPUT: ${{ inputs.ensemble_score_mode }}
       TIME_DECODE_BACKEND: ${{ inputs.time_decode_backend }}
       CLASS_PRIOR_CORRECTION: ${{ inputs.class_prior_correction }}
       LABEL_SHUFFLE_CONTROL: ${{ inputs.label_shuffle_control }}
@@ -369,6 +378,7 @@ jobs:
               ),
               "ensemble_baseline_window": os.environ.get("ENSEMBLE_BASELINE_WINDOW_INPUT", ""),
               "ensemble_min_probability": os.environ.get("ENSEMBLE_MIN_PROBABILITY_INPUT", ""),
+              "ensemble_score_mode": os.environ.get("ENSEMBLE_SCORE_MODE_INPUT", ""),
               "time_decode_backend": os.environ.get("TIME_DECODE_BACKEND", ""),
               "class_prior_correction": os.environ.get("CLASS_PRIOR_CORRECTION", ""),
               "label_shuffle_control": os.environ.get("LABEL_SHUFFLE_CONTROL", ""),
@@ -583,6 +593,9 @@ jobs:
           fi
           if [[ -n "$ENSEMBLE_MIN_PROBABILITY_INPUT" ]]; then
             args+=(--set "decoding.ensemble_min_probability=$ENSEMBLE_MIN_PROBABILITY_INPUT")
+          fi
+          if [[ -n "$ENSEMBLE_SCORE_MODE_INPUT" ]]; then
+            args+=(--set "decoding.ensemble_score_mode=$ENSEMBLE_SCORE_MODE_INPUT")
           fi
           python -m neureptrace.decode_from_config "${args[@]}"
 

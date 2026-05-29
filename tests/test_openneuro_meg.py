@@ -95,6 +95,8 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "temporal_smoothing" in workflow
     assert "ensemble_source_temperatures" in workflow
     assert "decoding.ensemble_source_temperatures" in workflow
+    assert "ensemble_score_mode" in workflow
+    assert "decoding.ensemble_score_mode" in workflow
     assert "python -m neureptrace.temporal_smoothing" in workflow
     assert "decode/temporal_smoothing/diagnostics" in workflow
     assert "resolve-matrix" in workflow
