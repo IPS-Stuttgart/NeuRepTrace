@@ -52,6 +52,28 @@ def test_decode_from_config_passes_ensemble_controls_for_ensemble_decoder(tmp_pa
     assert kwargs["ensemble_min_probability"] == 1e-9
 
 
+def test_decode_from_config_accepts_workflow_style_unquoted_string_lists(tmp_path):
+    kwargs = _decode_kwargs(
+        {
+            "dataset": {"name": "demo"},
+            "decoding": {
+                "label_column": "condition",
+                "classifier": "logistic-svm-ensemble",
+                "ensemble_source_decoders": "[multinomial-logistic-weighted,linear_svm,shrinkage_lda]",
+            },
+            "preprocessing": {},
+            "outputs": {"summary_csv": "summary.csv"},
+        },
+        config_dir=tmp_path,
+    )
+
+    assert kwargs["ensemble_source_decoders"] == (
+        "multinomial-logistic-weighted",
+        "linear_svm",
+        "shrinkage_lda",
+    )
+
+
 def test_decode_from_config_ignores_ensemble_controls_for_regular_decoder(tmp_path):
     kwargs = _decode_kwargs(
         {
