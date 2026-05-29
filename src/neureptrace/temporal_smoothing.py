@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 
 from neureptrace.metrics import brier_score_multiclass, expected_calibration_error
 from neureptrace.observations import stable_hash
@@ -107,6 +107,14 @@ def _numeric_labels(frame: pd.DataFrame, n_classes: int) -> np.ndarray:
     return labels_array
 
 
+def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
+    if len(labels) == 0:
+        return float("nan")
+    effective_k = min(int(k), probabilities.shape[1])
+    top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
+    return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
+
+
 def _with_posterior_columns(
     sequence_frame: pd.DataFrame,
     posterior: np.ndarray,
@@ -192,6 +200,9 @@ def metrics_from_probability_observations(observations: pd.DataFrame, *, ece_bin
         row.update(
             {
                 "accuracy": accuracy_score(group_labels, predictions),
+                "balanced_accuracy": balanced_accuracy_score(group_labels, predictions),
+                "top2_accuracy": _top_k_accuracy(probabilities, group_labels, k=2),
+                "top3_accuracy": _top_k_accuracy(probabilities, group_labels, k=3),
                 "log_loss": log_loss(group_labels, probabilities, labels=np.arange(n_classes)),
                 "brier": brier_score_multiclass(probabilities, group_labels),
                 "ece": expected_calibration_error(probabilities, group_labels, n_bins=ece_bins),
