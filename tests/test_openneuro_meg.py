@@ -79,6 +79,12 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "run-name: OpenNeuro MEG LOSO" in workflow
     assert "default: github-hosted" in workflow
     assert "GitHub-hosted starts immediately" in workflow
+    assert "Cache OpenNeuro raw files on GitHub-hosted runners" in workflow
+    assert "Cache staged OpenNeuro epochs on GitHub-hosted runners" in workflow
+    assert "openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}" in workflow
+    assert "stage_overwrite" in workflow
+    assert 'if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]]; then' in workflow
+    assert "stage_args+=(--overwrite)" in workflow
     assert "OPENNEURO_ARTIFACT_SUFFIX" in workflow
     assert "OPENNEURO_OUTPUT_SUFFIX" in workflow
     assert "run_manifest.json" in workflow
