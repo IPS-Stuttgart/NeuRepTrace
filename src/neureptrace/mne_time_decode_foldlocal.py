@@ -149,7 +149,9 @@ def run_time_resolved_decode(
     calibration_bins: int = 10,
     observation_out_path: Path | None = None,
     subject: str | None = None,
+    decode_window: tuple[float, float] | None = None,
     temporal_train_window: tuple[float, float] | None = None,
+    temporal_train_mode: str = "window_ensemble",
     time_decode_backend: str = "sklearn",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
@@ -196,7 +198,9 @@ def run_time_resolved_decode(
         pca_components_value = None
     tuning_scoring = normalize_tuning_scoring(tuning_scoring)
     tuning_c_grid_values = parse_c_grid(tuning_c_grid)
+    normalized_decode_window = _base._normalize_decode_window(decode_window)
     normalized_temporal_train_window = _base._normalize_temporal_train_window(temporal_train_window)
+    temporal_train_mode_name = _base._normalize_temporal_train_mode(temporal_train_mode)
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
@@ -220,7 +224,12 @@ def run_time_resolved_decode(
     session_values = metadata["session"].to_numpy() if "session" in metadata.columns else groups
     splitter_name = "stratified-group-kfold" if groups is not None else "stratified-kfold"
     split_id = f"{splitter_name}-{n_splits}"
-    temporal_mode = "same_time" if normalized_temporal_train_window is None else "train_window_ensemble"
+    if normalized_temporal_train_window is None:
+        temporal_mode = "same_time"
+    elif temporal_train_mode_name == "pooled":
+        temporal_mode = "train_window_pooled"
+    else:
+        temporal_mode = "train_window_ensemble"
     preprocessing_hash = stable_hash(
         {
             "picks": picks,
@@ -233,7 +242,9 @@ def run_time_resolved_decode(
             "normalization": normalization_name,
             "normalization_scope": "train_fold",
             "baseline_window": baseline_window_value,
+            "decode_window": normalized_decode_window,
             "temporal_train_window": normalized_temporal_train_window,
+            "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
         }
     )
     default_model_hash = _base._model_hash(
@@ -259,8 +270,9 @@ def run_time_resolved_decode(
     rows: list[dict] = []
     calibration_rows: list[dict] = []
     observation_rows: list[dict] = []
-    windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
-    selected_train_windows = _base._select_temporal_train_windows(windows, normalized_temporal_train_window)
+    all_windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
+    windows = _base._select_decode_windows(all_windows, normalized_decode_window)
+    selected_train_windows = _base._select_temporal_train_windows(all_windows, normalized_temporal_train_window)
     splits = list(make_cross_validator(labels, groups, n_splits))
 
     if selected_train_windows is None:
@@ -377,9 +389,10 @@ def run_time_resolved_decode(
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
-    else:
+    elif temporal_train_mode_name == "pooled":
         train_time, train_window_start, train_window_stop = _base._train_window_summary(epochs, selected_train_windows)
         train_window_centers = [window[2] for window in selected_train_windows]
+        model_windows = list(dict.fromkeys([*windows, *selected_train_windows]))
         for fold, (train_idx, test_idx) in enumerate(splits):
             fold_data = _normalize_epoch_data_for_fold(
                 raw_data,
@@ -388,7 +401,131 @@ def run_time_resolved_decode(
                 baseline_window=baseline_window_value,
                 train_idx=train_idx,
             )
-            feature_cache = {time_window: _base._features_for_window(fold_data, time_window) for time_window in windows}
+            feature_cache = {time_window: _base._features_for_window(fold_data, time_window) for time_window in model_windows}
+            test_labels = labels[test_idx]
+            train_labels = _base._fold_training_labels(
+                labels,
+                train_idx,
+                label_shuffle_control=label_shuffle_control,
+                label_shuffle_seed=label_shuffle_seed,
+                context=(split_id, fold, "foldlocal_pooled", *train_window_centers),
+            )
+            fold_labels = labels.copy()
+            fold_labels[train_idx] = train_labels
+            pooled_train_features, pooled_train_labels, pooled_train_groups = _base._pooled_temporal_training_set(
+                feature_cache,
+                selected_train_windows,
+                train_idx,
+                fold_labels,
+                groups,
+            )
+            for current_emission_mode in emission_modes:
+                tuning_cv = (
+                    make_tuning_cross_validator(pooled_train_labels, pooled_train_groups, tuning_cv_splits)
+                    if tune_hyperparameters
+                    else 3
+                )
+                model = make_decoder(
+                    decoder_name,
+                    max_iter=max_iter,
+                    emission_mode=current_emission_mode,
+                    feature_preprocessor=feature_preprocessor_name,
+                    pca_components=pca_components_value,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv=tuning_cv,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                )
+                model.fit(pooled_train_features, pooled_train_labels)
+                tuning_metadata = _base._tuning_metadata(
+                    model,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv_splits=tuning_cv_splits,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                )
+                current_model_hash = _base._model_hash(
+                    decoder_name=decoder_name,
+                    emission_mode=current_emission_mode,
+                    max_iter=max_iter,
+                    feature_preprocessor=feature_preprocessor_name,
+                    pca_components=pca_components_value,
+                    normalization=normalization_name,
+                    baseline_window=baseline_window_value,
+                    temporal_mode=temporal_mode,
+                    temporal_train_window=normalized_temporal_train_window,
+                    train_window_centers=train_window_centers,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv_splits=tuning_cv_splits,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                    tuning_metadata=tuning_metadata,
+                    label_shuffle_control=label_shuffle_control,
+                    label_shuffle_seed=label_shuffle_seed,
+                )
+                for test_window in windows:
+                    probabilities = _base._align_probability_columns(
+                        predict_emission_probabilities(
+                            model,
+                            feature_cache[test_window][test_idx],
+                            emission_mode=current_emission_mode,
+                        ),
+                        model=model,
+                        classes=classes,
+                    )
+                    _base._append_decoded_outputs(
+                        rows=rows,
+                        calibration_rows=calibration_rows,
+                        observation_rows=observation_rows,
+                        probabilities=probabilities,
+                        test_labels=test_labels,
+                        test_idx=test_idx,
+                        original_indices=original_indices,
+                        session_values=session_values,
+                        groups=groups,
+                        group_column=group_column,
+                        classes=classes,
+                        class_names=encoder.classes_,
+                        fold=fold,
+                        n_train=len(pooled_train_labels),
+                        decoder_name=decoder_name,
+                        emission_mode=current_emission_mode,
+                        feature_preprocessor_name=feature_preprocessor_name,
+                        pca_components_value=pca_components_value,
+                        normalization_name=normalization_name,
+                        baseline_window=baseline_window_value,
+                        time_window=test_window,
+                        epochs=epochs,
+                        split_id=split_id,
+                        preprocessing_hash=preprocessing_hash,
+                        model_hash=current_model_hash,
+                        temporal_mode=temporal_mode,
+                        temporal_train_window=normalized_temporal_train_window,
+                        train_time=train_time,
+                        train_window_start=train_window_start,
+                        train_window_stop=train_window_stop,
+                        n_train_windows=len(selected_train_windows),
+                        calibration_out_path=calibration_out_path,
+                        calibration_bins=calibration_bins,
+                        observation_out_path=observation_out_path,
+                        subject=subject,
+                        tuning_metadata=tuning_metadata,
+                        label_shuffle_control=label_shuffle_control,
+                        label_shuffle_seed=label_shuffle_seed,
+                    )
+    else:
+        train_time, train_window_start, train_window_stop = _base._train_window_summary(epochs, selected_train_windows)
+        train_window_centers = [window[2] for window in selected_train_windows]
+        model_windows = list(dict.fromkeys([*windows, *selected_train_windows]))
+        for fold, (train_idx, test_idx) in enumerate(splits):
+            fold_data = _normalize_epoch_data_for_fold(
+                raw_data,
+                epochs.times,
+                normalization_name,
+                baseline_window=baseline_window_value,
+                train_idx=train_idx,
+            )
+            feature_cache = {time_window: _base._features_for_window(fold_data, time_window) for time_window in model_windows}
             test_labels = labels[test_idx]
             train_labels = _base._fold_training_labels(
                 labels,

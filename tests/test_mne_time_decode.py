@@ -211,6 +211,38 @@ def test_run_time_resolved_decode_can_restrict_decode_window(tmp_path: Path, mon
     assert observations["time"].round(6).unique().tolist() == [0.025]
 
 
+def test_foldlocal_time_resolved_decode_can_restrict_decode_window(tmp_path: Path, monkeypatch):
+    from neureptrace.mne_time_decode_foldlocal import run_time_resolved_decode as run_foldlocal_decode
+
+    rng = np.random.default_rng(31)
+    labels = np.array(["animate", "inanimate"] * 4)
+    data = rng.normal(size=(8, 1, 6))
+    data[labels == "animate", 0, 2:4] += 0.5
+    metadata = pd.DataFrame({"condition": labels, "session": ["a", "a", "b", "b", "c", "c", "d", "d"]})
+    epochs = FakeEpochs(data, np.array([0.00, 0.01, 0.02, 0.03, 0.04, 0.05]), metadata)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    out = tmp_path / "foldlocal_decode_window.csv"
+    observations_out = tmp_path / "foldlocal_observations_decode_window.csv"
+
+    results = run_foldlocal_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        group_column="session",
+        out_path=out,
+        n_splits=2,
+        window_ms=20,
+        step_ms=20,
+        emission_mode="uncalibrated",
+        observation_out_path=observations_out,
+        decode_window=(0.02, 0.03),
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert results["time"].round(6).unique().tolist() == [0.025]
+    assert observations["time"].round(6).unique().tolist() == [0.025]
+
+
 def test_run_time_resolved_decode_label_shuffle_keeps_test_labels_and_marks_outputs(tmp_path: Path, monkeypatch):
     RecordingDecoder.fit_labels = []
     labels = np.array(["animate", "animate", "inanimate", "inanimate", "animate", "inanimate"])
