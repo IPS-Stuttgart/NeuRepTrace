@@ -235,16 +235,22 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
     if temporal_train_mode is not None:
         kwargs["temporal_train_mode"] = temporal_train_mode
     if normalize_time_decode_decoder_name(str(kwargs["decoder"])) == ENSEMBLE_DECODER:
-        if "ensemble_weights" in decoding or "ensemble_weight" in decoding:
-            ensemble_weights = decoding.get("ensemble_weights", decoding.get("ensemble_weight"))
-            if ensemble_weights is not None and ensemble_weights != "":
-                kwargs["ensemble_weights"] = _float_tuple(ensemble_weights, name="decoding.ensemble_weights", length=2)
+        parsed_ensemble_source_decoders: tuple[str, ...] | None = None
         if "ensemble_source_decoders" in decoding or "ensemble_source_decoder" in decoding:
             ensemble_source_decoders = decoding.get("ensemble_source_decoders", decoding.get("ensemble_source_decoder"))
             if ensemble_source_decoders is not None and ensemble_source_decoders != "":
-                kwargs["ensemble_source_decoders"] = _string_tuple(
+                parsed_ensemble_source_decoders = _string_tuple(
                     ensemble_source_decoders,
                     name="decoding.ensemble_source_decoders",
+                )
+                kwargs["ensemble_source_decoders"] = parsed_ensemble_source_decoders
+        if "ensemble_weights" in decoding or "ensemble_weight" in decoding:
+            ensemble_weights = decoding.get("ensemble_weights", decoding.get("ensemble_weight"))
+            if ensemble_weights is not None and ensemble_weights != "":
+                kwargs["ensemble_weights"] = _float_tuple(
+                    ensemble_weights,
+                    name="decoding.ensemble_weights",
+                    length=len(parsed_ensemble_source_decoders) if parsed_ensemble_source_decoders is not None else None,
                 )
         if "ensemble_baseline_window" in decoding:
             kwargs["ensemble_baseline_window"] = _float_tuple(
