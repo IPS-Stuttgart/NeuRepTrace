@@ -95,14 +95,21 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "temporal_smoothing" in workflow
     assert "python -m neureptrace.temporal_smoothing" in workflow
     assert "decode/temporal_smoothing/diagnostics" in workflow
+    assert "resolve-matrix" in workflow
+    assert "workflow.outer_test_group_shards_json" in workflow
+    assert "outer_test_groups: ${{ fromJSON(needs.resolve-matrix.outputs.outer_test_group_shards_json) }}" in workflow
+    assert "OUTER_TEST_GROUPS_SHARD" in workflow
     assert "OPENNEURO_CONFIG" in workflow
     assert "artifact_name" in workflow
+    assert "outer_test_groups_shard" in workflow
     assert "outer_test_groups" in workflow
     assert "decoding.outer_test_groups=[sub-01]" in workflow
     assert "decoding.outer_test_groups=" in workflow
+    assert 'args+=(--set "decoding.outer_test_groups=[$OUTER_TEST_GROUPS_SHARD]")' in workflow
     assert "python -m neureptrace.openneuro_decode_diagnostics" in workflow
     assert "openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}" in workflow
-    assert "outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ env.OPENNEURO_OUTPUT_SUFFIX }}/**" in workflow
+    assert "format('-shard-{0}', matrix.outer_test_groups)" in workflow
+    assert "outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}*/**" in workflow
     for dataset_id, config_name in OPENNEURO_DECODE_CONFIGS.items():
         assert f"- {dataset_id}" in workflow
         assert f'"{dataset_id}": "{config_name}"' in workflow
