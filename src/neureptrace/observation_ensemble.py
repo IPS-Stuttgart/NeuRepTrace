@@ -20,6 +20,8 @@ DEFAULT_WEIGHTS = (0.5, 0.5)
 DEFAULT_ENSEMBLE_DECODER = "baseline_debiased_logistic_linear_svm_ensemble"
 DEFAULT_ENSEMBLE_EMISSION_MODE = "baseline_debiased_ensemble"
 DEFAULT_MIN_PROBABILITY = 1e-12
+DEFAULT_SCORE_MODE = "log"
+ENSEMBLE_SCORE_MODE_CHOICES = ("log", "probability")
 
 _REQUIRED_VALUE_COLUMNS = ("time", "true_label")
 _BASE_ALIGNMENT_COLUMNS = (
@@ -62,6 +64,17 @@ def _source_temperatures(temperatures: Sequence[float] | None, n_decoders: int) 
     if any(not np.isfinite(temperature) or temperature <= 0.0 for temperature in values):
         raise ValueError("Source temperatures must be finite positive values.")
     return values
+
+
+def normalize_ensemble_score_mode(score_mode: str) -> str:
+    """Normalize how source probabilities are combined before baseline debiasing."""
+
+    normalized = str(score_mode).strip().lower().replace("-", "_")
+    if normalized in {"log", "log_probability", "log_prob", "geometric", "geometric_mean"}:
+        return "log"
+    if normalized in {"probability", "probability_mean", "probability_average", "arithmetic", "arithmetic_mean", "mean"}:
+        return "probability"
+    raise ValueError(f"Unknown ensemble score mode '{score_mode}'. Available modes: {', '.join(ENSEMBLE_SCORE_MODE_CHOICES)}.")
 
 
 def _class_suffixes(prob_columns: Sequence[str]) -> tuple[str, ...]:
@@ -260,6 +273,7 @@ def ensemble_probability_observations(
     baseline_group_columns: Sequence[str] = DEFAULT_BASELINE_GROUP_COLUMNS,
     min_probability: float = DEFAULT_MIN_PROBABILITY,
     source_temperatures: Sequence[float] | None = None,
+    score_mode: str = DEFAULT_SCORE_MODE,
     output_decoder: str = DEFAULT_ENSEMBLE_DECODER,
     output_emission_mode: str = DEFAULT_ENSEMBLE_EMISSION_MODE,
 ) -> pd.DataFrame:
@@ -268,6 +282,7 @@ def ensemble_probability_observations(
         raise ValueError("At least two source decoders are required for an ensemble.")
     if min_probability <= 0.0 or min_probability >= 1.0:
         raise ValueError("min_probability must lie in (0, 1).")
+    score_mode_name = normalize_ensemble_score_mode(score_mode)
 
     prob_columns = probability_columns(observations)
     if not prob_columns:
@@ -279,13 +294,20 @@ def ensemble_probability_observations(
     base, probability_matrices = _align_probability_matrices(sources, prob_columns=prob_columns, alignment_columns=alignment_columns)
 
     log_scores = np.zeros_like(probability_matrices[0], dtype=float)
+    probability_scores = np.zeros_like(probability_matrices[0], dtype=float)
     for weight, temperature, probabilities in zip(normalized_weights, temperatures, probability_matrices):
         source_probabilities = _temperature_scaled_probabilities(
             probabilities,
             temperature=temperature,
             min_probability=min_probability,
         )
-        log_scores += float(weight) * np.log(np.clip(source_probabilities, min_probability, 1.0))
+        if score_mode_name == "log":
+            log_scores += float(weight) * np.log(np.clip(source_probabilities, min_probability, 1.0))
+        else:
+            probability_scores += float(weight) * source_probabilities
+
+    if score_mode_name == "probability":
+        log_scores = np.log(np.clip(probability_scores, min_probability, 1.0))
 
     offsets, n_baseline = _baseline_offsets(
         base,
@@ -333,6 +355,7 @@ def ensemble_probability_observations(
     output["source_emission_mode"] = "" if source_emission_mode is None else source_emission_mode
     output["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
     output["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in temperatures)
+    output["ensemble_score_mode"] = score_mode_name
     output["baseline_window_start"] = "" if baseline_window is None else float(baseline_window[0])
     output["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
     output["baseline_group_columns"] = "|".join(column for column in baseline_group_columns if column in output.columns)
@@ -343,6 +366,7 @@ def ensemble_probability_observations(
             "decoders": list(decoders),
             "weights": [float(weight) for weight in normalized_weights],
             "source_temperatures": [float(temperature) for temperature in temperatures],
+            "score_mode": score_mode_name,
             "source_emission_mode": source_emission_mode,
             "baseline_window": baseline_window,
             "baseline_group_columns": [column for column in baseline_group_columns if column in observations.columns],
@@ -440,6 +464,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--decoder", action="append", dest="decoders", help="Source decoder to ensemble. May be repeated; defaults to logistic and linear_svm.")
     parser.add_argument("--weight", action="append", type=float, dest="weights", help="Source decoder weight. May be repeated in the same order as --decoder.")
     parser.add_argument("--source-temperature", action="append", type=float, dest="source_temperatures", help="Per-source probability temperature before log-space averaging. Repeat in the same order as --decoder; values >1 soften, values <1 sharpen.")
+    parser.add_argument("--score-mode", choices=ENSEMBLE_SCORE_MODE_CHOICES, default=DEFAULT_SCORE_MODE, help="Combine sources as weighted log probabilities or as a weighted probability mean before baseline debiasing.")
     parser.add_argument("--source-emission-mode", default="calibrated", help="Source emission_mode to use before ensembling. Defaults to calibrated.")
     parser.add_argument("--no-source-emission-filter", action="store_true", help="Use all source emission modes instead of filtering by --source-emission-mode.")
     parser.add_argument("--baseline-window", nargs=2, type=float, metavar=("START", "STOP"), default=DEFAULT_BASELINE_WINDOW)
@@ -475,6 +500,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             baseline_group_columns=baseline_group_columns,
             min_probability=args.min_probability,
             source_temperatures=source_temperatures,
+            score_mode=args.score_mode,
             output_decoder=args.output_decoder,
             output_emission_mode=args.output_emission_mode,
         )

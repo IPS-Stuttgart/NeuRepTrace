@@ -124,6 +124,7 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
                 "ensemble_weights": "0.5,0.3,0.2",
                 "ensemble_source_decoders": "multinomial-logistic-weighted,linear_svm,shrinkage_lda",
                 "ensemble_source_temperatures": "[1.25,1.0,0.8]",
+                "ensemble_score_mode": "probability",
             }
         ),
         encoding="utf-8",
@@ -172,6 +173,7 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
     assert quality.loc[0, "ensemble_weights"] == "0.5,0.3,0.2"
     assert quality.loc[0, "ensemble_source_decoders"] == "multinomial-logistic-weighted,linear_svm,shrinkage_lda"
     assert quality.loc[0, "ensemble_source_temperatures"] == "[1.25,1.0,0.8]"
+    assert quality.loc[0, "ensemble_score_mode"] == "probability"
     assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(0.34)
     assert quality.loc[0, "fixed_balanced_minus_chance_pct"] == pytest.approx(0.67)
     assert quality.loc[0, "fixed_top2_minus_chance_pct"] == pytest.approx((0.8 - 2 / 3) * 100.0)
@@ -203,6 +205,7 @@ def test_write_decode_diagnostics_recovers_ensemble_provenance_from_summary(tmp_
             "source_decoders": ["multinomial-logistic-weighted|linear_svm|shrinkage_lda"],
             "ensemble_weights": ["0.5|0.3|0.2"],
             "ensemble_source_temperatures": ["1.25|1|0.8"],
+            "ensemble_score_mode": ["probability"],
             "ensemble_baseline_window_start": [-0.2],
             "ensemble_baseline_window_stop": [0.0],
         }
@@ -223,6 +226,7 @@ def test_write_decode_diagnostics_recovers_ensemble_provenance_from_summary(tmp_
     assert quality.loc[0, "ensemble_source_decoders"] == "multinomial-logistic-weighted|linear_svm|shrinkage_lda"
     assert quality.loc[0, "ensemble_weights"] == "0.5|0.3|0.2"
     assert quality.loc[0, "ensemble_source_temperatures"] == "1.25|1|0.8"
+    assert quality.loc[0, "ensemble_score_mode"] == "probability"
     assert quality.loc[0, "ensemble_baseline_window_start"] == pytest.approx(-0.2)
     assert quality.loc[0, "ensemble_baseline_window_stop"] == pytest.approx(0.0)
 
