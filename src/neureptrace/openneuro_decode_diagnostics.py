@@ -16,6 +16,13 @@ METRIC_COLUMNS = ("balanced_accuracy", "accuracy", "top2_accuracy", "top3_accura
 MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 NULL_CHANCE_TOLERANCE = 0.03
 POSITIVE_CHANCE_MARGIN = 0.05
+SUMMARY_PROVENANCE_COLUMNS = (
+    "source_decoders",
+    "ensemble_weights",
+    "ensemble_source_temperatures",
+    "ensemble_baseline_window_start",
+    "ensemble_baseline_window_stop",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -115,6 +122,38 @@ def _csv_shape(path: Path) -> dict[str, Any]:
         return {"exists": False}
     frame = pd.read_csv(path)
     return {"exists": True, "rows": int(len(frame)), "columns": list(frame.columns)}
+
+
+def _compact_unique_value(values: pd.Series) -> str:
+    unique_values = tuple(
+        str(value).strip()
+        for value in values.dropna().astype(str)
+        if str(value).strip()
+    )
+    return "|".join(dict.fromkeys(unique_values))
+
+
+def _summary_provenance(summary_path: Path) -> dict[str, str]:
+    if not summary_path.is_file() or summary_path.stat().st_size <= 0:
+        return {}
+    frame = pd.read_csv(summary_path)
+    return {
+        column: _compact_unique_value(frame[column])
+        for column in SUMMARY_PROVENANCE_COLUMNS
+        if column in frame.columns
+    }
+
+
+def _provenance_value(
+    manifest: dict[str, Any],
+    summary_provenance: dict[str, str],
+    manifest_key: str,
+    summary_key: str | None = None,
+) -> Any:
+    value = manifest.get(manifest_key, "")
+    if value not in {"", None}:
+        return value
+    return summary_provenance.get(summary_key or manifest_key, "")
 
 
 def _concat_existing_csvs(
@@ -243,6 +282,7 @@ def workflow_quality_summary(
     output_dir = Path(output_dir)
     manifest = _read_json(output_dir / "run_manifest.json")
     raw_quality_path = output_dir / "decode" / "diagnostics" / "quality_summary.csv"
+    raw_summary_path = output_dir / "decode" / "time_decode_summary.csv"
     best_by_metric = best_rows.set_index("selection_metric") if not best_rows.empty else pd.DataFrame()
     stage_summary = diagnostics.get("stage_summary", {})
     rows = [
@@ -251,6 +291,7 @@ def workflow_quality_summary(
             stage_summary=stage_summary,
             decode_summary=diagnostics.get("decode_summary", {}),
             quality_path=raw_quality_path,
+            summary_provenance=_summary_provenance(raw_summary_path),
             best_by_metric=best_by_metric,
             result_variant="raw",
         )
@@ -270,6 +311,7 @@ def workflow_quality_summary(
                 stage_summary=stage_summary,
                 decode_summary=smoothed_summary,
                 quality_path=smoothed_quality_path,
+                summary_provenance=_summary_provenance(smoothed_summary_path),
                 best_by_metric=smoothed_best,
                 result_variant="temporal_smoothing",
             )
@@ -284,6 +326,7 @@ def _workflow_quality_row(
     stage_summary: dict[str, Any],
     decode_summary: dict[str, Any],
     quality_path: Path,
+    summary_provenance: dict[str, str],
     best_by_metric: pd.DataFrame,
     result_variant: str,
 ) -> dict[str, Any]:
@@ -326,10 +369,17 @@ def _workflow_quality_row(
         "label_shuffle_seed": manifest.get("label_shuffle_seed", ""),
         "time_decode_backend": manifest.get("time_decode_backend", ""),
         "decoder_override": manifest.get("decoder_override", ""),
-        "ensemble_weights": manifest.get("ensemble_weights", ""),
-        "ensemble_source_decoders": manifest.get("ensemble_source_decoders", ""),
-        "ensemble_source_temperatures": manifest.get("ensemble_source_temperatures", ""),
+        "ensemble_weights": _provenance_value(manifest, summary_provenance, "ensemble_weights"),
+        "ensemble_source_decoders": _provenance_value(
+            manifest,
+            summary_provenance,
+            "ensemble_source_decoders",
+            "source_decoders",
+        ),
+        "ensemble_source_temperatures": _provenance_value(manifest, summary_provenance, "ensemble_source_temperatures"),
         "ensemble_baseline_window": manifest.get("ensemble_baseline_window", ""),
+        "ensemble_baseline_window_start": summary_provenance.get("ensemble_baseline_window_start", ""),
+        "ensemble_baseline_window_stop": summary_provenance.get("ensemble_baseline_window_stop", ""),
         "ensemble_min_probability": manifest.get("ensemble_min_probability", ""),
         "temporal_smoothing": _as_bool(manifest.get("temporal_smoothing", "")),
         "temporal_smoothing_fit_window": manifest.get("temporal_smoothing_fit_window", ""),

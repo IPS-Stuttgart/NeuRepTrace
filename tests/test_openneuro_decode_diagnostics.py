@@ -180,6 +180,53 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
     assert quality.loc[0, "best_selection_value"] == pytest.approx(0.75)
 
 
+def test_write_decode_diagnostics_recovers_ensemble_provenance_from_summary(tmp_path: Path):
+    output_dir = tmp_path / "outputs" / "openneuro_ds006629_full"
+    decode_dir = output_dir / "decode"
+    diagnostics_dir = decode_dir / "diagnostics"
+    diagnostics_dir.mkdir(parents=True)
+    (output_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dataset": "ds006629",
+                "mode": "full",
+                "artifact_name": "openneuro-meg-ds006629-full",
+                "label_shuffle_control": "false",
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "time": [0.184],
+            "balanced_accuracy": [0.48],
+            "source_decoders": ["multinomial-logistic-weighted|linear_svm|shrinkage_lda"],
+            "ensemble_weights": ["0.5|0.3|0.2"],
+            "ensemble_source_temperatures": ["1.25|1|0.8"],
+            "ensemble_baseline_window_start": [-0.2],
+            "ensemble_baseline_window_stop": [0.0],
+        }
+    ).to_csv(decode_dir / "time_decode_summary.csv", index=False)
+    pd.DataFrame(
+        {
+            "n_classes": [3],
+            "fixed_time": [0.184],
+            "fixed_balanced_accuracy": [0.48],
+            "fixed_balanced_minus_chance": [0.48 - 1 / 3],
+            "subjects_fixed_above_chance": [12],
+        }
+    ).to_csv(diagnostics_dir / "quality_summary.csv", index=False)
+
+    write_decode_diagnostics(output_dir)
+
+    quality = pd.read_csv(output_dir / "workflow_quality_summary.csv")
+    assert quality.loc[0, "ensemble_source_decoders"] == "multinomial-logistic-weighted|linear_svm|shrinkage_lda"
+    assert quality.loc[0, "ensemble_weights"] == "0.5|0.3|0.2"
+    assert quality.loc[0, "ensemble_source_temperatures"] == "1.25|1|0.8"
+    assert quality.loc[0, "ensemble_baseline_window_start"] == pytest.approx(-0.2)
+    assert quality.loc[0, "ensemble_baseline_window_stop"] == pytest.approx(0.0)
+
+
 def test_write_decode_diagnostics_adds_temporal_smoothing_quality_row(tmp_path: Path):
     output_dir = tmp_path / "outputs" / "openneuro_ds006629_full"
     decode_dir = output_dir / "decode"
