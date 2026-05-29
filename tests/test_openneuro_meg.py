@@ -88,6 +88,9 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "decode/temporal_smoothing/diagnostics" in workflow
     assert "OPENNEURO_CONFIG" in workflow
     assert "artifact_name" in workflow
+    assert "outer_test_groups" in workflow
+    assert "decoding.outer_test_groups=[sub-01]" in workflow
+    assert "decoding.outer_test_groups=" in workflow
     assert "python -m neureptrace.openneuro_decode_diagnostics" in workflow
     assert "openneuro-meg-${{ inputs.dataset }}-${{ inputs.mode }}${{ env.OPENNEURO_ARTIFACT_SUFFIX }}" in workflow
     assert "outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ env.OPENNEURO_OUTPUT_SUFFIX }}/**" in workflow
