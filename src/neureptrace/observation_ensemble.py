@@ -53,6 +53,17 @@ def _normalize_weights(weights: Sequence[float], n_decoders: int) -> np.ndarray:
     return values / values.sum()
 
 
+def _source_temperatures(temperatures: Sequence[float] | None, n_decoders: int) -> tuple[float, ...]:
+    if temperatures is None:
+        return tuple(1.0 for _ in range(n_decoders))
+    if len(temperatures) != n_decoders:
+        raise ValueError(f"Expected {n_decoders} source temperatures, got {len(temperatures)}.")
+    values = tuple(float(temperature) for temperature in temperatures)
+    if any(not np.isfinite(temperature) or temperature <= 0.0 for temperature in values):
+        raise ValueError("Source temperatures must be finite positive values.")
+    return values
+
+
 def _class_suffixes(prob_columns: Sequence[str]) -> tuple[str, ...]:
     return tuple(column.removeprefix("prob_class_") for column in prob_columns)
 
@@ -228,6 +239,17 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     return exponentials / exponentials.sum(axis=1, keepdims=True)
 
 
+def _temperature_scaled_probabilities(
+    probabilities: np.ndarray,
+    *,
+    temperature: float,
+    min_probability: float,
+) -> np.ndarray:
+    if temperature == 1.0:
+        return probabilities
+    return _softmax(np.log(np.clip(probabilities, min_probability, 1.0)) / float(temperature))
+
+
 def ensemble_probability_observations(
     observations: pd.DataFrame,
     *,
@@ -237,6 +259,7 @@ def ensemble_probability_observations(
     baseline_window: tuple[float, float] | None = DEFAULT_BASELINE_WINDOW,
     baseline_group_columns: Sequence[str] = DEFAULT_BASELINE_GROUP_COLUMNS,
     min_probability: float = DEFAULT_MIN_PROBABILITY,
+    source_temperatures: Sequence[float] | None = None,
     output_decoder: str = DEFAULT_ENSEMBLE_DECODER,
     output_emission_mode: str = DEFAULT_ENSEMBLE_EMISSION_MODE,
 ) -> pd.DataFrame:
@@ -250,13 +273,19 @@ def ensemble_probability_observations(
     if not prob_columns:
         raise ValueError("Observation table must contain prob_class_* columns.")
     normalized_weights = _normalize_weights(weights, len(decoders))
+    temperatures = _source_temperatures(source_temperatures, len(decoders))
     sources = _source_frames(observations, decoders=decoders, source_emission_mode=source_emission_mode)
     alignment_columns = _alignment_columns(observations, prob_columns)
     base, probability_matrices = _align_probability_matrices(sources, prob_columns=prob_columns, alignment_columns=alignment_columns)
 
     log_scores = np.zeros_like(probability_matrices[0], dtype=float)
-    for weight, probabilities in zip(normalized_weights, probability_matrices):
-        log_scores += float(weight) * np.log(np.clip(probabilities, min_probability, 1.0))
+    for weight, temperature, probabilities in zip(normalized_weights, temperatures, probability_matrices):
+        source_probabilities = _temperature_scaled_probabilities(
+            probabilities,
+            temperature=temperature,
+            min_probability=min_probability,
+        )
+        log_scores += float(weight) * np.log(np.clip(source_probabilities, min_probability, 1.0))
 
     offsets, n_baseline = _baseline_offsets(
         base,
@@ -303,6 +332,7 @@ def ensemble_probability_observations(
     output["source_decoders"] = "|".join(decoders)
     output["source_emission_mode"] = "" if source_emission_mode is None else source_emission_mode
     output["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
+    output["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in temperatures)
     output["baseline_window_start"] = "" if baseline_window is None else float(baseline_window[0])
     output["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
     output["baseline_group_columns"] = "|".join(column for column in baseline_group_columns if column in output.columns)
@@ -312,6 +342,7 @@ def ensemble_probability_observations(
             "backend": "ensemble",
             "decoders": list(decoders),
             "weights": [float(weight) for weight in normalized_weights],
+            "source_temperatures": [float(temperature) for temperature in temperatures],
             "source_emission_mode": source_emission_mode,
             "baseline_window": baseline_window,
             "baseline_group_columns": [column for column in baseline_group_columns if column in observations.columns],
@@ -394,6 +425,12 @@ def _parse_weights(weights: Sequence[float] | None, decoders: Sequence[str]) -> 
     return tuple(1.0 for _ in decoders)
 
 
+def _parse_temperatures(temperatures: Sequence[float] | None) -> tuple[float, ...] | None:
+    if temperatures is None:
+        return None
+    return tuple(float(temperature) for temperature in temperatures)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Command-line entry point for baseline-debiased probability ensembling."""
     parser = argparse.ArgumentParser(description="Create a baseline-debiased log-probability ensemble from NeuRepTrace observation CSVs.")
@@ -402,6 +439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--metrics-out", type=Path, help="Optional time-resolved metrics CSV computed from the ensembled observations.")
     parser.add_argument("--decoder", action="append", dest="decoders", help="Source decoder to ensemble. May be repeated; defaults to logistic and linear_svm.")
     parser.add_argument("--weight", action="append", type=float, dest="weights", help="Source decoder weight. May be repeated in the same order as --decoder.")
+    parser.add_argument("--source-temperature", action="append", type=float, dest="source_temperatures", help="Per-source probability temperature before log-space averaging. Repeat in the same order as --decoder; values >1 soften, values <1 sharpen.")
     parser.add_argument("--source-emission-mode", default="calibrated", help="Source emission_mode to use before ensembling. Defaults to calibrated.")
     parser.add_argument("--no-source-emission-filter", action="store_true", help="Use all source emission modes instead of filtering by --source-emission-mode.")
     parser.add_argument("--baseline-window", nargs=2, type=float, metavar=("START", "STOP"), default=DEFAULT_BASELINE_WINDOW)
@@ -417,6 +455,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         decoders = tuple(args.decoders or DEFAULT_DECODERS)
         weights = _parse_weights(args.weights, decoders)
+        source_temperatures = _parse_temperatures(args.source_temperatures)
         source_emission_mode = None if args.no_source_emission_filter else args.source_emission_mode
         baseline_window = None if args.no_baseline_debiasing else tuple(float(value) for value in args.baseline_window)
         baseline_group_columns = tuple(args.baseline_group_columns or DEFAULT_BASELINE_GROUP_COLUMNS)
@@ -435,6 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             baseline_window=baseline_window,
             baseline_group_columns=baseline_group_columns,
             min_probability=args.min_probability,
+            source_temperatures=source_temperatures,
             output_decoder=args.output_decoder,
             output_emission_mode=args.output_emission_mode,
         )

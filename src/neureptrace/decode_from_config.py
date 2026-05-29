@@ -267,6 +267,16 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             )
         if "ensemble_min_probability" in decoding:
             kwargs["ensemble_min_probability"] = float(decoding["ensemble_min_probability"])
+        if "ensemble_source_temperatures" in decoding or "ensemble_source_temperature" in decoding:
+            ensemble_source_temperatures = decoding.get(
+                "ensemble_source_temperatures",
+                decoding.get("ensemble_source_temperature"),
+            )
+            if ensemble_source_temperatures is not None and ensemble_source_temperatures != "":
+                kwargs["ensemble_source_temperatures"] = _float_tuple(
+                    ensemble_source_temperatures,
+                    name="decoding.ensemble_source_temperatures",
+                )
     return kwargs
 
 
