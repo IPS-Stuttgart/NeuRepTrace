@@ -155,7 +155,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/datasets/openneuro
-          key: openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-${{ inputs.subjects }}-${{ inputs.runs }}-v1
+          key: openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-v2
           restore-keys: |
             openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-
             openneuro-meg-${{ runner.os }}-
@@ -421,6 +421,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "${OPENNEURO_OUTPUT_DIR:-}" ]]; then
+            echo "Skipping LOSO summary because run parameters were not resolved."
+            exit 0
+          fi
           python - <<'PY'
           from pathlib import Path
           import os
@@ -449,6 +453,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "${OPENNEURO_OUTPUT_DIR:-}" ]]; then
+            echo "Skipping LOSO diagnostics because run parameters were not resolved."
+            exit 0
+          fi
           observations="$OPENNEURO_OUTPUT_DIR/decode/observations.csv"
           summary="$OPENNEURO_OUTPUT_DIR/decode/time_decode_summary.csv"
           if [[ ! -s "$observations" || ! -s "$summary" ]]; then
@@ -471,6 +479,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "${OPENNEURO_OUTPUT_DIR:-}" ]]; then
+            echo "Skipping OpenNeuro workflow summary because run parameters were not resolved."
+            exit 0
+          fi
           python -m neureptrace.openneuro_decode_diagnostics \
             "$OPENNEURO_OUTPUT_DIR" \
             --diagnostics-out "$OPENNEURO_OUTPUT_DIR/decode_diagnostics.json" \
