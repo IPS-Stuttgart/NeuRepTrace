@@ -155,18 +155,59 @@ def workflow_quality_summary(
     diagnostics: dict[str, Any],
     best_rows: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Return one compact paper-table row for an OpenNeuro workflow artifact."""
+    """Return compact paper-table rows for an OpenNeuro workflow artifact."""
 
     output_dir = Path(output_dir)
     manifest = _read_json(output_dir / "run_manifest.json")
-    quality_path = output_dir / "decode" / "diagnostics" / "quality_summary.csv"
-    quality = pd.read_csv(quality_path).iloc[0].to_dict() if quality_path.is_file() else {}
+    raw_quality_path = output_dir / "decode" / "diagnostics" / "quality_summary.csv"
     best_by_metric = best_rows.set_index("selection_metric") if not best_rows.empty else pd.DataFrame()
+    stage_summary = diagnostics.get("stage_summary", {})
+    rows = [
+        _workflow_quality_row(
+            manifest=manifest,
+            stage_summary=stage_summary,
+            decode_summary=diagnostics.get("decode_summary", {}),
+            quality_path=raw_quality_path,
+            best_by_metric=best_by_metric,
+            result_variant="raw",
+        )
+    ]
+
+    smoothed_summary_path = output_dir / "decode" / "temporal_smoothing" / "time_decode_summary.csv"
+    smoothed_quality_path = output_dir / "decode" / "temporal_smoothing" / "diagnostics" / "quality_summary.csv"
+    if smoothed_summary_path.is_file() or smoothed_quality_path.is_file():
+        smoothed_summary = _csv_shape(smoothed_summary_path)
+        if smoothed_summary_path.is_file():
+            smoothed_best = best_metric_rows(pd.read_csv(smoothed_summary_path)).set_index("selection_metric")
+        else:
+            smoothed_best = pd.DataFrame()
+        rows.append(
+            _workflow_quality_row(
+                manifest=manifest,
+                stage_summary=stage_summary,
+                decode_summary=smoothed_summary,
+                quality_path=smoothed_quality_path,
+                best_by_metric=smoothed_best,
+                result_variant="temporal_smoothing",
+            )
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _workflow_quality_row(
+    *,
+    manifest: dict[str, Any],
+    stage_summary: dict[str, Any],
+    decode_summary: dict[str, Any],
+    quality_path: Path,
+    best_by_metric: pd.DataFrame,
+    result_variant: str,
+) -> dict[str, Any]:
+    quality = pd.read_csv(quality_path).iloc[0].to_dict() if quality_path.is_file() else {}
     preferred_metric = "balanced_accuracy" if "balanced_accuracy" in best_by_metric.index else "accuracy"
     has_best_metric = preferred_metric in best_by_metric.index
     best = best_by_metric.loc[preferred_metric].to_dict() if has_best_metric else {}
-    stage_summary = diagnostics.get("stage_summary", {})
-    decode_summary = diagnostics.get("decode_summary", {})
     decode_summary_exists = bool(decode_summary.get("exists", False))
     quality_summary_exists = bool(quality_path.is_file())
     n_subjects = stage_summary.get("n_subjects", manifest.get("n_subjects", ""))
@@ -180,51 +221,51 @@ def workflow_quality_summary(
         n_subjects=n_subjects,
     )
 
-    return pd.DataFrame(
-        [
-            {
-                "dataset": manifest.get("dataset", ""),
-                "mode": manifest.get("mode", ""),
-                "artifact_name": manifest.get("artifact_name", ""),
-                "github_run_id": manifest.get("github_run_id", ""),
-                "github_sha": manifest.get("github_sha", ""),
-                "runner_type_input": manifest.get("runner_type_input", ""),
-                "runner_environment": manifest.get("runner_environment", ""),
-                "subjects": manifest.get("subjects", ""),
-                "runs": manifest.get("runs", ""),
-                "n_subjects_requested": manifest.get("n_subjects", ""),
-                "n_subjects_staged": n_subjects,
-                "total_trials_staged": stage_summary.get("total_trials", ""),
-                "label_shuffle_control": label_shuffle_control,
-                "label_shuffle_seed": manifest.get("label_shuffle_seed", ""),
-                "time_decode_backend": manifest.get("time_decode_backend", ""),
-                "decoder_override": manifest.get("decoder_override", ""),
-                "decode_summary_exists": decode_summary_exists,
-                "quality_summary_exists": quality_summary_exists,
-                "quality_decision": quality_decision,
-                "null_chance_tolerance": NULL_CHANCE_TOLERANCE,
-                "positive_chance_margin": POSITIVE_CHANCE_MARGIN,
-                "n_classes": quality.get("n_classes", ""),
-                "chance_accuracy": quality.get("chance_accuracy", ""),
-                "top2_chance": quality.get("top2_chance", ""),
-                "top3_chance": quality.get("top3_chance", ""),
-                "top2_interpretation": quality.get("top2_interpretation", ""),
-                "top3_interpretation": quality.get("top3_interpretation", ""),
-                "fixed_time": quality.get("fixed_time", ""),
-                "fixed_accuracy": quality.get("fixed_accuracy", ""),
-                "fixed_balanced_accuracy": quality.get("fixed_balanced_accuracy", ""),
-                "fixed_balanced_minus_chance": quality.get("fixed_balanced_minus_chance", ""),
-                "fixed_top2_accuracy": quality.get("fixed_top2_accuracy", ""),
-                "fixed_top2_minus_chance": quality.get("fixed_top2_minus_chance", ""),
-                "fixed_top3_accuracy": quality.get("fixed_top3_accuracy", ""),
-                "fixed_top3_minus_chance": quality.get("fixed_top3_minus_chance", ""),
-                "subjects_fixed_above_chance": quality.get("subjects_fixed_above_chance", ""),
-                "best_selection_metric": preferred_metric if has_best_metric else "",
-                "best_time": best.get("time", ""),
-                "best_selection_value": best.get("selection_value", ""),
-            }
-        ]
-    )
+    return {
+        "dataset": manifest.get("dataset", ""),
+        "mode": manifest.get("mode", ""),
+        "result_variant": result_variant,
+        "artifact_name": manifest.get("artifact_name", ""),
+        "github_run_id": manifest.get("github_run_id", ""),
+        "github_sha": manifest.get("github_sha", ""),
+        "runner_type_input": manifest.get("runner_type_input", ""),
+        "runner_environment": manifest.get("runner_environment", ""),
+        "subjects": manifest.get("subjects", ""),
+        "runs": manifest.get("runs", ""),
+        "n_subjects_requested": manifest.get("n_subjects", ""),
+        "n_subjects_staged": n_subjects,
+        "total_trials_staged": stage_summary.get("total_trials", ""),
+        "label_shuffle_control": label_shuffle_control,
+        "label_shuffle_seed": manifest.get("label_shuffle_seed", ""),
+        "time_decode_backend": manifest.get("time_decode_backend", ""),
+        "decoder_override": manifest.get("decoder_override", ""),
+        "temporal_smoothing": _as_bool(manifest.get("temporal_smoothing", "")),
+        "temporal_smoothing_fit_window": manifest.get("temporal_smoothing_fit_window", ""),
+        "temporal_smoothing_stay_grid_size": manifest.get("temporal_smoothing_stay_grid_size", ""),
+        "decode_summary_exists": decode_summary_exists,
+        "quality_summary_exists": quality_summary_exists,
+        "quality_decision": quality_decision,
+        "null_chance_tolerance": NULL_CHANCE_TOLERANCE,
+        "positive_chance_margin": POSITIVE_CHANCE_MARGIN,
+        "n_classes": quality.get("n_classes", ""),
+        "chance_accuracy": quality.get("chance_accuracy", ""),
+        "top2_chance": quality.get("top2_chance", ""),
+        "top3_chance": quality.get("top3_chance", ""),
+        "top2_interpretation": quality.get("top2_interpretation", ""),
+        "top3_interpretation": quality.get("top3_interpretation", ""),
+        "fixed_time": quality.get("fixed_time", ""),
+        "fixed_accuracy": quality.get("fixed_accuracy", ""),
+        "fixed_balanced_accuracy": quality.get("fixed_balanced_accuracy", ""),
+        "fixed_balanced_minus_chance": quality.get("fixed_balanced_minus_chance", ""),
+        "fixed_top2_accuracy": quality.get("fixed_top2_accuracy", ""),
+        "fixed_top2_minus_chance": quality.get("fixed_top2_minus_chance", ""),
+        "fixed_top3_accuracy": quality.get("fixed_top3_accuracy", ""),
+        "fixed_top3_minus_chance": quality.get("fixed_top3_minus_chance", ""),
+        "subjects_fixed_above_chance": quality.get("subjects_fixed_above_chance", ""),
+        "best_selection_metric": preferred_metric if has_best_metric else "",
+        "best_time": best.get("time", ""),
+        "best_selection_value": best.get("selection_value", ""),
+    }
 
 
 def summarize_decode_outputs(output_dir: str | Path) -> tuple[dict[str, Any], pd.DataFrame]:
@@ -246,6 +287,8 @@ def summarize_decode_outputs(output_dir: str | Path) -> tuple[dict[str, Any], pd
         "decode_summary": _csv_shape(summary_path),
         "observations": _csv_shape(observations_path),
         "calibration": _csv_shape(calibration_path),
+        "temporal_smoothing_summary": _csv_shape(decode_dir / "temporal_smoothing" / "time_decode_summary.csv"),
+        "temporal_smoothing_observations": _csv_shape(decode_dir / "temporal_smoothing" / "observations.csv"),
     }
 
     if summary_path.is_file():
