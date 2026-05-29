@@ -56,7 +56,7 @@ def test_decode_from_config_passes_ensemble_controls_for_ensemble_decoder(tmp_pa
                 "ensemble_baseline_window": "none",
                 "ensemble_baseline_group_columns": "subject,fold",
                 "ensemble_min_probability": "1e-9",
-                "ensemble_score_mode": "rank",
+                "ensemble_score_mode": "confidence_probability",
             },
             "preprocessing": {},
             "outputs": {"summary_csv": "summary.csv"},
@@ -69,7 +69,7 @@ def test_decode_from_config_passes_ensemble_controls_for_ensemble_decoder(tmp_pa
     assert kwargs["ensemble_baseline_window"] is None
     assert kwargs["ensemble_baseline_group_columns"] == ("subject", "fold")
     assert kwargs["ensemble_min_probability"] == 1e-9
-    assert kwargs["ensemble_score_mode"] == "rank"
+    assert kwargs["ensemble_score_mode"] == "confidence_probability"
 
 
 def test_decode_from_config_accepts_workflow_style_unquoted_string_lists(tmp_path):
