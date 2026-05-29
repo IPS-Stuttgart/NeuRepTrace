@@ -54,7 +54,15 @@ def _list_value(value: Any, *, name: str) -> list[Any]:
         if text == "":
             return []
         if text.startswith("["):
-            loaded = json.loads(text)
+            try:
+                loaded = json.loads(text)
+            except json.JSONDecodeError:
+                loaded = None
+            if loaded is None:
+                if not text.endswith("]"):
+                    raise ValueError(f"{name} must be a list, comma-separated string, or whitespace-separated string.")
+                text = text[1:-1].strip()
+                return [part.strip() for chunk in text.split(",") for part in chunk.split() if part.strip()]
             if not isinstance(loaded, list):
                 raise ValueError(f"{name} must be a list, comma-separated string, or whitespace-separated string.")
             return loaded
