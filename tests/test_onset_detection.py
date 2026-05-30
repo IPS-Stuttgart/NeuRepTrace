@@ -209,6 +209,8 @@ def test_stable_prediction_splits_detection_runs():
 def test_fractional_labels_are_not_truncated_for_detection_correctness():
     frame = _observation_frame().drop(columns=["true_class", "predicted_class"])
     fractional_label_rows = frame["sequence_id"] == 0
+    frame["true_label"] = frame["true_label"].astype(float)
+    frame["predicted_label"] = frame["predicted_label"].astype(float)
     frame.loc[fractional_label_rows, "true_label"] = 0.2
     frame.loc[fractional_label_rows, "predicted_label"] = 0.8
 
