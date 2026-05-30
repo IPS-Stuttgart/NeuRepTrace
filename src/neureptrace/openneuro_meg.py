@@ -318,17 +318,18 @@ def _limit_metadata_per_label(
     seed: int,
 ) -> pd.DataFrame:
     filtered = metadata.copy()
-    if max_events_per_label is not None:
-        if selection not in {"first", "random"}:
-            raise ValueError("--selection must be first or random.")
-        pieces = []
-        for label, group in filtered.groupby(label_column, sort=True):
-            if selection == "random" and len(group) > max_events_per_label:
-                group = group.sample(n=max_events_per_label, random_state=seed + stable_label_seed(label))
-            else:
-                group = group.head(max_events_per_label)
-            pieces.append(group.sort_index())
-        filtered = pd.concat(pieces).sort_index().reset_index(drop=True) if pieces else filtered.iloc[0:0].copy()
+    if max_events_per_label is None or max_events_per_label <= 0:
+        return filtered.reset_index(drop=True)
+    if selection not in {"first", "random"}:
+        raise ValueError("--selection must be first or random.")
+    pieces = []
+    for label, group in filtered.groupby(label_column, sort=True):
+        if selection == "random" and len(group) > max_events_per_label:
+            group = group.sample(n=max_events_per_label, random_state=seed + stable_label_seed(label))
+        else:
+            group = group.head(max_events_per_label)
+        pieces.append(group.sort_index())
+    filtered = pd.concat(pieces).sort_index().reset_index(drop=True) if pieces else filtered.iloc[0:0].copy()
     return filtered.reset_index(drop=True)
 
 
