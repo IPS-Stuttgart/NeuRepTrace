@@ -32,6 +32,7 @@ RELIABILITY_BIN_NUMERIC_COLUMNS = RELIABILITY_BIN_REQUIRED_COLUMNS
 RELIABILITY_BIN_INTEGER_COLUMNS = ("bin", "n_samples")
 RELIABILITY_BIN_UNIT_INTERVAL_COLUMNS = ("bin_left", "bin_right", "accuracy", "confidence")
 RELIABILITY_BIN_OPTIONAL_EMPTY_COLUMNS = ("accuracy", "confidence")
+RELIABILITY_BIN_WEIGHT_COLUMN = "sample_weight"
 
 
 def _expand_paths(patterns: list[str]) -> list[Path]:
@@ -198,6 +199,22 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
             bad_rows = outside[outside].index.tolist()[:5]
             raise ValueError(f"{csv_path} contains values outside [0, 1] in column '{column}' at row(s) {bad_rows}.")
 
+    if RELIABILITY_BIN_WEIGHT_COLUMN in validated.columns:
+        sample_weight = pd.to_numeric(validated[RELIABILITY_BIN_WEIGHT_COLUMN], errors="coerce")
+        missing_weight = sample_weight.isna()
+        if missing_weight.any():
+            bad_rows = missing_weight[missing_weight].index.tolist()[:5]
+            raise ValueError(f"{csv_path} contains non-numeric values in column '{RELIABILITY_BIN_WEIGHT_COLUMN}' at row(s) {bad_rows}.")
+        finite_weight = pd.Series(np.isfinite(sample_weight.to_numpy(dtype=float)), index=sample_weight.index)
+        if not finite_weight.all():
+            bad_rows = finite_weight[~finite_weight].index.tolist()[:5]
+            raise ValueError(f"{csv_path} contains non-finite values in column '{RELIABILITY_BIN_WEIGHT_COLUMN}' at row(s) {bad_rows}.")
+        negative_weight = sample_weight < 0.0
+        if negative_weight.any():
+            bad_rows = negative_weight[negative_weight].index.tolist()[:5]
+            raise ValueError(f"{csv_path} contains negative {RELIABILITY_BIN_WEIGHT_COLUMN} at row(s) {bad_rows}.")
+        validated[RELIABILITY_BIN_WEIGHT_COLUMN] = sample_weight
+
     if (validated["bin_right"] < validated["bin_left"]).any():
         bad_rows = validated.index[validated["bin_right"] < validated["bin_left"]].tolist()[:5]
         raise ValueError(f"{csv_path} contains reliability bins with bin_right < bin_left at row(s) {bad_rows}.")
@@ -221,27 +238,48 @@ def aggregate_reliability_bins(csv_paths: list[Path]) -> pd.DataFrame:
         frames.append(frame)
 
     bins = pd.concat(frames, ignore_index=True)
+    has_sample_weight = RELIABILITY_BIN_WEIGHT_COLUMN in bins.columns
+    if has_sample_weight:
+        missing_weight = bins[RELIABILITY_BIN_WEIGHT_COLUMN].isna()
+        bins.loc[missing_weight, RELIABILITY_BIN_WEIGHT_COLUMN] = bins.loc[missing_weight, "n_samples"].astype(float)
+
     group_columns = ["decoder", "emission_mode", "time", "bin", "bin_left", "bin_right"]
     rows = []
     for keys, group in bins.groupby(group_columns, sort=True):
         n_samples = int(group["n_samples"].sum())
-        if n_samples:
-            weights = group["n_samples"] / n_samples
+        if has_sample_weight:
+            aggregation_mass = group[RELIABILITY_BIN_WEIGHT_COLUMN].astype(float)
+            mass_sum = float(aggregation_mass.sum())
+        else:
+            aggregation_mass = group["n_samples"].astype(float)
+            mass_sum = float(n_samples)
+
+        if mass_sum > 0.0:
+            weights = aggregation_mass / mass_sum
             accuracy = float((group["accuracy"].fillna(0.0) * weights).sum())
             confidence = float((group["confidence"].fillna(0.0) * weights).sum())
         else:
             accuracy = float("nan")
             confidence = float("nan")
-        rows.append(
-            {
-                **dict(zip(group_columns, keys, strict=True)),
-                "n_samples": n_samples,
-                "accuracy": accuracy,
-                "confidence": confidence,
-                "gap": accuracy - confidence if n_samples else float("nan"),
-            }
+
+        row = {
+            **dict(zip(group_columns, keys, strict=True)),
+            "n_samples": n_samples,
+            "accuracy": accuracy,
+            "confidence": confidence,
+            "gap": accuracy - confidence if mass_sum > 0.0 else float("nan"),
+        }
+        if has_sample_weight:
+            row[RELIABILITY_BIN_WEIGHT_COLUMN] = mass_sum
+        rows.append(row)
+
+    aggregated = pd.DataFrame(rows)
+    if has_sample_weight and not aggregated.empty:
+        total_weight = float(aggregated[RELIABILITY_BIN_WEIGHT_COLUMN].sum())
+        aggregated["sample_weight_fraction"] = (
+            aggregated[RELIABILITY_BIN_WEIGHT_COLUMN] / total_weight if total_weight > 0.0 else 0.0
         )
-    return pd.DataFrame(rows)
+    return aggregated
 
 
 def build_calibration_report(
