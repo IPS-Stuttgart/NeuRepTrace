@@ -206,6 +206,50 @@ def test_stable_prediction_splits_detection_runs():
     assert not stable.set_index("sequence_id").loc[1, "detected"]
 
 
+def test_fractional_labels_are_not_truncated_for_detection_correctness():
+    frame = _observation_frame().drop(columns=["true_class", "predicted_class"])
+    fractional_label_rows = frame["sequence_id"] == 0
+    frame.loc[fractional_label_rows, "true_label"] = 0.2
+    frame.loc[fractional_label_rows, "predicted_label"] = 0.8
+
+    events = detect_onsets(
+        frame,
+        threshold_window=(-0.20, -0.10),
+        threshold_quantile=0.875,
+    )
+
+    row = events.set_index("sequence_id").loc[0]
+
+    assert row["detected"]
+    assert not row["is_correct_at_detection"]
+
+
+def test_probability_true_class_scores_ignore_fractional_true_labels():
+    frame = pd.DataFrame(
+        {
+            "subject": ["sub-01", "sub-01"],
+            "decoder": ["logistic", "logistic"],
+            "emission_mode": ["calibrated", "calibrated"],
+            "sequence_id": [0, 0],
+            "time": [-0.20, 0.10],
+            "true_label": [0.5, 0.5],
+            "prob_class_0": [0.90, 0.80],
+            "prob_class_1": [0.10, 0.20],
+        }
+    )
+
+    thresholded = annotate_threshold_crossings(
+        frame,
+        threshold_window=(-0.20, -0.20),
+        threshold_quantile=0.5,
+        score_column="probability_true_class",
+    )
+
+    assert thresholded["onset_score"].isna().all()
+    assert thresholded["score_threshold"].isna().all()
+    assert not thresholded["above_threshold"].any()
+
+
 def test_summarize_onset_events_reports_detection_rates():
     events = detect_onsets(
         _observation_frame(),
