@@ -99,3 +99,24 @@ def test_run_decode_from_config_translates_sections(monkeypatch: pytest.MonkeyPa
     assert captured["group_column"] == "run"
     assert captured["baseline_window"] == (-0.2, 0.0)
     assert captured["tune_hyperparameters"] is True
+
+
+def test_decode_from_config_quoted_false_flags_stay_disabled(tmp_path: Path) -> None:
+    from neureptrace.decode_from_config import _decode_kwargs
+
+    kwargs = _decode_kwargs(
+        {
+            "dataset": {"name": "synthetic"},
+            "preprocessing": {},
+            "decoding": {
+                "label_column": "condition",
+                "tune_hyperparameters": "false",
+                "label_shuffle_control": "false",
+            },
+            "outputs": {"base_dir": tmp_path.as_posix()},
+        },
+        config_dir=tmp_path,
+    )
+
+    assert kwargs["tune_hyperparameters"] is False
+    assert kwargs["label_shuffle_control"] is False
