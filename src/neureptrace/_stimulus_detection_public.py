@@ -477,7 +477,22 @@ def detect_stimulus_events_from_csvs(
     out_thresholds: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     observations = read_stimulus_probability_observations(observation_csvs)
-    thresholds = pd.read_csv(thresholds_csv) if thresholds_csv is not None else None
+    thresholds = (
+        pd.read_csv(thresholds_csv)
+        if thresholds_csv is not None
+        else fit_stimulus_detection_thresholds(
+            observations,
+            threshold_window=threshold_window,
+            threshold_quantile=threshold_quantile,
+            threshold_method=threshold_method,
+            score_mode=score_mode,
+            target_classes=target_classes,
+            group_columns=group_columns,
+            stream_columns=stream_columns,
+            min_consecutive=min_consecutive,
+            min_duration=min_duration,
+        )
+    )
     events = detect_stimulus_events(
         observations,
         thresholds=thresholds,
@@ -495,19 +510,6 @@ def detect_stimulus_events_from_csvs(
         refractory=refractory,
         conflict_resolution=conflict_resolution,
     )
-    if thresholds is None:
-        thresholds = fit_stimulus_detection_thresholds(
-            observations,
-            threshold_window=threshold_window,
-            threshold_quantile=threshold_quantile,
-            threshold_method=threshold_method,
-            score_mode=score_mode,
-            target_classes=target_classes,
-            group_columns=group_columns,
-            stream_columns=stream_columns,
-            min_consecutive=min_consecutive,
-            min_duration=min_duration,
-        )
     annotations = pd.read_csv(annotations_csv) if annotations_csv is not None else None
     if annotations is not None:
         events = match_stimulus_annotations(events, annotations, stream_columns=stream_columns, match_tolerance=match_tolerance)

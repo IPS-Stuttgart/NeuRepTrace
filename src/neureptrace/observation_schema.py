@@ -452,6 +452,54 @@ def _numeric_label_to_probability_columns(prob_columns: Sequence[str]) -> dict[i
     return label_columns
 
 
+def _valid_integer_label_series(frame: pd.DataFrame, column: str, issues: list[ObservationValidationIssue]) -> pd.Series:
+    """Return numeric labels with non-finite or fractional values masked out.
+
+    Canonical observation labels index ``prob_class_<label>`` and ``class_<label>``
+    columns.  Treating labels as raw floats lets values such as ``0.5`` be
+    truncated by ``int(...)`` in downstream consistency checks, which can hide
+    malformed exports and produce cascading, misleading diagnostics.
+    """
+    labels = _numeric_series(frame, column, issues, allow_nan=True)
+    label_values = labels.to_numpy(dtype=float)
+    present = labels.notna()
+    finite = pd.Series(np.isfinite(label_values), index=labels.index)
+
+    non_finite = present & ~finite
+    for row_index, value in frame.loc[non_finite, column].head(20).items():
+        _issue(
+            issues,
+            "error",
+            "non_finite_label",
+            f"Column '{column}' must contain finite integer labels when present.",
+            column=column,
+            row=int(row_index),
+            value=value,
+        )
+
+    finite_present = present & finite
+    integer_like = pd.Series(False, index=labels.index)
+    if bool(finite_present.any()):
+        finite_values = labels.loc[finite_present].to_numpy(dtype=float)
+        integer_like.loc[finite_present] = finite_values == np.floor(finite_values)
+
+    non_integer = finite_present & ~integer_like
+    for row_index, value in frame.loc[non_integer, column].head(20).items():
+        _issue(
+            issues,
+            "error",
+            "non_integer_label",
+            f"Column '{column}' must contain integer labels when present.",
+            column=column,
+            row=int(row_index),
+            value=value,
+        )
+
+    valid = labels.copy()
+    valid.loc[non_finite | non_integer] = np.nan
+    return valid
+
+
 def _validate_probability_consistency(
     frame: pd.DataFrame,
     probabilities: pd.DataFrame,
@@ -463,12 +511,19 @@ def _validate_probability_consistency(
     if probabilities.empty:
         return
     probability_values = probabilities.to_numpy(dtype=float)
-    finite_row = np.isfinite(probability_values).any(axis=1)
-    filled = np.where(np.isfinite(probability_values), probability_values, -np.inf)
-    max_probabilities = np.nanmax(probability_values, axis=1)
+    finite_probabilities = np.isfinite(probability_values)
+    finite_row = finite_probabilities.any(axis=1)
+    filled = np.where(finite_probabilities, probability_values, -np.inf)
+    max_probabilities = np.where(finite_row, filled.max(axis=1), np.nan)
     argmax_positions = filled.argmax(axis=1)
     label_columns = _numeric_label_to_probability_columns(prob_columns)
     ordered_labels = [int(column.removeprefix("prob_class_")) if column.removeprefix("prob_class_").isdigit() else None for column in prob_columns]
+    valid_label_cache: dict[str, pd.Series] = {}
+
+    def valid_label_values(column: str) -> pd.Series:
+        if column not in valid_label_cache:
+            valid_label_cache[column] = _valid_integer_label_series(frame, column, issues)
+        return valid_label_cache[column]
 
     if "confidence" in frame.columns:
         confidence = _numeric_series(frame, "confidence", issues, allow_nan=True)
@@ -486,7 +541,7 @@ def _validate_probability_consistency(
             )
 
     if "predicted_label" in frame.columns and all(label is not None for label in ordered_labels):
-        predicted_label = _numeric_series(frame, "predicted_label", issues, allow_nan=True)
+        predicted_label = valid_label_values("predicted_label")
         expected = pd.Series([ordered_labels[position] for position in argmax_positions], index=frame.index, dtype=float)
         bad_prediction = predicted_label.notna() & finite_row & (predicted_label.astype(float) != expected)
         for row_index, value in predicted_label.loc[bad_prediction].head(20).items():
@@ -500,13 +555,24 @@ def _validate_probability_consistency(
                 value=int(value),
             )
 
-    if "probability_true_class" in frame.columns and "true_label" in frame.columns and label_columns:
-        true_label = _numeric_series(frame, "true_label", issues, allow_nan=True)
+    if "probability_true_class" in frame.columns and "true_label" in frame.columns:
+        true_label = valid_label_values("true_label")
         probability_true_class = _numeric_series(frame, "probability_true_class", issues, allow_nan=True)
         for row_index, label_value in true_label.dropna().items():
+            if pd.isna(probability_true_class.loc[row_index]):
+                continue
             label = int(label_value)
             column = label_columns.get(label)
-            if column is None or pd.isna(probability_true_class.loc[row_index]):
+            if column is None:
+                _issue(
+                    issues,
+                    "error",
+                    "missing_true_label_probability_column",
+                    f"Column 'true_label' references label {label}, but no 'prob_class_{label}' column is present.",
+                    column="true_label",
+                    row=int(row_index),
+                    value=label,
+                )
                 continue
             expected_probability = float(probabilities.loc[row_index, column])
             observed_probability = float(probability_true_class.loc[row_index])
@@ -522,7 +588,7 @@ def _validate_probability_consistency(
                 )
 
     if "predicted_class" in frame.columns and "predicted_label" in frame.columns:
-        predicted_label = pd.to_numeric(frame["predicted_label"], errors="coerce")
+        predicted_label = valid_label_values("predicted_label")
         for row_index, label_value in predicted_label.dropna().items():
             class_column = f"class_{int(label_value)}"
             if class_column not in frame.columns or pd.isna(frame.loc[row_index, "predicted_class"]):
