@@ -5,7 +5,10 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-from neureptrace.stimulus_detection import detect_stimulus_events, fit_stimulus_detection_thresholds
+from neureptrace.stimulus_detection import (
+    detect_stimulus_events,
+    fit_stimulus_detection_thresholds,
+)
 from neureptrace.streaming_stimulus_detection import StimulusDetectionConfig, StreamingStimulusDetector
 
 THRESHOLD_WINDOW = (-0.65, -0.05)
@@ -75,6 +78,53 @@ def _thresholds(frame: pd.DataFrame, target_classes: list[str] | None = None) ->
         target_classes=target_classes,
         threshold_window=THRESHOLD_WINDOW,
         threshold_quantile=1.0,
+    )
+
+
+def test_csv_stimulus_detection_fits_thresholds_once(tmp_path, monkeypatch) -> None:
+    import neureptrace._stimulus_detection_public as stimulus_public
+
+    frame = _stream_frame(final_gap=True)
+    observation_csv = tmp_path / "observations.csv"
+    out_events = tmp_path / "events.csv"
+    out_summary = tmp_path / "summary.csv"
+    out_thresholds = tmp_path / "thresholds.csv"
+    frame.to_csv(observation_csv, index=False)
+
+    original_fit = stimulus_public.fit_stimulus_detection_thresholds
+    fit_calls = []
+
+    def counted_fit(*args, **kwargs):
+        fit_calls.append(1)
+        return original_fit(*args, **kwargs)
+
+    monkeypatch.setattr(stimulus_public, "fit_stimulus_detection_thresholds", counted_fit)
+    monkeypatch.setattr(stimulus_public._legacy, "fit_stimulus_detection_thresholds", counted_fit)
+
+    events, summary, thresholds = stimulus_public.detect_stimulus_events_from_csvs(
+        [observation_csv],
+        threshold_window=THRESHOLD_WINDOW,
+        threshold_quantile=1.0,
+        stream_columns=("stream_id",),
+        detection_window=(0.0, float("inf")),
+        min_consecutive=2,
+        out_events=out_events,
+        out_summary=out_summary,
+        out_thresholds=out_thresholds,
+    )
+
+    assert len(fit_calls) == 1
+    assert not events.empty
+    assert not summary.empty
+    assert not thresholds.empty
+    assert out_events.exists()
+    assert out_summary.exists()
+
+    written_thresholds = pd.read_csv(out_thresholds)
+    pdt.assert_frame_equal(
+        written_thresholds.sort_index(axis=1),
+        thresholds.sort_index(axis=1),
+        check_dtype=False,
     )
 
 
