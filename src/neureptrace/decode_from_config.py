@@ -94,12 +94,22 @@ def _string_tuple(value: Any, *, name: str) -> tuple[str, ...]:
     return values
 
 
-def _bool_value(value: Any) -> bool:
+def _bool_value(value: Any, *, name: str = "boolean value", default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
     if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        if value == 0:
+            return False
+        if value == 1:
+            return True
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"", "0", "false", "no", "off", "none", "null"}:
         return False
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    raise ValueError(f"{name} must be a boolean value; got {value!r}.")
 
 
 def _find_project_root(start: Path) -> Path:
@@ -212,7 +222,10 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
         ),
         "normalization": preprocessing.get("normalization", "none"),
         "baseline_window": tuple(baseline_window) if baseline_window is not None else None,
-        "tune_hyperparameters": bool(decoding.get("tune_hyperparameters", False)),
+        "tune_hyperparameters": _bool_value(
+            decoding.get("tune_hyperparameters"),
+            name="decoding.tune_hyperparameters",
+        ),
         "tuning_cv_splits": int(decoding.get("tuning_cv_splits", 3)),
         "tuning_scoring": decoding.get("tuning_scoring", "accuracy"),
         "tuning_c_grid": decoding.get("tuning_c_grid"),
@@ -237,7 +250,10 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             "class_prior_correction",
             decoding.get("prior_correction", "none"),
         ),
-        "label_shuffle_control": bool(decoding.get("label_shuffle_control", False)),
+        "label_shuffle_control": _bool_value(
+            decoding.get("label_shuffle_control"),
+            name="decoding.label_shuffle_control",
+        ),
         "label_shuffle_seed": int(decoding.get("label_shuffle_seed", 13)),
     }
     if temporal_train_mode is not None:
@@ -295,7 +311,8 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             kwargs["ensemble_score_mode"] = str(decoding["ensemble_score_mode"])
         if "ensemble_source_baseline_debiasing" in decoding:
             kwargs["ensemble_source_baseline_debiasing"] = _bool_value(
-                decoding["ensemble_source_baseline_debiasing"]
+                decoding["ensemble_source_baseline_debiasing"],
+                name="decoding.ensemble_source_baseline_debiasing",
             )
     return kwargs
 
@@ -317,13 +334,17 @@ def _write_provenance_sidecars(
     output_paths: Sequence[Path],
 ) -> None:
     outputs = _section(config, "outputs")
-    if not bool(outputs.get("provenance", True)):
+    if not _bool_value(outputs.get("provenance"), name="outputs.provenance", default=True):
         return
     payload = provenance_payload(
         config,
         config_path=config_path,
         base_dir=config_dir,
-        include_file_hashes=bool(outputs.get("hash_input_files", True)),
+        include_file_hashes=_bool_value(
+            outputs.get("hash_input_files"),
+            name="outputs.hash_input_files",
+            default=True,
+        ),
     )
     for output_path in output_paths:
         sidecar = Path(str(output_path) + ".provenance.json")
