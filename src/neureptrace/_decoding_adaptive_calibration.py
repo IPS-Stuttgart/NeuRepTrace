@@ -8,6 +8,42 @@ from sklearn.base import BaseEstimator, ClassifierMixin, clone
 _MARKER = "_neureptrace_adaptive_calibration_installed"
 
 
+def _normalize_sample_weight(sample_weight, *, n_rows: int) -> np.ndarray | None:
+    if sample_weight is None:
+        return None
+    weights = np.asarray(sample_weight, dtype=float).reshape(-1)
+    if weights.shape[0] != int(n_rows):
+        raise ValueError("sample_weight must contain one weight per label.")
+    if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
+        raise ValueError("sample_weight must contain finite non-negative values.")
+    return weights
+
+
+def _fit_with_optional_sample_weight(model, features, labels, sample_weight=None):
+    """Fit an estimator and route sample weights through sklearn pipelines.
+
+    The adaptive calibration fallback can replace ``CalibratedClassifierCV`` with
+    the raw estimator when a fold has too few examples per class. Many NeuRepTrace
+    decoders are sklearn pipelines, and those require ``<final_step>__sample_weight``
+    rather than a top-level ``sample_weight`` argument. Routing here keeps tiny,
+    sample-weighted folds usable instead of failing after the fallback decision.
+    """
+
+    weights = _normalize_sample_weight(sample_weight, n_rows=len(labels))
+    if weights is None:
+        model.fit(features, labels)
+        return model
+
+    try:
+        model.fit(features, labels, sample_weight=weights)
+    except (TypeError, ValueError):
+        if not hasattr(model, "steps") or not getattr(model, "steps"):
+            raise
+        final_step_name = model.steps[-1][0]
+        model.fit(features, labels, **{f"{final_step_name}__sample_weight": weights})
+    return model
+
+
 class AdaptiveCalibratedClassifierCV(ClassifierMixin, BaseEstimator):
     def __init__(self, estimator: Any, method: str = "sigmoid", cv: int = 3):
         self.estimator = estimator
@@ -34,10 +70,7 @@ class AdaptiveCalibratedClassifierCV(ClassifierMixin, BaseEstimator):
             self.calibration_cv_ = 0
             self.used_uncalibrated_fallback_ = True
             self.model_ = clone(self.estimator)
-        if sample_weight is None:
-            self.model_.fit(features, labels)
-        else:
-            self.model_.fit(features, labels, sample_weight=sample_weight)
+        _fit_with_optional_sample_weight(self.model_, features, labels, sample_weight)
         if hasattr(self.model_, "classes_"):
             self.classes_ = np.asarray(self.model_.classes_)
         if hasattr(self.model_, "n_features_in_"):
