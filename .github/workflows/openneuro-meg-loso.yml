@@ -219,6 +219,47 @@ jobs:
                   python-version: "3.12"
                   cache: pip
 
+            - name: Resolve GitHub-hosted OpenNeuro cache keys
+              id: openneuro_cache_keys
+              if: runner.environment == 'github-hosted'
+              shell: bash
+              env:
+                  SUBJECTS_CACHE_INPUT: ${{ inputs.subjects }}
+                  RUNS_CACHE_INPUT: ${{ inputs.runs }}
+                  MAX_EVENTS_PER_LABEL_CACHE_INPUT: ${{ inputs.max_events_per_label }}
+              run: |
+                  set -euo pipefail
+                  python - <<'PY'
+                  from __future__ import annotations
+
+                  import hashlib
+                  import os
+                  import re
+                  from pathlib import Path
+
+                  def safe_cache_token(value: str | None, fallback: str) -> str:
+                      token = (value or fallback).strip() or fallback
+                      token = re.sub(r"[^A-Za-z0-9_.-]+", "-", token).strip("-._")
+                      if not token:
+                          token = fallback
+                      if len(token) > 120:
+                          digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+                          token = f"{token[:100].rstrip('-._')}-{digest}"
+                      return token
+
+                  outputs = {
+                      "subjects": safe_cache_token(os.environ.get("SUBJECTS_CACHE_INPUT"), "default"),
+                      "runs": safe_cache_token(os.environ.get("RUNS_CACHE_INPUT"), "default"),
+                      "cap": safe_cache_token(os.environ.get("MAX_EVENTS_PER_LABEL_CACHE_INPUT"), "none"),
+                  }
+                  with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+                      for key, value in outputs.items():
+                          handle.write(f"{key}={value}\n")
+                  print(f"OpenNeuro cache subjects token: {outputs['subjects']}")
+                  print(f"OpenNeuro cache runs token: {outputs['runs']}")
+                  print(f"OpenNeuro cache cap token: {outputs['cap']}")
+                  PY
+
             - name: Cache OpenNeuro raw files on GitHub-hosted runners
               if: runner.environment == 'github-hosted'
               uses: actions/cache@v5
@@ -234,7 +275,7 @@ jobs:
               uses: actions/cache@v5
               with:
                   path: ~/.cache/datasets/openneuro/staged-epochs/${{ inputs.dataset }}
-                  key: openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-subjects-${{ inputs.subjects }}-runs-${{ inputs.runs }}-cap-${{ inputs.max_events_per_label }}-v1
+                  key: openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-subjects-${{ steps.openneuro_cache_keys.outputs.subjects }}-runs-${{ steps.openneuro_cache_keys.outputs.runs }}-cap-${{ steps.openneuro_cache_keys.outputs.cap }}-v1
                   restore-keys: |
                       openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-
                       openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-

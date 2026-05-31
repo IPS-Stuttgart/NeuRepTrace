@@ -80,11 +80,16 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "default: github-hosted" in workflow
     assert "GitHub-hosted starts immediately" in workflow
     assert "Cache OpenNeuro raw files on GitHub-hosted runners" in workflow
+    assert "Resolve GitHub-hosted OpenNeuro cache keys" in workflow
+    assert "safe_cache_token" in workflow
     assert "Cache staged OpenNeuro epochs on GitHub-hosted runners" in workflow
     assert "Check selected staged epochs" in workflow
     assert "raw-file check/download can be skipped" in workflow
     assert "steps.staged_check.outputs.ready != 'true'" in workflow
-    assert "openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}" in workflow
+    assert "steps.openneuro_cache_keys.outputs.subjects" in workflow
+    assert "steps.openneuro_cache_keys.outputs.runs" in workflow
+    assert "steps.openneuro_cache_keys.outputs.cap" in workflow
+    assert "subjects-${{ inputs.subjects }}" not in workflow
     assert "stage_overwrite" in workflow
     assert 'if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]]; then' in workflow
     assert "stage_args+=(--overwrite)" in workflow
