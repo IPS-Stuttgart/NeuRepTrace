@@ -2,7 +2,8 @@
 
 NeuRepTrace does not download large public datasets automatically and does not
 store staged data in git. Stage datasets outside version control under
-`data/`, then validate the benchmark manifest before running decoding.
+`data/`, then validate the paper-repository benchmark manifest before running
+decoding.
 
 The repository tracks only code, documentation, and lightweight benchmark
 manifests. `.gitignore` excludes `data/`, `results/`, and large local data
@@ -46,7 +47,7 @@ openneuro-py download \
 ```
 
 Then stage the files under the local layout expected by
-`benchmarks/nod_animate_sub01.csv`:
+`NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv`:
 
 ```bash
 mkdir -p data/nod
@@ -177,7 +178,7 @@ data/nod/sub-30_epo.fif
 data/nod/sub-30_events.csv
 ```
 
-Then update `benchmarks/nod_animate_sub01.csv` if the staged filenames differ.
+Then update `NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv` if the staged filenames differ.
 
 ## Validate Before Decoding
 
@@ -185,7 +186,7 @@ Run:
 
 ```bash
 python -m neureptrace.validate_manifest \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 ```
 
@@ -193,7 +194,7 @@ Only run the benchmark after validation passes:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \
   --plot-out results/nod_animate_sub01_summary.png \

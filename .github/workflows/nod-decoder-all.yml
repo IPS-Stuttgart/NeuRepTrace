@@ -19,9 +19,9 @@ on:
                 required: true
                 default: "results/nod_animate_decoders_all"
             manifest_csv:
-                description: "Repository-relative benchmark manifest to run"
+                description: "Workspace-relative benchmark manifest to run"
                 required: true
-                default: "benchmarks/nod_animate_decoders_all.csv"
+                default: "NeuRepTrace-Paper/benchmarks/nod_animate_decoders_all.csv"
             n_permutations:
                 description: "Sign-flip permutations for temporal inference"
                 required: true
@@ -63,6 +63,12 @@ jobs:
         steps:
             - name: Check out repository
               uses: actions/checkout@v6
+
+            - name: Check out paper benchmark manifests
+              uses: actions/checkout@v6
+              with:
+                  repository: FlorianPfaff/NeuRepTrace-Paper
+                  path: NeuRepTrace-Paper
 
             - name: Install dependencies
               shell: cmd
@@ -150,6 +156,9 @@ jobs:
                   $outputDir = Join-Path $env:GITHUB_WORKSPACE "${{ inputs.output_dir }}"
                   $runManifest = Join-Path $outputDir "manifest.csv"
                   $manifestCsv = "${{ inputs.manifest_csv }}"
+                  if (-not [System.IO.Path]::IsPathRooted($manifestCsv)) {
+                    $manifestCsv = Join-Path $env:GITHUB_WORKSPACE $manifestCsv
+                  }
                   New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
                   & py "-${{ inputs.python_version }}" -m poetry run python scripts\prepare_benchmark_manifest.py $manifestCsv $runManifest --data-root $dataRoot
                   "NEUREPTRACE_DATA_ROOT=$dataRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

@@ -68,7 +68,7 @@ and a NeuRepTrace benchmark manifest:
 python scripts/stage_ds000117_faces.py \
   --bids-root data/ds000117 \
   --staged-dir data/ds000117_neureptrace \
-  --manifest-out benchmarks/ds000117_faces_sub01.csv \
+  --manifest-out NeuRepTrace-Paper/benchmarks/ds000117_faces_sub01.csv \
   --subjects 01 \
   --runs 01 02 \
   --max-events-per-label 40 \
@@ -90,11 +90,11 @@ on raw sub-01 smoke data it is substantially slower than logistic regression.
 
 ```bash
 neureptrace-validate-manifest \
-  benchmarks/ds000117_faces_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/ds000117_faces_sub01.csv \
   --report-out results/ds000117_faces_sub01_validation.csv
 
 neureptrace-benchmark \
-  benchmarks/ds000117_faces_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/ds000117_faces_sub01.csv \
   --out-dir results/ds000117_faces_sub01 \
   --aggregate-out results/ds000117_faces_sub01_summary.csv \
   --plot-out results/ds000117_faces_sub01_summary.png \

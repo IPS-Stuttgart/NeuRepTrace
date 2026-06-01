@@ -49,11 +49,11 @@ Or run the manifest:
 
 ```bash
 python -m neureptrace.validate_manifest \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \
   --plot-out results/nod_animate_sub01_summary.png \

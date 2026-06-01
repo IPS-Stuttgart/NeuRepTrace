@@ -122,6 +122,13 @@ def _fake_benchmark(manifest_csv: Path, *, out_dir: Path, aggregate_out: Path, p
 
 
 def test_run_temporal_state_workflow_builds_compact_outputs_and_exports(tmp_path: Path, monkeypatch):
+    manifest_dir = tmp_path / "paper_benchmarks"
+    manifest_dir.mkdir()
+    (manifest_dir / "nod_animate_all.csv").write_text(
+        "subject,epochs,events_csv,source_column,positive_pattern,label_column\n"
+        "sub-01,../data/nod/sub-01_epo.fif,../data/nod/sub-01_events.csv,stim_is_animate,True,condition\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
         "neureptrace.temporal_state_workflow.validate_manifest",
         lambda manifest_csv: [ManifestValidation(subject="sub-01", ok=True, messages=[])],
@@ -130,6 +137,7 @@ def test_run_temporal_state_workflow_builds_compact_outputs_and_exports(tmp_path
 
     run = run_temporal_state_workflow(
         out_dir=tmp_path / "temporal_state",
+        manifest_dir=manifest_dir,
         compact_export_dir=tmp_path / "compact_results" / "results" / "temporal_state_inference",
         task_ids=("nod_animate",),
         decoders=("linear_svm",),

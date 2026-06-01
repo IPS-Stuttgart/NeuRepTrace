@@ -36,7 +36,7 @@ Expand an MNE-compatible spec into a benchmark-style manifest:
 ```bash
 neureptrace dataset manifest configs/nod.yml \
   --workflow animate \
-  --out benchmarks/nod_animate_from_spec.csv
+  --out NeuRepTrace-Paper/benchmarks/nod_animate_from_spec.csv
 ```
 
 For MATLAB/FieldTrip-like private datasets, manifest expansion is still useful as an inventory and provenance table. Direct model workflows should call `load_split_dataset()` or a workflow-specific adapter.

@@ -94,6 +94,22 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _default_manifest_dir(repo_root: Path) -> Path:
+    candidates = (
+        repo_root / "NeuRepTrace-Paper" / "benchmarks",
+        repo_root.parent / "NeuRepTrace-Paper" / "benchmarks",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    formatted = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(
+        "Benchmark manifest snapshots are stored in FlorianPfaff/NeuRepTrace-Paper. "
+        "Pass --manifest-dir or clone/check out NeuRepTrace-Paper so one of these paths exists: "
+        f"{formatted}"
+    )
+
+
 def _normal_decoders(decoders: tuple[str, ...] | list[str]) -> tuple[str, ...]:
     if not decoders:
         raise ValueError("At least one decoder is required.")
@@ -468,6 +484,7 @@ def export_temporal_state_artifacts(
 def run_temporal_state_workflow(
     *,
     out_dir: Path,
+    manifest_dir: Path | None = None,
     data_root: Path | None = None,
     compact_export_dir: Path | None = None,
     task_ids: tuple[str, ...] | None = None,
@@ -486,6 +503,7 @@ def run_temporal_state_workflow(
 ) -> TemporalStateWorkflowRun:
     """Run the reproducible calibration-aware NOD temporal-state workflow."""
     repo_root = _repo_root()
+    manifest_dir = manifest_dir.resolve() if manifest_dir is not None else _default_manifest_dir(repo_root)
     out_dir = out_dir.resolve()
     tasks = _selected_tasks(task_ids)
     decoders = _normal_decoders(decoders)
@@ -495,7 +513,7 @@ def run_temporal_state_workflow(
         task_dir = out_dir / task.task_id
         manifest_csv = task_dir / "manifest.csv"
         validation_csv = task_dir / "validation.csv"
-        source_manifest = repo_root / "benchmarks" / task.manifest_name
+        source_manifest = manifest_dir / task.manifest_name
         prepare_temporal_state_manifest(
             source_manifest,
             manifest_csv,
@@ -628,6 +646,7 @@ def run_temporal_state_workflow(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the NeuRepTrace calibration-aware temporal-state workflow.")
     parser.add_argument("--out-dir", type=Path, default=Path("results/temporal_state_inference"))
+    parser.add_argument("--manifest-dir", type=Path, help="Directory containing paper benchmark manifest snapshots.")
     parser.add_argument("--data-root", type=Path, help="Directory containing staged NOD sub-*_epo.fif and sub-*_events.csv files.")
     parser.add_argument("--compact-export-dir", type=Path, help="Optional directory for compact exported artifacts.")
     parser.add_argument("--task", action="append", choices=DEFAULT_TASK_IDS, dest="task_ids", help="Task to run. Repeat to select multiple tasks.")
@@ -647,6 +666,7 @@ def main() -> None:
     command_line = "python -m neureptrace.temporal_state_workflow " + " ".join(sys.argv[1:])
     run = run_temporal_state_workflow(
         out_dir=args.out_dir,
+        manifest_dir=args.manifest_dir,
         data_root=args.data_root,
         compact_export_dir=args.compact_export_dir,
         task_ids=tuple(args.task_ids) if args.task_ids else None,
