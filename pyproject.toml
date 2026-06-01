@@ -7,7 +7,6 @@ version = "0.1.1"
 license = "MIT"
 packages = [
   { include = "neureptrace", from = "src" },
-  { include = "reptrace", from = "src" },
 ]
 
 [tool.poetry.scripts]
