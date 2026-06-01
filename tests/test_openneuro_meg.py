@@ -83,6 +83,7 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "Resolve GitHub-hosted OpenNeuro cache keys" in workflow
     assert "safe_cache_token" in workflow
     assert "Cache staged OpenNeuro epochs on GitHub-hosted runners" in workflow
+    assert "NeuRepTrace LOSO decode still running" in workflow
     assert "Check selected staged epochs" in workflow
     assert "raw-file check/download can be skipped" in workflow
     assert "steps.staged_check.outputs.ready != 'true'" in workflow

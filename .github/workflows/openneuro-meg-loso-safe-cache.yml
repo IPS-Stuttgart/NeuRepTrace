@@ -591,7 +591,20 @@ jobs:
                   if [[ -n "$ENSEMBLE_MIN_PROBABILITY_INPUT" ]]; then
                     args+=(--set "decoding.ensemble_min_probability=$ENSEMBLE_MIN_PROBABILITY_INPUT")
                   fi
-                  python -m neureptrace.decode_from_config "${args[@]}"
+                  python -m neureptrace.decode_from_config "${args[@]}" &
+                  decode_pid="$!"
+                  (
+                    while kill -0 "$decode_pid" 2>/dev/null; do
+                      echo "NeuRepTrace LOSO decode still running at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                      sleep 120
+                    done
+                  ) &
+                  keepalive_pid="$!"
+                  status=0
+                  wait "$decode_pid" || status="$?"
+                  kill "$keepalive_pid" 2>/dev/null || true
+                  wait "$keepalive_pid" 2>/dev/null || true
+                  exit "$status"
 
             - name: Run temporal posterior smoothing
               if: ${{ always() && env.RUN_DECODE == 'true' && env.TEMPORAL_SMOOTHING == 'true' }}
