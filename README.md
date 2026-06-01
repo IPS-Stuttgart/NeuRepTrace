@@ -109,15 +109,22 @@ whether a workflow also has a direct console-script entry point.
 
 ## Quickstart
 
+Paper-facing benchmark manifest snapshots live in
+[`FlorianPfaff/NeuRepTrace-Paper`](https://github.com/FlorianPfaff/NeuRepTrace-Paper).
+The commands below assume that repository is checked out as
+`NeuRepTrace-Paper/` inside this working tree, matching the GitHub workflow
+checkout path. Adjust the manifest path if you keep the paper repository as a
+sibling checkout.
+
 Run the pilot NOD-EEG benchmark from a manifest:
 
 ```bash
 neureptrace-validate-manifest \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 
 neureptrace-benchmark \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \
   --plot-out results/nod_animate_sub01_summary.png \
@@ -128,11 +135,11 @@ The grouped CLI provides the same workflows:
 
 ```bash
 neureptrace validate-manifest \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 
 neureptrace benchmark \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \
   --plot-out results/nod_animate_sub01_summary.png \

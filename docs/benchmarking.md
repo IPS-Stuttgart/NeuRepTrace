@@ -4,6 +4,12 @@ The first intended public benchmark is NOD-MEG/NOD-EEG. NeuRepTrace does not
 download large public datasets automatically; stage the relevant subject epochs
 and metadata locally first.
 
+Paper-facing benchmark manifest snapshots are stored in
+`FlorianPfaff/NeuRepTrace-Paper`. The commands below use paths under
+`NeuRepTrace-Paper/benchmarks/`, matching the GitHub workflow checkout path.
+If the paper repository is a sibling of this checkout, adjust the paths to
+`../NeuRepTrace-Paper/benchmarks/`.
+
 ## NOD Animate/Inanimate Pilot
 
 Use the NOD preprocessed epochs file and the matching detailed events CSV. If
@@ -150,11 +156,11 @@ The same workflow can be run from a manifest:
 
 ```bash
 python -m neureptrace.validate_manifest \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --report-out results/nod_animate_sub01_validation.csv
 
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_sub01.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sub01.csv \
   --out-dir results/nod_animate_sub01 \
   --aggregate-out results/nod_animate_sub01_summary.csv \
   --plot-out results/nod_animate_sub01_summary.png \
@@ -173,11 +179,11 @@ subjects at once from a single manifest:
 
 ```bash
 python -m neureptrace.validate_manifest \
-  benchmarks/nod_animate_first5.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_first5.csv \
   --report-out results/nod_animate_first5_validation.csv
 
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_first5.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_first5.csv \
   --out-dir results/nod_animate_first5 \
   --aggregate-out results/nod_animate_first5_summary.csv \
   --plot-out results/nod_animate_first5_summary.png \
@@ -209,7 +215,7 @@ because several subjects have only 2 unique session groups:
 
 ```bash
 python -m neureptrace.validate_manifest \
-  benchmarks/nod_animate_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_all.csv \
   --report-out results/nod_animate_all_validation.csv
 ```
 
@@ -217,7 +223,7 @@ Then run the same animate/inanimate benchmark over every staged NOD-EEG subject:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_all.csv \
   --out-dir results/nod_animate_all \
   --aggregate-out results/nod_animate_all/summary.csv \
   --plot-out results/nod_animate_all/nod_animate_all_summary.png \
@@ -259,7 +265,7 @@ checking; reported claims should use the full staged manifest.
 
 ## Second NOD-EEG Task
 
-Use `benchmarks/nod_superclass_canine_device_all.csv` for a second public task
+Use `NeuRepTrace-Paper/benchmarks/nod_superclass_canine_device_all.csv` for a second public task
 within the same staged NOD-EEG data. This task decodes ImageNet superclass
 labels `canine` versus `device`, using only trials whose `super_class` exactly
 matches one of those labels. The full staged set contains 7,293 canine trials
@@ -267,11 +273,11 @@ and 6,950 device trials across 19 subjects.
 
 ```bash
 python -m neureptrace.validate_manifest \
-  benchmarks/nod_superclass_canine_device_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_superclass_canine_device_all.csv \
   --report-out results/nod_superclass_canine_device_all_validation.csv
 
 python -m neureptrace.benchmark \
-  benchmarks/nod_superclass_canine_device_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_superclass_canine_device_all.csv \
   --out-dir results/nod_superclass_canine_device_all \
   --aggregate-out results/nod_superclass_canine_device_all/summary.csv \
   --plot-out results/nod_superclass_canine_device_all/summary.png \
@@ -304,7 +310,7 @@ preprocessing, CV logic, or reporting machinery.
 
 ## Next NOD-EEG Task
 
-Use `benchmarks/nod_superclass_container_covering_all.csv` for the next staged
+Use `NeuRepTrace-Paper/benchmarks/nod_superclass_container_covering_all.csv` for the next staged
 task. This contrast decodes ImageNet superclass labels `container` versus
 `covering`, using only trials whose `super_class` exactly matches one of those
 labels. Both labels are inanimate, so this task tests category decoding beyond
@@ -313,11 +319,11 @@ trials and 4,809 covering trials across all 19 subjects.
 
 ```bash
 python -m neureptrace.validate_manifest \
-  benchmarks/nod_superclass_container_covering_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_superclass_container_covering_all.csv \
   --report-out results/nod_superclass_container_covering_all_validation.csv
 
 python -m neureptrace.benchmark \
-  benchmarks/nod_superclass_container_covering_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_superclass_container_covering_all.csv \
   --out-dir results/nod_superclass_container_covering_all \
   --aggregate-out results/nod_superclass_container_covering_all/summary.csv \
   --plot-out results/nod_superclass_container_covering_all/summary.png \
@@ -376,7 +382,7 @@ Run the first-five-subject decoder comparison:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_decoders_first5.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_decoders_first5.csv \
   --out-dir results/nod_animate_decoders_first5 \
   --aggregate-out results/nod_animate_decoders_first5/summary.csv \
   --plot-out results/nod_animate_decoders_first5/summary.png \
@@ -407,7 +413,7 @@ Run the tuned PCA-whitened logistic variant over all 19 staged subjects:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_logistic_tuned_pca_whiten_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_logistic_tuned_pca_whiten_all.csv \
   --out-dir results/nod_animate_logistic_tuned_pca_whiten_all \
   --aggregate-out results/nod_animate_logistic_tuned_pca_whiten_all/summary.csv \
   --plot-out results/nod_animate_logistic_tuned_pca_whiten_all/summary.png \
@@ -426,7 +432,7 @@ subjects:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_logistic_tuned_anova_select_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_logistic_tuned_anova_select_all.csv \
   --out-dir results/nod_animate_logistic_tuned_anova_select_all \
   --aggregate-out results/nod_animate_logistic_tuned_anova_select_all/summary.csv \
   --plot-out results/nod_animate_logistic_tuned_anova_select_all/summary.png \
@@ -444,7 +450,7 @@ Run an explicit shrinkage-LDA variant over all 19 staged subjects:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_shrinkage_lda_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_shrinkage_lda_all.csv \
   --out-dir results/nod_animate_shrinkage_lda_all \
   --aggregate-out results/nod_animate_shrinkage_lda_all/summary.csv \
   --plot-out results/nod_animate_shrinkage_lda_all/summary.png \
@@ -463,7 +469,7 @@ too many weak noisy features but pure feature selection would be too aggressive:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_elastic_net_logistic_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_elastic_net_logistic_all.csv \
   --out-dir results/nod_animate_elastic_net_logistic_all \
   --aggregate-out results/nod_animate_elastic_net_logistic_all/summary.csv \
   --plot-out results/nod_animate_elastic_net_logistic_all/summary.png \
@@ -480,7 +486,7 @@ Run the ridge classifier variant over all 19 staged subjects:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_ridge_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_ridge_all.csv \
   --out-dir results/nod_animate_ridge_all \
   --aggregate-out results/nod_animate_ridge_all/summary.csv \
   --plot-out results/nod_animate_ridge_all/summary.png \
@@ -497,7 +503,7 @@ Run the Gaussian naive Bayes variant over all 19 staged subjects:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_gaussian_nb_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_gaussian_nb_all.csv \
   --out-dir results/nod_animate_gaussian_nb_all \
   --aggregate-out results/nod_animate_gaussian_nb_all/summary.csv \
   --plot-out results/nod_animate_gaussian_nb_all/summary.png \
@@ -514,7 +520,7 @@ Run the slower tuned temporal train-window ensemble:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_logistic_tuned_temporal_ensemble_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_logistic_tuned_temporal_ensemble_all.csv \
   --out-dir results/nod_animate_logistic_tuned_temporal_ensemble_all \
   --aggregate-out results/nod_animate_logistic_tuned_temporal_ensemble_all/summary.csv \
   --plot-out results/nod_animate_logistic_tuned_temporal_ensemble_all/summary.png \
@@ -533,7 +539,7 @@ changing the decoder:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_logistic_temporal_smoothing_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_logistic_temporal_smoothing_all.csv \
   --out-dir results/nod_animate_logistic_temporal_smoothing_all \
   --aggregate-out results/nod_animate_logistic_temporal_smoothing_all/summary.csv \
   --plot-out results/nod_animate_logistic_temporal_smoothing_all/summary.png \
@@ -557,7 +563,7 @@ many noisy sensor-time features:
 
 ```bash
 python -m neureptrace.benchmark \
-  benchmarks/nod_animate_sparse_logistic_all.csv \
+  NeuRepTrace-Paper/benchmarks/nod_animate_sparse_logistic_all.csv \
   --out-dir results/nod_animate_sparse_logistic_all \
   --aggregate-out results/nod_animate_sparse_logistic_all/summary.csv \
   --plot-out results/nod_animate_sparse_logistic_all/summary.png \
@@ -616,7 +622,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_decoders_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_decoders_all.csv \
   -f output_dir=results/nod_animate_decoders_all \
   -f n_permutations=10000
 ```
@@ -636,7 +642,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_logistic_tuned_pca_whiten_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_logistic_tuned_pca_whiten_all.csv \
   -f output_dir=results/nod_animate_logistic_tuned_pca_whiten_all \
   -f n_permutations=10000
 ```
@@ -648,7 +654,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_logistic_tuned_anova_select_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_logistic_tuned_anova_select_all.csv \
   -f output_dir=results/nod_animate_logistic_tuned_anova_select_all \
   -f n_permutations=10000
 ```
@@ -660,7 +666,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_logistic_tuned_temporal_ensemble_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_logistic_tuned_temporal_ensemble_all.csv \
   -f output_dir=results/nod_animate_logistic_tuned_temporal_ensemble_all \
   -f n_permutations=10000
 ```
@@ -672,7 +678,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_shrinkage_lda_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_shrinkage_lda_all.csv \
   -f output_dir=results/nod_animate_shrinkage_lda_all \
   -f n_permutations=10000
 ```
@@ -684,7 +690,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_elastic_net_logistic_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_elastic_net_logistic_all.csv \
   -f output_dir=results/nod_animate_elastic_net_logistic_all \
   -f n_permutations=10000
 ```
@@ -696,7 +702,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_ridge_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_ridge_all.csv \
   -f output_dir=results/nod_animate_ridge_all \
   -f n_permutations=10000
 ```
@@ -708,7 +714,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_gaussian_nb_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_gaussian_nb_all.csv \
   -f output_dir=results/nod_animate_gaussian_nb_all \
   -f n_permutations=10000
 ```
@@ -720,7 +726,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_logistic_temporal_smoothing_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_logistic_temporal_smoothing_all.csv \
   -f output_dir=results/nod_animate_logistic_temporal_smoothing_all \
   -f temporal_smoothing=true \
   -f temporal_smoothing_fit_window_start=0.1 \
@@ -736,7 +742,7 @@ gh workflow run nod-decoder-all.yml \
   --repo IPS-Stuttgart/NeuRepTrace \
   --ref main \
   -f data_root=../data/nod \
-  -f manifest_csv=benchmarks/nod_animate_sparse_logistic_all.csv \
+  -f manifest_csv=NeuRepTrace-Paper/benchmarks/nod_animate_sparse_logistic_all.csv \
   -f output_dir=results/nod_animate_sparse_logistic_all \
   -f n_permutations=10000
 ```
