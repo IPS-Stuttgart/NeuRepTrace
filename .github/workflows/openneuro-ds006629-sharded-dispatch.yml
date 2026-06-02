@@ -25,6 +25,10 @@ on:
                 description: "Per-run class cap during staging; 0 disables the cap"
                 required: true
                 default: "120"
+            stage_seed:
+                description: "Random seed for capped event selection during staging"
+                required: true
+                default: "13"
             no_download:
                 description: "Use already cached/staged data only; fail instead of downloading missing raw files"
                 required: true
@@ -153,11 +157,14 @@ jobs:
               env:
                   GH_TOKEN: ${{ github.token }}
                   SHARD_GROUPS_JSON: ${{ steps.shards.outputs.shard_groups_json }}
+                  STAGE_SEED: ${{ inputs.stage_seed }}
                   EXTRA_CONFIG_OVERRIDES: ${{ inputs.extra_config_overrides }}
               run: |
                   set -euo pipefail
 
                   overrides="workflow.outer_test_group_shards_json=${SHARD_GROUPS_JSON}"
+                  overrides+=$'\n'
+                  overrides+="workflow.stage_seed=${STAGE_SEED:-13}"
                   if [[ -n "${EXTRA_CONFIG_OVERRIDES//[[:space:];]/}" ]]; then
                     overrides+=$'\n'
                     overrides+="$EXTRA_CONFIG_OVERRIDES"

@@ -59,4 +59,8 @@ def test_ds006629_sharded_dispatch_defaults_to_staging_successful_subjects() -> 
     )
     assert 'default: "1,2,4,5,7-12,14-21"' in workflow
     assert 'default: "18"' in workflow
+    assert "stage_seed:" in workflow
+    assert 'default: "13"' in workflow
     assert "-f dataset=ds006629" in workflow
+    assert "workflow.stage_seed=${STAGE_SEED:-13}" in workflow
+    assert "-f stage_seed=" not in workflow
