@@ -41,10 +41,6 @@ on:
                 description: "Per-run class cap during staging; 0 disables the cap"
                 required: true
                 default: "120"
-            stage_seed:
-                description: "Random seed for capped event selection during staging"
-                required: true
-                default: "13"
             run_decode:
                 description: "Run LOSO decoding after staging"
                 required: true
@@ -192,7 +188,6 @@ jobs:
             DATA_ROOT_INPUT: ${{ inputs.data_root }}
             STAGED_ROOT_INPUT: ${{ inputs.staged_root }}
             MAX_EVENTS_PER_LABEL_INPUT: ${{ inputs.max_events_per_label }}
-            STAGE_SEED_INPUT: ${{ inputs.stage_seed }}
             RUN_DECODE: ${{ inputs.run_decode }}
             NO_DOWNLOAD: ${{ inputs.no_download }}
             SKIP_FAILED_SUBJECTS: ${{ inputs.skip_failed_subjects }}
@@ -232,7 +227,7 @@ jobs:
                   SUBJECTS_CACHE_INPUT: ${{ inputs.subjects }}
                   RUNS_CACHE_INPUT: ${{ inputs.runs }}
                   MAX_EVENTS_PER_LABEL_CACHE_INPUT: ${{ inputs.max_events_per_label }}
-                  STAGE_SEED_CACHE_INPUT: ${{ inputs.stage_seed }}
+                  CONFIG_OVERRIDES_CACHE_INPUT: ${{ inputs.config_overrides }}
               run: |
                   set -euo pipefail
                   python - <<'PY'
@@ -253,11 +248,25 @@ jobs:
                           token = f"{token[:100].rstrip('-._')}-{digest}"
                       return token
 
+                  def override_value(config_text: str, *keys: str) -> str:
+                      for override in config_text.replace(";", "\n").splitlines():
+                          key, separator, value = override.strip().partition("=")
+                          if separator and key.strip() in keys:
+                              return value.strip()
+                      return ""
+
+                  config_overrides = os.environ.get("CONFIG_OVERRIDES_CACHE_INPUT", "")
+                  stage_seed = override_value(
+                      config_overrides,
+                      "workflow.stage_seed",
+                      "openneuro.stage_seed",
+                  ) or "13"
+
                   outputs = {
                       "subjects": safe_cache_token(os.environ.get("SUBJECTS_CACHE_INPUT"), "default"),
                       "runs": safe_cache_token(os.environ.get("RUNS_CACHE_INPUT"), "default"),
                       "cap": safe_cache_token(os.environ.get("MAX_EVENTS_PER_LABEL_CACHE_INPUT"), "none"),
-                      "stage_seed": safe_cache_token(os.environ.get("STAGE_SEED_CACHE_INPUT"), "13"),
+                      "stage_seed": safe_cache_token(stage_seed, "13"),
                   }
                   with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
                       for key, value in outputs.items():
@@ -347,6 +356,7 @@ jobs:
                   parsed_runs = parse_runs(spec, runs)
                   subject_count = len(parse_subjects(spec, subjects))
                   max_events = int(os.environ["MAX_EVENTS_PER_LABEL_INPUT"])
+                  stage_seed = override_value("workflow.stage_seed", "openneuro.stage_seed") or "13"
                   if max_events <= 0:
                       max_events_arg = ""
                   else:
@@ -380,6 +390,7 @@ jobs:
                       handle.write(f"RUNNER_ENVIRONMENT={runner_environment}\n")
                       handle.write(f"OPENNEURO_OUTPUT_SUFFIX={output_suffix}\n")
                       handle.write(f"OPENNEURO_ARTIFACT_NAME={artifact_name}\n")
+                      handle.write(f"STAGE_SEED_INPUT={stage_seed}\n")
                   output_dir.mkdir(parents=True, exist_ok=True)
                   manifest = {
                       "dataset": dataset,
@@ -397,7 +408,7 @@ jobs:
                       "output_dir": output_dir.as_posix(),
                       "artifact_name": artifact_name,
                       "max_events_per_label": max_events,
-                      "stage_seed": os.environ.get("STAGE_SEED_INPUT", ""),
+                      "stage_seed": stage_seed,
                       "run_decode": os.environ.get("RUN_DECODE", ""),
                       "no_download": os.environ.get("NO_DOWNLOAD", ""),
                       "skip_failed_subjects": os.environ.get("SKIP_FAILED_SUBJECTS", ""),

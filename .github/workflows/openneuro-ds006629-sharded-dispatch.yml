@@ -157,11 +157,14 @@ jobs:
               env:
                   GH_TOKEN: ${{ github.token }}
                   SHARD_GROUPS_JSON: ${{ steps.shards.outputs.shard_groups_json }}
+                  STAGE_SEED: ${{ inputs.stage_seed }}
                   EXTRA_CONFIG_OVERRIDES: ${{ inputs.extra_config_overrides }}
               run: |
                   set -euo pipefail
 
                   overrides="workflow.outer_test_group_shards_json=${SHARD_GROUPS_JSON}"
+                  overrides+=$'\n'
+                  overrides+="workflow.stage_seed=${STAGE_SEED:-13}"
                   if [[ -n "${EXTRA_CONFIG_OVERRIDES//[[:space:];]/}" ]]; then
                     overrides+=$'\n'
                     overrides+="$EXTRA_CONFIG_OVERRIDES"
@@ -180,7 +183,6 @@ jobs:
                     -f data_root='${{ inputs.data_root }}' \
                     -f staged_root='${{ inputs.staged_root }}' \
                     -f max_events_per_label='${{ inputs.max_events_per_label }}' \
-                    -f stage_seed='${{ inputs.stage_seed }}' \
                     -f run_decode=true \
                     -f no_download='${{ inputs.no_download }}' \
                     -f skip_failed_subjects='${{ inputs.skip_failed_subjects }}' \

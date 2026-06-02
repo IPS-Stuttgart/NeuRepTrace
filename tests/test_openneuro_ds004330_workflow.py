@@ -62,4 +62,5 @@ def test_ds006629_sharded_dispatch_defaults_to_staging_successful_subjects() -> 
     assert "stage_seed:" in workflow
     assert 'default: "13"' in workflow
     assert "-f dataset=ds006629" in workflow
-    assert "-f stage_seed='${{ inputs.stage_seed }}'" in workflow
+    assert "workflow.stage_seed=${STAGE_SEED:-13}" in workflow
+    assert "-f stage_seed=" not in workflow

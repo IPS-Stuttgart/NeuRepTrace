@@ -92,6 +92,8 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "steps.openneuro_cache_keys.outputs.cap" in workflow
     assert "steps.openneuro_cache_keys.outputs.stage_seed" in workflow
     assert "stage-seed-${{ steps.openneuro_cache_keys.outputs.stage_seed }}" in workflow
+    assert "CONFIG_OVERRIDES_CACHE_INPUT" in workflow
+    assert "workflow.stage_seed" in workflow
     assert "STAGE_SEED_INPUT" in workflow
     assert '--seed "$STAGE_SEED_INPUT"' in workflow
     assert "subjects-${{ inputs.subjects }}" not in workflow
