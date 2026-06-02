@@ -41,6 +41,10 @@ on:
                 description: "Per-run class cap during staging; 0 disables the cap"
                 required: true
                 default: "120"
+            stage_seed:
+                description: "Random seed for capped event selection during staging"
+                required: true
+                default: "13"
             run_decode:
                 description: "Run LOSO decoding after staging"
                 required: true
@@ -188,6 +192,7 @@ jobs:
             DATA_ROOT_INPUT: ${{ inputs.data_root }}
             STAGED_ROOT_INPUT: ${{ inputs.staged_root }}
             MAX_EVENTS_PER_LABEL_INPUT: ${{ inputs.max_events_per_label }}
+            STAGE_SEED_INPUT: ${{ inputs.stage_seed }}
             RUN_DECODE: ${{ inputs.run_decode }}
             NO_DOWNLOAD: ${{ inputs.no_download }}
             SKIP_FAILED_SUBJECTS: ${{ inputs.skip_failed_subjects }}
@@ -227,6 +232,7 @@ jobs:
                   SUBJECTS_CACHE_INPUT: ${{ inputs.subjects }}
                   RUNS_CACHE_INPUT: ${{ inputs.runs }}
                   MAX_EVENTS_PER_LABEL_CACHE_INPUT: ${{ inputs.max_events_per_label }}
+                  STAGE_SEED_CACHE_INPUT: ${{ inputs.stage_seed }}
               run: |
                   set -euo pipefail
                   python - <<'PY'
@@ -251,6 +257,7 @@ jobs:
                       "subjects": safe_cache_token(os.environ.get("SUBJECTS_CACHE_INPUT"), "default"),
                       "runs": safe_cache_token(os.environ.get("RUNS_CACHE_INPUT"), "default"),
                       "cap": safe_cache_token(os.environ.get("MAX_EVENTS_PER_LABEL_CACHE_INPUT"), "none"),
+                      "stage_seed": safe_cache_token(os.environ.get("STAGE_SEED_CACHE_INPUT"), "13"),
                   }
                   with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
                       for key, value in outputs.items():
@@ -258,6 +265,7 @@ jobs:
                   print(f"OpenNeuro cache subjects token: {outputs['subjects']}")
                   print(f"OpenNeuro cache runs token: {outputs['runs']}")
                   print(f"OpenNeuro cache cap token: {outputs['cap']}")
+                  print(f"OpenNeuro cache stage seed token: {outputs['stage_seed']}")
                   PY
 
             - name: Cache OpenNeuro raw files on GitHub-hosted runners
@@ -275,10 +283,9 @@ jobs:
               uses: actions/cache@v5
               with:
                   path: ~/.cache/datasets/openneuro/staged-epochs/${{ inputs.dataset }}
-                  key: openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-subjects-${{ steps.openneuro_cache_keys.outputs.subjects }}-runs-${{ steps.openneuro_cache_keys.outputs.runs }}-cap-${{ steps.openneuro_cache_keys.outputs.cap }}-v1
+                  key: openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-subjects-${{ steps.openneuro_cache_keys.outputs.subjects }}-runs-${{ steps.openneuro_cache_keys.outputs.runs }}-cap-${{ steps.openneuro_cache_keys.outputs.cap }}-stage-seed-${{ steps.openneuro_cache_keys.outputs.stage_seed }}-v1
                   restore-keys: |
-                      openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-
-                      openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-
+                      openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-subjects-${{ steps.openneuro_cache_keys.outputs.subjects }}-runs-${{ steps.openneuro_cache_keys.outputs.runs }}-cap-${{ steps.openneuro_cache_keys.outputs.cap }}-stage-seed-${{ steps.openneuro_cache_keys.outputs.stage_seed }}-
 
             - name: Install NeuRepTrace and OpenNeuro client
               shell: bash
@@ -390,6 +397,7 @@ jobs:
                       "output_dir": output_dir.as_posix(),
                       "artifact_name": artifact_name,
                       "max_events_per_label": max_events,
+                      "stage_seed": os.environ.get("STAGE_SEED_INPUT", ""),
                       "run_decode": os.environ.get("RUN_DECODE", ""),
                       "no_download": os.environ.get("NO_DOWNLOAD", ""),
                       "skip_failed_subjects": os.environ.get("SKIP_FAILED_SUBJECTS", ""),
@@ -568,6 +576,7 @@ jobs:
                     --subjects "$OPENNEURO_SUBJECTS"
                     --runs "$OPENNEURO_RUNS"
                     --summary-out "$OPENNEURO_OUTPUT_DIR/stage_summary.csv"
+                    --seed "$STAGE_SEED_INPUT"
                   )
                   stage_args+=("${max_events_args[@]}")
                   stage_args+=(--on-mismatch warn)

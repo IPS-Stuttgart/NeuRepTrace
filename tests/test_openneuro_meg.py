@@ -90,6 +90,10 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "steps.openneuro_cache_keys.outputs.subjects" in workflow
     assert "steps.openneuro_cache_keys.outputs.runs" in workflow
     assert "steps.openneuro_cache_keys.outputs.cap" in workflow
+    assert "steps.openneuro_cache_keys.outputs.stage_seed" in workflow
+    assert "stage-seed-${{ steps.openneuro_cache_keys.outputs.stage_seed }}" in workflow
+    assert "STAGE_SEED_INPUT" in workflow
+    assert '--seed "$STAGE_SEED_INPUT"' in workflow
     assert "subjects-${{ inputs.subjects }}" not in workflow
     assert "stage_overwrite" in workflow
     assert 'if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]]; then' in workflow

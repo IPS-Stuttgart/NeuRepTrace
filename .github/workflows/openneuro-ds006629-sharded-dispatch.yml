@@ -25,6 +25,10 @@ on:
                 description: "Per-run class cap during staging; 0 disables the cap"
                 required: true
                 default: "120"
+            stage_seed:
+                description: "Random seed for capped event selection during staging"
+                required: true
+                default: "13"
             no_download:
                 description: "Use already cached/staged data only; fail instead of downloading missing raw files"
                 required: true
@@ -176,6 +180,7 @@ jobs:
                     -f data_root='${{ inputs.data_root }}' \
                     -f staged_root='${{ inputs.staged_root }}' \
                     -f max_events_per_label='${{ inputs.max_events_per_label }}' \
+                    -f stage_seed='${{ inputs.stage_seed }}' \
                     -f run_decode=true \
                     -f no_download='${{ inputs.no_download }}' \
                     -f skip_failed_subjects='${{ inputs.skip_failed_subjects }}' \
