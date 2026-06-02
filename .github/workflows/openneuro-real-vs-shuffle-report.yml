@@ -1,0 +1,95 @@
+name: OpenNeuro Real vs Shuffle Report
+
+run-name: OpenNeuro real-vs-shuffle ${{ inputs.real_run_id }} vs ${{ inputs.shuffle_run_id }}
+
+on:
+    workflow_dispatch:
+        inputs:
+            real_run_id:
+                description: "GitHub Actions run id for the real-label aggregate artifact"
+                required: true
+                default: "26745113419"
+            shuffle_run_id:
+                description: "GitHub Actions run id for the label-shuffle aggregate artifact"
+                required: true
+                default: "26765349067"
+            real_artifact:
+                description: "Artifact name for the real-label aggregate"
+                required: true
+                default: "openneuro-meg-ds006629-full-shard-aggregate"
+            shuffle_artifact:
+                description: "Artifact name for the label-shuffle aggregate"
+                required: true
+                default: "openneuro-meg-ds006629-full-label-shuffle-seed-13-shard-aggregate"
+            fixed_time:
+                description: "Primary fixed diagnostic time in seconds"
+                required: true
+                default: "0.184"
+
+permissions:
+    actions: read
+    contents: read
+
+jobs:
+    compare:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v6
+
+            - name: Set up Python
+              uses: actions/setup-python@v6
+              with:
+                  python-version: "3.12"
+                  cache: pip
+
+            - name: Install NeuRepTrace
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  python -m pip install --upgrade pip
+                  python -m pip install -e .
+
+            - name: Download comparison artifacts
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  REAL_RUN_ID: ${{ inputs.real_run_id }}
+                  SHUFFLE_RUN_ID: ${{ inputs.shuffle_run_id }}
+                  REAL_ARTIFACT: ${{ inputs.real_artifact }}
+                  SHUFFLE_ARTIFACT: ${{ inputs.shuffle_artifact }}
+              run: |
+                  set -euo pipefail
+                  mkdir -p downloaded_openneuro_compare/real downloaded_openneuro_compare/shuffle
+                  gh run download "$REAL_RUN_ID" \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --name "$REAL_ARTIFACT" \
+                    --dir downloaded_openneuro_compare/real
+                  gh run download "$SHUFFLE_RUN_ID" \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --name "$SHUFFLE_ARTIFACT" \
+                    --dir downloaded_openneuro_compare/shuffle
+
+            - name: Write real-vs-shuffle report
+              shell: bash
+              env:
+                  FIXED_TIME: ${{ inputs.fixed_time }}
+              run: |
+                  set -euo pipefail
+                  python -m neureptrace.openneuro_real_shuffle_report \
+                    --real-dir downloaded_openneuro_compare/real \
+                    --shuffle-dir downloaded_openneuro_compare/shuffle \
+                    --fixed-time "$FIXED_TIME" \
+                    --out-dir reports/ds006629_real_vs_shuffle \
+                    --output-prefix ds006629_real_vs_shuffle
+                  test -f reports/ds006629_real_vs_shuffle/ds006629_real_vs_shuffle_summary.csv
+                  test -f reports/ds006629_real_vs_shuffle/ds006629_real_vs_shuffle_per_subject.csv
+                  test -f reports/ds006629_real_vs_shuffle/ds006629_real_vs_shuffle.md
+                  cat reports/ds006629_real_vs_shuffle/ds006629_real_vs_shuffle.md >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Upload comparison report
+              uses: actions/upload-artifact@v7
+              with:
+                  name: ds006629-real-vs-shuffle-report
+                  path: reports/ds006629_real_vs_shuffle/**
+                  if-no-files-found: error
