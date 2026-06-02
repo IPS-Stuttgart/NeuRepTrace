@@ -37,6 +37,7 @@ def test_grouped_cli_exposes_synthetic_fieldtrip_generator():
 def test_grouped_cli_exposes_openneuro_helpers():
     assert cli.COMMAND_MODULES["openneuro-meg"] == "neureptrace.openneuro_meg"
     assert cli.COMMAND_MODULES["openneuro-diagnostics"] == "neureptrace.openneuro_decode_diagnostics"
+    assert cli.COMMAND_MODULES["openneuro-real-vs-shuffle"] == "neureptrace.openneuro_real_shuffle_report"
     assert cli.COMMAND_MODULES["openneuro-resilient"] == "neureptrace.openneuro_resilient"
 
 
@@ -59,6 +60,7 @@ def test_poetry_scripts_expose_openneuro_helpers():
 
     assert scripts["neureptrace-openneuro-meg"] == "neureptrace.openneuro_meg:main"
     assert scripts["neureptrace-openneuro-diagnostics"] == "neureptrace.openneuro_decode_diagnostics:main"
+    assert scripts["neureptrace-openneuro-real-vs-shuffle"] == "neureptrace.openneuro_real_shuffle_report:main"
     assert scripts["neureptrace-openneuro-resilient"] == "neureptrace.openneuro_resilient:main"
 
 
