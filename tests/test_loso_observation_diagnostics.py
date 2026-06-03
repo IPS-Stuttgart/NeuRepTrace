@@ -74,3 +74,22 @@ def test_loso_observation_diagnostics_writes_subject_confusion_and_class_tables(
     assert quality.loc[0, "fixed_balanced_minus_chance"].round(6) == round(5 / 6 - 1 / 3, 6)
     assert quality.loc[0, "subjects_fixed_above_chance"] == 2
     assert quality.loc[0, "top3_interpretation"] == "automatic_ceiling"
+
+
+def test_loso_observation_diagnostics_tolerates_missing_stage_summary(tmp_path: Path):
+    observations_csv = tmp_path / "observations.csv"
+    missing_stage_summary_csv = tmp_path / "stage_summary.csv"
+    out_dir = tmp_path / "diagnostics"
+    _toy_observations().to_csv(observations_csv, index=False)
+
+    paths = write_loso_observation_diagnostics(
+        observations_csv,
+        out_dir=out_dir,
+        stage_summary_csv=missing_stage_summary_csv,
+        best_time=0.184,
+    )
+
+    assert paths["quality_summary"].exists()
+    per_subject = pd.read_csv(paths["per_subject"])
+    assert per_subject["subject"].tolist() == ["sub-01", "sub-02"]
+    assert per_subject["staged_n_trials"].isna().all()

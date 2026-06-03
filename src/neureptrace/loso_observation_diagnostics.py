@@ -158,6 +158,15 @@ def _class_count_string(frame: pd.DataFrame) -> str:
     return json.dumps({str(label): int(count) for label, count in counts.items()}, sort_keys=True, separators=(",", ":"))
 
 
+def _read_optional_stage_summary(stage_summary_csv: str | Path | None) -> pd.DataFrame | None:
+    if stage_summary_csv is None:
+        return None
+    stage_summary_path = Path(stage_summary_csv)
+    if not stage_summary_path.is_file():
+        return None
+    return pd.read_csv(stage_summary_path)
+
+
 def per_subject_diagnostics(
     observations: pd.DataFrame,
     *,
@@ -343,7 +352,7 @@ def write_loso_observation_diagnostics(
         requested_time = _best_time(time_summary, selection_metric)
     actual_time = _nearest_time(observations, float(requested_time))
 
-    stage_summary = pd.read_csv(stage_summary_csv) if stage_summary_csv is not None else None
+    stage_summary = _read_optional_stage_summary(stage_summary_csv)
     per_subject = per_subject_diagnostics(
         observations,
         subject_column=subject_column_name,
