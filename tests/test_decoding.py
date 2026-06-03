@@ -63,10 +63,35 @@ def test_make_decoder_produces_probabilities_for_standard_decoders():
     for decoder in BUILTIN_DECODER_CHOICES:
         if decoder == "torch_mlp" and importlib.util.find_spec("torch") is None:
             continue
+        if decoder == "hierarchical_logistic":
+            continue
         model = make_decoder(decoder, max_iter=2000)
         model.fit(features, labels)
         probabilities = model.predict_proba(features[:3])
         assert probabilities.shape == (3, 2)
+
+
+def test_make_decoder_supports_ovo_and_hierarchical_logistic():
+    rng = np.random.default_rng(53)
+    features = rng.normal(size=(45, 6))
+    labels = np.array([0, 1, 2] * 15)
+    features[labels == 0, 0] += 1.0
+    features[labels == 1, 1] += 1.0
+    features[labels == 2, 2] += 1.0
+
+    ovo = make_decoder("one-vs-one-logistic", max_iter=2000, emission_mode="uncalibrated")
+    hierarchy = make_decoder("ds006629-hierarchical", max_iter=2000)
+    ovo.fit(features, labels)
+    hierarchy.fit(features, labels)
+
+    assert normalize_decoder_name("ovo-logistic") == "ovo_logistic"
+    assert normalize_decoder_name("large-dev-hierarchical") == "hierarchical_logistic"
+    assert "ovo_logistic" in BUILTIN_DECODER_CHOICES
+    assert "hierarchical_logistic" in BUILTIN_DECODER_CHOICES
+    assert ovo.predict(features[:4]).shape == (4,)
+    hierarchy_probabilities = hierarchy.predict_proba(features[:4])
+    assert hierarchy_probabilities.shape == (4, 3)
+    assert hierarchy_probabilities.sum(axis=1).round(6).tolist() == [1.0] * 4
 
 
 def test_decoder_choices_expose_classifier_registry_entries():

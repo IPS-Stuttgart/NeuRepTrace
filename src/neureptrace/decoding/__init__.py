@@ -44,8 +44,10 @@ BUILTIN_DECODER_CHOICES = (
     "lda",
     "shrinkage_lda",
     "linear_svm",
+    "ovo_logistic",
     "ovo_linear_svm",
     "ecoc_linear_svm",
+    "hierarchical_logistic",
     "torch_mlp",
 )
 DECODER_ALIASES = (
@@ -66,9 +68,17 @@ DECODER_ALIASES = (
     "onevsone-linear-svm",
     "ovo-linear-svm",
     "ovo-svm",
+    "one-vs-one-logistic",
+    "onevsone-logistic",
+    "ovo-logistic",
     "ecoc-svm",
     "output-code-linear-svm",
     "outputcode-linear-svm",
+    "hierarchical",
+    "hierarchical-3class-logistic",
+    "hierarchical-three-class-logistic",
+    "ds006629-hierarchical",
+    "large-dev-hierarchical",
     "deep-mlp",
     "shallow-torch-mlp",
 )
@@ -528,6 +538,87 @@ class ECOCLinearSVC(ClassifierMixin, BaseEstimator):
         return self.classes_[np.argmax(self._class_score_matrix(features), axis=1)]
 
 
+class HierarchicalThreeClassLogistic(ClassifierMixin, BaseEstimator):
+    """Three-class hierarchy: primary class versus rest, then the two rest classes.
+
+    The default primary class index is 1, matching the ds006629 sorted label
+    order for Inter dev / Large dev / Stand, where Large dev is the first-stage
+    branch. The estimator remains generic for any three encoded classes.
+    """
+
+    def __init__(
+        self,
+        primary_class_index: int = 1,
+        C: float = 1.0,
+        max_iter: int = 1000,
+        random_state: int | None = 13,
+    ):
+        self.primary_class_index = primary_class_index
+        self.C = C
+        self.max_iter = max_iter
+        self.random_state = random_state
+
+    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence | np.ndarray):
+        features = np.asarray(features, dtype=float)
+        labels = np.asarray(labels).ravel()
+        self.classes_ = np.unique(labels)
+        if self.classes_.shape[0] != 3:
+            raise ValueError("HierarchicalThreeClassLogistic requires exactly three classes.")
+        primary_position = int(self.primary_class_index)
+        if primary_position < 0 or primary_position >= self.classes_.shape[0]:
+            raise ValueError("primary_class_index must refer to one of the three fitted classes.")
+        self.primary_class_ = self.classes_[primary_position]
+        first_labels = labels == self.primary_class_
+        if len(np.unique(first_labels)) != 2:
+            raise ValueError("Both primary and non-primary samples are required.")
+        self.first_stage_ = LogisticRegression(
+            class_weight="balanced",
+            C=float(self.C),
+            max_iter=int(self.max_iter),
+            random_state=self.random_state,
+            solver="lbfgs",
+        )
+        self.first_stage_.fit(features, first_labels)
+
+        rest_mask = ~first_labels
+        rest_labels = labels[rest_mask]
+        if len(np.unique(rest_labels)) != 2:
+            raise ValueError("The non-primary branch requires exactly two classes.")
+        self.second_stage_ = LogisticRegression(
+            class_weight="balanced",
+            C=float(self.C),
+            max_iter=int(self.max_iter),
+            random_state=self.random_state,
+            solver="lbfgs",
+        )
+        self.second_stage_.fit(features[rest_mask], rest_labels)
+        return self
+
+    def predict_proba(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        if not hasattr(self, "first_stage_") or not hasattr(self, "second_stage_"):
+            raise RuntimeError("HierarchicalThreeClassLogistic must be fitted before prediction.")
+        features = np.asarray(features, dtype=float)
+        first_probabilities = np.asarray(self.first_stage_.predict_proba(features), dtype=float)
+        primary_column = int(np.flatnonzero(self.first_stage_.classes_ == True)[0])  # noqa: E712
+        primary_probability = first_probabilities[:, primary_column]
+        rest_probability = 1.0 - primary_probability
+
+        second_probabilities = np.asarray(self.second_stage_.predict_proba(features), dtype=float)
+        output = np.zeros((features.shape[0], self.classes_.shape[0]), dtype=float)
+        class_to_column = {class_label: index for index, class_label in enumerate(self.classes_.tolist())}
+        output[:, class_to_column[self.primary_class_]] = primary_probability
+        for source_column, class_label in enumerate(self.second_stage_.classes_.tolist()):
+            output[:, class_to_column[class_label]] = rest_probability * second_probabilities[:, source_column]
+        row_sums = output.sum(axis=1, keepdims=True)
+        return output / np.where(row_sums <= 0.0, 1.0, row_sums)
+
+    def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        return np.log(np.clip(self.predict_proba(features), 1e-12, 1.0))
+
+    def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        return self.classes_[np.argmax(self.predict_proba(features), axis=1)]
+
+
 def _make_registry_decoder_pipeline(
     name: str,
     *,
@@ -714,6 +805,29 @@ def make_decoder(
             cv=3,
         )
 
+    if normalized == "ovo_logistic":
+        c_value = _positive_float_classifier_param(classifier_param, default=1.0, name="LogisticRegression C")
+        ovo_logistic = make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            OneVsOneClassifier(
+                LogisticRegression(
+                    class_weight="balanced",
+                    C=c_value,
+                    max_iter=max_iter,
+                    random_state=random_state,
+                    solver="lbfgs",
+                )
+            ),
+        )
+        if emission_mode == "uncalibrated":
+            return ovo_logistic
+        return _make_calibrated_classifier(
+            ovo_logistic,
+            method="sigmoid",
+            cv=3,
+        )
+
     if normalized in {"ovo_linear_svm", "ecoc_linear_svm"}:
         c_value = _positive_float_classifier_param(classifier_param, default=1.0, name="LinearSVC C")
         multiclass_svm = (
@@ -743,6 +857,19 @@ def make_decoder(
             model,
             method="sigmoid",
             cv=3,
+        )
+
+    if normalized == "hierarchical_logistic":
+        c_value = _positive_float_classifier_param(classifier_param, default=1.0, name="Hierarchical logistic C")
+        return make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            HierarchicalThreeClassLogistic(
+                primary_class_index=1,
+                C=c_value,
+                max_iter=max_iter,
+                random_state=random_state,
+            ),
         )
 
     if normalized == "torch_mlp":
@@ -917,6 +1044,25 @@ def make_tuned_decoder(
             estimator = _make_calibrated_classifier(linear_svm, method="sigmoid", cv=3)
             param_grid = {_calibrated_estimator_param(estimator, "linearsvc__C"): c_grid}
         param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
+    elif normalized == "ovo_logistic":
+        estimator = make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            OneVsOneClassifier(
+                LogisticRegression(
+                    class_weight="balanced",
+                    max_iter=max_iter,
+                    random_state=random_state,
+                    solver="lbfgs",
+                )
+            ),
+        )
+        if emission_mode == "uncalibrated":
+            param_grid = {"onevsoneclassifier__estimator__C": c_grid}
+        else:
+            estimator = _make_calibrated_classifier(estimator, method="sigmoid", cv=3)
+            param_grid = {_calibrated_estimator_param(estimator, "onevsoneclassifier__estimator__C"): c_grid}
+        param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
     elif normalized in {"ovo_linear_svm", "ecoc_linear_svm"}:
         multiclass_svm = (
             OneVsOneClassifier(
@@ -943,6 +1089,18 @@ def make_tuned_decoder(
         else:
             estimator = _make_calibrated_classifier(estimator, method="sigmoid", cv=3)
             param_grid = {_calibrated_estimator_param(estimator, svm_c_param): c_grid}
+        param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
+    elif normalized == "hierarchical_logistic":
+        estimator = make_pipeline(
+            StandardScaler(),
+            *feature_steps,
+            HierarchicalThreeClassLogistic(
+                primary_class_index=1,
+                max_iter=max_iter,
+                random_state=random_state,
+            ),
+        )
+        param_grid = {"hierarchicalthreeclasslogistic__C": c_grid}
         param_grid = _with_feature_preprocessor_tuning(estimator, param_grid, feature_preprocessor)
     elif normalized == "torch_mlp":
         estimator = make_pipeline(
@@ -1122,8 +1280,18 @@ def normalize_decoder_name(name: str) -> str:
         return "shrinkage_lda"
     if normalized in {"one_vs_one_linear_svm", "onevsone_linear_svm", "ovo_svm", "ovo_linear_svm"}:
         return "ovo_linear_svm"
+    if normalized in {"one_vs_one_logistic", "onevsone_logistic", "ovo_logistic"}:
+        return "ovo_logistic"
     if normalized in {"ecoc_svm", "output_code_linear_svm", "outputcode_linear_svm", "ecoc_linear_svm"}:
         return "ecoc_linear_svm"
+    if normalized in {
+        "hierarchical",
+        "hierarchical_3class_logistic",
+        "hierarchical_three_class_logistic",
+        "ds006629_hierarchical",
+        "large_dev_hierarchical",
+    }:
+        return "hierarchical_logistic"
     if normalized in {"deep_mlp", "mlp", "torch_deep_mlp", "shallow_torch_mlp"}:
         return "torch_mlp"
     if normalized in BUILTIN_DECODER_CHOICES:
