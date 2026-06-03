@@ -26,8 +26,14 @@ from neureptrace.temporal_model import (
 )
 
 DEFAULT_FIT_WINDOW = (0.1, 0.8)
+DEFAULT_POSTSTIMULUS_APPLY_WINDOW = (0.04, 0.30)
 DEFAULT_EMISSION_SUFFIX = "temporal_posterior"
-SMOOTHING_METHOD = "sticky_forward_backward"
+SMOOTHING_MODE_CHOICES = ("forward_backward", "forward_only", "poststimulus_forward_only")
+SMOOTHING_METHODS = {
+    "forward_backward": "sticky_forward_backward",
+    "forward_only": "sticky_forward_only",
+    "poststimulus_forward_only": "sticky_poststimulus_forward_only",
+}
 SMOOTHING_GROUP_COLUMNS = (
     "decoder",
     "emission_mode",
@@ -65,6 +71,8 @@ METRIC_PROVENANCE_COLUMNS = (
     "temporal_smoothing_stay_probability",
     "temporal_smoothing_fit_window_start",
     "temporal_smoothing_fit_window_stop",
+    "temporal_smoothing_apply_window_start",
+    "temporal_smoothing_apply_window_stop",
 )
 
 
@@ -115,6 +123,69 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
 
 
+def _logsumexp(values: np.ndarray, axis: int | None = None) -> np.ndarray:
+    maximum = np.max(values, axis=axis, keepdims=True)
+    return np.squeeze(maximum + np.log(np.sum(np.exp(values - maximum), axis=axis, keepdims=True)), axis=axis)
+
+
+def _log_transition(n_states: int, stay_probability: float) -> np.ndarray:
+    if n_states < 2:
+        raise ValueError("Temporal smoothing requires at least two states.")
+    if not 0.0 < stay_probability < 1.0:
+        raise ValueError("stay_probability must be between 0 and 1.")
+    switch_probability = (1.0 - stay_probability) / (n_states - 1)
+    transition = np.full((n_states, n_states), switch_probability)
+    np.fill_diagonal(transition, stay_probability)
+    return np.log(transition)
+
+
+def _forward_filter(probabilities: np.ndarray, stay_probability: float) -> np.ndarray:
+    probabilities = _normalize_probabilities(probabilities)
+    n_states = probabilities.shape[1]
+    log_emissions = np.log(probabilities)
+    log_transition = _log_transition(n_states, stay_probability)
+
+    log_alpha = np.empty_like(log_emissions)
+    log_alpha[0] = np.full(n_states, -np.log(n_states)) + log_emissions[0]
+    log_alpha[0] = log_alpha[0] - _logsumexp(log_alpha[0])
+    for time_index in range(1, len(probabilities)):
+        log_alpha[time_index] = log_emissions[time_index] + _logsumexp(
+            log_alpha[time_index - 1][:, None] + log_transition,
+            axis=0,
+        )
+        log_alpha[time_index] = log_alpha[time_index] - _logsumexp(log_alpha[time_index])
+
+    posterior = np.exp(log_alpha)
+    return posterior / posterior.sum(axis=1, keepdims=True)
+
+
+def _smooth_sequence_posteriors(
+    sequence_frame: pd.DataFrame,
+    probabilities: np.ndarray,
+    *,
+    stay_probability: float,
+    mode: str,
+    apply_window: tuple[float, float] | None,
+) -> np.ndarray:
+    if mode == "forward_backward":
+        return _forward_backward(probabilities, stay_probability)
+    if mode == "forward_only":
+        return _forward_filter(probabilities, stay_probability)
+    if mode != "poststimulus_forward_only":
+        raise ValueError(f"Unknown temporal smoothing mode '{mode}'.")
+
+    if apply_window is None:
+        apply_window = DEFAULT_POSTSTIMULUS_APPLY_WINDOW
+    times = pd.to_numeric(sequence_frame["time"], errors="coerce").to_numpy(dtype=float)
+    mask = (times >= float(apply_window[0])) & (times <= float(apply_window[1]))
+    posterior = probabilities.copy()
+    if int(mask.sum()) >= 2:
+        posterior[mask] = _forward_filter(probabilities[mask], stay_probability)
+    elif int(mask.sum()) == 1:
+        posterior[mask] = _normalize_probabilities(probabilities[mask])
+    return _normalize_probabilities(posterior)
+
+
 def _with_posterior_columns(
     sequence_frame: pd.DataFrame,
     posterior: np.ndarray,
@@ -123,7 +194,9 @@ def _with_posterior_columns(
     class_names: list[str],
     stay_probability: float,
     fit_window: tuple[float, float] | None,
+    apply_window: tuple[float, float] | None,
     emission_suffix: str,
+    smoothing_method: str,
 ) -> pd.DataFrame:
     smoothed = sequence_frame.copy()
     posterior = _normalize_probabilities(posterior)
@@ -145,7 +218,7 @@ def _with_posterior_columns(
         smoothed["probability_true_class"] = posterior[np.arange(len(smoothed)), labels]
         smoothed["is_correct"] = predictions == labels
 
-    smoothed["temporal_smoothing_method"] = SMOOTHING_METHOD
+    smoothed["temporal_smoothing_method"] = smoothing_method
     smoothed["temporal_smoothing_stay_probability"] = float(stay_probability)
     if fit_window is not None:
         smoothed["temporal_smoothing_fit_window_start"] = float(fit_window[0])
@@ -153,6 +226,12 @@ def _with_posterior_columns(
     else:
         smoothed["temporal_smoothing_fit_window_start"] = np.nan
         smoothed["temporal_smoothing_fit_window_stop"] = np.nan
+    if apply_window is not None:
+        smoothed["temporal_smoothing_apply_window_start"] = float(apply_window[0])
+        smoothed["temporal_smoothing_apply_window_stop"] = float(apply_window[1])
+    else:
+        smoothed["temporal_smoothing_apply_window_start"] = np.nan
+        smoothed["temporal_smoothing_apply_window_stop"] = np.nan
 
     if "model_hash" in smoothed.columns:
         smoothed["base_model_hash"] = smoothed["model_hash"].astype(str)
@@ -160,9 +239,10 @@ def _with_posterior_columns(
             lambda base_hash: stable_hash(
                 {
                     "base_model_hash": base_hash,
-                    "temporal_smoothing_method": SMOOTHING_METHOD,
+                    "temporal_smoothing_method": smoothing_method,
                     "temporal_smoothing_stay_probability": float(stay_probability),
                     "fit_window": None if fit_window is None else [float(fit_window[0]), float(fit_window[1])],
+                    "apply_window": None if apply_window is None else [float(apply_window[0]), float(apply_window[1])],
                 }
             )
         )
@@ -227,18 +307,31 @@ def smooth_probability_observations(
     *,
     fit_window: tuple[float, float] | None = DEFAULT_FIT_WINDOW,
     stay_grid_size: int = 200,
+    mode: str = "forward_backward",
+    apply_window: tuple[float, float] | None = None,
     emission_suffix: str = DEFAULT_EMISSION_SUFFIX,
     ece_bins: int = 10,
     out_observations: Path | None = None,
     out_metrics: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Replace decoder probabilities by sticky-switching forward-backward posteriors.
+    """Replace decoder probabilities by sticky-switching temporal posteriors.
 
     The sticky transition probability is fit without labels from held-out probability observations within
     ``fit_window`` for each decoder/emission group, then applied to every complete sequence in that group.
+    ``forward_backward`` uses all times in a sequence, ``forward_only`` only uses observations up to each
+    time, and ``poststimulus_forward_only`` applies forward filtering only inside ``apply_window`` while
+    leaving probabilities outside that window unchanged.
     The returned observation table preserves the NeuRepTrace probability-observation schema but changes
     ``prob_class_*`` to temporally smoothed posterior probabilities and updates prediction columns.
     """
+
+    if mode not in SMOOTHING_MODE_CHOICES:
+        raise ValueError(f"Unknown temporal smoothing mode '{mode}'. Available modes: {', '.join(SMOOTHING_MODE_CHOICES)}.")
+    if mode == "poststimulus_forward_only" and apply_window is None:
+        apply_window = DEFAULT_POSTSTIMULUS_APPLY_WINDOW
+    elif mode != "poststimulus_forward_only":
+        apply_window = None
+    smoothing_method = SMOOTHING_METHODS[mode]
 
     observations = read_probability_observations(observation_csvs).copy()
     observations["__input_order"] = np.arange(len(observations))
@@ -259,7 +352,13 @@ def smooth_probability_observations(
             probabilities = _normalize_probabilities(sequence_frame[prob_columns].to_numpy(dtype=float))
             if len(probabilities) < 2:
                 continue
-            posterior = _forward_backward(probabilities, stay_probability)
+            posterior = _smooth_sequence_posteriors(
+                sequence_frame,
+                probabilities,
+                stay_probability=stay_probability,
+                mode=mode,
+                apply_window=apply_window,
+            )
             smoothed_frames.append(
                 _with_posterior_columns(
                     sequence_frame,
@@ -268,7 +367,9 @@ def smooth_probability_observations(
                     class_names=class_names,
                     stay_probability=stay_probability,
                     fit_window=fit_window,
+                    apply_window=apply_window,
                     emission_suffix=emission_suffix,
+                    smoothing_method=smoothing_method,
                 )
             )
 
@@ -297,6 +398,15 @@ def main() -> None:
     parser.add_argument("--fit-window", nargs=2, type=float, default=DEFAULT_FIT_WINDOW, metavar=("START", "STOP"))
     parser.add_argument("--use-full-sequence-fit", action="store_true", help="Fit the sticky transition on every available time bin instead of --fit-window.")
     parser.add_argument("--stay-grid-size", type=int, default=200)
+    parser.add_argument("--mode", choices=SMOOTHING_MODE_CHOICES, default="forward_backward")
+    parser.add_argument(
+        "--apply-window",
+        nargs=2,
+        type=float,
+        default=DEFAULT_POSTSTIMULUS_APPLY_WINDOW,
+        metavar=("START", "STOP"),
+        help="Application window for poststimulus_forward_only mode.",
+    )
     parser.add_argument("--emission-suffix", default=DEFAULT_EMISSION_SUFFIX)
     parser.add_argument("--ece-bins", type=int, default=10)
     args = parser.parse_args()
@@ -307,6 +417,8 @@ def main() -> None:
         paths,
         fit_window=fit_window,
         stay_grid_size=args.stay_grid_size,
+        mode=args.mode,
+        apply_window=tuple(args.apply_window),
         emission_suffix=args.emission_suffix,
         ece_bins=args.ece_bins,
         out_observations=args.out_observations,

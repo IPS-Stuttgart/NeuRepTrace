@@ -81,6 +81,15 @@ on:
                 description: "Temporal smoothing fit window START,STOP, or full to fit all time bins"
                 required: false
                 default: "0.10,0.30"
+            temporal_smoothing_mode:
+                description: "Temporal smoothing mode"
+                required: true
+                type: choice
+                options:
+                    - forward_backward
+                    - forward_only
+                    - poststimulus_forward_only
+                default: forward_backward
             ensemble_weights:
                 description: "Optional comma-separated logistic_svm_ensemble weights in source-decoder order, e.g. 0.5,0.3,0.2"
                 required: false
@@ -198,6 +207,7 @@ jobs:
             DIAGNOSTICS_BEST_TIME_INPUT: ${{ inputs.diagnostics_best_time }}
             TEMPORAL_SMOOTHING: ${{ inputs.temporal_smoothing }}
             TEMPORAL_SMOOTHING_FIT_WINDOW: ${{ inputs.temporal_smoothing_fit_window }}
+            TEMPORAL_SMOOTHING_MODE: ${{ inputs.temporal_smoothing_mode }}
             ENSEMBLE_WEIGHTS_INPUT: ${{ inputs.ensemble_weights }}
             ENSEMBLE_SOURCE_DECODERS_INPUT: ${{ inputs.ensemble_source_decoders }}
             ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
@@ -420,6 +430,7 @@ jobs:
                       "diagnostics_best_time": os.environ.get("DIAGNOSTICS_BEST_TIME_INPUT", ""),
                       "temporal_smoothing": os.environ.get("TEMPORAL_SMOOTHING", ""),
                       "temporal_smoothing_fit_window": os.environ.get("TEMPORAL_SMOOTHING_FIT_WINDOW", ""),
+                      "temporal_smoothing_mode": os.environ.get("TEMPORAL_SMOOTHING_MODE", ""),
                       "temporal_smoothing_stay_grid_size": "200",
                       "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
                       "ensemble_source_decoders": os.environ.get("ENSEMBLE_SOURCE_DECODERS_INPUT", ""),
@@ -677,6 +688,7 @@ jobs:
                     --out-observations "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/observations.csv"
                     --out-metrics "$OPENNEURO_OUTPUT_DIR/decode/temporal_smoothing/time_decode_summary.csv"
                     --stay-grid-size 200
+                    --mode "$TEMPORAL_SMOOTHING_MODE"
                   )
                   case "${TEMPORAL_SMOOTHING_FIT_WINDOW,,}" in
                     "")

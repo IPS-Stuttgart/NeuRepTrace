@@ -105,6 +105,9 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "run_manifest.json" in workflow
     assert "workflow_quality_summary.csv" in workflow
     assert "temporal_smoothing" in workflow
+    assert "temporal_smoothing_mode" in workflow
+    assert "poststimulus_forward_only" in workflow
+    assert '--mode "$TEMPORAL_SMOOTHING_MODE"' in workflow
     assert "ensemble_source_temperatures" in workflow
     assert "decoding.ensemble_source_temperatures" in workflow
     assert "python -m neureptrace.temporal_smoothing" in workflow

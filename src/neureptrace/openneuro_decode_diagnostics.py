@@ -391,6 +391,7 @@ def _workflow_quality_row(
         "ensemble_min_probability": manifest.get("ensemble_min_probability", ""),
         "temporal_smoothing": _as_bool(manifest.get("temporal_smoothing", "")),
         "temporal_smoothing_fit_window": manifest.get("temporal_smoothing_fit_window", ""),
+        "temporal_smoothing_mode": manifest.get("temporal_smoothing_mode", ""),
         "temporal_smoothing_stay_grid_size": manifest.get("temporal_smoothing_stay_grid_size", ""),
         "decode_summary_exists": decode_summary_exists,
         "quality_summary_exists": quality_summary_exists,
