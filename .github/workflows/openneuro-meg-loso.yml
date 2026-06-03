@@ -86,23 +86,6 @@ on:
                 description: "Temporal smoothing fit window START,STOP, or full to fit all time bins"
                 required: false
                 default: "0.10,0.30"
-            response_window_ensemble:
-                description: "Also write post-stimulus response-window logit ensemble outputs"
-                required: true
-                type: boolean
-                default: false
-            response_window_mode:
-                description: "Response-window logit ensemble mode"
-                required: true
-                type: choice
-                options:
-                    - uniform
-                    - source_oof_nonnegative
-                default: uniform
-            response_window_times:
-                description: "Comma-separated response-window centers"
-                required: false
-                default: "0.088,0.136,0.184,0.232"
             ensemble_weights:
                 description: "Optional comma-separated logistic_svm_ensemble weights in source-decoder order, e.g. 0.5,0.3,0.2"
                 required: false
@@ -221,9 +204,6 @@ jobs:
             TEMPORAL_SMOOTHING: ${{ inputs.temporal_smoothing != 'false' }}
             TEMPORAL_SMOOTHING_FIT_WINDOW: ${{ inputs.temporal_smoothing_fit_window }}
             TEMPORAL_SMOOTHING_MODE: ${{ inputs.temporal_smoothing }}
-            RESPONSE_WINDOW_ENSEMBLE: ${{ inputs.response_window_ensemble }}
-            RESPONSE_WINDOW_MODE: ${{ inputs.response_window_mode }}
-            RESPONSE_WINDOW_TIMES: ${{ inputs.response_window_times }}
             ENSEMBLE_WEIGHTS_INPUT: ${{ inputs.ensemble_weights }}
             ENSEMBLE_SOURCE_DECODERS_INPUT: ${{ inputs.ensemble_source_decoders }}
             ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
@@ -383,6 +363,19 @@ jobs:
                   subject_count = len(parse_subjects(spec, subjects))
                   max_events = int(os.environ["MAX_EVENTS_PER_LABEL_INPUT"])
                   stage_seed = override_value("workflow.stage_seed", "openneuro.stage_seed") or "13"
+                  response_window_ensemble = (
+                      override_value(
+                          "workflow.response_window_ensemble",
+                          "response_window.ensemble",
+                          "response_window.enabled",
+                      )
+                      or "false"
+                  ).lower()
+                  response_window_mode = override_value("workflow.response_window_mode", "response_window.mode") or "uniform"
+                  response_window_times = (
+                      override_value("workflow.response_window_times", "response_window.times")
+                      or "0.088,0.136,0.184,0.232"
+                  )
                   if max_events <= 0:
                       max_events_arg = ""
                   else:
@@ -417,6 +410,9 @@ jobs:
                       handle.write(f"OPENNEURO_OUTPUT_SUFFIX={output_suffix}\n")
                       handle.write(f"OPENNEURO_ARTIFACT_NAME={artifact_name}\n")
                       handle.write(f"STAGE_SEED_INPUT={stage_seed}\n")
+                      handle.write(f"RESPONSE_WINDOW_ENSEMBLE={response_window_ensemble}\n")
+                      handle.write(f"RESPONSE_WINDOW_MODE={response_window_mode}\n")
+                      handle.write(f"RESPONSE_WINDOW_TIMES={response_window_times}\n")
                   output_dir.mkdir(parents=True, exist_ok=True)
                   manifest = {
                       "dataset": dataset,
@@ -448,9 +444,9 @@ jobs:
                       "temporal_smoothing_fit_window": os.environ.get("TEMPORAL_SMOOTHING_FIT_WINDOW", ""),
                       "temporal_smoothing_mode": os.environ.get("TEMPORAL_SMOOTHING_MODE", ""),
                       "temporal_smoothing_stay_grid_size": "200",
-                      "response_window_ensemble": os.environ.get("RESPONSE_WINDOW_ENSEMBLE", ""),
-                      "response_window_mode": os.environ.get("RESPONSE_WINDOW_MODE", ""),
-                      "response_window_times": os.environ.get("RESPONSE_WINDOW_TIMES", ""),
+                      "response_window_ensemble": response_window_ensemble,
+                      "response_window_mode": response_window_mode,
+                      "response_window_times": response_window_times,
                       "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
                       "ensemble_source_decoders": os.environ.get("ENSEMBLE_SOURCE_DECODERS_INPUT", ""),
                       "ensemble_source_temperatures": override_value(
