@@ -73,23 +73,19 @@ on:
                 required: false
                 default: ""
             temporal_smoothing:
-                description: "Also write sticky temporal-posterior smoothed observations, metrics, and diagnostics"
+                description: "Also write sticky temporal-posterior smoothed outputs; false disables smoothing"
                 required: true
-                type: boolean
-                default: false
+                type: choice
+                options:
+                    - "false"
+                    - forward_backward
+                    - forward_only
+                    - poststimulus_forward_only
+                default: "false"
             temporal_smoothing_fit_window:
                 description: "Temporal smoothing fit window START,STOP, or full to fit all time bins"
                 required: false
                 default: "0.10,0.30"
-            temporal_smoothing_mode:
-                description: "Temporal smoothing mode"
-                required: true
-                type: choice
-                options:
-                    - forward_backward
-                    - forward_only
-                    - poststimulus_forward_only
-                default: forward_backward
             ensemble_weights:
                 description: "Optional comma-separated logistic_svm_ensemble weights in source-decoder order, e.g. 0.5,0.3,0.2"
                 required: false
@@ -205,9 +201,9 @@ jobs:
             CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
             OUTER_TEST_GROUPS_SHARD: ${{ matrix.outer_test_groups }}
             DIAGNOSTICS_BEST_TIME_INPUT: ${{ inputs.diagnostics_best_time }}
-            TEMPORAL_SMOOTHING: ${{ inputs.temporal_smoothing }}
+            TEMPORAL_SMOOTHING: ${{ inputs.temporal_smoothing != 'false' }}
             TEMPORAL_SMOOTHING_FIT_WINDOW: ${{ inputs.temporal_smoothing_fit_window }}
-            TEMPORAL_SMOOTHING_MODE: ${{ inputs.temporal_smoothing_mode }}
+            TEMPORAL_SMOOTHING_MODE: ${{ inputs.temporal_smoothing }}
             ENSEMBLE_WEIGHTS_INPUT: ${{ inputs.ensemble_weights }}
             ENSEMBLE_SOURCE_DECODERS_INPUT: ${{ inputs.ensemble_source_decoders }}
             ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
