@@ -65,7 +65,7 @@ on:
                 required: false
                 default: ""
             config_overrides:
-                description: 'Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075, decoding.outer_test_groups=[sub-01], or workflow.outer_test_group_shards_json=["sub-01","sub-02"]'
+                description: 'Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075, workflow.response_window_ensemble=true, workflow.response_window_mode=source_oof_nonnegative, workflow.response_window_times=0.088,0.136,0.184,0.232, decoding.outer_test_groups=[sub-01], or workflow.outer_test_group_shards_json=["sub-01","sub-02"]'
                 required: false
                 default: ""
             diagnostics_best_time:
@@ -720,10 +720,34 @@ jobs:
                   python -m neureptrace.temporal_smoothing "${smoothing_args[@]}"
 
             - name: Run response-window logit ensemble
-              if: ${{ always() && env.RUN_DECODE == 'true' && env.RESPONSE_WINDOW_ENSEMBLE == 'true' }}
+              if: ${{ always() && env.RUN_DECODE == 'true' }}
               shell: bash
               run: |
                   set -euo pipefail
+                  response_window_enabled="$RESPONSE_WINDOW_ENSEMBLE"
+                  response_window_mode="$RESPONSE_WINDOW_MODE"
+                  response_window_times="$RESPONSE_WINDOW_TIMES"
+                  if [[ -n "$CONFIG_OVERRIDES_INPUT" ]]; then
+                    while IFS= read -r override; do
+                      override="${override#"${override%%[![:space:]]*}"}"
+                      override="${override%"${override##*[![:space:]]}"}"
+                      case "$override" in
+                        workflow.response_window_ensemble=*)
+                          response_window_enabled="${override#*=}"
+                          ;;
+                        workflow.response_window_mode=*)
+                          response_window_mode="${override#*=}"
+                          ;;
+                        workflow.response_window_times=*)
+                          response_window_times="${override#*=}"
+                          ;;
+                      esac
+                    done < <(printf '%s\n' "$CONFIG_OVERRIDES_INPUT" | tr ';' '\n')
+                  fi
+                  if [[ "$response_window_enabled" != "true" ]]; then
+                    echo "Skipping response-window ensemble because workflow.response_window_ensemble is not true."
+                    exit 0
+                  fi
                   observations="$OPENNEURO_OUTPUT_DIR/decode/observations.csv"
                   if [[ ! -s "$observations" ]]; then
                     echo "Skipping response-window ensemble because observations are missing: $observations"
@@ -732,8 +756,8 @@ jobs:
                   mkdir -p "$OPENNEURO_OUTPUT_DIR/decode/response_window"
                   python -m neureptrace.response_window_ensemble \
                     "$observations" \
-                    --mode "$RESPONSE_WINDOW_MODE" \
-                    --response-times "$RESPONSE_WINDOW_TIMES" \
+                    --mode "$response_window_mode" \
+                    --response-times "$response_window_times" \
                     --output-time "${DIAGNOSTICS_BEST_TIME_INPUT:-0.184}" \
                     --out-observations "$OPENNEURO_OUTPUT_DIR/decode/response_window/observations.csv" \
                     --out-metrics "$OPENNEURO_OUTPUT_DIR/decode/response_window/time_decode_summary.csv"
