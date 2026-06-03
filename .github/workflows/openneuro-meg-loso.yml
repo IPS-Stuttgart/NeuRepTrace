@@ -86,6 +86,23 @@ on:
                 description: "Temporal smoothing fit window START,STOP, or full to fit all time bins"
                 required: false
                 default: "0.10,0.30"
+            response_window_ensemble:
+                description: "Also write post-stimulus response-window logit ensemble outputs"
+                required: true
+                type: boolean
+                default: false
+            response_window_mode:
+                description: "Response-window logit ensemble mode"
+                required: true
+                type: choice
+                options:
+                    - uniform
+                    - source_oof_nonnegative
+                default: uniform
+            response_window_times:
+                description: "Comma-separated response-window centers"
+                required: false
+                default: "0.088,0.136,0.184,0.232"
             ensemble_weights:
                 description: "Optional comma-separated logistic_svm_ensemble weights in source-decoder order, e.g. 0.5,0.3,0.2"
                 required: false
@@ -204,6 +221,9 @@ jobs:
             TEMPORAL_SMOOTHING: ${{ inputs.temporal_smoothing != 'false' }}
             TEMPORAL_SMOOTHING_FIT_WINDOW: ${{ inputs.temporal_smoothing_fit_window }}
             TEMPORAL_SMOOTHING_MODE: ${{ inputs.temporal_smoothing }}
+            RESPONSE_WINDOW_ENSEMBLE: ${{ inputs.response_window_ensemble }}
+            RESPONSE_WINDOW_MODE: ${{ inputs.response_window_mode }}
+            RESPONSE_WINDOW_TIMES: ${{ inputs.response_window_times }}
             ENSEMBLE_WEIGHTS_INPUT: ${{ inputs.ensemble_weights }}
             ENSEMBLE_SOURCE_DECODERS_INPUT: ${{ inputs.ensemble_source_decoders }}
             ENSEMBLE_BASELINE_WINDOW_INPUT: ${{ inputs.ensemble_baseline_window }}
@@ -428,6 +448,9 @@ jobs:
                       "temporal_smoothing_fit_window": os.environ.get("TEMPORAL_SMOOTHING_FIT_WINDOW", ""),
                       "temporal_smoothing_mode": os.environ.get("TEMPORAL_SMOOTHING_MODE", ""),
                       "temporal_smoothing_stay_grid_size": "200",
+                      "response_window_ensemble": os.environ.get("RESPONSE_WINDOW_ENSEMBLE", ""),
+                      "response_window_mode": os.environ.get("RESPONSE_WINDOW_MODE", ""),
+                      "response_window_times": os.environ.get("RESPONSE_WINDOW_TIMES", ""),
                       "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
                       "ensemble_source_decoders": os.environ.get("ENSEMBLE_SOURCE_DECODERS_INPUT", ""),
                       "ensemble_source_temperatures": override_value(
@@ -700,6 +723,25 @@ jobs:
                   esac
                   python -m neureptrace.temporal_smoothing "${smoothing_args[@]}"
 
+            - name: Run response-window logit ensemble
+              if: ${{ always() && env.RUN_DECODE == 'true' && env.RESPONSE_WINDOW_ENSEMBLE == 'true' }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  observations="$OPENNEURO_OUTPUT_DIR/decode/observations.csv"
+                  if [[ ! -s "$observations" ]]; then
+                    echo "Skipping response-window ensemble because observations are missing: $observations"
+                    exit 0
+                  fi
+                  mkdir -p "$OPENNEURO_OUTPUT_DIR/decode/response_window"
+                  python -m neureptrace.response_window_ensemble \
+                    "$observations" \
+                    --mode "$RESPONSE_WINDOW_MODE" \
+                    --response-times "$RESPONSE_WINDOW_TIMES" \
+                    --output-time "${DIAGNOSTICS_BEST_TIME_INPUT:-0.184}" \
+                    --out-observations "$OPENNEURO_OUTPUT_DIR/decode/response_window/observations.csv" \
+                    --out-metrics "$OPENNEURO_OUTPUT_DIR/decode/response_window/time_decode_summary.csv"
+
             - name: Summarize LOSO decode
               if: ${{ always() && env.RUN_DECODE == 'true' }}
               shell: bash
@@ -770,6 +812,20 @@ jobs:
                       smoothed_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
                     fi
                     python -m neureptrace.loso_observation_diagnostics "${smoothed_args[@]}"
+                  fi
+
+                  if [[ "$RESPONSE_WINDOW_ENSEMBLE" == "true" && -s "$OPENNEURO_OUTPUT_DIR/decode/response_window/observations.csv" ]]; then
+                    response_window_args=(
+                      "$OPENNEURO_OUTPUT_DIR/decode/response_window/observations.csv"
+                      --summary-csv "$OPENNEURO_OUTPUT_DIR/decode/response_window/time_decode_summary.csv"
+                      --stage-summary-csv "$OPENNEURO_OUTPUT_DIR/stage_summary.csv"
+                      --out-dir "$OPENNEURO_OUTPUT_DIR/decode/response_window/diagnostics"
+                      --selection-metric balanced_accuracy
+                    )
+                    if [[ -n "$DIAGNOSTICS_BEST_TIME_INPUT" ]]; then
+                      response_window_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
+                    fi
+                    python -m neureptrace.loso_observation_diagnostics "${response_window_args[@]}"
                   fi
 
             - name: Write OpenNeuro workflow summary
