@@ -44,13 +44,43 @@ def _nearest_times(available_times: np.ndarray, requested_times: tuple[float, ..
     return tuple(selected)
 
 
+def _has_nonempty_values(series: pd.Series) -> bool:
+    if series.dropna().empty:
+        return False
+    return series.dropna().astype(str).str.strip().ne("").any()
+
+
+def _subject_key_column(frame: pd.DataFrame) -> str | None:
+    for column in ("subject", "outer_test_groups", "group"):
+        if column in frame.columns and _has_nonempty_values(frame[column]):
+            return column
+    return None
+
+
 def _sequence_key_columns(frame: pd.DataFrame) -> list[str]:
-    keys = [column for column in ("subject", "fold", "sample_index") if column in frame.columns]
-    if "sample_index" not in keys:
-        keys = [column for column in ("subject", "fold", "sequence_id") if column in frame.columns]
-    if not keys:
-        raise ValueError("Observation table needs subject/fold/sample_index or sequence_id columns.")
+    keys = []
+    subject_column = _subject_key_column(frame)
+    if subject_column is not None:
+        keys.append(subject_column)
+    if "fold" in frame.columns:
+        keys.append("fold")
+    if "sample_index" in frame.columns:
+        keys.append("sample_index")
+    elif "sequence_id" in frame.columns:
+        keys.append("sequence_id")
+    else:
+        raise ValueError("Observation table needs sample_index or sequence_id columns.")
     return keys
+
+
+def _target_subject_values(base: pd.DataFrame, key_columns: list[str]) -> np.ndarray:
+    subject_column = _subject_key_column(base)
+    if subject_column is not None:
+        return base[subject_column].astype(str).to_numpy()
+    for column in ("subject", "outer_test_groups", "group"):
+        if column in key_columns:
+            return base.index.get_level_values(column).astype(str).to_numpy()
+    return np.full(len(base), "", dtype=object)
 
 
 def _candidate_weights(n_times: int, step: float) -> np.ndarray:
@@ -117,7 +147,8 @@ def _response_window_rows(
     ]
     time_labels = [_time_label(time) for time in times]
     candidates = _candidate_weights(len(times), weight_grid_step)
-    target_subjects = selected["subject"].dropna().astype(str).unique().tolist() if "subject" in selected.columns else [""]
+    subject_column = _subject_key_column(selected)
+    target_subjects = selected[subject_column].dropna().astype(str).unique().tolist() if subject_column else [""]
     output_rows: list[pd.DataFrame] = []
 
     wide_probabilities = {}
@@ -137,12 +168,7 @@ def _response_window_rows(
         [_normalize_rows(wide_probabilities[time].loc[common_index].to_numpy(dtype=float)) for time in times],
         axis=1,
     )
-    if "subject" in base.columns:
-        subjects = base["subject"].astype(str).to_numpy()
-    elif "subject" in key_columns:
-        subjects = base.index.get_level_values("subject").astype(str).to_numpy()
-    else:
-        subjects = np.full(len(base), "", dtype=object)
+    subjects = _target_subject_values(base, key_columns)
 
     for target_subject in target_subjects:
         target_mask = subjects == str(target_subject)

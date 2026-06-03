@@ -876,6 +876,7 @@ jobs:
             OPENNEURO_ARTIFACT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('-label-shuffle-seed-{0}', inputs.label_shuffle_seed) || '' }}
             OPENNEURO_OUTPUT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('_label_shuffle_seed_{0}', inputs.label_shuffle_seed) || '' }}
             OPENNEURO_AGGREGATE_OUTPUT_DIR: outputs/openneuro_${{ inputs.dataset }}_${{ inputs.mode }}${{ inputs.label_shuffle_control == true && format('_label_shuffle_seed_{0}', inputs.label_shuffle_seed) || '' }}_shard_aggregate
+            CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
 
         steps:
             - name: Check out repository
@@ -946,6 +947,67 @@ jobs:
                       encoding="utf-8",
                   )
                   PY
+
+            - name: Run aggregate response-window logit ensemble
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  response_window_enabled="false"
+                  response_window_mode="uniform"
+                  response_window_times="0.088,0.136,0.184,0.232"
+                  if [[ -n "$CONFIG_OVERRIDES_INPUT" ]]; then
+                    while IFS= read -r override; do
+                      override="${override#"${override%%[![:space:]]*}"}"
+                      override="${override%"${override##*[![:space:]]}"}"
+                      case "$override" in
+                        workflow.response_window_ensemble=*|response_window.ensemble=*|response_window.enabled=*)
+                          response_window_enabled="${override#*=}"
+                          ;;
+                        workflow.response_window_mode=*|response_window.mode=*)
+                          response_window_mode="${override#*=}"
+                          ;;
+                        workflow.response_window_times=*|response_window.times=*)
+                          response_window_times="${override#*=}"
+                          ;;
+                      esac
+                    done < <(printf '%s\n' "$CONFIG_OVERRIDES_INPUT" | tr ';' '\n')
+                  fi
+                  if [[ "$response_window_enabled" != "true" ]]; then
+                    echo "Skipping aggregate response-window ensemble because it was not requested."
+                    exit 0
+                  fi
+                  observations="$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/observations.csv"
+                  if [[ ! -s "$observations" ]]; then
+                    echo "Skipping aggregate response-window ensemble because observations are missing: $observations"
+                    exit 0
+                  fi
+                  mkdir -p "$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/response_window"
+                  python -m neureptrace.response_window_ensemble \
+                    "$observations" \
+                    --mode "$response_window_mode" \
+                    --response-times "$response_window_times" \
+                    --output-time "${DIAGNOSTICS_BEST_TIME_INPUT:-0.184}" \
+                    --out-observations "$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/response_window/observations.csv" \
+                    --out-metrics "$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/response_window/time_decode_summary.csv"
+
+                  response_window_args=(
+                    "$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/response_window/observations.csv"
+                    --summary-csv "$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/response_window/time_decode_summary.csv"
+                    --out-dir "$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/response_window/diagnostics"
+                    --selection-metric balanced_accuracy
+                  )
+                  if [[ -s "$OPENNEURO_AGGREGATE_OUTPUT_DIR/stage_summary.csv" ]]; then
+                    response_window_args+=(--stage-summary-csv "$OPENNEURO_AGGREGATE_OUTPUT_DIR/stage_summary.csv")
+                  fi
+                  if [[ -n "$DIAGNOSTICS_BEST_TIME_INPUT" ]]; then
+                    response_window_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
+                  fi
+                  python -m neureptrace.loso_observation_diagnostics "${response_window_args[@]}"
+                  python -m neureptrace.openneuro_decode_diagnostics \
+                    "$OPENNEURO_AGGREGATE_OUTPUT_DIR" \
+                    --diagnostics-out "$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode_diagnostics.json" \
+                    --best-out "$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode_best_metrics.csv" \
+                    --quality-out "$OPENNEURO_AGGREGATE_OUTPUT_DIR/workflow_quality_summary.csv"
 
             - name: Upload aggregate OpenNeuro MEG output
               uses: actions/upload-artifact@v7
