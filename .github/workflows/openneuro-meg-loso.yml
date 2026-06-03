@@ -156,15 +156,23 @@ jobs:
                   import os
                   from pathlib import Path
 
-                  shards_json = '[""]'
+                  shards_text = '[""]'
                   for override in os.environ.get("CONFIG_OVERRIDES_INPUT", "").replace(";", "\n").splitlines():
                       override = override.strip()
                       if override.startswith("workflow.outer_test_group_shards_json="):
-                          shards_json = override.split("=", 1)[1].strip()
+                          shards_text = override.split("=", 1)[1].strip()
+                      elif override.startswith("workflow.outer_test_group_shards="):
+                          shards_text = override.split("=", 1)[1].strip()
                   try:
-                      shards = json.loads(shards_json)
+                      shards = json.loads(shards_text)
                   except json.JSONDecodeError as exc:
-                      raise SystemExit(f"Invalid workflow.outer_test_group_shards_json: {exc}") from exc
+                      shards = [
+                          shard.strip().strip("\"'")
+                          for shard in shards_text.strip("[]").split(",")
+                          if shard.strip().strip("\"'")
+                      ]
+                      if not shards:
+                          raise SystemExit(f"Invalid workflow.outer_test_group_shards_json: {exc}") from exc
                   if not isinstance(shards, list) or not all(isinstance(item, str) for item in shards):
                       raise SystemExit("workflow.outer_test_group_shards_json must be a JSON array of strings.")
                   if not shards:
