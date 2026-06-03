@@ -9,7 +9,10 @@ from neureptrace.mne_time_decode import (
     _align_probability_columns,
     _filter_splits_for_outer_test_groups,
     _shuffle_training_labels,
+    apply_source_probability_calibration,
+    fit_source_probability_calibrator,
     normalize_class_prior_correction,
+    normalize_source_calibration,
     normalize_time_decode_backend,
     run_time_resolved_decode,
 )
@@ -69,6 +72,22 @@ class RecordingDecoder:
         return np.full((features.shape[0], len(self.classes_)), 1.0 / len(self.classes_))
 
 
+class RecordingFeatureDecoder:
+    fit_feature_maxima: list[float] = []
+
+    def fit(self, features: np.ndarray, labels: np.ndarray):
+        self.classes_ = np.unique(labels)
+        self.fit_feature_maxima.append(float(np.max(features)))
+        return self
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probabilities = np.full((features.shape[0], len(self.classes_)), 0.2 / max(len(self.classes_) - 1, 1))
+        dominant = (features[:, 0].astype(int) % len(self.classes_)).reshape(-1)
+        for row_index, class_index in enumerate(dominant):
+            probabilities[row_index, class_index] = 0.8
+        return probabilities
+
+
 def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     labels = np.array([0, 0, 0, 1, 1, 2, 2, 2])
 
@@ -111,6 +130,29 @@ def test_class_prior_correction_rebalances_train_fold_priors():
     np.testing.assert_allclose(corrected.sum(axis=1), np.ones(2))
     assert corrected[0, 1] > corrected[0, 0]
     assert corrected[1, 1] > probabilities[1, 1]
+
+
+def test_source_calibrator_fits_deterministic_re_ranking():
+    probabilities = np.array(
+        [
+            [0.70, 0.20, 0.10],
+            [0.65, 0.25, 0.10],
+            [0.62, 0.28, 0.10],
+            [0.60, 0.15, 0.25],
+            [0.58, 0.12, 0.30],
+            [0.55, 0.15, 0.30],
+        ]
+    )
+    labels = np.array([0, 1, 1, 2, 2, 2])
+
+    calibrator = fit_source_probability_calibrator(probabilities, labels, "class-bias")
+    corrected = apply_source_probability_calibration(probabilities, calibrator)
+
+    assert normalize_source_calibration("temperature-plus-class-bias") == "temperature_plus_class_bias"
+    assert calibrator.mode == "class_bias"
+    assert calibrator.parameter
+    np.testing.assert_allclose(corrected.sum(axis=1), np.ones(len(corrected)))
+    assert corrected.argmax(axis=1).tolist().count(0) < probabilities.argmax(axis=1).tolist().count(0)
 
 
 def test_align_probability_columns_expands_missing_model_classes():
@@ -166,6 +208,58 @@ def test_run_time_resolved_decode_aligns_missing_fold_class_probabilities(tmp_pa
     assert observations["prob_class_1"].tolist() == [0.0] * len(observations)
     assert observations["probability_true_class"].tolist() == [0.0] * len(observations)
     assert observations[["prob_class_0", "prob_class_1", "prob_class_2"]].sum(axis=1).round(6).tolist() == [1.0] * len(observations)
+
+
+def test_source_calibration_fits_only_outer_train_subjects(tmp_path: Path, monkeypatch):
+    RecordingFeatureDecoder.fit_feature_maxima = []
+    labels = np.array(["a", "b", "a", "b", "a", "b", "a", "b"])
+    data = np.repeat(np.arange(8, dtype=float).reshape(8, 1, 1), 2, axis=2)
+    data[6:, :, :] = 100.0
+    metadata = pd.DataFrame({"condition": labels, "session": ["s1", "s1", "s2", "s2", "s3", "s3", "target", "target"]})
+    epochs = FakeEpochs(data, np.array([0.00, 0.01]), metadata)
+    train_idx = np.array([0, 1, 2, 3, 4, 5])
+    test_idx = np.array([6, 7])
+    inner_splits = [
+        (np.array([0, 1, 2, 3]), np.array([4, 5])),
+        (np.array([0, 1, 4, 5]), np.array([2, 3])),
+        (np.array([2, 3, 4, 5]), np.array([0, 1])),
+    ]
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr(
+        "neureptrace.mne_time_decode.make_cross_validator",
+        lambda labels, groups, n_splits: iter([(train_idx, test_idx)]),
+    )
+    monkeypatch.setattr(
+        "neureptrace.mne_time_decode.make_tuning_cross_validator",
+        lambda labels, groups, n_splits: inner_splits,
+    )
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+
+    out = tmp_path / "decode_source_calibration.csv"
+    observations_out = tmp_path / "observations_source_calibration.csv"
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        group_column="session",
+        out_path=out,
+        n_splits=2,
+        window_ms=10,
+        step_ms=10,
+        emission_mode="uncalibrated",
+        observation_out_path=observations_out,
+        time_decode_backend="sklearn",
+        source_calibration="class_bias",
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert results["source_calibration"].unique().tolist() == ["class_bias"]
+    assert observations["source_calibration"].unique().tolist() == ["class_bias"]
+    assert sorted(observations["true_class"].unique().tolist()) == ["a", "b"]
+    assert observations["sample_index"].unique().tolist() == [6, 7]
+    assert RecordingFeatureDecoder.fit_feature_maxima
+    assert max(RecordingFeatureDecoder.fit_feature_maxima) < 100.0
 
 
 def test_run_time_resolved_decode_writes_probability_observations(tmp_path: Path, monkeypatch):

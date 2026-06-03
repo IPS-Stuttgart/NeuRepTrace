@@ -370,6 +370,7 @@ def _workflow_quality_row(
         "label_shuffle_control": label_shuffle_control,
         "label_shuffle_seed": manifest.get("label_shuffle_seed", ""),
         "time_decode_backend": manifest.get("time_decode_backend", ""),
+        "source_calibration": _provenance_value(manifest, summary_provenance, "source_calibration"),
         "decoder_override": manifest.get("decoder_override", ""),
         "ensemble_weights": _provenance_value(manifest, summary_provenance, "ensemble_weights"),
         "ensemble_source_decoders": _provenance_value(

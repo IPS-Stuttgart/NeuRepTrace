@@ -65,7 +65,7 @@ on:
                 required: false
                 default: ""
             config_overrides:
-                description: 'Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075, decoding.outer_test_groups=[sub-01], or workflow.outer_test_group_shards_json=["sub-01","sub-02"]'
+                description: 'Optional semicolon/newline-separated --set overrides, e.g. preprocessing.window_size=0.075, decoding.source_calibration=temperature, decoding.outer_test_groups=[sub-01], or workflow.outer_test_group_shards_json=["sub-01","sub-02"]'
                 required: false
                 default: ""
             diagnostics_best_time:
@@ -210,6 +210,7 @@ jobs:
             ENSEMBLE_MIN_PROBABILITY_INPUT: ${{ inputs.ensemble_min_probability }}
             TIME_DECODE_BACKEND: ${{ inputs.time_decode_backend }}
             CLASS_PRIOR_CORRECTION: ${{ inputs.class_prior_correction }}
+            SOURCE_CALIBRATION: none
             LABEL_SHUFFLE_CONTROL: ${{ inputs.label_shuffle_control }}
             LABEL_SHUFFLE_SEED: ${{ inputs.label_shuffle_seed }}
             OPENNEURO_ARTIFACT_SUFFIX: ${{ inputs.label_shuffle_control == true && format('-label-shuffle-seed-{0}', inputs.label_shuffle_seed) || '' }}
@@ -438,6 +439,10 @@ jobs:
                       "ensemble_min_probability": os.environ.get("ENSEMBLE_MIN_PROBABILITY_INPUT", ""),
                       "time_decode_backend": os.environ.get("TIME_DECODE_BACKEND", ""),
                       "class_prior_correction": os.environ.get("CLASS_PRIOR_CORRECTION", ""),
+                      "source_calibration": override_value("decoding.source_calibration") or os.environ.get(
+                          "SOURCE_CALIBRATION",
+                          "",
+                      ),
                       "label_shuffle_control": os.environ.get("LABEL_SHUFFLE_CONTROL", ""),
                       "label_shuffle_seed": os.environ.get("LABEL_SHUFFLE_SEED", ""),
                       "github_run_id": os.environ.get("GITHUB_RUN_ID", ""),
@@ -615,6 +620,7 @@ jobs:
                     --set "decoding.n_splits=$OPENNEURO_N_SPLITS"
                     --set "decoding.time_decode_backend=$TIME_DECODE_BACKEND"
                     --set "decoding.class_prior_correction=$CLASS_PRIOR_CORRECTION"
+                    --set "decoding.source_calibration=$SOURCE_CALIBRATION"
                     --set "decoding.label_shuffle_control=$LABEL_SHUFFLE_CONTROL"
                     --set "decoding.label_shuffle_seed=$LABEL_SHUFFLE_SEED"
                     --set "outputs.base_dir=$OPENNEURO_OUTPUT_DIR/decode"

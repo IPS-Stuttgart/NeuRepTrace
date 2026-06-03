@@ -110,6 +110,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
                 "prob_class_0": probability if label == 0 else 1.0 - probability,
                 "prob_class_1": 1.0 - probability if label == 0 else probability,
                 "class_prior_correction": kwargs["class_prior_correction"],
+                "source_calibration": kwargs["source_calibration"],
             }
             for index, label in enumerate((0, 1))
         ]
@@ -154,6 +155,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         temporal_train_window=(0.12, 0.248),
         temporal_train_mode="pooled",
         class_prior_correction="train_uniform",
+        source_calibration="temperature_plus_class_bias",
         ensemble_source_decoders=("multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"),
         ensemble_source_temperatures=(1.25, 1.0, 0.8),
         ensemble_score_mode="rank",
@@ -167,7 +169,9 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert all(call["temporal_train_window"] == (0.12, 0.248) for call in calls)
     assert all(call["temporal_train_mode"] == "pooled" for call in calls)
     assert all(call["class_prior_correction"] == "train_uniform" for call in calls)
+    assert all(call["source_calibration"] == "temperature_plus_class_bias" for call in calls)
     assert results["class_prior_correction"].unique().tolist() == ["train_uniform"]
+    assert results["source_calibration"].unique().tolist() == ["temperature_plus_class_bias"]
     assert results["source_decoders"].unique().tolist() == ["multinomial-logistic-weighted|linear_svm|shrinkage_lda"]
     assert results["ensemble_weights"].unique().tolist() == ["0.333333333333|0.333333333333|0.333333333333"]
     assert results["ensemble_source_temperatures"].unique().tolist() == ["1.25|1|0.8"]

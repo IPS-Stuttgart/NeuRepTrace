@@ -18,6 +18,7 @@ from neureptrace.mne_time_decode import (
     RESULT_SELECTION_METRIC_CHOICES,
     RESULT_SELECTION_MINIMIZE_METRICS,
     RESULT_SUMMARY_METRIC_COLUMNS,
+    SOURCE_CALIBRATION_RUN_CHOICES,
     _best_time_by_metric,
     _normalize_outer_test_groups,
     TEMPORAL_TRAIN_MODE_RUN_CHOICES,
@@ -138,6 +139,7 @@ def run_time_resolved_decode(
     temporal_train_mode: str = "window_ensemble",
     time_decode_backend: str = "sklearn",
     class_prior_correction: str = "none",
+    source_calibration: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
     ensemble_source_decoders: Sequence[str] | None = None,
@@ -192,6 +194,7 @@ def run_time_resolved_decode(
             temporal_train_mode=temporal_train_mode,
             time_decode_backend=time_decode_backend,
             class_prior_correction=class_prior_correction,
+            source_calibration=source_calibration,
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
         )
@@ -247,6 +250,7 @@ def run_time_resolved_decode(
                     temporal_train_mode=temporal_train_mode,
                     time_decode_backend=time_decode_backend,
                     class_prior_correction=class_prior_correction,
+                    source_calibration=source_calibration,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
                 )
@@ -281,6 +285,7 @@ def run_time_resolved_decode(
     results["pca_components"] = "" if pca_components is None else pca_components
     results["normalization"] = normalization.replace("-", "_") if normalization is not None else "none"
     results["class_prior_correction"] = str(class_prior_correction).strip().lower().replace("-", "_")
+    results["source_calibration"] = str(source_calibration).strip().lower().replace("-", "_")
     results["source_decoders"] = "|".join(source_decoders)
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
     results["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in source_temperatures)
@@ -411,6 +416,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Optional train-fold prior correction applied to source decoder probabilities before ensembling.",
     )
     parser.add_argument(
+        "--source-calibration",
+        choices=SOURCE_CALIBRATION_RUN_CHOICES,
+        default="none",
+        help="Nested source-only source-decoder probability re-ranking learned inside each outer training set.",
+    )
+    parser.add_argument(
         "--ensemble-source-decoder",
         action="append",
         dest="ensemble_source_decoders",
@@ -484,6 +495,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         temporal_train_window=tuple(args.temporal_train_window) if args.temporal_train_window is not None else None,
         temporal_train_mode=args.temporal_train_mode,
         class_prior_correction=args.class_prior_correction,
+        source_calibration=args.source_calibration,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
         ensemble_source_decoders=tuple(args.ensemble_source_decoders) if args.ensemble_source_decoders is not None else None,

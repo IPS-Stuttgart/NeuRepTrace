@@ -155,6 +155,7 @@ def run_time_resolved_decode(
     temporal_train_mode: str = "window_ensemble",
     time_decode_backend: str = "sklearn",
     class_prior_correction: str = "none",
+    source_calibration: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -204,6 +205,7 @@ def run_time_resolved_decode(
     normalized_temporal_train_window = _base._normalize_temporal_train_window(temporal_train_window)
     temporal_train_mode_name = _base._normalize_temporal_train_mode(temporal_train_mode)
     class_prior_correction_name = _base.normalize_class_prior_correction(class_prior_correction)
+    source_calibration_name = _base.normalize_source_calibration(source_calibration)
     outer_test_groups_value = _base._normalize_outer_test_groups(outer_test_groups)
 
     if label_column not in metadata.columns:
@@ -250,6 +252,7 @@ def run_time_resolved_decode(
             "temporal_train_window": normalized_temporal_train_window,
             "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
             "class_prior_correction": class_prior_correction_name,
+            "source_calibration": source_calibration_name,
             "outer_test_groups": outer_test_groups_value,
         }
     )
@@ -268,6 +271,7 @@ def run_time_resolved_decode(
         tuning_scoring=tuning_scoring,
         tuning_c_grid=tuning_c_grid_values,
         class_prior_correction=class_prior_correction_name,
+        source_calibration=source_calibration_name,
         label_shuffle_control=label_shuffle_control,
         label_shuffle_seed=label_shuffle_seed,
     )
@@ -340,6 +344,25 @@ def run_time_resolved_decode(
                         classes,
                         class_prior_correction_name,
                     )
+                    calibrator = _base.fit_inner_source_probability_calibrator(
+                        features=features,
+                        train_idx=train_idx,
+                        train_labels=train_labels,
+                        train_groups=None if groups is None else groups[train_idx],
+                        decoder_name=decoder_name,
+                        emission_mode=current_emission_mode,
+                        max_iter=max_iter,
+                        feature_preprocessor=feature_preprocessor_name,
+                        pca_components=pca_components_value,
+                        tune_hyperparameters=tune_hyperparameters,
+                        tuning_cv_splits=tuning_cv_splits,
+                        tuning_scoring=tuning_scoring,
+                        tuning_c_grid=tuning_c_grid_values,
+                        classes=classes,
+                        source_calibration=source_calibration_name,
+                    )
+                    probabilities = _base.apply_source_probability_calibration(probabilities, calibrator)
+                    source_metadata = _base.source_calibration_metadata(calibrator)
                     tuning_metadata = _base._tuning_metadata(
                         model,
                         tune_hyperparameters=tune_hyperparameters,
@@ -364,6 +387,7 @@ def run_time_resolved_decode(
                         tuning_c_grid=tuning_c_grid_values,
                         tuning_metadata=tuning_metadata,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration=source_calibration_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -405,6 +429,7 @@ def run_time_resolved_decode(
                         subject=subject,
                         tuning_metadata=tuning_metadata,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration_metadata=source_metadata,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                         outer_test_groups=outer_test_groups_value,
@@ -500,6 +525,8 @@ def run_time_resolved_decode(
                         classes,
                         class_prior_correction_name,
                     )
+                    if source_calibration_name != "none":
+                        raise ValueError("source_calibration currently supports same-time decoding only.")
                     _base._append_decoded_outputs(
                         rows=rows,
                         calibration_rows=calibration_rows,
@@ -538,6 +565,7 @@ def run_time_resolved_decode(
                         subject=subject,
                         tuning_metadata=tuning_metadata,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration_metadata=_base.source_calibration_metadata(_base.SourceProbabilityCalibrator(mode="none")),
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                         outer_test_groups=outer_test_groups_value,
@@ -635,6 +663,8 @@ def run_time_resolved_decode(
                         classes,
                         class_prior_correction_name,
                     )
+                    if source_calibration_name != "none":
+                        raise ValueError("source_calibration currently supports same-time decoding only.")
                     _base._append_decoded_outputs(
                         rows=rows,
                         calibration_rows=calibration_rows,
@@ -673,6 +703,7 @@ def run_time_resolved_decode(
                         subject=subject,
                         tuning_metadata=tuning_metadata,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration_metadata=_base.source_calibration_metadata(_base.SourceProbabilityCalibrator(mode="none")),
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                         outer_test_groups=outer_test_groups_value,
