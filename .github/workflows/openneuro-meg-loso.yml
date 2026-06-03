@@ -364,6 +364,19 @@ jobs:
                   subject_count = len(parse_subjects(spec, subjects))
                   max_events = int(os.environ["MAX_EVENTS_PER_LABEL_INPUT"])
                   stage_seed = override_value("workflow.stage_seed", "openneuro.stage_seed") or "13"
+                  response_window_ensemble = (
+                      override_value(
+                          "workflow.response_window_ensemble",
+                          "response_window.ensemble",
+                          "response_window.enabled",
+                      )
+                      or "false"
+                  ).lower()
+                  response_window_mode = override_value("workflow.response_window_mode", "response_window.mode") or "uniform"
+                  response_window_times = (
+                      override_value("workflow.response_window_times", "response_window.times")
+                      or "0.088,0.136,0.184,0.232"
+                  )
                   if max_events <= 0:
                       max_events_arg = ""
                   else:
@@ -398,6 +411,9 @@ jobs:
                       handle.write(f"OPENNEURO_OUTPUT_SUFFIX={output_suffix}\n")
                       handle.write(f"OPENNEURO_ARTIFACT_NAME={artifact_name}\n")
                       handle.write(f"STAGE_SEED_INPUT={stage_seed}\n")
+                      handle.write(f"RESPONSE_WINDOW_ENSEMBLE={response_window_ensemble}\n")
+                      handle.write(f"RESPONSE_WINDOW_MODE={response_window_mode}\n")
+                      handle.write(f"RESPONSE_WINDOW_TIMES={response_window_times}\n")
                   output_dir.mkdir(parents=True, exist_ok=True)
                   manifest = {
                       "dataset": dataset,
@@ -429,6 +445,9 @@ jobs:
                       "temporal_smoothing_fit_window": os.environ.get("TEMPORAL_SMOOTHING_FIT_WINDOW", ""),
                       "temporal_smoothing_mode": os.environ.get("TEMPORAL_SMOOTHING_MODE", ""),
                       "temporal_smoothing_stay_grid_size": "200",
+                      "response_window_ensemble": response_window_ensemble,
+                      "response_window_mode": response_window_mode,
+                      "response_window_times": response_window_times,
                       "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
                       "ensemble_source_decoders": os.environ.get("ENSEMBLE_SOURCE_DECODERS_INPUT", ""),
                       "ensemble_source_temperatures": override_value(
@@ -706,6 +725,25 @@ jobs:
                   esac
                   python -m neureptrace.temporal_smoothing "${smoothing_args[@]}"
 
+            - name: Run response-window logit ensemble
+              if: ${{ always() && env.RUN_DECODE == 'true' && env.RESPONSE_WINDOW_ENSEMBLE == 'true' }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  observations="$OPENNEURO_OUTPUT_DIR/decode/observations.csv"
+                  if [[ ! -s "$observations" ]]; then
+                    echo "Skipping response-window ensemble because observations are missing: $observations"
+                    exit 0
+                  fi
+                  mkdir -p "$OPENNEURO_OUTPUT_DIR/decode/response_window"
+                  python -m neureptrace.response_window_ensemble \
+                    "$observations" \
+                    --mode "$RESPONSE_WINDOW_MODE" \
+                    --response-times "$RESPONSE_WINDOW_TIMES" \
+                    --output-time "${DIAGNOSTICS_BEST_TIME_INPUT:-0.184}" \
+                    --out-observations "$OPENNEURO_OUTPUT_DIR/decode/response_window/observations.csv" \
+                    --out-metrics "$OPENNEURO_OUTPUT_DIR/decode/response_window/time_decode_summary.csv"
+
             - name: Summarize LOSO decode
               if: ${{ always() && env.RUN_DECODE == 'true' }}
               shell: bash
@@ -776,6 +814,20 @@ jobs:
                       smoothed_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
                     fi
                     python -m neureptrace.loso_observation_diagnostics "${smoothed_args[@]}"
+                  fi
+
+                  if [[ "$RESPONSE_WINDOW_ENSEMBLE" == "true" && -s "$OPENNEURO_OUTPUT_DIR/decode/response_window/observations.csv" ]]; then
+                    response_window_args=(
+                      "$OPENNEURO_OUTPUT_DIR/decode/response_window/observations.csv"
+                      --summary-csv "$OPENNEURO_OUTPUT_DIR/decode/response_window/time_decode_summary.csv"
+                      --stage-summary-csv "$OPENNEURO_OUTPUT_DIR/stage_summary.csv"
+                      --out-dir "$OPENNEURO_OUTPUT_DIR/decode/response_window/diagnostics"
+                      --selection-metric balanced_accuracy
+                    )
+                    if [[ -n "$DIAGNOSTICS_BEST_TIME_INPUT" ]]; then
+                      response_window_args+=(--best-time "$DIAGNOSTICS_BEST_TIME_INPUT")
+                    fi
+                    python -m neureptrace.loso_observation_diagnostics "${response_window_args[@]}"
                   fi
 
             - name: Write OpenNeuro workflow summary

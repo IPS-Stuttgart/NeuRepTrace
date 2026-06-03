@@ -319,6 +319,26 @@ def workflow_quality_summary(
             )
         )
 
+    response_summary_path = output_dir / "decode" / "response_window" / "time_decode_summary.csv"
+    response_quality_path = output_dir / "decode" / "response_window" / "diagnostics" / "quality_summary.csv"
+    if response_summary_path.is_file() or response_quality_path.is_file():
+        response_summary = _csv_shape(response_summary_path)
+        if response_summary_path.is_file():
+            response_best = best_metric_rows(pd.read_csv(response_summary_path)).set_index("selection_metric")
+        else:
+            response_best = pd.DataFrame()
+        rows.append(
+            _workflow_quality_row(
+                manifest=manifest,
+                stage_summary=stage_summary,
+                decode_summary=response_summary,
+                quality_path=response_quality_path,
+                summary_provenance=_summary_provenance(response_summary_path),
+                best_by_metric=response_best,
+                result_variant="response_window",
+            )
+        )
+
     return pd.DataFrame(rows)
 
 
@@ -394,6 +414,9 @@ def _workflow_quality_row(
         "temporal_smoothing_fit_window": manifest.get("temporal_smoothing_fit_window", ""),
         "temporal_smoothing_mode": manifest.get("temporal_smoothing_mode", ""),
         "temporal_smoothing_stay_grid_size": manifest.get("temporal_smoothing_stay_grid_size", ""),
+        "response_window_ensemble": _as_bool(manifest.get("response_window_ensemble", "")),
+        "response_window_mode": manifest.get("response_window_mode", ""),
+        "response_window_times": manifest.get("response_window_times", ""),
         "decode_summary_exists": decode_summary_exists,
         "quality_summary_exists": quality_summary_exists,
         "quality_decision": quality_decision,
