@@ -104,6 +104,8 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "OPENNEURO_OUTPUT_SUFFIX" in workflow
     assert "run_manifest.json" in workflow
     assert "workflow_quality_summary.csv" in workflow
+    assert "source_calibration" in workflow
+    assert "decoding.source_calibration=$SOURCE_CALIBRATION" in workflow
     assert "temporal_smoothing" in workflow
     assert "ensemble_source_temperatures" in workflow
     assert "decoding.ensemble_source_temperatures" in workflow

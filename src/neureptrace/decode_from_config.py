@@ -245,6 +245,7 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             "class_prior_correction",
             decoding.get("prior_correction", "none"),
         ),
+        "source_calibration": decoding.get("source_calibration", "none"),
         "label_shuffle_control": _bool_value(decoding.get("label_shuffle_control"), name="decoding.label_shuffle_control"),
         "label_shuffle_seed": int(decoding.get("label_shuffle_seed", 13)),
     }

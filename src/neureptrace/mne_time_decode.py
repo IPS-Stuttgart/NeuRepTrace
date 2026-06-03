@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import mne
@@ -66,6 +67,22 @@ RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 TIME_DECODE_BACKEND_CHOICES = ("auto", "sklearn", "mne")
 CLASS_PRIOR_CORRECTION_CHOICES = ("none", "train_uniform")
 CLASS_PRIOR_CORRECTION_RUN_CHOICES = (*CLASS_PRIOR_CORRECTION_CHOICES, "train-uniform")
+SOURCE_CALIBRATION_CHOICES = (
+    "none",
+    "temperature",
+    "class_bias",
+    "temperature_plus_class_bias",
+    "confusion_correction_l2",
+)
+SOURCE_CALIBRATION_RUN_CHOICES = (
+    *SOURCE_CALIBRATION_CHOICES,
+    "class-bias",
+    "temperature-plus-class-bias",
+    "confusion-correction-l2",
+)
+SOURCE_CALIBRATION_TEMPERATURE_GRID = (0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0)
+SOURCE_CALIBRATION_BIAS_SCALE_GRID = (0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0)
+SOURCE_CALIBRATION_L2_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
 DEFAULT_BASELINE_WINDOW = (-0.35, -0.05)
 BASELINE_WHITENING_SHRINKAGE = 0.1
 BASELINE_WHITENING_EIGENVALUE_FLOOR = 1e-6
@@ -75,6 +92,18 @@ TemporalTrainWindow = tuple[float, float]
 DecodeWindow = tuple[float, float]
 TEMPORAL_TRAIN_MODE_CHOICES = ("window_ensemble", "pooled")
 TEMPORAL_TRAIN_MODE_RUN_CHOICES = (*TEMPORAL_TRAIN_MODE_CHOICES, "window-ensemble")
+
+
+@dataclass(frozen=True)
+class SourceProbabilityCalibrator:
+    """Source-only probability transform learned from inner validation folds."""
+
+    mode: str
+    temperature: float = 1.0
+    bias: tuple[float, ...] = ()
+    matrix: tuple[tuple[float, ...], ...] = ()
+    score: float = float("nan")
+    parameter: str = ""
 
 
 def _add_subject(row: dict, subject: str | None) -> dict:
@@ -526,6 +555,236 @@ def normalize_class_prior_correction(mode: str | None) -> str:
     return normalized
 
 
+def normalize_source_calibration(mode: str | None) -> str:
+    """Normalize source-only post-hoc calibration modes."""
+
+    normalized = "none" if mode is None else str(mode).strip().lower().replace("-", "_")
+    if normalized not in SOURCE_CALIBRATION_CHOICES:
+        raise ValueError(
+            f"Unknown source_calibration '{mode}'. Available modes: "
+            f"{', '.join(SOURCE_CALIBRATION_CHOICES)}."
+        )
+    return normalized
+
+
+def _probabilities_to_logits(probabilities: np.ndarray) -> np.ndarray:
+    return np.log(np.clip(_normalize_probability_rows(probabilities), 1e-12, 1.0))
+
+
+def _softmax(logits: np.ndarray) -> np.ndarray:
+    logits = np.asarray(logits, dtype=float)
+    shifted = logits - np.max(logits, axis=1, keepdims=True)
+    exp_logits = np.exp(shifted)
+    return exp_logits / exp_logits.sum(axis=1, keepdims=True)
+
+
+def _balanced_score_for_probabilities(probabilities: np.ndarray, labels: np.ndarray) -> float:
+    predictions = np.asarray(probabilities).argmax(axis=1)
+    return float(balanced_accuracy_score(np.asarray(labels, dtype=int), predictions))
+
+
+def _marginal_class_bias(probabilities: np.ndarray) -> np.ndarray:
+    marginal = _normalize_probability_rows(probabilities).mean(axis=0)
+    target = np.full(marginal.shape, 1.0 / len(marginal), dtype=float)
+    bias = np.log(np.clip(target, 1e-12, 1.0)) - np.log(np.clip(marginal, 1e-12, 1.0))
+    return bias - float(np.mean(bias))
+
+
+def _calibrator_with_best_score(candidates: Sequence[SourceProbabilityCalibrator], oof_probabilities: np.ndarray, labels: np.ndarray) -> SourceProbabilityCalibrator:
+    best: SourceProbabilityCalibrator | None = None
+    best_score = -np.inf
+    for candidate in candidates:
+        score = _balanced_score_for_probabilities(
+            apply_source_probability_calibration(oof_probabilities, candidate),
+            labels,
+        )
+        if score > best_score:
+            best = candidate
+            best_score = score
+    if best is None:
+        return SourceProbabilityCalibrator(mode="none")
+    return SourceProbabilityCalibrator(
+        mode=best.mode,
+        temperature=best.temperature,
+        bias=best.bias,
+        matrix=best.matrix,
+        score=best_score,
+        parameter=best.parameter,
+    )
+
+
+def fit_source_probability_calibrator(
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+    mode: str,
+) -> SourceProbabilityCalibrator:
+    """Fit a probability re-ranking transform from source-only validation predictions.
+
+    ``probabilities`` should be out-of-fold predictions from inner splits of the
+    outer training subjects. The returned transform is then applied to the
+    held-out target subject predictions from the final model.
+    """
+
+    mode = normalize_source_calibration(mode)
+    probabilities = _normalize_probability_rows(probabilities)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    if probabilities.shape[0] != labels.shape[0]:
+        raise ValueError("Source calibration probabilities and labels must have the same row count.")
+    n_classes = probabilities.shape[1]
+    if mode == "none":
+        return SourceProbabilityCalibrator(mode="none")
+
+    bias = _marginal_class_bias(probabilities)
+    candidates: list[SourceProbabilityCalibrator] = []
+    if mode == "temperature":
+        candidates = [
+            SourceProbabilityCalibrator(mode=mode, temperature=temperature, parameter=f"temperature={temperature:g}")
+            for temperature in SOURCE_CALIBRATION_TEMPERATURE_GRID
+        ]
+    elif mode == "class_bias":
+        candidates = [
+            SourceProbabilityCalibrator(
+                mode=mode,
+                bias=tuple((bias * scale).tolist()),
+                parameter=f"bias_scale={scale:g}",
+            )
+            for scale in SOURCE_CALIBRATION_BIAS_SCALE_GRID
+        ]
+    elif mode == "temperature_plus_class_bias":
+        candidates = [
+            SourceProbabilityCalibrator(
+                mode=mode,
+                temperature=temperature,
+                bias=tuple((bias * scale).tolist()),
+                parameter=f"temperature={temperature:g};bias_scale={scale:g}",
+            )
+            for temperature in SOURCE_CALIBRATION_TEMPERATURE_GRID
+            for scale in SOURCE_CALIBRATION_BIAS_SCALE_GRID
+        ]
+    elif mode == "confusion_correction_l2":
+        targets = np.eye(n_classes, dtype=float)[labels]
+        design = probabilities
+        identity = np.eye(n_classes, dtype=float)
+        for penalty in SOURCE_CALIBRATION_L2_GRID:
+            matrix = np.linalg.solve(
+                design.T @ design + float(penalty) * identity,
+                design.T @ targets + float(penalty) * identity,
+            )
+            candidates.append(
+                SourceProbabilityCalibrator(
+                    mode=mode,
+                    matrix=tuple(tuple(float(value) for value in row) for row in matrix),
+                    parameter=f"l2={penalty:g}",
+                )
+            )
+    else:
+        raise ValueError(f"Unsupported source calibration mode: {mode}")
+    return _calibrator_with_best_score(candidates, probabilities, labels)
+
+
+def apply_source_probability_calibration(
+    probabilities: np.ndarray,
+    calibrator: SourceProbabilityCalibrator,
+) -> np.ndarray:
+    probabilities = _normalize_probability_rows(probabilities)
+    mode = normalize_source_calibration(calibrator.mode)
+    if mode == "none":
+        return probabilities
+    if mode in {"temperature", "class_bias", "temperature_plus_class_bias"}:
+        logits = _probabilities_to_logits(probabilities) / max(float(calibrator.temperature), 1e-12)
+        if calibrator.bias:
+            logits = logits + np.asarray(calibrator.bias, dtype=float).reshape(1, -1)
+        return _softmax(logits)
+    if mode == "confusion_correction_l2":
+        if not calibrator.matrix:
+            return probabilities
+        corrected = probabilities @ np.asarray(calibrator.matrix, dtype=float)
+        corrected = np.clip(corrected, 1e-12, None)
+        return corrected / corrected.sum(axis=1, keepdims=True)
+    raise ValueError(f"Unsupported source calibration mode: {mode}")
+
+
+def source_calibration_metadata(calibrator: SourceProbabilityCalibrator) -> dict[str, object]:
+    """Return compact provenance for source-only calibration outputs."""
+
+    return {
+        "source_calibration": normalize_source_calibration(calibrator.mode),
+        "source_calibration_parameter": calibrator.parameter,
+        "source_calibration_inner_score": "" if not np.isfinite(calibrator.score) else float(calibrator.score),
+    }
+
+
+def fit_inner_source_probability_calibrator(
+    *,
+    features: np.ndarray,
+    train_idx: np.ndarray,
+    train_labels: np.ndarray,
+    train_groups: np.ndarray | None,
+    decoder_name: str,
+    emission_mode: str,
+    max_iter: int,
+    feature_preprocessor: str,
+    pca_components: int | float | None,
+    tune_hyperparameters: bool,
+    tuning_cv_splits: int,
+    tuning_scoring: str,
+    tuning_c_grid: Sequence[float],
+    classes: np.ndarray,
+    source_calibration: str,
+) -> SourceProbabilityCalibrator:
+    """Fit source calibration with inner CV over the current outer train fold."""
+
+    source_calibration = normalize_source_calibration(source_calibration)
+    if source_calibration == "none":
+        return SourceProbabilityCalibrator(mode="none")
+    train_idx = np.asarray(train_idx, dtype=int)
+    train_labels = np.asarray(train_labels, dtype=int)
+    train_groups = None if train_groups is None else np.asarray(train_groups)
+    try:
+        inner_splits = make_tuning_cross_validator(train_labels, train_groups, tuning_cv_splits)
+    except ValueError:
+        return SourceProbabilityCalibrator(mode="none")
+
+    oof_probabilities = np.zeros((len(train_idx), len(classes)), dtype=float)
+    oof_labels = np.asarray(train_labels, dtype=int)
+    filled = np.zeros(len(train_idx), dtype=bool)
+    for inner_train_local, inner_valid_local in inner_splits:
+        inner_tuning_cv = (
+            make_tuning_cross_validator(
+                train_labels[inner_train_local],
+                None if train_groups is None else train_groups[inner_train_local],
+                tuning_cv_splits,
+            )
+            if tune_hyperparameters
+            else 3
+        )
+        model = make_decoder(
+            decoder_name,
+            max_iter=max_iter,
+            emission_mode=emission_mode,
+            feature_preprocessor=feature_preprocessor,
+            pca_components=pca_components,
+            tune_hyperparameters=tune_hyperparameters,
+            tuning_cv=inner_tuning_cv,
+            tuning_scoring=tuning_scoring,
+            tuning_c_grid=tuning_c_grid,
+        )
+        model.fit(features[train_idx[inner_train_local]], train_labels[inner_train_local])
+        oof_probabilities[inner_valid_local] = _align_probability_columns(
+            predict_emission_probabilities(
+                model,
+                features[train_idx[inner_valid_local]],
+                emission_mode=emission_mode,
+            ),
+            model=model,
+            classes=classes,
+        )
+        filled[inner_valid_local] = True
+    if not np.all(filled):
+        return SourceProbabilityCalibrator(mode="none")
+    return fit_source_probability_calibrator(oof_probabilities, oof_labels, source_calibration)
+
+
 def _features_for_window(data: np.ndarray, window: TimeWindow) -> np.ndarray:
     start, stop, _center = window
     return data[:, :, start:stop].reshape(data.shape[0], -1)
@@ -781,6 +1040,7 @@ def _model_hash(
     tuning_metadata: dict[str, object] | None = None,
     backend: str = "sklearn",
     class_prior_correction: str = "none",
+    source_calibration: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> str:
@@ -799,6 +1059,8 @@ def _model_hash(
     }
     if class_prior_correction != "none":
         payload["class_prior_correction"] = class_prior_correction
+    if source_calibration != "none":
+        payload["source_calibration"] = source_calibration
     if tune_hyperparameters:
         payload.update(
             {
@@ -859,11 +1121,17 @@ def _append_decoded_outputs(
     tuning_metadata: dict[str, object] | None = None,
     backend: str = "sklearn",
     class_prior_correction: str = "none",
+    source_calibration_metadata: dict[str, object] | None = None,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
     outer_test_groups: Sequence[str] = (),
 ) -> None:
     tuning_metadata = {} if tuning_metadata is None else tuning_metadata
+    source_calibration_metadata = (
+        source_calibration_metadata
+        if source_calibration_metadata is not None
+        else {"source_calibration": "none", "source_calibration_parameter": "", "source_calibration_inner_score": ""}
+    )
     start, stop, center = time_window
     predictions = probabilities.argmax(axis=1)
     common = {
@@ -889,6 +1157,7 @@ def _append_decoded_outputs(
         "label_shuffle_control": bool(label_shuffle_control),
         "label_shuffle_seed": int(label_shuffle_seed),
         "class_prior_correction": class_prior_correction,
+        **source_calibration_metadata,
         "outer_test_groups": "|".join(outer_test_groups),
     }
     row = {
@@ -984,6 +1253,7 @@ def run_time_resolved_decode(
     temporal_train_mode: str = "window_ensemble",
     time_decode_backend: str = "auto",
     class_prior_correction: str = "none",
+    source_calibration: str = "none",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -1031,6 +1301,7 @@ def run_time_resolved_decode(
     normalized_temporal_train_window = _normalize_temporal_train_window(temporal_train_window)
     temporal_train_mode_name = _normalize_temporal_train_mode(temporal_train_mode)
     class_prior_correction_name = normalize_class_prior_correction(class_prior_correction)
+    source_calibration_name = normalize_source_calibration(source_calibration)
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
@@ -1088,6 +1359,7 @@ def run_time_resolved_decode(
             "temporal_train_window": normalized_temporal_train_window,
             "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
             "class_prior_correction": class_prior_correction_name,
+            "source_calibration": source_calibration_name,
             "outer_test_groups": outer_test_groups_value,
         }
     )
@@ -1107,6 +1379,7 @@ def run_time_resolved_decode(
         tuning_c_grid=tuning_c_grid_values,
         backend=time_decode_backend,
         class_prior_correction=class_prior_correction_name,
+        source_calibration=source_calibration_name,
         label_shuffle_control=label_shuffle_control,
         label_shuffle_seed=label_shuffle_seed,
     )
@@ -1174,6 +1447,10 @@ def run_time_resolved_decode(
                         classes,
                         class_prior_correction_name,
                     )
+                    calibrator = SourceProbabilityCalibrator(mode="none")
+                    source_metadata = source_calibration_metadata(calibrator)
+                    if source_calibration_name != "none":
+                        raise ValueError("source_calibration currently requires the sklearn time-decode backend.")
                     start, stop, center = time_window
                     tuning_metadata = _tuning_metadata(
                         fitted_model,
@@ -1200,6 +1477,7 @@ def run_time_resolved_decode(
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration=source_calibration_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -1242,6 +1520,7 @@ def run_time_resolved_decode(
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration_metadata=source_metadata,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                         outer_test_groups=outer_test_groups_value,
@@ -1293,6 +1572,25 @@ def run_time_resolved_decode(
                         classes,
                         class_prior_correction_name,
                     )
+                    calibrator = fit_inner_source_probability_calibrator(
+                        features=features,
+                        train_idx=train_idx,
+                        train_labels=train_labels,
+                        train_groups=None if groups is None else groups[train_idx],
+                        decoder_name=decoder_name,
+                        emission_mode=current_emission_mode,
+                        max_iter=max_iter,
+                        feature_preprocessor=feature_preprocessor_name,
+                        pca_components=pca_components_value,
+                        tune_hyperparameters=tune_hyperparameters,
+                        tuning_cv_splits=tuning_cv_splits,
+                        tuning_scoring=tuning_scoring,
+                        tuning_c_grid=tuning_c_grid_values,
+                        classes=classes,
+                        source_calibration=source_calibration_name,
+                    )
+                    probabilities = apply_source_probability_calibration(probabilities, calibrator)
+                    source_metadata = source_calibration_metadata(calibrator)
                     tuning_metadata = _tuning_metadata(
                         model,
                         tune_hyperparameters=tune_hyperparameters,
@@ -1318,6 +1616,7 @@ def run_time_resolved_decode(
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration=source_calibration_name,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -1360,6 +1659,7 @@ def run_time_resolved_decode(
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration_metadata=source_metadata,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                         outer_test_groups=outer_test_groups_value,
@@ -1448,6 +1748,8 @@ def run_time_resolved_decode(
                         classes,
                         class_prior_correction_name,
                     )
+                    if source_calibration_name != "none":
+                        raise ValueError("source_calibration currently supports same-time decoding only.")
                     _append_decoded_outputs(
                         rows=rows,
                         calibration_rows=calibration_rows,
@@ -1486,6 +1788,7 @@ def run_time_resolved_decode(
                         subject=subject,
                         tuning_metadata=tuning_metadata,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration_metadata=source_calibration_metadata(SourceProbabilityCalibrator(mode="none")),
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                         outer_test_groups=outer_test_groups_value,
@@ -1577,6 +1880,8 @@ def run_time_resolved_decode(
                         classes,
                         class_prior_correction_name,
                     )
+                    if source_calibration_name != "none":
+                        raise ValueError("source_calibration currently supports same-time decoding only.")
                     _append_decoded_outputs(
                         rows=rows,
                         calibration_rows=calibration_rows,
@@ -1616,6 +1921,7 @@ def run_time_resolved_decode(
                         tuning_metadata=tuning_metadata,
                         backend=time_decode_backend,
                         class_prior_correction=class_prior_correction_name,
+                        source_calibration_metadata=source_calibration_metadata(SourceProbabilityCalibrator(mode="none")),
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                         outer_test_groups=outer_test_groups_value,
@@ -1737,6 +2043,12 @@ def main() -> None:
         help="Optional train-fold prior correction. train_uniform divides posterior probabilities by train-fold class priors before scoring.",
     )
     parser.add_argument(
+        "--source-calibration",
+        choices=SOURCE_CALIBRATION_RUN_CHOICES,
+        default="none",
+        help="Nested source-only probability re-ranking learned from inner folds of each outer training set.",
+    )
+    parser.add_argument(
         "--decode-window",
         nargs=2,
         type=float,
@@ -1815,6 +2127,7 @@ def main() -> None:
         temporal_train_mode=args.temporal_train_mode,
         time_decode_backend=args.time_decode_backend,
         class_prior_correction=args.class_prior_correction,
+        source_calibration=args.source_calibration,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
     )
