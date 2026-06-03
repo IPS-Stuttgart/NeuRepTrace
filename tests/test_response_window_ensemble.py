@@ -84,3 +84,23 @@ def test_response_window_learned_weights_are_source_subject_only(tmp_path: Path)
     assert set(weights) == {"sub-01", "sub-02", "sub-03"}
     assert all(weight for weight in weights.values())
     assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
+
+
+def test_response_window_uses_outer_test_group_when_subject_is_empty(tmp_path: Path):
+    observations = _toy_observations()
+    observations["outer_test_groups"] = observations["subject"]
+    observations["group"] = observations["subject"]
+    observations["subject"] = np.nan
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    ensembled, _ = run_response_window_ensemble(
+        [csv_path],
+        mode="source_oof_nonnegative",
+        weight_grid_step=0.5,
+    )
+
+    weights = ensembled.groupby("outer_test_groups")["response_window_weights"].first().to_dict()
+    assert set(weights) == {"sub-01", "sub-02", "sub-03"}
+    assert ensembled["subject"].isna().all()
+    assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
