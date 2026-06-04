@@ -19,6 +19,8 @@ from neureptrace.mne_time_decode import (
     RESULT_SELECTION_MINIMIZE_METRICS,
     RESULT_SUMMARY_METRIC_COLUMNS,
     SOURCE_CALIBRATION_RUN_CHOICES,
+    DEFAULT_SOURCE_TIME_SELECTION_TIMES,
+    SOURCE_TIME_SELECTION_RUN_CHOICES,
     _best_time_by_metric,
     _normalize_outer_test_groups,
     TEMPORAL_TRAIN_MODE_RUN_CHOICES,
@@ -140,6 +142,9 @@ def run_time_resolved_decode(
     time_decode_backend: str = "sklearn",
     class_prior_correction: str = "none",
     source_calibration: str = "none",
+    source_time_selection: str = "none",
+    source_time_selection_times: Sequence[float] | str | None = None,
+    source_time_selection_output_time: float = 0.184,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
     ensemble_source_decoders: Sequence[str] | None = None,
@@ -195,6 +200,9 @@ def run_time_resolved_decode(
             time_decode_backend=time_decode_backend,
             class_prior_correction=class_prior_correction,
             source_calibration=source_calibration,
+            source_time_selection=source_time_selection,
+            source_time_selection_times=source_time_selection_times,
+            source_time_selection_output_time=source_time_selection_output_time,
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
         )
@@ -251,6 +259,9 @@ def run_time_resolved_decode(
                     time_decode_backend=time_decode_backend,
                     class_prior_correction=class_prior_correction,
                     source_calibration=source_calibration,
+                    source_time_selection=source_time_selection,
+                    source_time_selection_times=source_time_selection_times,
+                    source_time_selection_output_time=source_time_selection_output_time,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
                 )
@@ -286,6 +297,13 @@ def run_time_resolved_decode(
     results["normalization"] = normalization.replace("-", "_") if normalization is not None else "none"
     results["class_prior_correction"] = str(class_prior_correction).strip().lower().replace("-", "_")
     results["source_calibration"] = str(source_calibration).strip().lower().replace("-", "_")
+    results["source_time_selection"] = str(source_time_selection).strip().lower().replace("-", "_")
+    results["source_time_selection_times"] = (
+        ",".join(str(time) for time in source_time_selection_times)
+        if isinstance(source_time_selection_times, Sequence) and not isinstance(source_time_selection_times, str)
+        else source_time_selection_times or ",".join(str(time) for time in DEFAULT_SOURCE_TIME_SELECTION_TIMES)
+    )
+    results["source_time_selection_output_time"] = float(source_time_selection_output_time)
     results["source_decoders"] = "|".join(source_decoders)
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
     results["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in source_temperatures)
@@ -307,6 +325,11 @@ def run_time_resolved_decode(
         "train_window_start",
         "train_window_stop",
         "n_train_windows",
+        "source_time_selection_candidate_times",
+        "source_time_selection_time_scores",
+        "source_time_selection_weights",
+        "source_time_selection_selected_time",
+        "source_time_selection_inner_score",
     ):
         values = [frame[column].iloc[0] for frame in source_metric_frames if column in frame.columns and not frame.empty]
         if values and all(value == values[0] for value in values):
@@ -422,6 +445,23 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Nested source-only source-decoder probability re-ranking learned inside each outer training set.",
     )
     parser.add_argument(
+        "--source-time-selection",
+        choices=SOURCE_TIME_SELECTION_RUN_CHOICES,
+        default="none",
+        help="Nested source-only time selection applied to each ensemble source decoder.",
+    )
+    parser.add_argument(
+        "--source-time-selection-times",
+        default=",".join(str(time) for time in DEFAULT_SOURCE_TIME_SELECTION_TIMES),
+        help="Comma-separated candidate time centers for --source-time-selection.",
+    )
+    parser.add_argument(
+        "--source-time-selection-output-time",
+        type=float,
+        default=0.184,
+        help="Reported output time for source-time-selected predictions.",
+    )
+    parser.add_argument(
         "--ensemble-source-decoder",
         action="append",
         dest="ensemble_source_decoders",
@@ -496,6 +536,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         temporal_train_mode=args.temporal_train_mode,
         class_prior_correction=args.class_prior_correction,
         source_calibration=args.source_calibration,
+        source_time_selection=args.source_time_selection,
+        source_time_selection_times=args.source_time_selection_times,
+        source_time_selection_output_time=args.source_time_selection_output_time,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
         ensemble_source_decoders=tuple(args.ensemble_source_decoders) if args.ensemble_source_decoders is not None else None,

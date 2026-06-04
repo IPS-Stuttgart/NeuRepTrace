@@ -13,6 +13,7 @@ from neureptrace.mne_time_decode import (
     fit_source_probability_calibrator,
     normalize_class_prior_correction,
     normalize_source_calibration,
+    normalize_source_time_selection,
     normalize_time_decode_backend,
     run_time_resolved_decode,
 )
@@ -130,6 +131,84 @@ def test_class_prior_correction_rebalances_train_fold_priors():
     np.testing.assert_allclose(corrected.sum(axis=1), np.ones(2))
     assert corrected[0, 1] > corrected[0, 0]
     assert corrected[1, 1] > probabilities[1, 1]
+
+
+def test_source_time_selection_uses_source_only_inner_validation(tmp_path: Path, monkeypatch):
+    labels = np.array([0, 1, 2] * 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 3)
+    times = np.array([0.088, 0.136, 0.184, 0.232, 0.280])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    good_time_index = 2
+    for trial_index, label in enumerate(labels):
+        data[trial_index, 0, :] = (label + 1) % 3
+        data[trial_index, 0, good_time_index] = label
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+
+    out = tmp_path / "source_time.csv"
+    observations_out = tmp_path / "source_time_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=out,
+        n_splits=3,
+        window_ms=1,
+        step_ms=48,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        source_time_selection="source-oof-best-time",
+        source_time_selection_times=(0.088, 0.136, 0.184, 0.232, 0.280),
+        source_time_selection_output_time=0.184,
+        observation_out_path=observations_out,
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert normalize_source_time_selection("source-oof-best-time") == "source_oof_best_time"
+    assert results["decoder"].unique().tolist() == ["logistic_source_oof_best_time"]
+    assert results["time"].unique().tolist() == [0.184]
+    assert results["source_time_selection_selected_time"].round(3).tolist() == [0.184]
+    assert observations["group"].unique().tolist() == ["sub-01"]
+    assert observations["source_time_selection"].unique().tolist() == ["source_oof_best_time"]
+    assert observations["source_time_selection_candidate_times"].str.contains("0.184").all()
+
+
+def test_source_time_weighted_logits_writes_weights(tmp_path: Path, monkeypatch):
+    labels = np.array([0, 1, 2] * 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 3)
+    times = np.array([0.088, 0.184])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    for trial_index, label in enumerate(labels):
+        data[trial_index, 0, 0] = (label + 1) % 3
+        data[trial_index, 0, 1] = label
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "source_time_weighted.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=96,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        source_time_selection="source_oof_time_weighted_logits",
+        source_time_selection_times=(0.088, 0.184),
+    )
+
+    assert results["decoder"].unique().tolist() == ["logistic_source_oof_time_weighted_logits"]
+    assert results["source_time_selection_weights"].str.contains("|", regex=False).all()
+    assert results["balanced_accuracy"].between(0.0, 1.0).all()
 
 
 def test_source_calibrator_fits_deterministic_re_ranking():
