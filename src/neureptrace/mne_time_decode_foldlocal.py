@@ -156,6 +156,9 @@ def run_time_resolved_decode(
     time_decode_backend: str = "sklearn",
     class_prior_correction: str = "none",
     source_calibration: str = "none",
+    source_time_selection: str = "none",
+    source_time_selection_times: Sequence[float] | str | None = None,
+    source_time_selection_output_time: float = 0.184,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -206,7 +209,11 @@ def run_time_resolved_decode(
     temporal_train_mode_name = _base._normalize_temporal_train_mode(temporal_train_mode)
     class_prior_correction_name = _base.normalize_class_prior_correction(class_prior_correction)
     source_calibration_name = _base.normalize_source_calibration(source_calibration)
+    source_time_selection_name = _base.normalize_source_time_selection(source_time_selection)
+    _ = source_time_selection_times, source_time_selection_output_time
     outer_test_groups_value = _base._normalize_outer_test_groups(outer_test_groups)
+    if source_time_selection_name != "none":
+        raise ValueError("source_time_selection is not yet implemented for fold-local normalization.")
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
