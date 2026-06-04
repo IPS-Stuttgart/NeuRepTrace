@@ -733,25 +733,6 @@ jobs:
                   esac
                   python -m neureptrace.temporal_smoothing "${smoothing_args[@]}"
 
-            - name: Run response-window logit ensemble
-              if: ${{ always() && env.RUN_DECODE == 'true' && env.RESPONSE_WINDOW_ENSEMBLE == 'true' }}
-              shell: bash
-              run: |
-                  set -euo pipefail
-                  observations="$OPENNEURO_OUTPUT_DIR/decode/observations.csv"
-                  if [[ ! -s "$observations" ]]; then
-                    echo "Skipping response-window ensemble because observations are missing: $observations"
-                    exit 0
-                  fi
-                  mkdir -p "$OPENNEURO_OUTPUT_DIR/decode/response_window"
-                  python -m neureptrace.response_window_ensemble \
-                    "$observations" \
-                    --mode "$RESPONSE_WINDOW_MODE" \
-                    --response-times "$RESPONSE_WINDOW_TIMES" \
-                    --output-time "${DIAGNOSTICS_BEST_TIME_INPUT:-0.184}" \
-                    --out-observations "$OPENNEURO_OUTPUT_DIR/decode/response_window/observations.csv" \
-                    --out-metrics "$OPENNEURO_OUTPUT_DIR/decode/response_window/time_decode_summary.csv"
-
             - name: Summarize LOSO decode
               if: ${{ always() && env.RUN_DECODE == 'true' }}
               shell: bash
