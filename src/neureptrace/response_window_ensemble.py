@@ -17,6 +17,7 @@ ENSEMBLE_MODE_CHOICES = ("uniform", "source_oof_nonnegative")
 OUTPUT_DECODER = "poststimulus_response_window_logit_ensemble"
 OUTPUT_EMISSION_MODE = "response_window_logit_ensemble"
 EPSILON = 1e-12
+TARGET_GROUP_COLUMNS = ("subject", "group", "outer_test_groups", "session", "fold")
 
 
 def _normalize_rows(probabilities: np.ndarray) -> np.ndarray:
@@ -51,7 +52,7 @@ def _has_nonempty_values(series: pd.Series) -> bool:
 
 
 def _subject_key_column(frame: pd.DataFrame) -> str | None:
-    for column in ("subject", "outer_test_groups", "group"):
+    for column in TARGET_GROUP_COLUMNS:
         if column in frame.columns and _has_nonempty_values(frame[column]):
             return column
     return None
@@ -62,7 +63,7 @@ def _sequence_key_columns(frame: pd.DataFrame) -> list[str]:
     subject_column = _subject_key_column(frame)
     if subject_column is not None:
         keys.append(subject_column)
-    if "fold" in frame.columns:
+    if "fold" in frame.columns and "fold" not in keys:
         keys.append("fold")
     if "sample_index" in frame.columns:
         keys.append("sample_index")
@@ -77,7 +78,7 @@ def _target_subject_values(base: pd.DataFrame, key_columns: list[str]) -> np.nda
     subject_column = _subject_key_column(base)
     if subject_column is not None:
         return base[subject_column].astype(str).to_numpy()
-    for column in ("subject", "outer_test_groups", "group"):
+    for column in TARGET_GROUP_COLUMNS:
         if column in key_columns:
             return base.index.get_level_values(column).astype(str).to_numpy()
     return np.full(len(base), "", dtype=object)

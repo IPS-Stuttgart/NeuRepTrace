@@ -104,3 +104,42 @@ def test_response_window_uses_outer_test_group_when_subject_is_empty(tmp_path: P
     assert set(weights) == {"sub-01", "sub-02", "sub-03"}
     assert ensembled["subject"].isna().all()
     assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
+
+
+def test_response_window_uses_session_when_subject_and_group_columns_are_empty(tmp_path: Path):
+    observations = _toy_observations()
+    observations["session"] = observations["subject"]
+    observations["subject"] = np.nan
+    observations["group"] = ""
+    observations["outer_test_groups"] = np.nan
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    ensembled, _ = run_response_window_ensemble(
+        [csv_path],
+        mode="source_oof_nonnegative",
+        weight_grid_step=0.5,
+    )
+
+    weights = ensembled.groupby("session")["response_window_weights"].first().to_dict()
+    assert set(weights) == {"sub-01", "sub-02", "sub-03"}
+    assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
+
+
+def test_response_window_can_use_fold_as_last_resort_target_key(tmp_path: Path):
+    observations = _toy_observations()
+    observations["subject"] = np.nan
+    observations["group"] = np.nan
+    observations["outer_test_groups"] = np.nan
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    ensembled, _ = run_response_window_ensemble(
+        [csv_path],
+        mode="source_oof_nonnegative",
+        weight_grid_step=0.5,
+    )
+
+    weights = ensembled.groupby("fold")["response_window_weights"].first().to_dict()
+    assert set(weights) == {"sub-01", "sub-02", "sub-03"}
+    assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
