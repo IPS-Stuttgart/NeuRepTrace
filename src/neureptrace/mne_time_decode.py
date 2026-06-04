@@ -92,6 +92,19 @@ TemporalTrainWindow = tuple[float, float]
 DecodeWindow = tuple[float, float]
 TEMPORAL_TRAIN_MODE_CHOICES = ("window_ensemble", "pooled")
 TEMPORAL_TRAIN_MODE_RUN_CHOICES = (*TEMPORAL_TRAIN_MODE_CHOICES, "window-ensemble")
+SOURCE_TIME_SELECTION_CHOICES = ("none", "source_oof_best_time", "source_oof_time_weighted_logits")
+SOURCE_TIME_SELECTION_RUN_CHOICES = (
+    *SOURCE_TIME_SELECTION_CHOICES,
+    "source-oof-best-time",
+    "source-oof-time-weighted-logits",
+)
+DEFAULT_SOURCE_TIME_SELECTION_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
+SOURCE_TIME_SELECTION_OUTPUT_DECODER_SUFFIX = {
+    "source_oof_best_time": "source_oof_best_time",
+    "source_oof_time_weighted_logits": "source_oof_time_weighted_logits",
+}
+SOURCE_TIME_SELECTION_WEIGHT_GRID_STEP = 0.1
+PROBABILITY_EPSILON = 1e-12
 
 
 @dataclass(frozen=True)
@@ -148,6 +161,33 @@ def _normalize_outer_test_groups(value: object | Sequence[object] | None) -> tup
         values = [value]
 
     return tuple(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+
+
+def normalize_source_time_selection(mode: str | None) -> str:
+    normalized = "none" if mode is None else str(mode).strip().lower().replace("-", "_")
+    if normalized not in SOURCE_TIME_SELECTION_CHOICES:
+        raise ValueError(
+            f"Unknown source_time_selection '{mode}'. Available modes: {', '.join(SOURCE_TIME_SELECTION_CHOICES)}."
+        )
+    return normalized
+
+
+def _parse_float_sequence(value: object | Sequence[object] | None, *, default: Sequence[float]) -> tuple[float, ...]:
+    if value is None or value == "":
+        return tuple(float(item) for item in default)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        values = [part.strip() for chunk in text.split(",") for part in chunk.split() if part.strip()]
+    elif isinstance(value, Sequence) and not isinstance(value, bytes):
+        values = list(value)
+    else:
+        values = [value]
+    parsed = tuple(float(item) for item in values)
+    if not parsed:
+        raise ValueError("Expected at least one time value.")
+    return parsed
 
 
 def _filter_splits_for_outer_test_groups(
@@ -514,6 +554,60 @@ def _select_temporal_train_windows(
     )
 
 
+def _nearest_candidate_windows(windows: Sequence[TimeWindow], requested_times: Sequence[float]) -> list[TimeWindow]:
+    if not windows:
+        raise ValueError("No decode windows are available for source-time selection.")
+    centers = np.asarray([window[2] for window in windows], dtype=float)
+    selected: list[TimeWindow] = []
+    seen: set[TimeWindow] = set()
+    for requested_time in requested_times:
+        window = windows[int(np.argmin(np.abs(centers - float(requested_time))))]
+        if window not in seen:
+            selected.append(window)
+            seen.add(window)
+    if not selected:
+        raise ValueError("No source-time-selection candidate windows were selected.")
+    return selected
+
+
+def _softmax_rows(logits: np.ndarray) -> np.ndarray:
+    shifted = logits - np.max(logits, axis=1, keepdims=True)
+    exp_logits = np.exp(np.clip(shifted, -50.0, 50.0))
+    return exp_logits / exp_logits.sum(axis=1, keepdims=True)
+
+
+def _combine_probability_logits(probability_cube: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    logits = np.log(np.clip(probability_cube, PROBABILITY_EPSILON, 1.0))
+    return _softmax_rows(np.tensordot(logits, weights, axes=([1], [0])))
+
+
+def _nonnegative_weight_candidates(n_times: int, step: float = SOURCE_TIME_SELECTION_WEIGHT_GRID_STEP) -> np.ndarray:
+    if n_times <= 0:
+        raise ValueError("Need at least one source-time-selection candidate.")
+    if n_times == 1:
+        return np.ones((1, 1), dtype=float)
+    levels = np.arange(0.0, 1.0 + step / 2.0, step)
+    candidates: list[np.ndarray] = []
+
+    def visit(prefix: list[float], remaining: int) -> None:
+        if remaining == 1:
+            value = 1.0 - sum(prefix)
+            if value >= -step / 2.0:
+                candidate = np.asarray([*prefix, max(0.0, value)], dtype=float)
+                total = float(candidate.sum())
+                if total > 0 and abs(total - 1.0) <= step / 2.0:
+                    candidates.append(candidate / total)
+            return
+        for value in levels:
+            if sum(prefix) + value <= 1.0 + step / 2.0:
+                visit([*prefix, float(value)], remaining - 1)
+
+    visit([], n_times)
+    if not candidates:
+        raise ValueError("No nonnegative source-time-selection weight candidates were generated.")
+    return np.unique(np.vstack(candidates).round(12), axis=0)
+
+
 def _normalize_decode_window(decode_window: tuple[float, float] | list[float] | None) -> DecodeWindow | None:
     if decode_window is None:
         return None
@@ -785,6 +879,111 @@ def fit_inner_source_probability_calibrator(
     return fit_source_probability_calibrator(oof_probabilities, oof_labels, source_calibration)
 
 
+def _fit_source_time_selector(
+    *,
+    feature_cache: dict[TimeWindow, np.ndarray],
+    candidate_windows: Sequence[TimeWindow],
+    train_idx: np.ndarray,
+    train_labels: np.ndarray,
+    train_groups: np.ndarray | None,
+    decoder_name: str,
+    emission_mode: str,
+    max_iter: int,
+    feature_preprocessor: str,
+    pca_components: int | float | str | None,
+    tune_hyperparameters: bool,
+    tuning_cv_splits: int,
+    tuning_scoring: str,
+    tuning_c_grid: Sequence[float] | str | None,
+    classes: np.ndarray,
+    class_prior_correction: str,
+    mode: str,
+) -> tuple[np.ndarray, dict[str, object]]:
+    inner_splits = list(make_tuning_cross_validator(train_labels, train_groups, tuning_cv_splits))
+    if not inner_splits:
+        raise ValueError("Source-time selection needs at least one inner validation split.")
+
+    validation_probabilities: list[list[np.ndarray]] = [[] for _ in candidate_windows]
+    validation_labels: list[np.ndarray] = []
+    for inner_train_local, inner_valid_local in inner_splits:
+        validation_labels.append(train_labels[inner_valid_local])
+        for window_index, window in enumerate(candidate_windows):
+            features = feature_cache[window]
+            inner_tuning_cv = (
+                make_tuning_cross_validator(
+                    train_labels[inner_train_local],
+                    None if train_groups is None else train_groups[inner_train_local],
+                    tuning_cv_splits,
+                )
+                if tune_hyperparameters
+                else 3
+            )
+            model = make_decoder(
+                decoder_name,
+                max_iter=max_iter,
+                emission_mode=emission_mode,
+                feature_preprocessor=feature_preprocessor,
+                pca_components=pca_components,
+                tune_hyperparameters=tune_hyperparameters,
+                tuning_cv=inner_tuning_cv,
+                tuning_scoring=tuning_scoring,
+                tuning_c_grid=tuning_c_grid,
+            )
+            model.fit(features[train_idx[inner_train_local]], train_labels[inner_train_local])
+            probabilities = _align_probability_columns(
+                predict_emission_probabilities(
+                    model,
+                    features[train_idx[inner_valid_local]],
+                    emission_mode=emission_mode,
+                ),
+                model=model,
+                classes=classes,
+            )
+            probabilities = _apply_class_prior_correction(
+                probabilities,
+                train_labels[inner_train_local],
+                classes,
+                class_prior_correction,
+            )
+            validation_probabilities[window_index].append(probabilities)
+
+    labels = np.concatenate(validation_labels)
+    probability_cube = np.stack([np.vstack(parts) for parts in validation_probabilities], axis=1)
+    time_scores = [
+        float(balanced_accuracy_score(labels, probability_cube[:, window_index, :].argmax(axis=1)))
+        for window_index in range(len(candidate_windows))
+    ]
+
+    if mode == "source_oof_best_time":
+        best_index = int(np.argmax(time_scores))
+        weights = np.zeros(len(candidate_windows), dtype=float)
+        weights[best_index] = 1.0
+        source_score = time_scores[best_index]
+    elif mode == "source_oof_time_weighted_logits":
+        best_weights = None
+        source_score = -np.inf
+        for weights_candidate in _nonnegative_weight_candidates(len(candidate_windows)):
+            probabilities = _combine_probability_logits(probability_cube, weights_candidate)
+            score = float(balanced_accuracy_score(labels, probabilities.argmax(axis=1)))
+            if score > source_score:
+                best_weights = weights_candidate
+                source_score = score
+        if best_weights is None:
+            raise ValueError("No source-time-selection weights were selected.")
+        weights = best_weights
+    else:
+        raise ValueError(f"Unknown source-time-selection mode '{mode}'.")
+
+    return weights, {
+        "source_time_selection": mode,
+        "source_time_selection_candidate_times": "|".join(f"{window[2]:.12g}" for window in candidate_windows),
+        "source_time_selection_time_scores": "|".join(f"{score:.12g}" for score in time_scores),
+        "source_time_selection_weights": "|".join(f"{float(weight):.12g}" for weight in weights),
+        "source_time_selection_selected_time": float(candidate_windows[int(np.argmax(weights))][2]),
+        "source_time_selection_inner_score": float(source_score),
+    }
+
+
 def _features_for_window(data: np.ndarray, window: TimeWindow) -> np.ndarray:
     start, stop, _center = window
     return data[:, :, start:stop].reshape(data.shape[0], -1)
@@ -1041,6 +1240,8 @@ def _model_hash(
     backend: str = "sklearn",
     class_prior_correction: str = "none",
     source_calibration: str = "none",
+    source_time_selection: str = "none",
+    source_time_selection_times: Sequence[float] | None = None,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> str:
@@ -1061,6 +1262,9 @@ def _model_hash(
         payload["class_prior_correction"] = class_prior_correction
     if source_calibration != "none":
         payload["source_calibration"] = source_calibration
+    if source_time_selection != "none":
+        payload["source_time_selection"] = source_time_selection
+        payload["source_time_selection_times"] = tuple(source_time_selection_times or ())
     if tune_hyperparameters:
         payload.update(
             {
@@ -1254,6 +1458,9 @@ def run_time_resolved_decode(
     time_decode_backend: str = "auto",
     class_prior_correction: str = "none",
     source_calibration: str = "none",
+    source_time_selection: str = "none",
+    source_time_selection_times: Sequence[float] | str | None = None,
+    source_time_selection_output_time: float = 0.184,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -1302,15 +1509,24 @@ def run_time_resolved_decode(
     temporal_train_mode_name = _normalize_temporal_train_mode(temporal_train_mode)
     class_prior_correction_name = normalize_class_prior_correction(class_prior_correction)
     source_calibration_name = normalize_source_calibration(source_calibration)
+    source_time_selection_name = normalize_source_time_selection(source_time_selection)
+    source_time_selection_time_values = _parse_float_sequence(
+        source_time_selection_times,
+        default=DEFAULT_SOURCE_TIME_SELECTION_TIMES,
+    )
+    source_time_selection_output_time = float(source_time_selection_output_time)
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
     outer_test_groups_value = _normalize_outer_test_groups(outer_test_groups)
     if requested_time_decode_backend == "mne" and normalized_temporal_train_window is not None:
         raise ValueError("The MNE time-decode backend currently supports same-time decoding only.")
+    if source_time_selection_name != "none" and normalized_temporal_train_window is not None:
+        raise ValueError("source_time_selection currently supports same-time decoding only.")
     time_decode_backend = (
         "sklearn"
-        if requested_time_decode_backend == "auto" and normalized_temporal_train_window is not None
+        if requested_time_decode_backend == "auto"
+        and (normalized_temporal_train_window is not None or source_time_selection_name != "none")
         else "mne"
         if requested_time_decode_backend == "auto"
         else requested_time_decode_backend
@@ -1360,6 +1576,8 @@ def run_time_resolved_decode(
             "temporal_train_mode": None if normalized_temporal_train_window is None else temporal_train_mode_name,
             "class_prior_correction": class_prior_correction_name,
             "source_calibration": source_calibration_name,
+            "source_time_selection": source_time_selection_name,
+            "source_time_selection_times": source_time_selection_time_values,
             "outer_test_groups": outer_test_groups_value,
         }
     )
@@ -1380,6 +1598,8 @@ def run_time_resolved_decode(
         backend=time_decode_backend,
         class_prior_correction=class_prior_correction_name,
         source_calibration=source_calibration_name,
+        source_time_selection=source_time_selection_name,
+        source_time_selection_times=source_time_selection_time_values,
         label_shuffle_control=label_shuffle_control,
         label_shuffle_seed=label_shuffle_seed,
     )
@@ -1404,7 +1624,174 @@ def run_time_resolved_decode(
         outer_test_groups_value,
     )
 
-    if selected_train_windows is None and time_decode_backend == "mne":
+    if source_time_selection_name != "none":
+        if time_decode_backend == "mne":
+            raise ValueError("source_time_selection currently requires the sklearn time-decode backend.")
+        if source_calibration_name != "none":
+            raise ValueError("source_time_selection should be run with source_calibration='none'.")
+        candidate_windows = _nearest_candidate_windows(windows, source_time_selection_time_values)
+        feature_cache = {time_window: _features_for_window(data, time_window) for time_window in candidate_windows}
+        selection_decoder_name = f"{decoder_name}_{SOURCE_TIME_SELECTION_OUTPUT_DECODER_SUFFIX[source_time_selection_name]}"
+        candidate_centers = [window[2] for window in candidate_windows]
+        for fold, (train_idx, test_idx) in splits:
+            test_labels = labels[test_idx]
+            train_labels = _fold_training_labels(
+                labels,
+                train_idx,
+                label_shuffle_control=label_shuffle_control,
+                label_shuffle_seed=label_shuffle_seed,
+                context=(split_id, fold, source_time_selection_name, *candidate_centers),
+            )
+            train_groups = None if groups is None else groups[train_idx]
+            for current_emission_mode in emission_modes:
+                weights, selection_metadata = _fit_source_time_selector(
+                    feature_cache=feature_cache,
+                    candidate_windows=candidate_windows,
+                    train_idx=train_idx,
+                    train_labels=train_labels,
+                    train_groups=train_groups,
+                    decoder_name=decoder_name,
+                    emission_mode=current_emission_mode,
+                    max_iter=max_iter,
+                    feature_preprocessor=feature_preprocessor_name,
+                    pca_components=pca_components_value,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv_splits=tuning_cv_splits,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                    classes=classes,
+                    class_prior_correction=class_prior_correction_name,
+                    mode=source_time_selection_name,
+                )
+                test_probability_parts: list[np.ndarray] = []
+                final_tuning_metadata: dict[str, object] = {}
+                for window, weight in zip(candidate_windows, weights, strict=True):
+                    if weight <= 0.0:
+                        continue
+                    features = feature_cache[window]
+                    tuning_cv = (
+                        make_tuning_cross_validator(train_labels, train_groups, tuning_cv_splits)
+                        if tune_hyperparameters
+                        else 3
+                    )
+                    model = make_decoder(
+                        decoder_name,
+                        max_iter=max_iter,
+                        emission_mode=current_emission_mode,
+                        feature_preprocessor=feature_preprocessor_name,
+                        pca_components=pca_components_value,
+                        tune_hyperparameters=tune_hyperparameters,
+                        tuning_cv=tuning_cv,
+                        tuning_scoring=tuning_scoring,
+                        tuning_c_grid=tuning_c_grid_values,
+                    )
+                    model.fit(features[train_idx], train_labels)
+                    probabilities = _align_probability_columns(
+                        predict_emission_probabilities(
+                            model,
+                            features[test_idx],
+                            emission_mode=current_emission_mode,
+                        ),
+                        model=model,
+                        classes=classes,
+                    )
+                    probabilities = _apply_class_prior_correction(
+                        probabilities,
+                        train_labels,
+                        classes,
+                        class_prior_correction_name,
+                    )
+                    test_probability_parts.append(probabilities)
+                    if not final_tuning_metadata:
+                        final_tuning_metadata = _tuning_metadata(
+                            model,
+                            tune_hyperparameters=tune_hyperparameters,
+                            tuning_cv_splits=tuning_cv_splits,
+                            tuning_scoring=tuning_scoring,
+                            tuning_c_grid=tuning_c_grid_values,
+                        )
+                if not test_probability_parts:
+                    raise ValueError("Source-time selection produced no final test probabilities.")
+                probability_cube = np.stack(test_probability_parts, axis=1)
+                active_weights = weights[weights > 0.0]
+                probabilities = _combine_probability_logits(probability_cube, active_weights / active_weights.sum())
+                tuning_metadata = {**final_tuning_metadata, **selection_metadata}
+                selected_indices = [index for index, weight in enumerate(weights) if weight > 0.0]
+                selected_windows = [candidate_windows[index] for index in selected_indices]
+                synthetic_window = (
+                    min(window[0] for window in selected_windows),
+                    max(window[1] for window in selected_windows),
+                    source_time_selection_output_time,
+                )
+                current_model_hash = _model_hash(
+                    decoder_name=selection_decoder_name,
+                    emission_mode=current_emission_mode,
+                    max_iter=max_iter,
+                    feature_preprocessor=feature_preprocessor_name,
+                    pca_components=pca_components_value,
+                    normalization=normalization_name,
+                    baseline_window=baseline_window_value,
+                    temporal_mode=source_time_selection_name,
+                    temporal_train_window=None,
+                    train_window_centers=candidate_centers,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv_splits=tuning_cv_splits,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid_values,
+                    tuning_metadata=tuning_metadata,
+                    backend=time_decode_backend,
+                    class_prior_correction=class_prior_correction_name,
+                    source_calibration=source_calibration_name,
+                    source_time_selection=source_time_selection_name,
+                    source_time_selection_times=source_time_selection_time_values,
+                    label_shuffle_control=label_shuffle_control,
+                    label_shuffle_seed=label_shuffle_seed,
+                )
+                _append_decoded_outputs(
+                    rows=rows,
+                    calibration_rows=calibration_rows,
+                    observation_rows=observation_rows,
+                    probabilities=probabilities,
+                    test_labels=test_labels,
+                    test_idx=test_idx,
+                    original_indices=original_indices,
+                    session_values=session_values,
+                    groups=groups,
+                    group_column=group_column,
+                    classes=classes,
+                    class_names=encoder.classes_,
+                    fold=fold,
+                    n_train=len(train_idx),
+                    decoder_name=selection_decoder_name,
+                    emission_mode=current_emission_mode,
+                    feature_preprocessor_name=feature_preprocessor_name,
+                    pca_components_value=pca_components_value,
+                    normalization_name=normalization_name,
+                    baseline_window=baseline_window_value,
+                    time_window=synthetic_window,
+                    epochs=epochs,
+                    split_id=split_id,
+                    preprocessing_hash=preprocessing_hash,
+                    model_hash=current_model_hash,
+                    temporal_mode=source_time_selection_name,
+                    temporal_train_window=None,
+                    train_time=source_time_selection_output_time,
+                    train_window_start=float(min(epochs.times[window[0]] for window in selected_windows)),
+                    train_window_stop=float(max(epochs.times[window[1] - 1] for window in selected_windows)),
+                    n_train_windows=len(selected_windows),
+                    calibration_out_path=calibration_out_path,
+                    calibration_bins=calibration_bins,
+                    observation_out_path=observation_out_path,
+                    subject=subject,
+                    tuning_metadata=tuning_metadata,
+                    backend=time_decode_backend,
+                    class_prior_correction=class_prior_correction_name,
+                    source_calibration_metadata=source_calibration_metadata(SourceProbabilityCalibrator(mode="none")),
+                    label_shuffle_control=label_shuffle_control,
+                    label_shuffle_seed=label_shuffle_seed,
+                    outer_test_groups=outer_test_groups_value,
+                )
+    elif selected_train_windows is None and time_decode_backend == "mne":
         for fold, (train_idx, test_idx) in splits:
             test_labels = labels[test_idx]
             train_labels = _fold_training_labels(
@@ -2049,6 +2436,23 @@ def main() -> None:
         help="Nested source-only probability re-ranking learned from inner folds of each outer training set.",
     )
     parser.add_argument(
+        "--source-time-selection",
+        choices=SOURCE_TIME_SELECTION_RUN_CHOICES,
+        default="none",
+        help="Nested source-only time selection learned from inner folds of each outer training set.",
+    )
+    parser.add_argument(
+        "--source-time-selection-times",
+        default=",".join(str(time) for time in DEFAULT_SOURCE_TIME_SELECTION_TIMES),
+        help="Comma-separated candidate time centers for --source-time-selection.",
+    )
+    parser.add_argument(
+        "--source-time-selection-output-time",
+        type=float,
+        default=0.184,
+        help="Reported output time for source-time-selected predictions.",
+    )
+    parser.add_argument(
         "--decode-window",
         nargs=2,
         type=float,
@@ -2128,6 +2532,9 @@ def main() -> None:
         time_decode_backend=args.time_decode_backend,
         class_prior_correction=args.class_prior_correction,
         source_calibration=args.source_calibration,
+        source_time_selection=args.source_time_selection,
+        source_time_selection_times=args.source_time_selection_times,
+        source_time_selection_output_time=args.source_time_selection_output_time,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
     )
