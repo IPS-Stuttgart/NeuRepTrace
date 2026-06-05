@@ -670,6 +670,11 @@ jobs:
                       args+=(--set "$override")
                     done < <(printf '%s\n' "$CONFIG_OVERRIDES_INPUT" | tr ';' '\n')
                   fi
+                  if [[ "$RESPONSE_WINDOW_ENSEMBLE" == "true" && "$RESPONSE_WINDOW_MODE" == "strict_source_oof_nonnegative" ]]; then
+                    args+=(--set "decoding.source_time_selection=source_oof_time_weighted_logits")
+                    args+=(--set "decoding.source_time_selection_times=[$RESPONSE_WINDOW_TIMES]")
+                    args+=(--set "decoding.source_time_selection_output_time=${DIAGNOSTICS_BEST_TIME_INPUT:-0.184}")
+                  fi
                   if [[ -n "$OUTER_TEST_GROUPS_SHARD" ]]; then
                     args+=(--set "decoding.outer_test_groups=[$OUTER_TEST_GROUPS_SHARD]")
                   fi
@@ -965,6 +970,10 @@ jobs:
                   fi
                   if [[ "$response_window_enabled" != "true" ]]; then
                     echo "Skipping aggregate response-window ensemble because it was not requested."
+                    exit 0
+                  fi
+                  if [[ "$response_window_mode" == "strict_source_oof_nonnegative" ]]; then
+                    echo "Skipping aggregate response-window ensemble because strict_source_oof_nonnegative is produced inside each outer decode fold."
                     exit 0
                   fi
                   observations="$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/observations.csv"
