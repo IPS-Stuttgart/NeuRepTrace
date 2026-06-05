@@ -2,7 +2,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
 from neureptrace.mne_time_decode import (
@@ -454,18 +453,23 @@ def test_foldlocal_time_resolved_decode_can_restrict_decode_window(tmp_path: Pat
     assert results["time"].round(6).unique().tolist() == [0.025]
     assert observations["time"].round(6).unique().tolist() == [0.025]
 
-    with pytest.raises(ValueError, match="source_time_selection is not yet implemented for fold-local normalization"):
-        run_foldlocal_decode(
-            epochs_path=tmp_path / "sub-01_epo.fif",
-            label_column="condition",
-            group_column="session",
-            out_path=tmp_path / "foldlocal_source_time.csv",
-            n_splits=2,
-            window_ms=20,
-            step_ms=20,
-            emission_mode="uncalibrated",
-            source_time_selection="source_oof_best_time",
-        )
+    source_time_results = run_foldlocal_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        group_column="session",
+        out_path=tmp_path / "foldlocal_source_time.csv",
+        n_splits=2,
+        window_ms=20,
+        step_ms=20,
+        emission_mode="uncalibrated",
+        decode_window=(0.02, 0.03),
+        source_time_selection="source_oof_best_time",
+        source_time_selection_times=(0.025,),
+        source_time_selection_output_time=0.025,
+    )
+    assert source_time_results["temporal_mode"].unique().tolist() == ["source_oof_best_time"]
+    assert source_time_results["time"].round(6).unique().tolist() == [0.025]
+    assert source_time_results["source_time_selection_normalization_scope"].unique().tolist() == ["inner_train_fold"]
 
 
 def test_run_time_resolved_decode_label_shuffle_keeps_test_labels_and_marks_outputs(tmp_path: Path, monkeypatch):
