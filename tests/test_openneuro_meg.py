@@ -117,6 +117,7 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "strict_source_oof_nonnegative" in workflow
     assert "strict_source_oof_classwise_nonnegative" in workflow
     assert "strict_source_oof_logit_stacker" in workflow
+    assert "response_window_poststimulus_forward" in workflow
     assert "decoding.source_time_selection=source_oof_time_weighted_logits" in workflow
     assert "decoding.source_time_selection=source_oof_classwise_time_weighted_logits" in workflow
     assert "decoding.source_time_selection=source_oof_logit_stacker" in workflow

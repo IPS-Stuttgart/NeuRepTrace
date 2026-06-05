@@ -90,6 +90,33 @@ def test_response_window_uniform_probability_mean_uses_arithmetic_average(tmp_pa
     )
 
 
+def test_response_window_poststimulus_forward_smooths_then_averages_requested_times(tmp_path: Path):
+    observations = _toy_observations()
+    prestimulus = observations.loc[observations["time"] == 0.088].copy()
+    prestimulus["time"] = -0.050
+    prestimulus["test_time"] = -0.050
+    observations = pd.concat([prestimulus, observations], ignore_index=True)
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    ensembled, metrics = run_response_window_ensemble(
+        [csv_path],
+        response_times=(0.088, 0.136, 0.184, 0.232),
+        mode="response_window_poststimulus_forward",
+        smoothing_fit_window=(0.10, 0.30),
+        smoothing_apply_window=(0.088, 0.232),
+        smoothing_stay_grid_size=20,
+    )
+
+    assert ensembled["time"].unique().tolist() == [0.184]
+    assert ensembled["response_window_mode"].unique().tolist() == ["response_window_poststimulus_forward"]
+    assert ensembled["temporal_smoothing_method"].unique().tolist() == ["sticky_poststimulus_forward_only"]
+    assert ensembled["temporal_smoothing_apply_window_start"].unique().tolist() == [0.088]
+    assert ensembled["temporal_smoothing_apply_window_stop"].unique().tolist() == [0.232]
+    assert ensembled["response_window_actual_times"].unique().tolist() == ["0.088|0.136|0.184|0.232"]
+    assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
+
+
 def test_response_window_learned_weights_are_source_subject_only(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     _toy_observations().to_csv(csv_path, index=False)

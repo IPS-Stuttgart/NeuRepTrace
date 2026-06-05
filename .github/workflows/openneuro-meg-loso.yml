@@ -986,6 +986,9 @@ jobs:
                     echo "Skipping aggregate response-window ensemble because $response_window_mode is produced inside each outer decode fold."
                     exit 0
                   fi
+                  if [[ "$response_window_mode" == "response_window_poststimulus_forward" ]]; then
+                    echo "Running response-window C after poststimulus_forward_only temporal smoothing."
+                  fi
                   observations="$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/observations.csv"
                   if [[ ! -s "$observations" ]]; then
                     echo "Skipping aggregate response-window ensemble because observations are missing: $observations"
