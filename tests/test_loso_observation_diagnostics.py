@@ -20,6 +20,7 @@ def _toy_observations() -> pd.DataFrame:
                 else:
                     predicted = true_label
                 probabilities[predicted] = 0.8
+                confidence = 0.45 if subject == "sub-02" and time == 0.184 and true_label == 2 else 0.8
                 rows.append(
                     {
                         "group": subject,
@@ -29,6 +30,7 @@ def _toy_observations() -> pd.DataFrame:
                         "true_class": f"class_{true_label}",
                         "predicted_label": predicted,
                         "predicted_class": f"class_{predicted}",
+                        "confidence": confidence,
                         "prob_class_0": probabilities[0],
                         "prob_class_1": probabilities[1],
                         "prob_class_2": probabilities[2],
@@ -51,10 +53,18 @@ def test_loso_observation_diagnostics_writes_subject_confusion_and_class_tables(
         best_time=0.183,
     )
 
-    assert set(paths) == {"time_course", "per_subject", "confusion_matrix", "class_counts", "quality_summary"}
+    assert set(paths) == {
+        "time_course",
+        "per_subject",
+        "confusion_matrix",
+        "class_counts",
+        "selective_coverage",
+        "quality_summary",
+    }
     per_subject = pd.read_csv(out_dir / "per_subject.csv")
     confusion = pd.read_csv(out_dir / "confusion_matrix.csv")
     class_counts = pd.read_csv(out_dir / "class_counts.csv")
+    selective = pd.read_csv(out_dir / "selective_coverage.csv")
     time_course = pd.read_csv(out_dir / "time_course_summary.csv")
     quality = pd.read_csv(out_dir / "quality_summary.csv")
 
@@ -65,6 +75,11 @@ def test_loso_observation_diagnostics_writes_subject_confusion_and_class_tables(
     assert per_subject["staged_n_trials"].tolist() == [3, 3]
     assert int(confusion.loc[(confusion["true_class"] == "class_2") & (confusion["predicted_class"] == "class_1"), "count"].iloc[0]) == 1
     assert class_counts.groupby("subject")["n_trials"].sum().to_dict() == {"sub-01": 3, "sub-02": 3}
+    assert selective["coverage_target"].tolist() == [1.0, 0.9, 0.8, 0.7]
+    assert selective.loc[selective["coverage_target"] == 1.0, "balanced_accuracy"].iloc[0].round(6) == round(5 / 6, 6)
+    assert selective.loc[selective["coverage_target"] == 0.8, "balanced_accuracy"].iloc[0].round(6) == 1.0
+    assert selective.loc[selective["coverage_target"] == 0.8, "selective_risk"].iloc[0].round(6) == 0.0
+    assert selective.loc[selective["coverage_target"] == 0.8, "all_classes_present"].iloc[0]
     assert time_course["top2_interpretation"].unique().tolist() == ["informative"]
     assert time_course["top3_interpretation"].unique().tolist() == ["automatic_ceiling"]
     assert quality.loc[0, "n_subjects"] == 2
