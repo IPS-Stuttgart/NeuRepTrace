@@ -416,6 +416,7 @@ def _workflow_quality_row(
         "temporal_smoothing_stay_grid_size": manifest.get("temporal_smoothing_stay_grid_size", ""),
         "response_window_ensemble": _as_bool(manifest.get("response_window_ensemble", "")),
         "response_window_mode": manifest.get("response_window_mode", ""),
+        "response_window_combine": manifest.get("response_window_combine", ""),
         "response_window_times": manifest.get("response_window_times", ""),
         "decode_summary_exists": decode_summary_exists,
         "quality_summary_exists": quality_summary_exists,

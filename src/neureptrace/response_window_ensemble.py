@@ -14,6 +14,7 @@ from neureptrace.temporal_smoothing import metrics_from_probability_observations
 
 DEFAULT_RESPONSE_TIMES = (0.088, 0.136, 0.184, 0.232)
 ENSEMBLE_MODE_CHOICES = ("uniform", "source_oof_nonnegative")
+COMBINE_CHOICES = ("log_probability_mean", "probability_mean")
 OUTPUT_DECODER = "poststimulus_response_window_logit_ensemble"
 OUTPUT_EMISSION_MODE = "response_window_logit_ensemble"
 EPSILON = 1e-12
@@ -107,8 +108,17 @@ def _combine_logits(probability_cube: np.ndarray, weights: np.ndarray) -> np.nda
     return _softmax(weighted_logits)
 
 
-def _score_weights(probability_cube: np.ndarray, labels: np.ndarray, weights: np.ndarray) -> float:
-    probabilities = _combine_logits(probability_cube, weights)
+def _combine_probabilities(probability_cube: np.ndarray, weights: np.ndarray, *, combine: str) -> np.ndarray:
+    if combine == "log_probability_mean":
+        return _combine_logits(probability_cube, weights)
+    if combine == "probability_mean":
+        probabilities = np.tensordot(probability_cube, weights, axes=([1], [0]))
+        return _normalize_rows(probabilities)
+    raise ValueError(f"Unknown response-window combine mode '{combine}'.")
+
+
+def _score_weights(probability_cube: np.ndarray, labels: np.ndarray, weights: np.ndarray, *, combine: str) -> float:
+    probabilities = _combine_probabilities(probability_cube, weights, combine=combine)
     return float(balanced_accuracy_score(labels, probabilities.argmax(axis=1)))
 
 
@@ -116,11 +126,13 @@ def _learn_weights(
     probability_cube: np.ndarray,
     labels: np.ndarray,
     candidates: np.ndarray,
+    *,
+    combine: str,
 ) -> tuple[np.ndarray, float]:
     best_weights = candidates[0]
     best_score = -np.inf
     for weights in candidates:
-        score = _score_weights(probability_cube, labels, weights)
+        score = _score_weights(probability_cube, labels, weights, combine=combine)
         if score > best_score:
             best_weights = weights
             best_score = score
@@ -132,11 +144,14 @@ def _response_window_rows(
     *,
     requested_times: tuple[float, ...],
     mode: str,
+    combine: str,
     weight_grid_step: float,
     output_time: float | None,
 ) -> pd.DataFrame:
     if mode not in ENSEMBLE_MODE_CHOICES:
         raise ValueError(f"Unknown response-window ensemble mode '{mode}'.")
+    if combine not in COMBINE_CHOICES:
+        raise ValueError(f"Unknown response-window combine mode '{combine}'.")
     prob_columns = list(probability_columns(observations))
     times = _nearest_times(pd.to_numeric(observations["time"], errors="coerce").dropna().unique(), requested_times)
     selected = observations.loc[observations["time"].astype(float).isin(times)].copy()
@@ -184,9 +199,14 @@ def _response_window_rows(
                 weights = np.full(len(times), 1.0 / len(times), dtype=float)
                 source_score = np.nan
             else:
-                weights, source_score = _learn_weights(probability_cube[source_mask], labels[source_mask], candidates)
+                weights, source_score = _learn_weights(
+                    probability_cube[source_mask],
+                    labels[source_mask],
+                    candidates,
+                    combine=combine,
+                )
 
-        probabilities = _combine_logits(probability_cube[target_mask], weights)
+        probabilities = _combine_probabilities(probability_cube[target_mask], weights, combine=combine)
         target_base = base.iloc[np.flatnonzero(target_mask)].reset_index()
         target_base = target_base[[column for column in metadata_columns if column in target_base.columns]].copy()
         predictions = probabilities.argmax(axis=1)
@@ -216,11 +236,13 @@ def _response_window_rows(
         target_base["response_window_requested_times"] = "|".join(_time_label(time) for time in requested_times)
         target_base["response_window_actual_times"] = "|".join(time_labels)
         target_base["response_window_weights"] = "|".join(f"{float(weight):.12g}" for weight in weights)
+        target_base["response_window_combine"] = combine
         target_base["response_window_source_score"] = "" if not np.isfinite(source_score) else float(source_score)
         target_base["model_hash"] = stable_hash(
             {
                 "decoder": OUTPUT_DECODER,
                 "mode": mode,
+                "combine": combine,
                 "requested_times": requested_times,
                 "actual_times": times,
                 "weights": tuple(float(weight) for weight in weights),
@@ -239,6 +261,7 @@ def run_response_window_ensemble(
     *,
     response_times: tuple[float, ...] = DEFAULT_RESPONSE_TIMES,
     mode: str = "uniform",
+    combine: str = "log_probability_mean",
     weight_grid_step: float = 0.1,
     output_time: float | None = 0.184,
     ece_bins: int = 10,
@@ -250,6 +273,7 @@ def run_response_window_ensemble(
         observations,
         requested_times=tuple(float(time) for time in response_times),
         mode=mode,
+        combine=combine,
         weight_grid_step=float(weight_grid_step),
         output_time=output_time,
     )
@@ -271,6 +295,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Build a post-stimulus response-window logit ensemble from probability observations.")
     parser.add_argument("observation_csv", nargs="+", type=Path)
     parser.add_argument("--mode", choices=ENSEMBLE_MODE_CHOICES, default="uniform")
+    parser.add_argument("--combine", choices=COMBINE_CHOICES, default="log_probability_mean")
     parser.add_argument("--response-times", default=",".join(str(time) for time in DEFAULT_RESPONSE_TIMES))
     parser.add_argument("--output-time", type=float, default=0.184)
     parser.add_argument("--weight-grid-step", type=float, default=0.1)
@@ -283,6 +308,7 @@ def main(argv: list[str] | None = None) -> None:
         args.observation_csv,
         response_times=_parse_times(args.response_times),
         mode=args.mode,
+        combine=args.combine,
         weight_grid_step=args.weight_grid_step,
         output_time=args.output_time,
         ece_bins=args.ece_bins,

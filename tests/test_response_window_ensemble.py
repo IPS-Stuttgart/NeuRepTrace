@@ -70,6 +70,26 @@ def test_response_window_uniform_logit_ensemble_writes_metrics(tmp_path: Path):
     assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
 
 
+def test_response_window_uniform_probability_mean_uses_arithmetic_average(tmp_path: Path):
+    csv_path = tmp_path / "observations.csv"
+    _toy_observations().to_csv(csv_path, index=False)
+
+    ensembled, _ = run_response_window_ensemble(
+        [csv_path],
+        response_times=(0.088, 0.184),
+        mode="uniform",
+        combine="probability_mean",
+    )
+
+    row = ensembled.loc[(ensembled["subject"] == "sub-01") & (ensembled["sample_index"] == 0)].iloc[0]
+    assert row["response_window_combine"] == "probability_mean"
+    assert row["response_window_actual_times"] == "0.088|0.184"
+    np.testing.assert_allclose(
+        [row["prob_class_0"], row["prob_class_1"], row["prob_class_2"]],
+        [0.45, 0.45, 0.10],
+    )
+
+
 def test_response_window_learned_weights_are_source_subject_only(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     _toy_observations().to_csv(csv_path, index=False)
