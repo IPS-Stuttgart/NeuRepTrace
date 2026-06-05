@@ -949,6 +949,33 @@ jobs:
                       encoding="utf-8",
                   )
                   PY
+                  python - <<'PY'
+                  from __future__ import annotations
+
+                  import os
+                  from pathlib import Path
+
+                  import pandas as pd
+
+                  out_dir = Path(os.environ["OPENNEURO_AGGREGATE_OUTPUT_DIR"])
+                  source_dirs = [
+                      Path(line)
+                      for line in (out_dir / "source_output_dirs.txt").read_text(encoding="utf-8").splitlines()
+                      if line.strip()
+                  ]
+                  source_observation_paths = [
+                      source_dir / "decode" / "ensemble_source_observations.csv"
+                      for source_dir in source_dirs
+                      if (source_dir / "decode" / "ensemble_source_observations.csv").is_file()
+                  ]
+                  if not source_observation_paths:
+                      print("No ensemble source-observation sidecars found in shard artifacts.")
+                      raise SystemExit(0)
+                  output = out_dir / "decode" / "ensemble_source_observations.csv"
+                  output.parent.mkdir(parents=True, exist_ok=True)
+                  pd.concat((pd.read_csv(path) for path in source_observation_paths), ignore_index=True).to_csv(output, index=False)
+                  print(f"Wrote aggregate ensemble source observations: {output}")
+                  PY
 
             - name: Run aggregate response-window logit ensemble
               shell: bash
@@ -990,6 +1017,9 @@ jobs:
                     echo "Running response-window C after poststimulus_forward_only temporal smoothing."
                   fi
                   observations="$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/observations.csv"
+                  if [[ "$response_window_mode" == "decoder_source_oof_nonnegative" ]]; then
+                    observations="$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/ensemble_source_observations.csv"
+                  fi
                   if [[ ! -s "$observations" ]]; then
                     echo "Skipping aggregate response-window ensemble because observations are missing: $observations"
                     exit 0

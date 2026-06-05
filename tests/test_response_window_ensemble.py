@@ -48,6 +48,47 @@ def _toy_observations() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _toy_decoder_observations() -> pd.DataFrame:
+    rows = []
+    times = (0.088, 0.136)
+    for subject in ("sub-01", "sub-02", "sub-03"):
+        for sample_index, true_label in enumerate((0, 1, 2, 0, 1, 2)):
+            for decoder in ("weak", "strong"):
+                for time in times:
+                    probabilities = np.full(3, 0.1)
+                    if decoder == "strong":
+                        probabilities[true_label] = 0.8
+                    else:
+                        probabilities[(true_label + 1) % 3] = 0.8
+                    probabilities = probabilities / probabilities.sum()
+                    predicted_label = int(probabilities.argmax())
+                    rows.append(
+                        {
+                            "subject": subject,
+                            "fold": subject,
+                            "decoder": decoder,
+                            "emission_mode": "calibrated",
+                            "time": time,
+                            "test_time": time,
+                            "sample_index": sample_index,
+                            "sequence_id": sample_index,
+                            "true_label": true_label,
+                            "true_class": f"class-{true_label}",
+                            "predicted_label": predicted_label,
+                            "predicted_class": f"class-{predicted_label}",
+                            "probability_true_class": float(probabilities[true_label]),
+                            "confidence": float(probabilities.max()),
+                            "class_0": "class-0",
+                            "class_1": "class-1",
+                            "class_2": "class-2",
+                            "prob_class_0": float(probabilities[0]),
+                            "prob_class_1": float(probabilities[1]),
+                            "prob_class_2": float(probabilities[2]),
+                        }
+                    )
+    return pd.DataFrame(rows)
+
+
 def test_response_window_uniform_logit_ensemble_writes_metrics(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     _toy_observations().to_csv(csv_path, index=False)
@@ -131,6 +172,28 @@ def test_response_window_learned_weights_are_source_subject_only(tmp_path: Path)
     assert set(weights) == {"sub-01", "sub-02", "sub-03"}
     assert all(weight for weight in weights.values())
     assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
+
+
+def test_response_window_can_learn_decoder_family_weights_from_source_subjects(tmp_path: Path):
+    csv_path = tmp_path / "decoder_observations.csv"
+    _toy_decoder_observations().to_csv(csv_path, index=False)
+
+    ensembled, metrics = run_response_window_ensemble(
+        [csv_path],
+        response_times=(0.088, 0.136),
+        mode="decoder_source_oof_nonnegative",
+        weight_grid_step=0.5,
+    )
+
+    assert ensembled["response_window_mode"].unique().tolist() == ["decoder_source_oof_nonnegative"]
+    assert ensembled["response_window_decoder_candidates"].unique().tolist() == ["weak|strong"]
+    strong_weights = [
+        float(weights.split("|")[1])
+        for weights in ensembled.groupby("subject")["response_window_decoder_weights"].first()
+    ]
+    assert all(weight >= 0.5 for weight in strong_weights)
+    assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
+    assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
 
 
 def test_response_window_uses_outer_test_group_when_subject_is_empty(tmp_path: Path):

@@ -13,7 +13,12 @@ from neureptrace.temporal_model import probability_columns, read_probability_obs
 from neureptrace.temporal_smoothing import metrics_from_probability_observations, smooth_probability_observations
 
 DEFAULT_RESPONSE_TIMES = (0.088, 0.136, 0.184, 0.232)
-ENSEMBLE_MODE_CHOICES = ("uniform", "source_oof_nonnegative", "response_window_poststimulus_forward")
+ENSEMBLE_MODE_CHOICES = (
+    "uniform",
+    "source_oof_nonnegative",
+    "decoder_source_oof_nonnegative",
+    "response_window_poststimulus_forward",
+)
 COMBINE_CHOICES = ("log_probability_mean", "probability_mean")
 OUTPUT_DECODER = "poststimulus_response_window_logit_ensemble"
 OUTPUT_EMISSION_MODE = "response_window_logit_ensemble"
@@ -259,6 +264,153 @@ def _response_window_rows(
     return pd.concat(output_rows, ignore_index=True)
 
 
+def _decoder_source_oof_response_window_rows(
+    observations: pd.DataFrame,
+    *,
+    requested_times: tuple[float, ...],
+    combine: str,
+    weight_grid_step: float,
+    output_time: float | None,
+) -> pd.DataFrame:
+    if combine not in COMBINE_CHOICES:
+        raise ValueError(f"Unknown response-window combine mode '{combine}'.")
+    if "decoder" not in observations.columns:
+        raise ValueError("Decoder-source OOF response-window ensembling requires a decoder column.")
+    prob_columns = list(probability_columns(observations))
+    times = _nearest_times(pd.to_numeric(observations["time"], errors="coerce").dropna().unique(), requested_times)
+    selected = observations.loc[observations["time"].astype(float).isin(times)].copy()
+    decoders = tuple(
+        decoder
+        for decoder in selected["decoder"].dropna().astype(str).drop_duplicates().tolist()
+        if decoder.strip()
+    )
+    if len(decoders) < 2:
+        raise ValueError("Decoder-source OOF response-window ensembling requires at least two decoder families.")
+
+    key_columns = _sequence_key_columns(selected)
+    metadata_columns = [
+        column
+        for column in selected.columns
+        if column
+        not in {
+            *prob_columns,
+            "time",
+            "test_time",
+            "window_start",
+            "window_stop",
+            "train_time",
+        }
+    ]
+    time_labels = [_time_label(time) for time in times]
+    time_weights = np.full(len(times), 1.0 / len(times), dtype=float)
+    decoder_weight_candidates = _candidate_weights(len(decoders), weight_grid_step)
+
+    wide_probabilities = {}
+    base_frame = None
+    common_index = None
+    for decoder in decoders:
+        for time in times:
+            time_frame = selected.loc[
+                (selected["decoder"].astype(str) == decoder)
+                & (selected["time"].astype(float) == float(time))
+            ].copy()
+            time_frame = time_frame.sort_values(key_columns).drop_duplicates(key_columns, keep="first")
+            if time_frame.empty:
+                raise ValueError(f"Missing observations for decoder {decoder!r} at response time {time}.")
+            if base_frame is None:
+                base_frame = time_frame
+            indexed = time_frame.set_index(key_columns)[prob_columns]
+            wide_probabilities[(decoder, time)] = indexed
+            common_index = indexed.index if common_index is None else common_index.intersection(indexed.index)
+    if base_frame is None or common_index is None or len(common_index) == 0:
+        raise ValueError("No observations contain all requested decoder/time response-window combinations.")
+
+    base = base_frame.sort_values(key_columns).drop_duplicates(key_columns, keep="first").set_index(key_columns).loc[common_index]
+    labels = pd.to_numeric(base["true_label"], errors="raise").to_numpy(dtype=int)
+    decoder_probabilities = []
+    for decoder in decoders:
+        time_cube = np.stack(
+            [_normalize_rows(wide_probabilities[(decoder, time)].loc[common_index].to_numpy(dtype=float)) for time in times],
+            axis=1,
+        )
+        decoder_probabilities.append(_combine_probabilities(time_cube, time_weights, combine=combine))
+    probability_cube = np.stack(decoder_probabilities, axis=1)
+
+    subject_column = _subject_key_column(selected)
+    target_subjects = selected[subject_column].dropna().astype(str).unique().tolist() if subject_column else [""]
+    subjects = _target_subject_values(base, key_columns)
+    output_rows: list[pd.DataFrame] = []
+
+    for target_subject in target_subjects:
+        target_mask = subjects == str(target_subject)
+        if not np.any(target_mask):
+            continue
+        source_mask = ~target_mask
+        if not np.any(source_mask):
+            decoder_weights = np.full(len(decoders), 1.0 / len(decoders), dtype=float)
+            source_score = np.nan
+        else:
+            decoder_weights, source_score = _learn_weights(
+                probability_cube[source_mask],
+                labels[source_mask],
+                decoder_weight_candidates,
+                combine=combine,
+            )
+
+        probabilities = _combine_probabilities(probability_cube[target_mask], decoder_weights, combine=combine)
+        target_base = base.iloc[np.flatnonzero(target_mask)].reset_index()
+        target_base = target_base[[column for column in metadata_columns if column in target_base.columns]].copy()
+        predictions = probabilities.argmax(axis=1)
+        for class_index, column in enumerate(prob_columns):
+            target_base[column] = probabilities[:, class_index]
+        class_names = []
+        for class_index in range(len(prob_columns)):
+            class_column = f"class_{class_index}"
+            if class_column in target_base.columns and target_base[class_column].notna().any():
+                class_names.append(str(target_base[class_column].dropna().iloc[0]))
+            else:
+                class_names.append(str(class_index))
+        true_labels = pd.to_numeric(target_base["true_label"], errors="raise").to_numpy(dtype=int)
+        target_base["predicted_label"] = predictions.astype(int)
+        target_base["predicted_class"] = [class_names[int(label)] for label in predictions]
+        target_base["probability_true_class"] = probabilities[np.arange(len(probabilities)), true_labels]
+        target_base["confidence"] = probabilities.max(axis=1)
+        target_base["is_correct"] = predictions == true_labels
+        target_base["decoder"] = OUTPUT_DECODER
+        target_base["emission_mode"] = f"{OUTPUT_EMISSION_MODE}_decoder_source_oof_nonnegative"
+        target_base["time"] = float(np.mean(times) if output_time is None else output_time)
+        target_base["test_time"] = target_base["time"]
+        target_base["train_time"] = target_base["time"]
+        target_base["window_start"] = float(min(times))
+        target_base["window_stop"] = float(max(times))
+        target_base["response_window_mode"] = "decoder_source_oof_nonnegative"
+        target_base["response_window_requested_times"] = "|".join(_time_label(time) for time in requested_times)
+        target_base["response_window_actual_times"] = "|".join(time_labels)
+        target_base["response_window_weights"] = "|".join(f"{float(weight):.12g}" for weight in time_weights)
+        target_base["response_window_combine"] = combine
+        target_base["response_window_source_score"] = "" if not np.isfinite(source_score) else float(source_score)
+        target_base["response_window_decoder_candidates"] = "|".join(decoders)
+        target_base["response_window_decoder_weights"] = "|".join(f"{float(weight):.12g}" for weight in decoder_weights)
+        target_base["model_hash"] = stable_hash(
+            {
+                "decoder": OUTPUT_DECODER,
+                "mode": "decoder_source_oof_nonnegative",
+                "combine": combine,
+                "requested_times": requested_times,
+                "actual_times": times,
+                "time_weights": tuple(float(weight) for weight in time_weights),
+                "decoder_candidates": decoders,
+                "decoder_weights": tuple(float(weight) for weight in decoder_weights),
+                "target_subject": target_subject,
+            }
+        )
+        output_rows.append(target_base)
+
+    if not output_rows:
+        raise ValueError("No decoder-source OOF response-window rows were produced.")
+    return pd.concat(output_rows, ignore_index=True)
+
+
 def run_response_window_ensemble(
     observation_csvs: list[Path],
     *,
@@ -288,14 +440,23 @@ def run_response_window_ensemble(
         )
     else:
         observations = read_probability_observations(observation_csvs).copy()
-    ensembled = _response_window_rows(
-        observations,
-        requested_times=tuple(float(time) for time in response_times),
-        mode=mode,
-        combine=combine,
-        weight_grid_step=float(weight_grid_step),
-        output_time=output_time,
-    )
+    if mode == "decoder_source_oof_nonnegative":
+        ensembled = _decoder_source_oof_response_window_rows(
+            observations,
+            requested_times=tuple(float(time) for time in response_times),
+            combine=combine,
+            weight_grid_step=float(weight_grid_step),
+            output_time=output_time,
+        )
+    else:
+        ensembled = _response_window_rows(
+            observations,
+            requested_times=tuple(float(time) for time in response_times),
+            mode=mode,
+            combine=combine,
+            weight_grid_step=float(weight_grid_step),
+            output_time=output_time,
+        )
     metrics = metrics_from_probability_observations(ensembled, ece_bins=ece_bins)
     if out_observations is not None:
         out_observations.parent.mkdir(parents=True, exist_ok=True)

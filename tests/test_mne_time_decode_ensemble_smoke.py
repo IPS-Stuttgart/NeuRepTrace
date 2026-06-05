@@ -149,6 +149,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         epochs_path=tmp_path / "dummy-epo.fif",
         label_column="condition",
         out_path=tmp_path / "ensemble.csv",
+        observation_out_path=tmp_path / "observations.csv",
         decoder="logistic-svm-ensemble",
         emission_mode="calibrated",
         decode_window=(0.12, 0.248),
@@ -185,3 +186,5 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert results["ensemble_score_mode"].unique().tolist() == ["rank"]
     assert results["ensemble_source_baseline_debiasing"].unique().tolist() == [True]
     assert results["temporal_mode"].unique().tolist() == ["train_window_pooled"]
+    source_observations = pd.read_csv(tmp_path / "ensemble_source_observations.csv")
+    assert set(source_observations["decoder"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}
