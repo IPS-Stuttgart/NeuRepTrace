@@ -289,6 +289,8 @@ def run_time_resolved_decode(
         )
 
     if observation_out_path is not None:
+        source_observation_out_path = observation_out_path.with_name("ensemble_source_observations.csv")
+        ProbabilityObservationTable(observations).to_csv(source_observation_out_path)
         ProbabilityObservationTable(ensemble).to_csv(observation_out_path)
 
     results = summarize_ensemble_metrics(ensemble, ece_bins=calibration_bins)
