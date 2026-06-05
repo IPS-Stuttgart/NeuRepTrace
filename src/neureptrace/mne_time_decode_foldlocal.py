@@ -215,7 +215,7 @@ def _fit_foldlocal_source_time_selector(
     elif mode == "source_oof_time_weighted_logits":
         best_weights = None
         source_score = -np.inf
-        for weights_candidate in _base._nonnegative_weight_candidates(len(candidate_windows)):
+        for weights_candidate in _base._nonnegative_weight_candidates_with_uniform(len(candidate_windows)):
             probabilities = _base._combine_probability_logits(probability_cube, weights_candidate)
             score = float(balanced_accuracy_score(labels, probabilities.argmax(axis=1)))
             if score > source_score:
@@ -224,16 +224,20 @@ def _fit_foldlocal_source_time_selector(
         if best_weights is None:
             raise ValueError("No source-time-selection weights were selected.")
         weights = best_weights
+    elif mode == "source_oof_classwise_time_weighted_logits":
+        weights, source_score = _base._fit_classwise_nonnegative_time_weights(probability_cube, labels)
     else:
         raise ValueError(f"Unknown source-time-selection mode '{mode}'.")
 
+    time_mass = weights if weights.ndim == 1 else weights.sum(axis=0)
     return weights, {
         "source_time_selection": mode,
         "source_time_selection_candidate_times": "|".join(f"{window[2]:.12g}" for window in candidate_windows),
         "source_time_selection_time_scores": "|".join(f"{score:.12g}" for score in time_scores),
-        "source_time_selection_weights": "|".join(f"{float(weight):.12g}" for weight in weights),
-        "source_time_selection_selected_time": float(candidate_windows[int(np.argmax(weights))][2]),
+        "source_time_selection_weights": _base._format_source_time_weights(weights),
+        "source_time_selection_selected_time": float(candidate_windows[int(np.argmax(time_mass))][2]),
         "source_time_selection_inner_score": float(source_score),
+        "source_time_selection_weight_type": "classwise" if weights.ndim == 2 else "global",
         "source_time_selection_normalization_scope": "inner_train_fold",
     }
 
@@ -476,9 +480,9 @@ def run_time_resolved_decode(
                 )
                 test_probability_parts: list[np.ndarray] = []
                 final_tuning_metadata: dict[str, object] = {}
-                for window, weight in zip(candidate_windows, weights, strict=True):
-                    if weight <= 0.0:
-                        continue
+                selected_indices = _base._source_time_active_indices(weights)
+                for window_index in selected_indices:
+                    window = candidate_windows[window_index]
                     features = feature_cache[window]
                     tuning_cv = (
                         make_tuning_cross_validator(train_labels, train_groups, tuning_cv_splits)
@@ -524,10 +528,8 @@ def run_time_resolved_decode(
                 if not test_probability_parts:
                     raise ValueError("Source-time selection produced no final test probabilities.")
                 probability_cube = np.stack(test_probability_parts, axis=1)
-                active_weights = weights[weights > 0.0]
-                probabilities = _base._combine_probability_logits(probability_cube, active_weights / active_weights.sum())
+                probabilities = _base._combine_source_time_probabilities(probability_cube, weights, selected_indices)
                 tuning_metadata = {**final_tuning_metadata, **selection_metadata}
-                selected_indices = [index for index, weight in enumerate(weights) if weight > 0.0]
                 selected_windows = [candidate_windows[index] for index in selected_indices]
                 synthetic_window = (
                     min(window[0] for window in selected_windows),

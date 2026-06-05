@@ -115,9 +115,11 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "python -m neureptrace.temporal_smoothing" in workflow
     assert "decode/temporal_smoothing/diagnostics" in workflow
     assert "strict_source_oof_nonnegative" in workflow
+    assert "strict_source_oof_classwise_nonnegative" in workflow
     assert "decoding.source_time_selection=source_oof_time_weighted_logits" in workflow
+    assert "decoding.source_time_selection=source_oof_classwise_time_weighted_logits" in workflow
     assert "decoding.source_time_selection_times=[$RESPONSE_WINDOW_TIMES]" in workflow
-    assert "strict_source_oof_nonnegative is produced inside each outer decode fold" in workflow
+    assert "$response_window_mode is produced inside each outer decode fold" in workflow
     assert "resolve-matrix" in workflow
     assert "workflow.outer_test_group_shards_json" in workflow
     assert "outer_test_groups: ${{ fromJSON(needs.resolve-matrix.outputs.outer_test_group_shards_json) }}" in workflow
