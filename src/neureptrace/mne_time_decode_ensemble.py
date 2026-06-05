@@ -330,6 +330,11 @@ def run_time_resolved_decode(
         "source_time_selection_weights",
         "source_time_selection_selected_time",
         "source_time_selection_inner_score",
+        "source_time_selection_weight_type",
+        "source_time_selection_stacker_type",
+        "source_time_selection_stacker_regularization",
+        "source_time_selection_class_bias",
+        "source_time_selection_inner_objective",
     ):
         values = [frame[column].iloc[0] for frame in source_metric_frames if column in frame.columns and not frame.empty]
         if values and all(value == values[0] for value in values):

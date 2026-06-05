@@ -194,3 +194,45 @@ def test_foldlocal_classwise_source_time_selection_writes_class_time_weights(tmp
     assert observations["source_time_selection_weight_type"].unique().tolist() == ["classwise"]
     assert observations["source_time_selection_normalization_scope"].unique().tolist() == ["inner_train_fold"]
     assert observations[["prob_class_0", "prob_class_1"]].sum(axis=1).round(6).tolist() == [1.0] * len(observations)
+
+
+def test_foldlocal_logit_stacker_writes_source_only_bias(tmp_path: Path, monkeypatch):
+    rng = np.random.default_rng(41)
+    subjects = np.repeat(["sub-01", "sub-02", "sub-03"], 6)
+    labels = np.tile(["left", "right"], 9)
+    times = np.array([0.00, 0.01, 0.02, 0.03, 0.04, 0.05])
+    data = rng.normal(scale=0.05, size=(len(labels), 1, len(times)))
+    data[labels == "left", 0, 2:4] += 0.8
+    data[labels == "right", 0, 4:6] -= 0.8
+    metadata = pd.DataFrame({"condition": labels, "subject": subjects})
+    epochs = FakeEpochs(data, times, metadata)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    observations_out = tmp_path / "foldlocal_stacker_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "epochs.fif",
+        label_column="condition",
+        group_column="subject",
+        out_path=tmp_path / "foldlocal_stacker.csv",
+        n_splits=3,
+        window_ms=20,
+        step_ms=20,
+        max_iter=1000,
+        emission_mode="uncalibrated",
+        normalization="subject_baseline_z",
+        baseline_window=(0.00, 0.01),
+        source_time_selection="source_oof_logit_stacker",
+        source_time_selection_times=(0.005, 0.025, 0.045),
+        source_time_selection_output_time=0.025,
+        observation_out_path=observations_out,
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert results["temporal_mode"].unique().tolist() == ["source_oof_logit_stacker"]
+    assert results["source_time_selection_weight_type"].unique().tolist() == ["stacker"]
+    assert results["source_time_selection_stacker_type"].unique().tolist() == ["shared_time_weights_plus_class_bias"]
+    assert results["source_time_selection_stacker_regularization"].unique().tolist() == ["strong"]
+    assert results["source_time_selection_class_bias"].str.split("|").map(len).unique().tolist() == [2]
+    assert observations["source_time_selection_weight_type"].unique().tolist() == ["stacker"]
+    assert observations["source_time_selection_normalization_scope"].unique().tolist() == ["inner_train_fold"]
+    assert observations[["prob_class_0", "prob_class_1"]].sum(axis=1).round(6).tolist() == [1.0] * len(observations)
