@@ -211,6 +211,45 @@ def test_source_time_weighted_logits_writes_weights(tmp_path: Path, monkeypatch)
     assert results["balanced_accuracy"].between(0.0, 1.0).all()
 
 
+def test_source_time_classwise_weighted_logits_writes_matrix_weights(tmp_path: Path, monkeypatch):
+    labels = np.array([0, 1, 2] * 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 3)
+    times = np.array([0.088, 0.184])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    for trial_index, label in enumerate(labels):
+        data[trial_index, 0, 0] = (label + 1) % 3
+        data[trial_index, 0, 1] = label
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-01_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "source_time_classwise.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=96,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        source_time_selection="source-oof-classwise-time-weighted-logits",
+        source_time_selection_times=(0.088, 0.184),
+    )
+
+    assert normalize_source_time_selection("source-oof-classwise-time-weighted-logits") == (
+        "source_oof_classwise_time_weighted_logits"
+    )
+    assert results["decoder"].unique().tolist() == ["logistic_source_oof_classwise_time_weighted_logits"]
+    assert results["source_time_selection_weight_type"].unique().tolist() == ["classwise"]
+    assert results["source_time_selection_weights"].str.contains("/", regex=False).all()
+    assert results["source_time_selection_weights"].str.split("/").map(len).unique().tolist() == [3]
+    assert results["balanced_accuracy"].between(0.0, 1.0).all()
+
+
 def test_source_calibrator_fits_deterministic_re_ranking():
     probabilities = np.array(
         [

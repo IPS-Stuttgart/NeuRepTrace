@@ -92,18 +92,27 @@ TemporalTrainWindow = tuple[float, float]
 DecodeWindow = tuple[float, float]
 TEMPORAL_TRAIN_MODE_CHOICES = ("window_ensemble", "pooled")
 TEMPORAL_TRAIN_MODE_RUN_CHOICES = (*TEMPORAL_TRAIN_MODE_CHOICES, "window-ensemble")
-SOURCE_TIME_SELECTION_CHOICES = ("none", "source_oof_best_time", "source_oof_time_weighted_logits")
+SOURCE_TIME_SELECTION_CHOICES = (
+    "none",
+    "source_oof_best_time",
+    "source_oof_time_weighted_logits",
+    "source_oof_classwise_time_weighted_logits",
+)
 SOURCE_TIME_SELECTION_RUN_CHOICES = (
     *SOURCE_TIME_SELECTION_CHOICES,
     "source-oof-best-time",
     "source-oof-time-weighted-logits",
+    "source-oof-classwise-time-weighted-logits",
 )
 DEFAULT_SOURCE_TIME_SELECTION_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
 SOURCE_TIME_SELECTION_OUTPUT_DECODER_SUFFIX = {
     "source_oof_best_time": "source_oof_best_time",
     "source_oof_time_weighted_logits": "source_oof_time_weighted_logits",
+    "source_oof_classwise_time_weighted_logits": "source_oof_classwise_time_weighted_logits",
 }
 SOURCE_TIME_SELECTION_WEIGHT_GRID_STEP = 0.1
+SOURCE_TIME_SELECTION_CLASSWISE_L2 = 0.5
+SOURCE_TIME_SELECTION_CLASSWISE_MAX_ITER = 3
 PROBABILITY_EPSILON = 1e-12
 
 
@@ -581,6 +590,19 @@ def _combine_probability_logits(probability_cube: np.ndarray, weights: np.ndarra
     return _softmax_rows(np.tensordot(logits, weights, axes=([1], [0])))
 
 
+def _combine_probability_logits_classwise(probability_cube: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    logits = np.log(np.clip(probability_cube, PROBABILITY_EPSILON, 1.0))
+    weights = np.asarray(weights, dtype=float)
+    expected_shape = (logits.shape[2], logits.shape[1])
+    if weights.shape != expected_shape:
+        raise ValueError(f"Classwise source-time weights must have shape {expected_shape}, got {weights.shape}.")
+    row_sums = weights.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("Each class-specific source-time weight row must have positive mass.")
+    normalized = weights / row_sums
+    return _softmax_rows(np.einsum("ntc,ct->nc", logits, normalized))
+
+
 def _nonnegative_weight_candidates(n_times: int, step: float = SOURCE_TIME_SELECTION_WEIGHT_GRID_STEP) -> np.ndarray:
     if n_times <= 0:
         raise ValueError("Need at least one source-time-selection candidate.")
@@ -606,6 +628,92 @@ def _nonnegative_weight_candidates(n_times: int, step: float = SOURCE_TIME_SELEC
     if not candidates:
         raise ValueError("No nonnegative source-time-selection weight candidates were generated.")
     return np.unique(np.vstack(candidates).round(12), axis=0)
+
+
+def _nonnegative_weight_candidates_with_uniform(n_times: int) -> np.ndarray:
+    candidates = _nonnegative_weight_candidates(n_times)
+    uniform = np.full((1, n_times), 1.0 / n_times, dtype=float)
+    return np.unique(np.vstack([candidates, uniform]).round(12), axis=0)
+
+
+def _balanced_cross_entropy_for_probabilities(probabilities: np.ndarray, labels: np.ndarray) -> float:
+    probabilities = _normalize_probability_rows(probabilities)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    counts = np.bincount(labels, minlength=probabilities.shape[1]).astype(float)
+    if np.any(counts <= 0.0):
+        raise ValueError("Classwise source-time weighting requires every class in source validation labels.")
+    sample_weights = 1.0 / counts[labels]
+    sample_weights = sample_weights / sample_weights.mean()
+    losses = -np.log(np.clip(probabilities[np.arange(len(labels)), labels], PROBABILITY_EPSILON, 1.0))
+    return float(np.average(losses, weights=sample_weights))
+
+
+def _classwise_weight_objective(probability_cube: np.ndarray, labels: np.ndarray, weights: np.ndarray) -> float:
+    probabilities = _combine_probability_logits_classwise(probability_cube, weights)
+    uniform = np.full(weights.shape[1], 1.0 / weights.shape[1], dtype=float)
+    l2_to_uniform = float(np.mean(np.sum((weights - uniform.reshape(1, -1)) ** 2, axis=1)))
+    return _balanced_cross_entropy_for_probabilities(probabilities, labels) + (
+        SOURCE_TIME_SELECTION_CLASSWISE_L2 * l2_to_uniform
+    )
+
+
+def _fit_classwise_nonnegative_time_weights(
+    probability_cube: np.ndarray,
+    labels: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    n_times = probability_cube.shape[1]
+    n_classes = probability_cube.shape[2]
+    weights = np.full((n_classes, n_times), 1.0 / n_times, dtype=float)
+    candidates = _nonnegative_weight_candidates_with_uniform(n_times)
+    best_objective = _classwise_weight_objective(probability_cube, labels, weights)
+
+    for _iteration in range(SOURCE_TIME_SELECTION_CLASSWISE_MAX_ITER):
+        improved = False
+        for class_index in range(n_classes):
+            best_row = weights[class_index].copy()
+            for candidate in candidates:
+                trial = weights.copy()
+                trial[class_index] = candidate
+                objective = _classwise_weight_objective(probability_cube, labels, trial)
+                if objective < best_objective - 1e-12:
+                    best_objective = objective
+                    best_row = candidate.copy()
+                    improved = True
+            weights[class_index] = best_row
+        if not improved:
+            break
+
+    probabilities = _combine_probability_logits_classwise(probability_cube, weights)
+    score = float(balanced_accuracy_score(labels, probabilities.argmax(axis=1)))
+    return weights, score
+
+
+def _format_source_time_weights(weights: np.ndarray) -> str:
+    weights = np.asarray(weights, dtype=float)
+    if weights.ndim == 1:
+        return "|".join(f"{float(weight):.12g}" for weight in weights)
+    if weights.ndim == 2:
+        return "/".join("|".join(f"{float(weight):.12g}" for weight in row) for row in weights)
+    raise ValueError("Source-time weights must be a vector or class-by-time matrix.")
+
+
+def _source_time_active_indices(weights: np.ndarray) -> list[int]:
+    weights = np.asarray(weights, dtype=float)
+    time_mass = weights if weights.ndim == 1 else weights.sum(axis=0)
+    return [index for index, weight in enumerate(time_mass) if weight > 0.0]
+
+
+def _combine_source_time_probabilities(
+    probability_cube: np.ndarray,
+    weights: np.ndarray,
+    selected_indices: Sequence[int],
+) -> np.ndarray:
+    weights = np.asarray(weights, dtype=float)
+    if weights.ndim == 1:
+        active_weights = weights[list(selected_indices)]
+        return _combine_probability_logits(probability_cube, active_weights / active_weights.sum())
+    active_weights = weights[:, list(selected_indices)]
+    return _combine_probability_logits_classwise(probability_cube, active_weights)
 
 
 def _normalize_decode_window(decode_window: tuple[float, float] | list[float] | None) -> DecodeWindow | None:
@@ -962,7 +1070,7 @@ def _fit_source_time_selector(
     elif mode == "source_oof_time_weighted_logits":
         best_weights = None
         source_score = -np.inf
-        for weights_candidate in _nonnegative_weight_candidates(len(candidate_windows)):
+        for weights_candidate in _nonnegative_weight_candidates_with_uniform(len(candidate_windows)):
             probabilities = _combine_probability_logits(probability_cube, weights_candidate)
             score = float(balanced_accuracy_score(labels, probabilities.argmax(axis=1)))
             if score > source_score:
@@ -971,16 +1079,20 @@ def _fit_source_time_selector(
         if best_weights is None:
             raise ValueError("No source-time-selection weights were selected.")
         weights = best_weights
+    elif mode == "source_oof_classwise_time_weighted_logits":
+        weights, source_score = _fit_classwise_nonnegative_time_weights(probability_cube, labels)
     else:
         raise ValueError(f"Unknown source-time-selection mode '{mode}'.")
 
+    time_mass = weights if weights.ndim == 1 else weights.sum(axis=0)
     return weights, {
         "source_time_selection": mode,
         "source_time_selection_candidate_times": "|".join(f"{window[2]:.12g}" for window in candidate_windows),
         "source_time_selection_time_scores": "|".join(f"{score:.12g}" for score in time_scores),
-        "source_time_selection_weights": "|".join(f"{float(weight):.12g}" for weight in weights),
-        "source_time_selection_selected_time": float(candidate_windows[int(np.argmax(weights))][2]),
+        "source_time_selection_weights": _format_source_time_weights(weights),
+        "source_time_selection_selected_time": float(candidate_windows[int(np.argmax(time_mass))][2]),
         "source_time_selection_inner_score": float(source_score),
+        "source_time_selection_weight_type": "classwise" if weights.ndim == 2 else "global",
     }
 
 
@@ -1665,9 +1777,9 @@ def run_time_resolved_decode(
                 )
                 test_probability_parts: list[np.ndarray] = []
                 final_tuning_metadata: dict[str, object] = {}
-                for window, weight in zip(candidate_windows, weights, strict=True):
-                    if weight <= 0.0:
-                        continue
+                selected_indices = _source_time_active_indices(weights)
+                for window_index in selected_indices:
+                    window = candidate_windows[window_index]
                     features = feature_cache[window]
                     tuning_cv = (
                         make_tuning_cross_validator(train_labels, train_groups, tuning_cv_splits)
@@ -1713,10 +1825,8 @@ def run_time_resolved_decode(
                 if not test_probability_parts:
                     raise ValueError("Source-time selection produced no final test probabilities.")
                 probability_cube = np.stack(test_probability_parts, axis=1)
-                active_weights = weights[weights > 0.0]
-                probabilities = _combine_probability_logits(probability_cube, active_weights / active_weights.sum())
+                probabilities = _combine_source_time_probabilities(probability_cube, weights, selected_indices)
                 tuning_metadata = {**final_tuning_metadata, **selection_metadata}
-                selected_indices = [index for index, weight in enumerate(weights) if weight > 0.0]
                 selected_windows = [candidate_windows[index] for index in selected_indices]
                 synthetic_window = (
                     min(window[0] for window in selected_windows),
