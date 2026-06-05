@@ -381,6 +381,10 @@ jobs:
                       or "false"
                   ).lower()
                   response_window_mode = override_value("workflow.response_window_mode", "response_window.mode") or "uniform"
+                  response_window_combine = (
+                      override_value("workflow.response_window_combine", "response_window.combine")
+                      or "log_probability_mean"
+                  )
                   response_window_times = (
                       override_value("workflow.response_window_times", "response_window.times")
                       or "0.088,0.136,0.184,0.232"
@@ -421,6 +425,7 @@ jobs:
                       handle.write(f"STAGE_SEED_INPUT={stage_seed}\n")
                       handle.write(f"RESPONSE_WINDOW_ENSEMBLE={response_window_ensemble}\n")
                       handle.write(f"RESPONSE_WINDOW_MODE={response_window_mode}\n")
+                      handle.write(f"RESPONSE_WINDOW_COMBINE={response_window_combine}\n")
                       handle.write(f"RESPONSE_WINDOW_TIMES={response_window_times}\n")
                   output_dir.mkdir(parents=True, exist_ok=True)
                   manifest = {
@@ -455,6 +460,7 @@ jobs:
                       "temporal_smoothing_stay_grid_size": "200",
                       "response_window_ensemble": response_window_ensemble,
                       "response_window_mode": response_window_mode,
+                      "response_window_combine": response_window_combine,
                       "response_window_times": response_window_times,
                       "ensemble_weights": os.environ.get("ENSEMBLE_WEIGHTS_INPUT", ""),
                       "ensemble_source_decoders": os.environ.get("ENSEMBLE_SOURCE_DECODERS_INPUT", ""),
@@ -935,6 +941,7 @@ jobs:
                   set -euo pipefail
                   response_window_enabled="false"
                   response_window_mode="uniform"
+                  response_window_combine="log_probability_mean"
                   response_window_times="0.088,0.136,0.184,0.232"
                   if [[ -n "$CONFIG_OVERRIDES_INPUT" ]]; then
                     while IFS= read -r override; do
@@ -946,6 +953,9 @@ jobs:
                           ;;
                         workflow.response_window_mode=*|response_window.mode=*)
                           response_window_mode="${override#*=}"
+                          ;;
+                        workflow.response_window_combine=*|response_window.combine=*)
+                          response_window_combine="${override#*=}"
                           ;;
                         workflow.response_window_times=*|response_window.times=*)
                           response_window_times="${override#*=}"
@@ -966,6 +976,7 @@ jobs:
                   python -m neureptrace.response_window_ensemble \
                     "$observations" \
                     --mode "$response_window_mode" \
+                    --combine "$response_window_combine" \
                     --response-times "$response_window_times" \
                     --output-time "${DIAGNOSTICS_BEST_TIME_INPUT:-0.184}" \
                     --out-observations "$OPENNEURO_AGGREGATE_OUTPUT_DIR/decode/response_window/observations.csv" \
