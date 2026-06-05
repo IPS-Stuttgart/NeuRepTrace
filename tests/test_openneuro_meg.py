@@ -116,8 +116,10 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "decode/temporal_smoothing/diagnostics" in workflow
     assert "strict_source_oof_nonnegative" in workflow
     assert "strict_source_oof_classwise_nonnegative" in workflow
+    assert "strict_source_oof_logit_stacker" in workflow
     assert "decoding.source_time_selection=source_oof_time_weighted_logits" in workflow
     assert "decoding.source_time_selection=source_oof_classwise_time_weighted_logits" in workflow
+    assert "decoding.source_time_selection=source_oof_logit_stacker" in workflow
     assert "decoding.source_time_selection_times=[$RESPONSE_WINDOW_TIMES]" in workflow
     assert "$response_window_mode is produced inside each outer decode fold" in workflow
     assert "resolve-matrix" in workflow

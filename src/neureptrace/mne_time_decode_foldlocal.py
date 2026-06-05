@@ -139,7 +139,7 @@ def _fit_foldlocal_source_time_selector(
     classes: np.ndarray,
     class_prior_correction: str,
     mode: str,
-) -> tuple[np.ndarray, dict[str, object]]:
+) -> tuple[np.ndarray, np.ndarray | None, dict[str, object]]:
     """Learn response-time weights with inner source-only fold-local decoding."""
 
     inner_splits = list(make_tuning_cross_validator(train_labels, train_groups, tuning_cv_splits))
@@ -212,6 +212,8 @@ def _fit_foldlocal_source_time_selector(
         weights = np.zeros(len(candidate_windows), dtype=float)
         weights[best_index] = 1.0
         source_score = time_scores[best_index]
+        bias = None
+        objective: float | None = None
     elif mode == "source_oof_time_weighted_logits":
         best_weights = None
         source_score = -np.inf
@@ -224,22 +226,38 @@ def _fit_foldlocal_source_time_selector(
         if best_weights is None:
             raise ValueError("No source-time-selection weights were selected.")
         weights = best_weights
+        bias = None
+        objective = None
     elif mode == "source_oof_classwise_time_weighted_logits":
         weights, source_score = _base._fit_classwise_nonnegative_time_weights(probability_cube, labels)
+        bias = None
+        objective = None
+    elif mode == "source_oof_logit_stacker":
+        weights, bias, source_score, objective = _base._fit_logit_stacker_time_weights_and_bias(probability_cube, labels)
     else:
         raise ValueError(f"Unknown source-time-selection mode '{mode}'.")
 
     time_mass = weights if weights.ndim == 1 else weights.sum(axis=0)
-    return weights, {
+    metadata = {
         "source_time_selection": mode,
         "source_time_selection_candidate_times": "|".join(f"{window[2]:.12g}" for window in candidate_windows),
         "source_time_selection_time_scores": "|".join(f"{score:.12g}" for score in time_scores),
         "source_time_selection_weights": _base._format_source_time_weights(weights),
         "source_time_selection_selected_time": float(candidate_windows[int(np.argmax(time_mass))][2]),
         "source_time_selection_inner_score": float(source_score),
-        "source_time_selection_weight_type": "classwise" if weights.ndim == 2 else "global",
+        "source_time_selection_weight_type": "classwise" if weights.ndim == 2 else ("stacker" if bias is not None else "global"),
         "source_time_selection_normalization_scope": "inner_train_fold",
     }
+    if bias is not None:
+        metadata.update(
+            {
+                "source_time_selection_stacker_type": _base.SOURCE_TIME_STACKER_TYPE,
+                "source_time_selection_stacker_regularization": _base.SOURCE_TIME_STACKER_REGULARIZATION,
+                "source_time_selection_class_bias": _base._format_source_time_bias(bias),
+                "source_time_selection_inner_objective": float(objective) if objective is not None else "",
+            }
+        )
+    return weights, bias, metadata
 
 
 def run_time_resolved_decode(
@@ -456,7 +474,7 @@ def run_time_resolved_decode(
             )
             train_groups = None if groups is None else groups[train_idx]
             for current_emission_mode in emission_modes:
-                weights, selection_metadata = _fit_foldlocal_source_time_selector(
+                weights, bias, selection_metadata = _fit_foldlocal_source_time_selector(
                     raw_data=raw_data,
                     times=epochs.times,
                     normalization=normalization_name,
@@ -528,7 +546,12 @@ def run_time_resolved_decode(
                 if not test_probability_parts:
                     raise ValueError("Source-time selection produced no final test probabilities.")
                 probability_cube = np.stack(test_probability_parts, axis=1)
-                probabilities = _base._combine_source_time_probabilities(probability_cube, weights, selected_indices)
+                probabilities = _base._combine_source_time_probabilities(
+                    probability_cube,
+                    weights,
+                    selected_indices,
+                    bias=bias,
+                )
                 tuning_metadata = {**final_tuning_metadata, **selection_metadata}
                 selected_windows = [candidate_windows[index] for index in selected_indices]
                 synthetic_window = (

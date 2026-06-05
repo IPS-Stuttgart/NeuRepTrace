@@ -97,22 +97,30 @@ SOURCE_TIME_SELECTION_CHOICES = (
     "source_oof_best_time",
     "source_oof_time_weighted_logits",
     "source_oof_classwise_time_weighted_logits",
+    "source_oof_logit_stacker",
 )
 SOURCE_TIME_SELECTION_RUN_CHOICES = (
     *SOURCE_TIME_SELECTION_CHOICES,
     "source-oof-best-time",
     "source-oof-time-weighted-logits",
     "source-oof-classwise-time-weighted-logits",
+    "source-oof-logit-stacker",
 )
 DEFAULT_SOURCE_TIME_SELECTION_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
 SOURCE_TIME_SELECTION_OUTPUT_DECODER_SUFFIX = {
     "source_oof_best_time": "source_oof_best_time",
     "source_oof_time_weighted_logits": "source_oof_time_weighted_logits",
     "source_oof_classwise_time_weighted_logits": "source_oof_classwise_time_weighted_logits",
+    "source_oof_logit_stacker": "source_oof_logit_stacker",
 }
 SOURCE_TIME_SELECTION_WEIGHT_GRID_STEP = 0.1
 SOURCE_TIME_SELECTION_CLASSWISE_L2 = 0.5
 SOURCE_TIME_SELECTION_CLASSWISE_MAX_ITER = 3
+SOURCE_TIME_STACKER_TYPE = "shared_time_weights_plus_class_bias"
+SOURCE_TIME_STACKER_REGULARIZATION = "strong"
+SOURCE_TIME_STACKER_TIME_L2 = 1.0
+SOURCE_TIME_STACKER_BIAS_L2 = 0.25
+SOURCE_TIME_STACKER_BIAS_SCALE_GRID = (0.0, 0.25, 0.5, 0.75, 1.0)
 PROBABILITY_EPSILON = 1e-12
 
 
@@ -688,6 +696,41 @@ def _fit_classwise_nonnegative_time_weights(
     return weights, score
 
 
+def _fit_logit_stacker_time_weights_and_bias(
+    probability_cube: np.ndarray,
+    labels: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    n_times = probability_cube.shape[1]
+    uniform = np.full(n_times, 1.0 / n_times, dtype=float)
+    best_weights = uniform
+    best_bias = np.zeros(probability_cube.shape[2], dtype=float)
+    best_objective = np.inf
+    best_score = -np.inf
+
+    logits = np.log(np.clip(probability_cube, PROBABILITY_EPSILON, 1.0))
+    for weights in _nonnegative_weight_candidates_with_uniform(n_times):
+        base_logits = np.tensordot(logits, weights, axes=([1], [0]))
+        bias_direction = _marginal_class_bias(_softmax_rows(base_logits))
+        for bias_scale in SOURCE_TIME_STACKER_BIAS_SCALE_GRID:
+            bias = bias_direction * float(bias_scale)
+            probabilities = _softmax_rows(base_logits + bias.reshape(1, -1))
+            time_l2 = float(np.sum((weights - uniform) ** 2))
+            bias_l2 = float(np.mean(bias**2))
+            objective = _balanced_cross_entropy_for_probabilities(probabilities, labels) + (
+                SOURCE_TIME_STACKER_TIME_L2 * time_l2
+            ) + (SOURCE_TIME_STACKER_BIAS_L2 * bias_l2)
+            score = float(balanced_accuracy_score(labels, probabilities.argmax(axis=1)))
+            if objective < best_objective - 1e-12 or (
+                abs(objective - best_objective) <= 1e-12 and score > best_score
+            ):
+                best_objective = objective
+                best_score = score
+                best_weights = weights.copy()
+                best_bias = bias.copy()
+
+    return best_weights, best_bias, best_score, float(best_objective)
+
+
 def _format_source_time_weights(weights: np.ndarray) -> str:
     weights = np.asarray(weights, dtype=float)
     if weights.ndim == 1:
@@ -695,6 +738,12 @@ def _format_source_time_weights(weights: np.ndarray) -> str:
     if weights.ndim == 2:
         return "/".join("|".join(f"{float(weight):.12g}" for weight in row) for row in weights)
     raise ValueError("Source-time weights must be a vector or class-by-time matrix.")
+
+
+def _format_source_time_bias(bias: np.ndarray | None) -> str:
+    if bias is None:
+        return ""
+    return "|".join(f"{float(value):.12g}" for value in np.asarray(bias, dtype=float))
 
 
 def _source_time_active_indices(weights: np.ndarray) -> list[int]:
@@ -707,11 +756,16 @@ def _combine_source_time_probabilities(
     probability_cube: np.ndarray,
     weights: np.ndarray,
     selected_indices: Sequence[int],
+    bias: np.ndarray | None = None,
 ) -> np.ndarray:
     weights = np.asarray(weights, dtype=float)
     if weights.ndim == 1:
         active_weights = weights[list(selected_indices)]
-        return _combine_probability_logits(probability_cube, active_weights / active_weights.sum())
+        logits = np.log(np.clip(probability_cube, PROBABILITY_EPSILON, 1.0))
+        combined_logits = np.tensordot(logits, active_weights / active_weights.sum(), axes=([1], [0]))
+        if bias is not None:
+            combined_logits = combined_logits + np.asarray(bias, dtype=float).reshape(1, -1)
+        return _softmax_rows(combined_logits)
     active_weights = weights[:, list(selected_indices)]
     return _combine_probability_logits_classwise(probability_cube, active_weights)
 
@@ -1006,7 +1060,7 @@ def _fit_source_time_selector(
     classes: np.ndarray,
     class_prior_correction: str,
     mode: str,
-) -> tuple[np.ndarray, dict[str, object]]:
+) -> tuple[np.ndarray, np.ndarray | None, dict[str, object]]:
     inner_splits = list(make_tuning_cross_validator(train_labels, train_groups, tuning_cv_splits))
     if not inner_splits:
         raise ValueError("Source-time selection needs at least one inner validation split.")
@@ -1067,6 +1121,8 @@ def _fit_source_time_selector(
         weights = np.zeros(len(candidate_windows), dtype=float)
         weights[best_index] = 1.0
         source_score = time_scores[best_index]
+        bias = None
+        objective: float | None = None
     elif mode == "source_oof_time_weighted_logits":
         best_weights = None
         source_score = -np.inf
@@ -1079,21 +1135,37 @@ def _fit_source_time_selector(
         if best_weights is None:
             raise ValueError("No source-time-selection weights were selected.")
         weights = best_weights
+        bias = None
+        objective = None
     elif mode == "source_oof_classwise_time_weighted_logits":
         weights, source_score = _fit_classwise_nonnegative_time_weights(probability_cube, labels)
+        bias = None
+        objective = None
+    elif mode == "source_oof_logit_stacker":
+        weights, bias, source_score, objective = _fit_logit_stacker_time_weights_and_bias(probability_cube, labels)
     else:
         raise ValueError(f"Unknown source-time-selection mode '{mode}'.")
 
     time_mass = weights if weights.ndim == 1 else weights.sum(axis=0)
-    return weights, {
+    metadata = {
         "source_time_selection": mode,
         "source_time_selection_candidate_times": "|".join(f"{window[2]:.12g}" for window in candidate_windows),
         "source_time_selection_time_scores": "|".join(f"{score:.12g}" for score in time_scores),
         "source_time_selection_weights": _format_source_time_weights(weights),
         "source_time_selection_selected_time": float(candidate_windows[int(np.argmax(time_mass))][2]),
         "source_time_selection_inner_score": float(source_score),
-        "source_time_selection_weight_type": "classwise" if weights.ndim == 2 else "global",
+        "source_time_selection_weight_type": "classwise" if weights.ndim == 2 else ("stacker" if bias is not None else "global"),
     }
+    if bias is not None:
+        metadata.update(
+            {
+                "source_time_selection_stacker_type": SOURCE_TIME_STACKER_TYPE,
+                "source_time_selection_stacker_regularization": SOURCE_TIME_STACKER_REGULARIZATION,
+                "source_time_selection_class_bias": _format_source_time_bias(bias),
+                "source_time_selection_inner_objective": float(objective) if objective is not None else "",
+            }
+        )
+    return weights, bias, metadata
 
 
 def _features_for_window(data: np.ndarray, window: TimeWindow) -> np.ndarray:
@@ -1756,7 +1828,7 @@ def run_time_resolved_decode(
             )
             train_groups = None if groups is None else groups[train_idx]
             for current_emission_mode in emission_modes:
-                weights, selection_metadata = _fit_source_time_selector(
+                weights, bias, selection_metadata = _fit_source_time_selector(
                     feature_cache=feature_cache,
                     candidate_windows=candidate_windows,
                     train_idx=train_idx,
@@ -1825,7 +1897,7 @@ def run_time_resolved_decode(
                 if not test_probability_parts:
                     raise ValueError("Source-time selection produced no final test probabilities.")
                 probability_cube = np.stack(test_probability_parts, axis=1)
-                probabilities = _combine_source_time_probabilities(probability_cube, weights, selected_indices)
+                probabilities = _combine_source_time_probabilities(probability_cube, weights, selected_indices, bias=bias)
                 tuning_metadata = {**final_tuning_metadata, **selection_metadata}
                 selected_windows = [candidate_windows[index] for index in selected_indices]
                 synthetic_window = (
