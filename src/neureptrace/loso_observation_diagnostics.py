@@ -16,6 +16,7 @@ from neureptrace.observations import probability_columns
 MAXIMIZE_METRICS = {"accuracy", "balanced_accuracy", "top2_accuracy", "top3_accuracy"}
 MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 SELECTION_METRICS = tuple(sorted(MAXIMIZE_METRICS | MINIMIZE_METRICS))
+DEFAULT_SELECTIVE_COVERAGES = (1.0, 0.9, 0.8, 0.7)
 
 
 def _sem(values: pd.Series) -> float:
@@ -99,6 +100,15 @@ def _metrics_for_rows(frame: pd.DataFrame) -> dict[str, float | int | str]:
         "brier": float(brier_score_multiclass(probabilities, labels)),
         "ece": float(expected_calibration_error(probabilities, labels)),
     }
+
+
+def _confidence_array(frame: pd.DataFrame) -> np.ndarray:
+    if "confidence" in frame.columns:
+        confidence = pd.to_numeric(frame["confidence"], errors="coerce").to_numpy(dtype=float)
+        if np.all(np.isfinite(confidence)):
+            return confidence
+    probabilities = _probability_matrix(frame)
+    return probabilities.max(axis=1)
 
 
 def _metric_value_for_selection(frame: pd.DataFrame, metric: str) -> float:
@@ -254,6 +264,65 @@ def class_counts(observations: pd.DataFrame, *, subject_column: str, time: float
     return counts
 
 
+def selective_coverage_summary(
+    observations: pd.DataFrame,
+    *,
+    time: float,
+    coverages: tuple[float, ...] = DEFAULT_SELECTIVE_COVERAGES,
+) -> pd.DataFrame:
+    """Return confidence-thresholded fixed-time metrics.
+
+    These rows are diagnostics only: they describe how accuracy changes when
+    low-confidence held-out observations are rejected, while the main LOSO
+    quality summary remains the full-coverage result.
+    """
+
+    fixed = _rows_at_time(observations, time).reset_index(drop=True)
+    if fixed.empty:
+        raise ValueError("Cannot compute selective coverage from an empty fixed-time table.")
+    probabilities = _probability_matrix(fixed)
+    n_classes = probabilities.shape[1]
+    confidence = _confidence_array(fixed)
+    order = np.lexsort((np.arange(len(fixed)), -confidence))
+    sorted_fixed = fixed.iloc[order].reset_index(drop=True)
+    sorted_confidence = confidence[order]
+    rows = []
+    total = int(len(sorted_fixed))
+    actual_time = _nearest_time(observations, time)
+    for coverage in coverages:
+        target = float(coverage)
+        if not 0.0 < target <= 1.0:
+            raise ValueError("Selective coverage targets must be in (0, 1].")
+        n_selected = total if np.isclose(target, 1.0) else int(np.ceil(total * target))
+        n_selected = min(max(n_selected, 1), total)
+        selected = sorted_fixed.iloc[:n_selected].copy()
+        metrics = _metrics_for_rows(selected)
+        selected_labels = _label_array(selected)
+        class_support = {
+            str(class_index): int(np.sum(selected_labels == class_index))
+            for class_index in range(n_classes)
+        }
+        rows.append(
+            {
+                "time": actual_time,
+                "coverage_target": target,
+                "coverage": n_selected / float(total),
+                "n_selected": int(n_selected),
+                "n_total": total,
+                "rejection_rate": 1.0 - n_selected / float(total),
+                "confidence_threshold": float(sorted_confidence[n_selected - 1]),
+                "accuracy": metrics["accuracy"],
+                "balanced_accuracy": metrics["balanced_accuracy"],
+                "selective_risk": 1.0 - float(metrics["accuracy"]),
+                "balanced_selective_risk": 1.0 - float(metrics["balanced_accuracy"]),
+                "n_selected_classes": int(sum(count > 0 for count in class_support.values())),
+                "all_classes_present": all(count > 0 for count in class_support.values()),
+                "selected_class_support": json.dumps(class_support, sort_keys=True, separators=(",", ":")),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def quality_summary(
     observations: pd.DataFrame,
     *,
@@ -362,6 +431,7 @@ def write_loso_observation_diagnostics(
     )
     confusion = confusion_matrix(observations, time=actual_time)
     counts = class_counts(observations, subject_column=subject_column_name, time=actual_time)
+    selective = selective_coverage_summary(observations, time=actual_time)
     quality = quality_summary(
         observations,
         time_summary=time_summary,
@@ -378,12 +448,14 @@ def write_loso_observation_diagnostics(
         "per_subject": out_dir / "per_subject.csv",
         "confusion_matrix": out_dir / "confusion_matrix.csv",
         "class_counts": out_dir / "class_counts.csv",
+        "selective_coverage": out_dir / "selective_coverage.csv",
         "quality_summary": out_dir / "quality_summary.csv",
     }
     time_summary.to_csv(paths["time_course"], index=False)
     per_subject.to_csv(paths["per_subject"], index=False)
     confusion.to_csv(paths["confusion_matrix"], index=False)
     counts.to_csv(paths["class_counts"], index=False)
+    selective.to_csv(paths["selective_coverage"], index=False)
     quality.to_csv(paths["quality_summary"], index=False)
     return paths
 
