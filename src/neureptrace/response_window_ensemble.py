@@ -10,13 +10,16 @@ from sklearn.metrics import balanced_accuracy_score
 
 from neureptrace.observations import stable_hash
 from neureptrace.temporal_model import probability_columns, read_probability_observations
-from neureptrace.temporal_smoothing import metrics_from_probability_observations
+from neureptrace.temporal_smoothing import metrics_from_probability_observations, smooth_probability_observations
 
 DEFAULT_RESPONSE_TIMES = (0.088, 0.136, 0.184, 0.232)
-ENSEMBLE_MODE_CHOICES = ("uniform", "source_oof_nonnegative")
+ENSEMBLE_MODE_CHOICES = ("uniform", "source_oof_nonnegative", "response_window_poststimulus_forward")
 COMBINE_CHOICES = ("log_probability_mean", "probability_mean")
 OUTPUT_DECODER = "poststimulus_response_window_logit_ensemble"
 OUTPUT_EMISSION_MODE = "response_window_logit_ensemble"
+HYBRID_SMOOTHING_FIT_WINDOW = (0.10, 0.30)
+HYBRID_SMOOTHING_STAY_GRID_SIZE = 200
+HYBRID_SMOOTHING_EMISSION_SUFFIX = "response_window_poststimulus_forward"
 EPSILON = 1e-12
 TARGET_GROUP_COLUMNS = ("subject", "group", "outer_test_groups", "session", "fold")
 
@@ -190,7 +193,7 @@ def _response_window_rows(
         target_mask = subjects == str(target_subject)
         if not np.any(target_mask):
             continue
-        if mode == "uniform":
+        if mode in {"uniform", "response_window_poststimulus_forward"}:
             weights = np.full(len(times), 1.0 / len(times), dtype=float)
             source_score = np.nan
         else:
@@ -264,11 +267,27 @@ def run_response_window_ensemble(
     combine: str = "log_probability_mean",
     weight_grid_step: float = 0.1,
     output_time: float | None = 0.184,
+    smoothing_fit_window: tuple[float, float] = HYBRID_SMOOTHING_FIT_WINDOW,
+    smoothing_apply_window: tuple[float, float] | None = None,
+    smoothing_stay_grid_size: int = HYBRID_SMOOTHING_STAY_GRID_SIZE,
     ece_bins: int = 10,
     out_observations: Path | None = None,
     out_metrics: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    observations = read_probability_observations(observation_csvs).copy()
+    if mode == "response_window_poststimulus_forward":
+        if smoothing_apply_window is None:
+            smoothing_apply_window = (min(response_times), max(response_times))
+        observations, _ = smooth_probability_observations(
+            observation_csvs,
+            fit_window=tuple(float(value) for value in smoothing_fit_window),
+            stay_grid_size=int(smoothing_stay_grid_size),
+            mode="poststimulus_forward_only",
+            apply_window=tuple(float(value) for value in smoothing_apply_window),
+            emission_suffix=HYBRID_SMOOTHING_EMISSION_SUFFIX,
+            ece_bins=ece_bins,
+        )
+    else:
+        observations = read_probability_observations(observation_csvs).copy()
     ensembled = _response_window_rows(
         observations,
         requested_times=tuple(float(time) for time in response_times),
@@ -299,6 +318,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--response-times", default=",".join(str(time) for time in DEFAULT_RESPONSE_TIMES))
     parser.add_argument("--output-time", type=float, default=0.184)
     parser.add_argument("--weight-grid-step", type=float, default=0.1)
+    parser.add_argument("--smoothing-fit-window", nargs=2, type=float, default=HYBRID_SMOOTHING_FIT_WINDOW, metavar=("START", "STOP"))
+    parser.add_argument(
+        "--smoothing-apply-window",
+        nargs=2,
+        type=float,
+        metavar=("START", "STOP"),
+        help="Optional application window for response_window_poststimulus_forward; defaults to the requested response-time span.",
+    )
+    parser.add_argument("--smoothing-stay-grid-size", type=int, default=HYBRID_SMOOTHING_STAY_GRID_SIZE)
     parser.add_argument("--ece-bins", type=int, default=10)
     parser.add_argument("--out-observations", type=Path, required=True)
     parser.add_argument("--out-metrics", type=Path, required=True)
@@ -311,6 +339,9 @@ def main(argv: list[str] | None = None) -> None:
         combine=args.combine,
         weight_grid_step=args.weight_grid_step,
         output_time=args.output_time,
+        smoothing_fit_window=tuple(args.smoothing_fit_window),
+        smoothing_apply_window=None if args.smoothing_apply_window is None else tuple(args.smoothing_apply_window),
+        smoothing_stay_grid_size=args.smoothing_stay_grid_size,
         ece_bins=args.ece_bins,
         out_observations=args.out_observations,
         out_metrics=args.out_metrics,
