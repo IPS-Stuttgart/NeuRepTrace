@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import csv
+import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -29,6 +32,94 @@ from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
 
 FoldNormalizationParams = dict[str, np.ndarray]
+
+
+SOURCE_TIME_SELECTION_DIAGNOSTIC_COLUMNS = (
+    "event",
+    "split_id",
+    "outer_fold",
+    "emission_mode",
+    "source_time_selection",
+    "inner_fold",
+    "window_index",
+    "window_center",
+    "fit_index",
+    "planned_inner_window_fits",
+    "estimated_sklearn_fits",
+    "n_source_trials",
+    "n_inner_train_trials",
+    "n_inner_valid_trials",
+    "n_inner_folds",
+    "n_candidate_times",
+    "elapsed_seconds",
+    "rss_peak_mb_before",
+    "rss_peak_mb_after",
+    "rss_peak_mb_delta",
+    "source_score",
+    "selected_time",
+    "time_scores",
+    "weights",
+    "error_type",
+    "error_message",
+)
+
+
+def _source_time_selection_diagnostics_path(out_path: Path) -> Path:
+    return out_path.with_name(f"{out_path.stem}_source_time_selection_diagnostics.csv")
+
+
+def _peak_rss_mb() -> float | None:
+    try:
+        import resource
+    except ImportError:
+        return None
+
+    peak = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    if sys.platform == "darwin":
+        return peak / (1024.0 * 1024.0)
+    return peak / 1024.0
+
+
+def _format_optional_float(value: float | None) -> float | str:
+    if value is None or not np.isfinite(value):
+        return ""
+    return float(value)
+
+
+def _append_source_time_selection_diagnostic(path: Path | None, row: dict[str, object]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not path.exists() or path.stat().st_size == 0
+    with path.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SOURCE_TIME_SELECTION_DIAGNOSTIC_COLUMNS)
+        if write_header:
+            writer.writeheader()
+        writer.writerow({column: row.get(column, "") for column in SOURCE_TIME_SELECTION_DIAGNOSTIC_COLUMNS})
+        handle.flush()
+
+
+def _print_source_time_progress(message: str) -> None:
+    print(f"[source-time-selection] {message}", flush=True)
+
+
+def _estimated_sklearn_fits(
+    *,
+    tune_hyperparameters: bool,
+    inner_tuning_cv: int | Sequence[tuple[np.ndarray, np.ndarray]],
+    tuning_c_grid: Sequence[float] | str | None,
+) -> int:
+    if not tune_hyperparameters:
+        return 1
+    if isinstance(inner_tuning_cv, int):
+        n_cv_splits = inner_tuning_cv
+    else:
+        n_cv_splits = len(inner_tuning_cv)
+    try:
+        n_grid = max(1, len(parse_c_grid(tuning_c_grid)))
+    except Exception:
+        n_grid = 1
+    return n_cv_splits * n_grid + 1
 
 
 def _fit_fold_epoch_normalization(
@@ -119,6 +210,8 @@ def _normalize_epoch_data_for_fold(
 
 def _fit_foldlocal_source_time_selector(
     *,
+    split_id: str,
+    outer_fold: int,
     raw_data: np.ndarray,
     times: np.ndarray,
     normalization: str,
@@ -139,6 +232,7 @@ def _fit_foldlocal_source_time_selector(
     classes: np.ndarray,
     class_prior_correction: str,
     mode: str,
+    diagnostics_out_path: Path | None,
 ) -> tuple[np.ndarray, np.ndarray | None, dict[str, object]]:
     """Learn response-time weights with inner source-only fold-local decoding."""
 
@@ -147,58 +241,249 @@ def _fit_foldlocal_source_time_selector(
         raise ValueError("Source-time selection needs at least one inner validation split.")
 
     train_idx = np.asarray(train_idx, dtype=int)
+    planned_inner_window_fits = len(inner_splits) * len(candidate_windows)
+    _print_source_time_progress(
+        "start "
+        f"split={split_id} outer_fold={outer_fold} mode={mode} emission_mode={emission_mode} "
+        f"source_trials={len(train_idx)} inner_folds={len(inner_splits)} "
+        f"candidate_times={len(candidate_windows)} planned_inner_window_fits={planned_inner_window_fits}"
+    )
+    _append_source_time_selection_diagnostic(
+        diagnostics_out_path,
+        {
+            "event": "planned",
+            "split_id": split_id,
+            "outer_fold": outer_fold,
+            "emission_mode": emission_mode,
+            "source_time_selection": mode,
+            "planned_inner_window_fits": planned_inner_window_fits,
+            "n_source_trials": len(train_idx),
+            "n_inner_folds": len(inner_splits),
+            "n_candidate_times": len(candidate_windows),
+        },
+    )
+
     validation_probabilities: list[list[np.ndarray]] = [[] for _ in candidate_windows]
     validation_labels: list[np.ndarray] = []
-    for inner_train_local, inner_valid_local in inner_splits:
+    fit_index = 0
+    for inner_fold, (inner_train_local, inner_valid_local) in enumerate(inner_splits):
         inner_train_global = train_idx[inner_train_local]
         inner_valid_global = train_idx[inner_valid_local]
-        inner_data = _normalize_epoch_data_for_fold(
-            raw_data,
-            times,
-            normalization,
-            baseline_window=baseline_window,
-            train_idx=inner_train_global,
+        normalize_start = time.perf_counter()
+        normalize_rss_before = _peak_rss_mb()
+        _print_source_time_progress(
+            "normalize-start "
+            f"split={split_id} outer_fold={outer_fold} inner_fold={inner_fold + 1}/{len(inner_splits)} "
+            f"inner_train_trials={len(inner_train_local)} inner_valid_trials={len(inner_valid_local)}"
         )
+        try:
+            inner_data = _normalize_epoch_data_for_fold(
+                raw_data,
+                times,
+                normalization,
+                baseline_window=baseline_window,
+                train_idx=inner_train_global,
+            )
+        except Exception as exc:
+            normalize_rss_after = _peak_rss_mb()
+            elapsed = time.perf_counter() - normalize_start
+            _append_source_time_selection_diagnostic(
+                diagnostics_out_path,
+                {
+                    "event": "normalization_error",
+                    "split_id": split_id,
+                    "outer_fold": outer_fold,
+                    "emission_mode": emission_mode,
+                    "source_time_selection": mode,
+                    "inner_fold": inner_fold,
+                    "planned_inner_window_fits": planned_inner_window_fits,
+                    "n_source_trials": len(train_idx),
+                    "n_inner_train_trials": len(inner_train_local),
+                    "n_inner_valid_trials": len(inner_valid_local),
+                    "n_inner_folds": len(inner_splits),
+                    "n_candidate_times": len(candidate_windows),
+                    "elapsed_seconds": elapsed,
+                    "rss_peak_mb_before": _format_optional_float(normalize_rss_before),
+                    "rss_peak_mb_after": _format_optional_float(normalize_rss_after),
+                    "rss_peak_mb_delta": _format_optional_float(
+                        None if normalize_rss_before is None or normalize_rss_after is None else normalize_rss_after - normalize_rss_before
+                    ),
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+            )
+            _print_source_time_progress(
+                "normalization-error "
+                f"split={split_id} outer_fold={outer_fold} inner_fold={inner_fold + 1}/{len(inner_splits)} "
+                f"elapsed={elapsed:.2f}s error={type(exc).__name__}: {exc}"
+            )
+            raise
+        normalize_rss_after = _peak_rss_mb()
+        normalize_elapsed = time.perf_counter() - normalize_start
+        _append_source_time_selection_diagnostic(
+            diagnostics_out_path,
+            {
+                "event": "inner_fold_normalized",
+                "split_id": split_id,
+                "outer_fold": outer_fold,
+                "emission_mode": emission_mode,
+                "source_time_selection": mode,
+                "inner_fold": inner_fold,
+                "planned_inner_window_fits": planned_inner_window_fits,
+                "n_source_trials": len(train_idx),
+                "n_inner_train_trials": len(inner_train_local),
+                "n_inner_valid_trials": len(inner_valid_local),
+                "n_inner_folds": len(inner_splits),
+                "n_candidate_times": len(candidate_windows),
+                "elapsed_seconds": normalize_elapsed,
+                "rss_peak_mb_before": _format_optional_float(normalize_rss_before),
+                "rss_peak_mb_after": _format_optional_float(normalize_rss_after),
+                "rss_peak_mb_delta": _format_optional_float(
+                    None if normalize_rss_before is None or normalize_rss_after is None else normalize_rss_after - normalize_rss_before
+                ),
+            },
+        )
+        _print_source_time_progress(
+            "normalize-done "
+            f"split={split_id} outer_fold={outer_fold} inner_fold={inner_fold + 1}/{len(inner_splits)} "
+            f"elapsed={normalize_elapsed:.2f}s rss_peak_mb={_format_optional_float(normalize_rss_after)}"
+        )
+
         validation_labels.append(train_labels[inner_valid_local])
         for window_index, window in enumerate(candidate_windows):
+            fit_index += 1
             features = _base._features_for_window(inner_data, window)
             inner_tuning_cv = (
-                make_tuning_cross_validator(
-                    train_labels[inner_train_local],
-                    None if train_groups is None else train_groups[inner_train_local],
-                    tuning_cv_splits,
+                list(
+                    make_tuning_cross_validator(
+                        train_labels[inner_train_local],
+                        None if train_groups is None else train_groups[inner_train_local],
+                        tuning_cv_splits,
+                    )
                 )
                 if tune_hyperparameters
                 else 3
             )
-            model = make_decoder(
-                decoder_name,
-                max_iter=max_iter,
-                emission_mode=emission_mode,
-                feature_preprocessor=feature_preprocessor,
-                pca_components=pca_components,
+            estimated_fit_count = _estimated_sklearn_fits(
                 tune_hyperparameters=tune_hyperparameters,
-                tuning_cv=inner_tuning_cv,
-                tuning_scoring=tuning_scoring,
+                inner_tuning_cv=inner_tuning_cv,
                 tuning_c_grid=tuning_c_grid,
             )
-            model.fit(features[inner_train_global], train_labels[inner_train_local])
-            probabilities = _base._align_probability_columns(
-                predict_emission_probabilities(
-                    model,
-                    features[inner_valid_global],
-                    emission_mode=emission_mode,
-                ),
-                model=model,
-                classes=classes,
+            fit_start = time.perf_counter()
+            fit_rss_before = _peak_rss_mb()
+            _print_source_time_progress(
+                "fit-start "
+                f"split={split_id} outer_fold={outer_fold} inner_fold={inner_fold + 1}/{len(inner_splits)} "
+                f"window={window_index + 1}/{len(candidate_windows)} center={window[2]:.3f}s "
+                f"fit={fit_index}/{planned_inner_window_fits} "
+                f"estimated_sklearn_fits={estimated_fit_count} "
+                f"inner_train_trials={len(inner_train_local)} inner_valid_trials={len(inner_valid_local)}"
             )
-            probabilities = _base._apply_class_prior_correction(
-                probabilities,
-                train_labels[inner_train_local],
-                classes,
-                class_prior_correction,
+            try:
+                model = make_decoder(
+                    decoder_name,
+                    max_iter=max_iter,
+                    emission_mode=emission_mode,
+                    feature_preprocessor=feature_preprocessor,
+                    pca_components=pca_components,
+                    tune_hyperparameters=tune_hyperparameters,
+                    tuning_cv=inner_tuning_cv,
+                    tuning_scoring=tuning_scoring,
+                    tuning_c_grid=tuning_c_grid,
+                )
+                model.fit(features[inner_train_global], train_labels[inner_train_local])
+                probabilities = _base._align_probability_columns(
+                    predict_emission_probabilities(
+                        model,
+                        features[inner_valid_global],
+                        emission_mode=emission_mode,
+                    ),
+                    model=model,
+                    classes=classes,
+                )
+                probabilities = _base._apply_class_prior_correction(
+                    probabilities,
+                    train_labels[inner_train_local],
+                    classes,
+                    class_prior_correction,
+                )
+            except Exception as exc:
+                fit_rss_after = _peak_rss_mb()
+                elapsed = time.perf_counter() - fit_start
+                _append_source_time_selection_diagnostic(
+                    diagnostics_out_path,
+                    {
+                        "event": "fit_error",
+                        "split_id": split_id,
+                        "outer_fold": outer_fold,
+                        "emission_mode": emission_mode,
+                        "source_time_selection": mode,
+                        "inner_fold": inner_fold,
+                        "window_index": window_index,
+                        "window_center": float(window[2]),
+                        "fit_index": fit_index,
+                        "planned_inner_window_fits": planned_inner_window_fits,
+                        "estimated_sklearn_fits": estimated_fit_count,
+                        "n_source_trials": len(train_idx),
+                        "n_inner_train_trials": len(inner_train_local),
+                        "n_inner_valid_trials": len(inner_valid_local),
+                        "n_inner_folds": len(inner_splits),
+                        "n_candidate_times": len(candidate_windows),
+                        "elapsed_seconds": elapsed,
+                        "rss_peak_mb_before": _format_optional_float(fit_rss_before),
+                        "rss_peak_mb_after": _format_optional_float(fit_rss_after),
+                        "rss_peak_mb_delta": _format_optional_float(
+                            None if fit_rss_before is None or fit_rss_after is None else fit_rss_after - fit_rss_before
+                        ),
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                    },
+                )
+                _print_source_time_progress(
+                    "fit-error "
+                    f"split={split_id} outer_fold={outer_fold} inner_fold={inner_fold + 1}/{len(inner_splits)} "
+                    f"window={window_index + 1}/{len(candidate_windows)} center={window[2]:.3f}s "
+                    f"fit={fit_index}/{planned_inner_window_fits} elapsed={elapsed:.2f}s "
+                    f"error={type(exc).__name__}: {exc}"
+                )
+                raise
+            fit_rss_after = _peak_rss_mb()
+            fit_elapsed = time.perf_counter() - fit_start
+            _append_source_time_selection_diagnostic(
+                diagnostics_out_path,
+                {
+                    "event": "fit_complete",
+                    "split_id": split_id,
+                    "outer_fold": outer_fold,
+                    "emission_mode": emission_mode,
+                    "source_time_selection": mode,
+                    "inner_fold": inner_fold,
+                    "window_index": window_index,
+                    "window_center": float(window[2]),
+                    "fit_index": fit_index,
+                    "planned_inner_window_fits": planned_inner_window_fits,
+                    "estimated_sklearn_fits": estimated_fit_count,
+                    "n_source_trials": len(train_idx),
+                    "n_inner_train_trials": len(inner_train_local),
+                    "n_inner_valid_trials": len(inner_valid_local),
+                    "n_inner_folds": len(inner_splits),
+                    "n_candidate_times": len(candidate_windows),
+                    "elapsed_seconds": fit_elapsed,
+                    "rss_peak_mb_before": _format_optional_float(fit_rss_before),
+                    "rss_peak_mb_after": _format_optional_float(fit_rss_after),
+                    "rss_peak_mb_delta": _format_optional_float(
+                        None if fit_rss_before is None or fit_rss_after is None else fit_rss_after - fit_rss_before
+                    ),
+                },
             )
             validation_probabilities[window_index].append(probabilities)
+            _print_source_time_progress(
+                "fit-done "
+                f"split={split_id} outer_fold={outer_fold} inner_fold={inner_fold + 1}/{len(inner_splits)} "
+                f"window={window_index + 1}/{len(candidate_windows)} center={window[2]:.3f}s "
+                f"fit={fit_index}/{planned_inner_window_fits} elapsed={fit_elapsed:.2f}s "
+                f"rss_peak_mb={_format_optional_float(fit_rss_after)}"
+            )
 
     labels = np.concatenate(validation_labels)
     probability_cube = np.stack([np.vstack(parts) for parts in validation_probabilities], axis=1)
@@ -207,35 +492,70 @@ def _fit_foldlocal_source_time_selector(
         for window_index in range(len(candidate_windows))
     ]
 
-    if mode == "source_oof_best_time":
-        best_index = int(np.argmax(time_scores))
-        weights = np.zeros(len(candidate_windows), dtype=float)
-        weights[best_index] = 1.0
-        source_score = time_scores[best_index]
-        bias = None
-        objective: float | None = None
-    elif mode == "source_oof_time_weighted_logits":
-        best_weights = None
-        source_score = -np.inf
-        for weights_candidate in _base._nonnegative_weight_candidates_with_uniform(len(candidate_windows)):
-            probabilities = _base._combine_probability_logits(probability_cube, weights_candidate)
-            score = float(balanced_accuracy_score(labels, probabilities.argmax(axis=1)))
-            if score > source_score:
-                best_weights = weights_candidate
-                source_score = score
-        if best_weights is None:
-            raise ValueError("No source-time-selection weights were selected.")
-        weights = best_weights
-        bias = None
-        objective = None
-    elif mode == "source_oof_classwise_time_weighted_logits":
-        weights, source_score = _base._fit_classwise_nonnegative_time_weights(probability_cube, labels)
-        bias = None
-        objective = None
-    elif mode == "source_oof_logit_stacker":
-        weights, bias, source_score, objective = _base._fit_logit_stacker_time_weights_and_bias(probability_cube, labels)
-    else:
-        raise ValueError(f"Unknown source-time-selection mode '{mode}'.")
+    selection_start = time.perf_counter()
+    selection_rss_before = _peak_rss_mb()
+    try:
+        if mode == "source_oof_best_time":
+            best_index = int(np.argmax(time_scores))
+            weights = np.zeros(len(candidate_windows), dtype=float)
+            weights[best_index] = 1.0
+            source_score = time_scores[best_index]
+            bias = None
+            objective: float | None = None
+        elif mode == "source_oof_time_weighted_logits":
+            best_weights = None
+            source_score = -np.inf
+            for weights_candidate in _base._nonnegative_weight_candidates_with_uniform(len(candidate_windows)):
+                probabilities = _base._combine_probability_logits(probability_cube, weights_candidate)
+                score = float(balanced_accuracy_score(labels, probabilities.argmax(axis=1)))
+                if score > source_score:
+                    best_weights = weights_candidate
+                    source_score = score
+            if best_weights is None:
+                raise ValueError("No source-time-selection weights were selected.")
+            weights = best_weights
+            bias = None
+            objective = None
+        elif mode == "source_oof_classwise_time_weighted_logits":
+            weights, source_score = _base._fit_classwise_nonnegative_time_weights(probability_cube, labels)
+            bias = None
+            objective = None
+        elif mode == "source_oof_logit_stacker":
+            weights, bias, source_score, objective = _base._fit_logit_stacker_time_weights_and_bias(probability_cube, labels)
+        else:
+            raise ValueError(f"Unknown source-time-selection mode '{mode}'.")
+    except Exception as exc:
+        selection_rss_after = _peak_rss_mb()
+        elapsed = time.perf_counter() - selection_start
+        _append_source_time_selection_diagnostic(
+            diagnostics_out_path,
+            {
+                "event": "selection_error",
+                "split_id": split_id,
+                "outer_fold": outer_fold,
+                "emission_mode": emission_mode,
+                "source_time_selection": mode,
+                "planned_inner_window_fits": planned_inner_window_fits,
+                "n_source_trials": len(train_idx),
+                "n_inner_folds": len(inner_splits),
+                "n_candidate_times": len(candidate_windows),
+                "elapsed_seconds": elapsed,
+                "rss_peak_mb_before": _format_optional_float(selection_rss_before),
+                "rss_peak_mb_after": _format_optional_float(selection_rss_after),
+                "rss_peak_mb_delta": _format_optional_float(
+                    None if selection_rss_before is None or selection_rss_after is None else selection_rss_after - selection_rss_before
+                ),
+                "time_scores": "|".join(f"{score:.12g}" for score in time_scores),
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        )
+        _print_source_time_progress(
+            "selection-error "
+            f"split={split_id} outer_fold={outer_fold} mode={mode} elapsed={elapsed:.2f}s "
+            f"error={type(exc).__name__}: {exc}"
+        )
+        raise
 
     time_mass = weights if weights.ndim == 1 else weights.sum(axis=0)
     metadata = {
@@ -257,6 +577,38 @@ def _fit_foldlocal_source_time_selector(
                 "source_time_selection_inner_objective": float(objective) if objective is not None else "",
             }
         )
+    selection_rss_after = _peak_rss_mb()
+    selection_elapsed = time.perf_counter() - selection_start
+    _append_source_time_selection_diagnostic(
+        diagnostics_out_path,
+        {
+            "event": "selection_complete",
+            "split_id": split_id,
+            "outer_fold": outer_fold,
+            "emission_mode": emission_mode,
+            "source_time_selection": mode,
+            "planned_inner_window_fits": planned_inner_window_fits,
+            "n_source_trials": len(train_idx),
+            "n_inner_folds": len(inner_splits),
+            "n_candidate_times": len(candidate_windows),
+            "elapsed_seconds": selection_elapsed,
+            "rss_peak_mb_before": _format_optional_float(selection_rss_before),
+            "rss_peak_mb_after": _format_optional_float(selection_rss_after),
+            "rss_peak_mb_delta": _format_optional_float(
+                None if selection_rss_before is None or selection_rss_after is None else selection_rss_after - selection_rss_before
+            ),
+            "source_score": float(source_score),
+            "selected_time": metadata["source_time_selection_selected_time"],
+            "time_scores": metadata["source_time_selection_time_scores"],
+            "weights": metadata["source_time_selection_weights"],
+        },
+    )
+    _print_source_time_progress(
+        "selection-complete "
+        f"split={split_id} outer_fold={outer_fold} mode={mode} "
+        f"source_score={float(source_score):.4f} selected_time={metadata['source_time_selection_selected_time']:.3f}s "
+        f"elapsed={selection_elapsed:.2f}s diagnostics={diagnostics_out_path}"
+    )
     return weights, bias, metadata
 
 
@@ -455,6 +807,10 @@ def run_time_resolved_decode(
         candidate_windows = _base._nearest_candidate_windows(windows, source_time_selection_time_values)
         selection_decoder_name = f"{decoder_name}_{_base.SOURCE_TIME_SELECTION_OUTPUT_DECODER_SUFFIX[source_time_selection_name]}"
         candidate_centers = [window[2] for window in candidate_windows]
+        source_time_diagnostics_out_path = _source_time_selection_diagnostics_path(out_path)
+        if source_time_diagnostics_out_path.exists():
+            source_time_diagnostics_out_path.unlink()
+        _print_source_time_progress(f"writing diagnostics to {source_time_diagnostics_out_path}")
         for fold, (train_idx, test_idx) in splits:
             fold_data = _normalize_epoch_data_for_fold(
                 raw_data,
@@ -475,6 +831,8 @@ def run_time_resolved_decode(
             train_groups = None if groups is None else groups[train_idx]
             for current_emission_mode in emission_modes:
                 weights, bias, selection_metadata = _fit_foldlocal_source_time_selector(
+                    split_id=split_id,
+                    outer_fold=fold,
                     raw_data=raw_data,
                     times=epochs.times,
                     normalization=normalization_name,
@@ -495,6 +853,7 @@ def run_time_resolved_decode(
                     classes=classes,
                     class_prior_correction=class_prior_correction_name,
                     mode=source_time_selection_name,
+                    diagnostics_out_path=source_time_diagnostics_out_path,
                 )
                 test_probability_parts: list[np.ndarray] = []
                 final_tuning_metadata: dict[str, object] = {}

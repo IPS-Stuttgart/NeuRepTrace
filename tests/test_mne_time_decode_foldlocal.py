@@ -155,7 +155,7 @@ def test_foldlocal_source_time_selection_is_inner_source_only(tmp_path: Path, mo
     assert observations[["prob_class_0", "prob_class_1"]].sum(axis=1).round(6).tolist() == [1.0] * len(observations)
 
 
-def test_foldlocal_classwise_source_time_selection_writes_class_time_weights(tmp_path: Path, monkeypatch):
+def test_foldlocal_classwise_source_time_selection_writes_class_time_weights(tmp_path: Path, monkeypatch, capsys):
     rng = np.random.default_rng(37)
     subjects = np.repeat(["sub-01", "sub-02", "sub-03"], 6)
     labels = np.tile(["left", "right"], 9)
@@ -168,11 +168,12 @@ def test_foldlocal_classwise_source_time_selection_writes_class_time_weights(tmp
     monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
 
     observations_out = tmp_path / "foldlocal_classwise_source_time_observations.csv"
+    out_path = tmp_path / "foldlocal_classwise_source_time.csv"
     results = run_time_resolved_decode(
         epochs_path=tmp_path / "epochs.fif",
         label_column="condition",
         group_column="subject",
-        out_path=tmp_path / "foldlocal_classwise_source_time.csv",
+        out_path=out_path,
         n_splits=3,
         window_ms=20,
         step_ms=20,
@@ -186,6 +187,8 @@ def test_foldlocal_classwise_source_time_selection_writes_class_time_weights(tmp
         observation_out_path=observations_out,
     )
     observations = pd.read_csv(observations_out)
+    diagnostics = pd.read_csv(tmp_path / "foldlocal_classwise_source_time_source_time_selection_diagnostics.csv")
+    captured = capsys.readouterr()
 
     assert results["temporal_mode"].unique().tolist() == ["source_oof_classwise_time_weighted_logits"]
     assert results["source_time_selection_weight_type"].unique().tolist() == ["classwise"]
@@ -194,6 +197,11 @@ def test_foldlocal_classwise_source_time_selection_writes_class_time_weights(tmp
     assert observations["source_time_selection_weight_type"].unique().tolist() == ["classwise"]
     assert observations["source_time_selection_normalization_scope"].unique().tolist() == ["inner_train_fold"]
     assert observations[["prob_class_0", "prob_class_1"]].sum(axis=1).round(6).tolist() == [1.0] * len(observations)
+    assert "[source-time-selection] fit-start" in captured.out
+    assert "planned_inner_window_fits" in captured.out
+    assert {"planned", "inner_fold_normalized", "fit_complete", "selection_complete"}.issubset(set(diagnostics["event"]))
+    assert {"elapsed_seconds", "rss_peak_mb_after", "estimated_sklearn_fits"}.issubset(diagnostics.columns)
+    assert diagnostics["planned_inner_window_fits"].dropna().astype(int).max() > 0
 
 
 def test_foldlocal_logit_stacker_writes_source_only_bias(tmp_path: Path, monkeypatch):
