@@ -98,7 +98,8 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert '--seed "$STAGE_SEED_INPUT"' in workflow
     assert "subjects-${{ inputs.subjects }}" not in workflow
     assert "stage_overwrite" in workflow
-    assert 'if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]]; then' in workflow
+    assert 'runner_environment == "github-hosted" or no_download' in workflow
+    assert 'if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" && "$NO_DOWNLOAD" != "true" ]]; then' in workflow
     assert "stage_args+=(--overwrite)" in workflow
     assert "OPENNEURO_ARTIFACT_SUFFIX" in workflow
     assert "OPENNEURO_OUTPUT_SUFFIX" in workflow
