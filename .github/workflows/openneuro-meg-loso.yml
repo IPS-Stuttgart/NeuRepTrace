@@ -513,6 +513,7 @@ jobs:
 
                   dataset = os.environ["DATASET"]
                   runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "")
+                  no_download = os.environ.get("NO_DOWNLOAD", "").lower() == "true"
                   staged_root = Path(os.environ["NEUREPTRACE_OPENNEURO_STAGED_DIR"])
                   spec = DATASET_SPECS[dataset]
                   expected = [
@@ -520,7 +521,7 @@ jobs:
                       for subject in parse_subjects(spec, os.environ["OPENNEURO_SUBJECTS"])
                   ]
                   missing = [path for path in expected if not path.is_file() or path.stat().st_size <= 0]
-                  ready = runner_environment == "github-hosted" and not missing
+                  ready = not missing and (runner_environment == "github-hosted" or no_download)
                   output_path = Path(os.environ["GITHUB_OUTPUT"])
                   with output_path.open("a", encoding="utf-8") as handle:
                       handle.write(f"ready={str(ready).lower()}\n")
@@ -637,7 +638,7 @@ jobs:
                   )
                   stage_args+=("${max_events_args[@]}")
                   stage_args+=(--on-mismatch warn)
-                  if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]]; then
+                  if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" && "$NO_DOWNLOAD" != "true" ]]; then
                     stage_args+=(--overwrite)
                   fi
                   python -m "$stage_module" "${stage_args[@]}" "${extra_stage_args[@]}"
