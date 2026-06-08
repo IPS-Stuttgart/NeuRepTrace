@@ -317,6 +317,7 @@ jobs:
                   max_events = int(os.environ["MAX_EVENTS_PER_LABEL_INPUT"])
                   max_events_arg = "" if max_events <= 0 else f"--max-events-per-label {max_events}"
                   runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "")
+                  no_download = os.environ.get("NO_DOWNLOAD", "").lower() == "true"
                   dataset_cache_root = (
                       Path("/home/github-runner/.cache/datasets")
                       if runner_environment == "self-hosted"
@@ -357,7 +358,7 @@ jobs:
                       "runner_environment": runner_environment or "unknown",
                       "data_root": data_root.as_posix(),
                       "staged_root": staged_root.as_posix(),
-                      "stage_overwrite": runner_environment == "self-hosted",
+                      "stage_overwrite": runner_environment == "self-hosted" and not no_download,
                       "output_dir": output_dir.as_posix(),
                       "artifact_name": artifact_name,
                       "max_events_per_label": max_events,
@@ -416,6 +417,7 @@ jobs:
 
                   dataset = os.environ["DATASET"]
                   runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "")
+                  no_download = os.environ.get("NO_DOWNLOAD", "").lower() == "true"
                   staged_root = Path(os.environ["NEUREPTRACE_OPENNEURO_STAGED_DIR"])
                   spec = DATASET_SPECS[dataset]
                   expected = [
@@ -423,7 +425,7 @@ jobs:
                       for subject in parse_subjects(spec, os.environ["OPENNEURO_SUBJECTS"])
                   ]
                   missing = [path for path in expected if not path.is_file() or path.stat().st_size <= 0]
-                  ready = runner_environment == "github-hosted" and not missing
+                  ready = not missing and (runner_environment == "github-hosted" or no_download)
                   with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
                       handle.write(f"ready={str(ready).lower()}\n")
                       handle.write(f"missing_count={len(missing)}\n")
@@ -506,6 +508,7 @@ jobs:
                   exit "$status"
 
             - name: Stage OpenNeuro MEG epochs
+              if: steps.staged_check.outputs.ready != 'true'
               shell: bash
               run: |
                   set -euo pipefail
@@ -537,7 +540,7 @@ jobs:
                   )
                   stage_args+=("${max_events_args[@]}")
                   stage_args+=(--on-mismatch warn)
-                  if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" ]]; then
+                  if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" && "$NO_DOWNLOAD" != "true" ]]; then
                     stage_args+=(--overwrite)
                   fi
                   python -m "$stage_module" "${stage_args[@]}" "${extra_stage_args[@]}"
