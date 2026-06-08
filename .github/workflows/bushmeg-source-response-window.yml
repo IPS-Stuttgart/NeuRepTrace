@@ -1,0 +1,140 @@
+name: BUSH-MEG source response-window
+
+on:
+    workflow_dispatch:
+        inputs:
+            participants:
+                description: "BUSH-MEG participant ids/ranges"
+                required: true
+                default: "1-4,6,8,9,10,13-27"
+            run_baseline:
+                description: "Run clean source-only baseline config"
+                required: true
+                type: boolean
+                default: true
+            run_response_window:
+                description: "Run fixed response-window C config"
+                required: true
+                type: boolean
+                default: true
+            run_shuffle:
+                description: "Also run matched train-label shuffle controls"
+                required: true
+                type: boolean
+                default: true
+
+jobs:
+    bushmeg-source-response-window:
+        runs-on: ubuntu-latest
+        timeout-minutes: 720
+        env:
+            BUSHMEG_DATA_DIR: ${{ github.workspace }}/.cache/bushmeg
+            BUSH_MEG_DATA_DIR: ${{ github.workspace }}/.cache/bushmeg
+            BUSHMEG_WEBDAV_URL: ${{ secrets.BUSHMEG_WEBDAV_URL }}
+            BUSHMEG_DATA_KEY: ${{ secrets.BUSHMEG_DATA_KEY }}
+            BUSHMEG_DATA_PASSWORD: ${{ secrets.BUSHMEG_DATA_PASSWORD }}
+            BUSHMEG_PARTICIPANTS: ${{ inputs.participants }}
+            RUN_BASELINE: ${{ inputs.run_baseline }}
+            RUN_RESPONSE_WINDOW: ${{ inputs.run_response_window }}
+            RUN_SHUFFLE: ${{ inputs.run_shuffle }}
+
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v6
+
+            - name: Restore BUSH-MEG data cache
+              uses: actions/cache/restore@v5
+              with:
+                  path: .cache/bushmeg
+                  key: bushmeg-data-v1
+                  restore-keys: |
+                      bushmeg-data-
+
+            - name: Set up Python
+              uses: actions/setup-python@v6
+              with:
+                  python-version: "3.12"
+                  cache: pip
+
+            - name: Install NeuRepTrace
+              run: |
+                  python -m pip install --upgrade pip
+                  python -m pip install -e . pytest
+
+            - name: Prepare requested BUSH-MEG main-task files
+              run: |
+                  python -m neureptrace.bushmeg_data prepare-smoke \
+                    --data-dir "$BUSHMEG_DATA_DIR" \
+                    --participants "$BUSHMEG_PARTICIPANTS" \
+                    --roles main \
+                    --timeout 300
+
+            - name: Verify requested BUSH-MEG main-task files
+              run: |
+                  python -m neureptrace.bushmeg_data list-smoke-files \
+                    --data-dir "$BUSHMEG_DATA_DIR" \
+                    --participants "$BUSHMEG_PARTICIPANTS" \
+                    --roles main
+
+            - name: Run source-only LOSO response-window comparison
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  run_source_loso() {
+                    local config_path="$1"
+                    local run_name="$2"
+                    local shuffle="$3"
+
+                    echo "::group::${run_name}"
+                    python -m neureptrace.bushmeg_source_loso "$config_path" \
+                      --set "participants.ids=$BUSHMEG_PARTICIPANTS" \
+                      --set "outputs.base_dir=results/bush_meg/${run_name}" \
+                      --set "decoding.label_shuffle_control=${shuffle}" \
+                      --set "decoding.label_shuffle_seed=13"
+
+                    python - "$run_name" <<'PY'
+                  from pathlib import Path
+                  import sys
+
+                  import pandas as pd
+
+                  run_name = sys.argv[1]
+                  output_dir = Path("results") / "bush_meg" / run_name
+                  summaries = sorted(output_dir.glob("*summary.csv"))
+                  if not summaries:
+                      raise SystemExit(f"No summary CSV found in {output_dir}")
+                  summary = pd.read_csv(summaries[0])
+                  print(
+                      "BUSH-MEG",
+                      run_name,
+                      f"mean_balanced_accuracy={summary['balanced_accuracy'].mean():.6f}",
+                      f"mean_accuracy={summary['accuracy'].mean():.6f}",
+                      f"mean_top2={summary['top2_accuracy'].mean():.6f}",
+                      f"n_subjects={len(summary)}",
+                  )
+                  PY
+                    echo "::endgroup::"
+                  }
+
+                  if [[ "$RUN_BASELINE" == "true" ]]; then
+                    run_source_loso "configs/bush_meg/source_loso_decoding.yml" "source_loso_baseline_real" "false"
+                    if [[ "$RUN_SHUFFLE" == "true" ]]; then
+                      run_source_loso "configs/bush_meg/source_loso_decoding.yml" "source_loso_baseline_shuffle_seed_13" "true"
+                    fi
+                  fi
+
+                  if [[ "$RUN_RESPONSE_WINDOW" == "true" ]]; then
+                    run_source_loso "configs/bush_meg/source_loso_response_window_c.yml" "source_loso_response_window_c_real" "false"
+                    if [[ "$RUN_SHUFFLE" == "true" ]]; then
+                      run_source_loso "configs/bush_meg/source_loso_response_window_c.yml" "source_loso_response_window_c_shuffle_seed_13" "true"
+                    fi
+                  fi
+
+            - name: Upload BUSH-MEG source LOSO outputs
+              if: ${{ always() }}
+              uses: actions/upload-artifact@v7
+              with:
+                  name: bushmeg-source-response-window-${{ github.run_id }}
+                  path: results/bush_meg/**
+                  if-no-files-found: warn

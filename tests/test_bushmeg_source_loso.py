@@ -13,10 +13,12 @@ from neureptrace.bushmeg_source_loso import (
     WindowSpec,
     _apply_class_bias,
     _candidate_metrics,
+    _combine_window_probabilities,
     _class_prototype_similarity_features,
     _candidate_grid,
     _fit_candidate_model,
     _fit_class_bias,
+    _predict_candidate,
     _preprocessing_normalization_name,
     _prepare_window_train_test_features,
     _sample_weights_for_training,
@@ -360,6 +362,112 @@ def test_candidate_metrics_report_multiclass_topk():
     assert metrics["balanced_accuracy"] == 2 / 3
     assert metrics["top2_accuracy"] == 1.0
     assert metrics["top3_accuracy"] == 1.0
+
+
+def test_log_probability_window_combine_uses_geometric_mean():
+    probabilities_a = np.array([[0.9, 0.1], [0.4, 0.6]], dtype=float)
+    probabilities_b = np.array([[0.5, 0.5], [0.8, 0.2]], dtype=float)
+    probability_mean = _combine_window_probabilities(probabilities_a + probabilities_b, 2, "probability_mean")
+    log_probability_mean = _combine_window_probabilities(
+        np.log(probabilities_a) + np.log(probabilities_b),
+        2,
+        "log_probability_mean",
+    )
+
+    expected = np.sqrt(probabilities_a * probabilities_b)
+    expected /= expected.sum(axis=1, keepdims=True)
+
+    np.testing.assert_allclose(log_probability_mean, expected)
+    assert not np.allclose(log_probability_mean, probability_mean)
+
+
+def test_candidate_grid_expands_window_combine_modes():
+    config = {
+        "preprocessing": {"window_size": 0.100, "tmin": -0.35, "tmax": 0.35},
+        "decoding": {
+            "classifier": "multinomial-logistic",
+            "emission_mode": "uncalibrated",
+            "feature_preprocessor": "none",
+            "pca_components": None,
+            "tuning_c_grid": "1.0",
+        },
+        "source_loso": {
+            "candidate_grid": {
+                "decoders": ["logistic"],
+                "emission_modes": ["uncalibrated"],
+                "feature_preprocessors": ["none"],
+                "pca_components": [None],
+                "temporal_bins": [1],
+                "c_grid": [1.0],
+                "window_combines": ["log_probability_mean"],
+                "window_sets": [
+                    {"name": "response_window_c", "centers": [0.088, 0.136, 0.184, 0.232, 0.280], "window_size": 0.100},
+                ],
+            }
+        },
+    }
+
+    candidates = _candidate_grid(config)
+
+    assert {candidate.window_combine for candidate in candidates} == {"log_probability_mean"}
+    assert candidates[0].window_centers == (0.088, 0.136, 0.184, 0.232, 0.28)
+
+
+def test_predict_candidate_train_label_shuffle_is_train_only(monkeypatch):
+    subjects = {}
+    times = np.array([0.15])
+    labels = np.array([0, 0, 1, 1])
+    for subject_idx in range(3):
+        data = np.zeros((4, 1, 1), dtype=np.float32)
+        data[:, 0, 0] = labels * 4.0 + subject_idx * 0.01
+        subjects[str(subject_idx)] = SubjectEpochs(
+            subject=str(subject_idx),
+            data=data,
+            times=times,
+            metadata=pd.DataFrame(),
+            labels=labels,
+        )
+    candidate = CandidateSpec(
+        name="single",
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        feature_preprocessor="none",
+        pca_components=None,
+        classifier_param=1.0,
+        temporal_bins=1,
+        windows=(WindowSpec(center=0.15, width=0.05),),
+    )
+
+    real_probabilities = _predict_candidate(
+        subjects=subjects,
+        cache=FeatureCache(subjects),
+        candidate=candidate,
+        train_subjects=["0", "1"],
+        test_subject="2",
+        n_classes=2,
+        max_iter=200,
+    )
+
+    def flip_binary_labels(labels, *, seed, context):
+        del seed, context
+        return 1 - np.asarray(labels, dtype=int)
+
+    monkeypatch.setattr("neureptrace.bushmeg_source_loso._base._shuffle_training_labels", flip_binary_labels)
+    shuffled_probabilities = _predict_candidate(
+        subjects=subjects,
+        cache=FeatureCache(subjects),
+        candidate=candidate,
+        train_subjects=["0", "1"],
+        test_subject="2",
+        n_classes=2,
+        max_iter=200,
+        label_shuffle_control=True,
+        label_shuffle_seed=13,
+        shuffle_context=("test",),
+    )
+
+    assert balanced_accuracy_score(labels, real_probabilities.argmax(axis=1)) == 1.0
+    assert balanced_accuracy_score(labels, shuffled_probabilities.argmax(axis=1)) == 0.0
 
 
 def test_select_candidate_uses_only_source_subjects_for_inner_loso():
