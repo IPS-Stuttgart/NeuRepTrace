@@ -213,6 +213,92 @@ def selected_download_includes(
     return tuple(includes)
 
 
+def _missing_include_paths(bids_root: Path, include_paths: Sequence[str]) -> tuple[str, ...]:
+    missing = []
+    for relative_path in include_paths:
+        local_path = bids_root / relative_path
+        if not local_path.is_file() or local_path.stat().st_size <= 0:
+            missing.append(relative_path)
+    return tuple(missing)
+
+
+def _run_openneuro_download(
+    dataset_id: str,
+    *,
+    bids_root: Path,
+    include_paths: Sequence[str],
+    max_concurrent_downloads: int,
+    metadata_timeout: float,
+) -> None:
+    command = [
+        "openneuro-py",
+        "download",
+        "--dataset",
+        dataset_id,
+        "--target-dir",
+        str(bids_root),
+        "--max-concurrent-downloads",
+        str(int(max_concurrent_downloads)),
+        "--metadata-timeout",
+        str(float(metadata_timeout)),
+    ]
+    for include_path in include_paths:
+        command.extend(["--include", include_path])
+    print(f"Downloading OpenNeuro batch with {len(include_paths)} include path(s).")
+    subprocess.run(command, check=True)
+
+
+def _download_include_batch_adaptive(
+    dataset_id: str,
+    *,
+    bids_root: Path,
+    include_paths: Sequence[str],
+    max_concurrent_downloads: int,
+    metadata_timeout: float,
+) -> tuple[str, ...]:
+    missing_before = _missing_include_paths(bids_root, include_paths)
+    if not missing_before:
+        return ()
+
+    try:
+        _run_openneuro_download(
+            dataset_id,
+            bids_root=bids_root,
+            include_paths=missing_before,
+            max_concurrent_downloads=max_concurrent_downloads,
+            metadata_timeout=metadata_timeout,
+        )
+    except subprocess.CalledProcessError as exc:
+        print(f"OpenNeuro batch download failed with exit code {exc.returncode}; re-checking local files.")
+
+    missing_after = _missing_include_paths(bids_root, missing_before)
+    if not missing_after or len(missing_before) == 1:
+        return missing_after
+
+    downloaded_count = len(missing_before) - len(missing_after)
+    if downloaded_count > 0:
+        print(
+            f"OpenNeuro batch materialized {downloaded_count}/{len(missing_before)} requested file(s); "
+            "retrying the remaining files in smaller batches."
+        )
+    else:
+        print("OpenNeuro batch did not materialize requested files; retrying in smaller batches.")
+
+    split_size = max(1, len(missing_after) // 2)
+    remaining: list[str] = []
+    for chunk in _chunked(missing_after, split_size):
+        remaining.extend(
+            _download_include_batch_adaptive(
+                dataset_id,
+                bids_root=bids_root,
+                include_paths=chunk,
+                max_concurrent_downloads=max_concurrent_downloads,
+                metadata_timeout=metadata_timeout,
+            )
+        )
+    return tuple(remaining)
+
+
 def download_selected_files(
     dataset_id: str,
     *,
@@ -253,35 +339,19 @@ def download_selected_files(
 
     for attempt in range(1, max_attempts + 1):
         print(f"Downloading {len(pending)} selected {dataset_id} file(s), attempt {attempt}/{max_attempts}.")
-        failed_command: subprocess.CalledProcessError | None = None
         for chunk in _chunked(pending, batch_size):
-            command = [
-                "openneuro-py",
-                "download",
-                "--dataset",
+            _download_include_batch_adaptive(
                 dataset_id,
-                "--target-dir",
-                str(bids_root),
-                "--max-concurrent-downloads",
-                str(int(max_concurrent_downloads)),
-                "--metadata-timeout",
-                str(float(metadata_timeout)),
-            ]
-            for include_path in chunk:
-                command.extend(["--include", include_path])
-            print(f"Downloading OpenNeuro batch with {len(chunk)} include path(s).")
-            try:
-                subprocess.run(command, check=True)
-            except subprocess.CalledProcessError as exc:
-                failed_command = exc
-                print(f"OpenNeuro batch download failed with exit code {exc.returncode}; will re-check local files before retrying.")
-                break
+                bids_root=bids_root,
+                include_paths=chunk,
+                max_concurrent_downloads=int(max_concurrent_downloads),
+                metadata_timeout=float(metadata_timeout),
+            )
         pending = list(selected_download_includes(dataset_id, bids_root=bids_root, subjects=subjects, runs=runs))
         if not pending:
             print(f"Downloaded all selected {dataset_id} files.")
             return ()
-        if failed_command is not None:
-            print(f"{len(pending)} selected {dataset_id} file(s) remain after the failed batch.")
+        print(f"{len(pending)} selected {dataset_id} file(s) remain after attempt {attempt}.")
 
     print(f"Missing {len(pending)} selected {dataset_id} file(s) after download attempts:")
     for relative_path in pending:

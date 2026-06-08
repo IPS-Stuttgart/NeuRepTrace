@@ -214,6 +214,35 @@ def test_download_selected_files_batches_openneuro_includes(tmp_path: Path, monk
     assert manifest.read_text(encoding="utf-8").splitlines() == expected_relative_files("ds006629", subjects="1,2", runs="0")
 
 
+def test_download_selected_files_splits_partial_successful_batches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    commands: list[list[str]] = []
+
+    def fake_run(command, *, check):
+        assert check is True
+        commands.append(list(command))
+        target_dir = Path(command[command.index("--target-dir") + 1])
+        include_indices = [index + 1 for index, token in enumerate(command) if token == "--include"]
+        path = target_dir / command[include_indices[-1]]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"ok")
+
+    monkeypatch.setattr("neureptrace.openneuro_meg.subprocess.run", fake_run)
+
+    missing = download_selected_files(
+        "ds006629",
+        bids_root=tmp_path,
+        subjects="1,2",
+        runs="0",
+        batch_size=4,
+        max_attempts=1,
+    )
+
+    assert missing == ()
+    assert [command.count("--include") for command in commands] == [4, 1, 1, 1]
+    for relative_path in expected_relative_files("ds006629", subjects="1,2", runs="0"):
+        assert (tmp_path / relative_path).is_file()
+
+
 def test_ds004276_word_metadata_joins_behavior_file(tmp_path: Path):
     behavior = pd.DataFrame(
         {
