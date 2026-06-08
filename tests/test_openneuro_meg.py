@@ -14,11 +14,13 @@ from neureptrace.openneuro_meg import (
     _derive_metadata,
     _drop_non_epochable_metadata,
     _filter_metadata,
+    download_selected_files,
     expected_relative_files,
     invalid_raw_fif_files,
     parse_runs,
     parse_subjects,
     run_files,
+    selected_download_includes,
     subject_label,
 )
 
@@ -83,6 +85,9 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "Resolve GitHub-hosted OpenNeuro cache keys" in workflow
     assert "safe_cache_token" in workflow
     assert "Cache staged OpenNeuro epochs on GitHub-hosted runners" in workflow
+    assert "download-selected" in workflow
+    assert "--batch-size 24" in workflow
+    assert "--max-concurrent-downloads 2" in workflow
     assert "NeuRepTrace LOSO decode still running" in workflow
     assert "Check selected staged epochs" in workflow
     assert "raw-file check/download can be skipped" in workflow
@@ -162,6 +167,51 @@ def test_expected_relative_files_include_singsing_raw_and_events():
         "sub-02/meg/sub-02_task-MMNHCS_run-0_meg.fif",
         "sub-02/meg/sub-02_task-MMNHCS_run-0_events.tsv",
     ]
+
+
+def test_selected_download_includes_skip_existing_files(tmp_path: Path):
+    existing = tmp_path / "sub-01" / "meg" / "sub-01_task-MMNHCS_run-0_events.tsv"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("onset\tduration\ttrial_type\n", encoding="utf-8")
+
+    includes = selected_download_includes("ds006629", bids_root=tmp_path, subjects="1", runs="0")
+
+    assert includes == ("sub-01/meg/sub-01_task-MMNHCS_run-0_meg.fif",)
+
+
+def test_download_selected_files_batches_openneuro_includes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    commands: list[list[str]] = []
+
+    def fake_run(command, *, check):
+        assert check is True
+        commands.append(list(command))
+        target_dir = Path(command[command.index("--target-dir") + 1])
+        include_indices = [index + 1 for index, token in enumerate(command) if token == "--include"]
+        for index in include_indices:
+            path = target_dir / command[index]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"ok")
+
+    monkeypatch.setattr("neureptrace.openneuro_meg.subprocess.run", fake_run)
+    manifest = tmp_path / "includes.txt"
+
+    missing = download_selected_files(
+        "ds006629",
+        bids_root=tmp_path,
+        subjects="1,2",
+        runs="0",
+        include_manifest=manifest,
+        batch_size=3,
+        max_attempts=1,
+        max_concurrent_downloads=2,
+    )
+
+    assert missing == ()
+    assert len(commands) == 2
+    assert all(command[:4] == ["openneuro-py", "download", "--dataset", "ds006629"] for command in commands)
+    assert all(command[command.index("--max-concurrent-downloads") + 1] == "2" for command in commands)
+    assert [command.count("--include") for command in commands] == [3, 1]
+    assert manifest.read_text(encoding="utf-8").splitlines() == expected_relative_files("ds006629", subjects="1,2", runs="0")
 
 
 def test_ds004276_word_metadata_joins_behavior_file(tmp_path: Path):
