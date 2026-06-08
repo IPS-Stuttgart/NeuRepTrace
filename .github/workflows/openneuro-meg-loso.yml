@@ -9,6 +9,7 @@ on:
                 required: true
                 type: choice
                 options:
+                    - ds000117
                     - ds006629
                     - ds004276
                     - ds004330
@@ -337,11 +338,13 @@ jobs:
                   mode = os.environ["MODE"]
                   spec = DATASET_SPECS[dataset]
                   config_names = {
+                      "ds000117": "ds000117_face_recognition.yml",
                       "ds004276": "ds004276_words.yml",
                       "ds006629": "ds006629_singsing.yml",
                       "ds004330": "ds004330_object_drawing.yml",
                   }
                   smoke_defaults = {
+                      "ds000117": ("1,2", "01,02"),
                       "ds004276": ("1-2", "all"),
                       "ds006629": ("1,2", "0"),
                       "ds004330": ("1,2", "01,02,03"),

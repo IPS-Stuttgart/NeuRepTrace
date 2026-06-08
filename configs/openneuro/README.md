@@ -12,6 +12,8 @@ Set `NEUREPTRACE_OPENNEURO_STAGED_DIR` to the staging directory before running
 
 Supported recipes:
 
+- `ds000117_face_recognition.yml`: classic multisubject face-recognition MEG,
+  default label is `stim_type` (`Famous`, `Unfamiliar`, `Scrambled`).
 - `ds004276_words.yml`: auditory words, default label is binary word length
   (`short` vs `long`) derived from the behavior file.
 - `ds006629_singsing.yml`: SINGSING auditory oddball, default label is
