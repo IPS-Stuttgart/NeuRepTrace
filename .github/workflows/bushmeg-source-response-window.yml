@@ -67,7 +67,8 @@ jobs:
                     --data-dir "$BUSHMEG_DATA_DIR" \
                     --participants "$BUSHMEG_PARTICIPANTS" \
                     --roles main \
-                    --timeout 300
+                    --timeout 300 \
+                    --allow-missing
 
             - name: Verify requested BUSH-MEG main-task files
               run: |
