@@ -1,6 +1,9 @@
 name: BUSH-MEG source response-window
 
 on:
+    push:
+        branches:
+            - codex/bushmeg-response-window-transfer-run2
     workflow_dispatch:
         inputs:
             participants:
@@ -33,10 +36,10 @@ jobs:
             BUSHMEG_WEBDAV_URL: ${{ secrets.BUSHMEG_WEBDAV_URL }}
             BUSHMEG_DATA_KEY: ${{ secrets.BUSHMEG_DATA_KEY }}
             BUSHMEG_DATA_PASSWORD: ${{ secrets.BUSHMEG_DATA_PASSWORD }}
-            BUSHMEG_PARTICIPANTS: ${{ inputs.participants }}
-            RUN_BASELINE: ${{ inputs.run_baseline }}
-            RUN_RESPONSE_WINDOW: ${{ inputs.run_response_window }}
-            RUN_SHUFFLE: ${{ inputs.run_shuffle }}
+            BUSHMEG_PARTICIPANTS: ${{ github.event_name == 'workflow_dispatch' && inputs.participants || '1-4,6,8,9,10,13-27' }}
+            RUN_BASELINE: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_baseline) || 'true' }}
+            RUN_RESPONSE_WINDOW: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_response_window) || 'true' }}
+            RUN_SHUFFLE: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.run_shuffle) || 'true' }}
 
         steps:
             - name: Check out repository
