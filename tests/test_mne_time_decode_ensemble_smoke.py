@@ -160,6 +160,12 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         source_time_selection="source_oof_best_time",
         source_time_selection_times=(0.088, 0.184, 0.280),
         source_time_selection_output_time=0.184,
+        alignment_method="mcca",
+        alignment_anchor_mode="class_repetition",
+        alignment_repetition_cap=12,
+        alignment_components=32,
+        alignment_times=(0.088, 0.136, 0.184),
+        alignment_target_projection="group_projection",
         ensemble_source_decoders=("multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"),
         ensemble_source_temperatures=(1.25, 1.0, 0.8),
         ensemble_score_mode="rank",
@@ -177,9 +183,21 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert all(call["source_time_selection"] == "source_oof_best_time" for call in calls)
     assert all(call["source_time_selection_times"] == (0.088, 0.184, 0.280) for call in calls)
     assert all(call["source_time_selection_output_time"] == 0.184 for call in calls)
+    assert all(call["alignment_method"] == "mcca" for call in calls)
+    assert all(call["alignment_anchor_mode"] == "class_repetition" for call in calls)
+    assert all(call["alignment_repetition_cap"] == 12 for call in calls)
+    assert all(call["alignment_components"] == 32 for call in calls)
+    assert all(call["alignment_times"] == (0.088, 0.136, 0.184) for call in calls)
+    assert all(call["alignment_target_projection"] == "group_projection" for call in calls)
     assert results["class_prior_correction"].unique().tolist() == ["train_uniform"]
     assert results["source_calibration"].unique().tolist() == ["temperature_plus_class_bias"]
     assert results["source_time_selection"].unique().tolist() == ["source_oof_best_time"]
+    assert results["alignment_method"].unique().tolist() == ["mcca"]
+    assert results["alignment_anchor_mode"].unique().tolist() == ["class_repetition"]
+    assert results["alignment_repetition_cap"].unique().tolist() == [12]
+    assert results["alignment_components"].unique().tolist() == [32]
+    assert results["alignment_times"].unique().tolist() == ["0.088,0.136,0.184"]
+    assert results["alignment_target_projection"].unique().tolist() == ["group_projection"]
     assert results["source_decoders"].unique().tolist() == ["multinomial-logistic-weighted|linear_svm|shrinkage_lda"]
     assert results["ensemble_weights"].unique().tolist() == ["0.333333333333|0.333333333333|0.333333333333"]
     assert results["ensemble_source_temperatures"].unique().tolist() == ["1.25|1|0.8"]

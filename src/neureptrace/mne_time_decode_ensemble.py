@@ -18,6 +18,8 @@ from neureptrace.mne_time_decode import (
     RESULT_SELECTION_METRIC_CHOICES,
     RESULT_SELECTION_MINIMIZE_METRICS,
     RESULT_SUMMARY_METRIC_COLUMNS,
+    SOURCE_ALIGNMENT_RUN_ANCHOR_MODES,
+    SOURCE_ALIGNMENT_RUN_METHODS,
     SOURCE_CALIBRATION_RUN_CHOICES,
     DEFAULT_SOURCE_TIME_SELECTION_TIMES,
     SOURCE_TIME_SELECTION_RUN_CHOICES,
@@ -145,6 +147,12 @@ def run_time_resolved_decode(
     source_time_selection: str = "none",
     source_time_selection_times: Sequence[float] | str | None = None,
     source_time_selection_output_time: float = 0.184,
+    alignment_method: str = "none",
+    alignment_anchor_mode: str = "class_mean",
+    alignment_repetition_cap: int | str | None = 16,
+    alignment_components: int | float | str | None = 64,
+    alignment_times: Sequence[float] | str | None = None,
+    alignment_target_projection: str = "group_projection",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
     ensemble_source_decoders: Sequence[str] | None = None,
@@ -203,6 +211,12 @@ def run_time_resolved_decode(
             source_time_selection=source_time_selection,
             source_time_selection_times=source_time_selection_times,
             source_time_selection_output_time=source_time_selection_output_time,
+            alignment_method=alignment_method,
+            alignment_anchor_mode=alignment_anchor_mode,
+            alignment_repetition_cap=alignment_repetition_cap,
+            alignment_components=alignment_components,
+            alignment_times=alignment_times,
+            alignment_target_projection=alignment_target_projection,
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
         )
@@ -262,6 +276,12 @@ def run_time_resolved_decode(
                     source_time_selection=source_time_selection,
                     source_time_selection_times=source_time_selection_times,
                     source_time_selection_output_time=source_time_selection_output_time,
+                    alignment_method=alignment_method,
+                    alignment_anchor_mode=alignment_anchor_mode,
+                    alignment_repetition_cap=alignment_repetition_cap,
+                    alignment_components=alignment_components,
+                    alignment_times=alignment_times,
+                    alignment_target_projection=alignment_target_projection,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
                 )
@@ -306,6 +326,16 @@ def run_time_resolved_decode(
         else source_time_selection_times or ",".join(str(time) for time in DEFAULT_SOURCE_TIME_SELECTION_TIMES)
     )
     results["source_time_selection_output_time"] = float(source_time_selection_output_time)
+    results["alignment_method"] = str(alignment_method).strip().lower().replace("-", "_")
+    results["alignment_anchor_mode"] = str(alignment_anchor_mode).strip().lower().replace("-", "_")
+    results["alignment_repetition_cap"] = "" if alignment_repetition_cap is None else alignment_repetition_cap
+    results["alignment_components"] = "" if alignment_components is None else alignment_components
+    results["alignment_times"] = (
+        ",".join(str(time) for time in alignment_times)
+        if isinstance(alignment_times, Sequence) and not isinstance(alignment_times, str)
+        else alignment_times or ""
+    )
+    results["alignment_target_projection"] = str(alignment_target_projection).strip().lower().replace("-", "_")
     results["source_decoders"] = "|".join(source_decoders)
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
     results["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in source_temperatures)
@@ -469,6 +499,31 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Reported output time for source-time-selected predictions.",
     )
     parser.add_argument(
+        "--alignment-method",
+        choices=SOURCE_ALIGNMENT_RUN_METHODS,
+        default="none",
+        help="Strict source-only subject-alignment method fitted inside each outer training fold.",
+    )
+    parser.add_argument(
+        "--alignment-anchor-mode",
+        choices=SOURCE_ALIGNMENT_RUN_ANCHOR_MODES,
+        default="class_mean",
+        help="Source-label anchor representation used to fit strict source-only alignment.",
+    )
+    parser.add_argument("--alignment-repetition-cap", type=int, default=16)
+    parser.add_argument("--alignment-components", default="64")
+    parser.add_argument(
+        "--alignment-times",
+        default="0.088,0.136,0.184,0.232,0.280",
+        help="Comma-separated time centers used to build source-only alignment anchors.",
+    )
+    parser.add_argument(
+        "--alignment-target-projection",
+        choices=("group_projection",),
+        default="group_projection",
+        help="Projection used for held-out subjects. Strict mode only supports source-fitted group_projection.",
+    )
+    parser.add_argument(
         "--ensemble-source-decoder",
         action="append",
         dest="ensemble_source_decoders",
@@ -546,6 +601,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         source_time_selection=args.source_time_selection,
         source_time_selection_times=args.source_time_selection_times,
         source_time_selection_output_time=args.source_time_selection_output_time,
+        alignment_method=args.alignment_method,
+        alignment_anchor_mode=args.alignment_anchor_mode,
+        alignment_repetition_cap=args.alignment_repetition_cap,
+        alignment_components=args.alignment_components,
+        alignment_times=args.alignment_times,
+        alignment_target_projection=args.alignment_target_projection,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
         ensemble_source_decoders=tuple(args.ensemble_source_decoders) if args.ensemble_source_decoders is not None else None,
