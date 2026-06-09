@@ -113,6 +113,45 @@ def test_subject_baseline_whiten_fit_excludes_test_fold_outlier():
     assert abs(float(fold_local[2, 0, 0])) > abs(float(contaminated[2, 0, 0]))
 
 
+def test_foldlocal_accepts_strict_source_alignment(tmp_path: Path, monkeypatch):
+    rng = np.random.default_rng(23)
+    subjects = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    labels = np.tile(["left", "right"], 6)
+    times = np.array([0.00, 0.01, 0.02, 0.03])
+    data = rng.normal(scale=0.05, size=(len(labels), 2, len(times)))
+    data[labels == "left", 0, 1:3] += 0.9
+    data[labels == "right", 1, 1:3] += 0.9
+    metadata = pd.DataFrame({"condition": labels, "subject": subjects})
+    epochs = FakeEpochs(data, times, metadata)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    observations_out = tmp_path / "foldlocal_alignment_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "epochs.fif",
+        label_column="condition",
+        group_column="subject",
+        out_path=tmp_path / "foldlocal_alignment.csv",
+        n_splits=3,
+        window_ms=20,
+        step_ms=20,
+        max_iter=1000,
+        emission_mode="uncalibrated",
+        normalization="none",
+        alignment_method="procrustes",
+        alignment_anchor_mode="class_mean",
+        alignment_components=4,
+        alignment_times=(0.005, 0.025),
+        observation_out_path=observations_out,
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert results["alignment_method"].unique().tolist() == ["procrustes"]
+    assert results["alignment_anchor_mode"].unique().tolist() == ["class_mean"]
+    assert results["alignment_target_projection"].unique().tolist() == ["group_projection"]
+    assert observations["alignment_method"].unique().tolist() == ["procrustes"]
+    assert observations["alignment_n_source_subjects"].min() == 2
+
+
 def test_foldlocal_source_time_selection_is_inner_source_only(tmp_path: Path, monkeypatch):
     rng = np.random.default_rng(31)
     subjects = np.repeat(["sub-01", "sub-02", "sub-03"], 6)

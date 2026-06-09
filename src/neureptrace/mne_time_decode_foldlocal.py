@@ -655,6 +655,12 @@ def run_time_resolved_decode(
     source_time_selection: str = "none",
     source_time_selection_times: Sequence[float] | str | None = None,
     source_time_selection_output_time: float = 0.184,
+    alignment_method: str = "none",
+    alignment_anchor_mode: str = "class_mean",
+    alignment_repetition_cap: int | str | None = 16,
+    alignment_components: int | float | str | None = 64,
+    alignment_times: Sequence[float] | str | None = None,
+    alignment_target_projection: str = "group_projection",
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -711,7 +717,24 @@ def run_time_resolved_decode(
         default=_base.DEFAULT_SOURCE_TIME_SELECTION_TIMES,
     )
     source_time_selection_output_time = float(source_time_selection_output_time)
+    alignment_config = _base.source_alignment_config(
+        method=alignment_method,
+        anchor_mode=alignment_anchor_mode,
+        repetition_cap=alignment_repetition_cap,
+        components=alignment_components,
+        times=alignment_times,
+        target_projection=alignment_target_projection,
+    )
     outer_test_groups_value = _base._normalize_outer_test_groups(outer_test_groups)
+    if alignment_config.enabled:
+        if group_column is None:
+            raise ValueError("source alignment requires group_column so source subjects can be identified.")
+        if normalized_temporal_train_window is not None:
+            raise ValueError("source alignment currently supports same-time decoding only.")
+        if source_time_selection_name != "none":
+            raise ValueError("source alignment should be combined with posthoc response-window aggregation, not source_time_selection.")
+        if source_calibration_name != "none":
+            raise ValueError("source alignment currently requires source_calibration='none'.")
     if source_time_selection_name != "none" and normalized_temporal_train_window is not None:
         raise ValueError("source_time_selection currently supports same-time decoding only.")
     if source_time_selection_name != "none" and source_calibration_name != "none":
@@ -764,6 +787,7 @@ def run_time_resolved_decode(
             "source_calibration": source_calibration_name,
             "source_time_selection": source_time_selection_name,
             "source_time_selection_times": source_time_selection_time_values,
+            "source_alignment": alignment_config.static_metadata() if alignment_config.enabled else {},
             "outer_test_groups": outer_test_groups_value,
         }
     )
@@ -785,6 +809,7 @@ def run_time_resolved_decode(
         source_calibration=source_calibration_name,
         source_time_selection=source_time_selection_name,
         source_time_selection_times=source_time_selection_time_values,
+        alignment_metadata=alignment_config.static_metadata() if alignment_config.enabled else None,
         label_shuffle_control=label_shuffle_control,
         label_shuffle_seed=label_shuffle_seed,
     )
@@ -1004,6 +1029,20 @@ def run_time_resolved_decode(
             for time_window in windows:
                 features = _base._features_for_window(fold_data, time_window)
                 start, stop, center = time_window
+                train_feature_matrix = features[train_idx]
+                test_feature_matrix = features[test_idx]
+                alignment_metadata = None
+                if alignment_config.enabled:
+                    alignment_result = _base.align_train_test_features(
+                        train_features=train_feature_matrix,
+                        train_labels=train_labels,
+                        train_subject_ids=groups[train_idx],
+                        test_features=test_feature_matrix,
+                        config=alignment_config,
+                    )
+                    train_feature_matrix = alignment_result.train_features
+                    test_feature_matrix = alignment_result.test_features
+                    alignment_metadata = alignment_result.metadata
                 for current_emission_mode in emission_modes:
                     tuning_cv = (
                         make_tuning_cross_validator(train_labels, None if groups is None else groups[train_idx], tuning_cv_splits)
@@ -1021,12 +1060,12 @@ def run_time_resolved_decode(
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
                     )
-                    model.fit(features[train_idx], train_labels)
+                    model.fit(train_feature_matrix, train_labels)
 
                     probabilities = _base._align_probability_columns(
                         predict_emission_probabilities(
                             model,
-                            features[test_idx],
+                            test_feature_matrix,
                             emission_mode=current_emission_mode,
                         ),
                         model=model,
@@ -1082,6 +1121,7 @@ def run_time_resolved_decode(
                         tuning_metadata=tuning_metadata,
                         class_prior_correction=class_prior_correction_name,
                         source_calibration=source_calibration_name,
+                        alignment_metadata=alignment_metadata,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -1124,6 +1164,7 @@ def run_time_resolved_decode(
                         tuning_metadata=tuning_metadata,
                         class_prior_correction=class_prior_correction_name,
                         source_calibration_metadata=source_metadata,
+                        alignment_metadata=alignment_metadata,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                         outer_test_groups=outer_test_groups_value,
