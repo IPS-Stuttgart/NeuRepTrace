@@ -2,8 +2,8 @@
 
 The caller supplies row-aligned subject matrices, e.g. one row per class or per
 class/repetition anchor. The fitted model stores subject-specific semi-orthogonal
-maps into a common representational space and a polar-stabilized average
-projection for calibration-free held-out-subject baselines.
+maps into a common representational space and an average projection for
+calibration-free held-out-subject baselines.
 """
 
 from __future__ import annotations
@@ -50,7 +50,12 @@ class HyperalignmentModel:
             raise KeyError(f"Unknown hyperalignment subject {subject_id!r}. Fitted subjects: {fitted}.") from exc
         return transform_with_projection(features, projection)
 
-    def transform_group(self, features: Sequence[Sequence[float]] | np.ndarray, *, feature_mean: Sequence[float] | np.ndarray | None = None) -> np.ndarray:
+    def transform_group(
+        self,
+        features: Sequence[Sequence[float]] | np.ndarray,
+        *,
+        feature_mean: Sequence[float] | np.ndarray | None = None,
+    ) -> np.ndarray:
         if self.group_projection is None or self.group_feature_mean is None:
             raise ValueError("A group projection is unavailable because fitted subjects have incompatible feature dimensions.")
         matrix = _feature_matrix(features, name="features")
@@ -96,7 +101,7 @@ def fit_hyperalignment(
     if actual < 1:
         raise ValueError("No hyperalignment components are available.")
 
-    means = {sid: np.mean(matrix, axis=0) for sid, matrix in matrices.items()}
+    means = {sid: np.mean(matrices[sid], axis=0) for sid in subject_ids}
     centered = {sid: matrices[sid] - means[sid] for sid in subject_ids}
     projections = {sid: _initial_projection(centered[sid], actual) for sid in subject_ids}
     template = _normalize_template(np.mean(np.stack([centered[sid] @ projections[sid] for sid in subject_ids], axis=0), axis=0))
@@ -274,20 +279,19 @@ def _average_projection(projections: Mapping[Hashable, SubjectHyperalignmentProj
         return None, None
     mean = np.mean(np.stack([projection.feature_mean for projection in projections.values()], axis=0), axis=0)
     matrix = np.mean(np.stack([projection.projection for projection in projections.values()], axis=0), axis=0)
-    return mean, _closest_semi_orthogonal(matrix)
+    return mean, _orthonormalized_columns(matrix)
 
 
-def _closest_semi_orthogonal(matrix: np.ndarray) -> np.ndarray:
-    """Return the nearest semi-orthogonal matrix to ``matrix``.
+def _orthonormalized_columns(matrix: np.ndarray) -> np.ndarray:
+    """Return the closest semi-orthogonal matrix with the same shape.
 
-    Averaging subject-specific Procrustes rotations is a convenient
-    calibration-free fallback for unseen subjects, but the raw arithmetic mean is
-    generally no longer semi-orthogonal.  Projecting it back to the Stiefel
-    manifold preserves the scale of the common-space axes instead of introducing
-    a shrinkage/shear that can silently disadvantage group-transform baselines.
+    The source-only held-out-subject fallback applies an across-source average
+    projection.  A raw arithmetic mean of Procrustes maps is generally not itself
+    semi-orthogonal and can shrink projected target variance.  The polar factor
+    preserves the averaged orientation while keeping the transform well scaled.
     """
 
-    u, _s, vt = np.linalg.svd(matrix, full_matrices=False)
+    u, _singular_values, vt = np.linalg.svd(matrix, full_matrices=False)
     return u @ vt
 
 
