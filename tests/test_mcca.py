@@ -32,6 +32,42 @@ def test_fit_mcca_recovers_shared_rows():
     assert model.transform_group(subjects[0]).shape == (24, 3)
 
 
+def test_fit_mcca_caps_requested_components_to_centered_row_rank():
+    base = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ]
+    )
+    subjects = {
+        "a": base,
+        "b": base
+        @ np.array(
+            [
+                [1.0, 0.2, 0.0, 0.0],
+                [0.0, 1.0, 0.3, 0.0],
+                [0.1, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+        "c": base
+        @ np.array(
+            [
+                [0.8, 0.0, 0.2, 0.0],
+                [0.1, 1.1, 0.0, 0.0],
+                [0.0, 0.4, 0.9, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+    }
+
+    model = fit_mcca(subjects, n_components=8, regularization=1e-6)
+
+    assert model.n_components == 2
+    assert model.transform("a", subjects["a"]).shape == (3, 2)
+
+
 def test_class_alignment_matrices_class_mean():
     features = {
         "a": np.array([[1.0, 0.0], [3.0, 0.0], [0.0, 2.0], [0.0, 4.0]]),
@@ -121,6 +157,16 @@ def test_fit_class_mcca_rejects_missing_class():
 
     with pytest.raises(ValueError, match="expected"):
         fit_class_mcca(features, labels)
+
+
+def test_fit_mcca_rejects_alignment_with_no_shared_rank():
+    subjects = {
+        "a": np.ones((3, 4)),
+        "b": np.ones((3, 4)) * 2.0,
+    }
+
+    with pytest.raises(ValueError, match="shared-space SVD"):
+        fit_mcca(subjects, n_components=4, regularization=1e-6)
 
 
 def test_fit_mcca_caps_components_to_centered_shared_rank():

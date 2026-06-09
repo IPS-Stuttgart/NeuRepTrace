@@ -228,11 +228,11 @@ def fit_mcca(
     _left, singular_values, right_t = np.linalg.svd(concatenated, full_matrices=False)
 
     # Centering row-aligned matrices caps the identifiable common-space rank.
-    shared_rank = int(np.count_nonzero(singular_values > rank_tolerance))
+    shared_rank = _numerical_svd_rank(singular_values, rank_tolerance=rank_tolerance)
     requested_components = _requested_component_count(n_components)
     actual_components = min(requested_components, shared_rank)
     if actual_components < 1:
-        raise ValueError("No M-CCA components are available after centering and whitening.")
+        raise ValueError("No M-CCA components are available after the shared-space SVD.")
 
     component_vectors = right_t.T[:, :actual_components]
     projections = _subject_projections_from_blocks(
@@ -265,6 +265,15 @@ def fit_mcca(
         group_projection=group_projection,
         normalize_components=bool(normalize_components),
     )
+
+
+def _numerical_svd_rank(singular_values: np.ndarray, *, rank_tolerance: float) -> int:
+    values = np.asarray(singular_values, dtype=float).ravel()
+    if values.size == 0:
+        return 0
+    scale = max(float(np.max(values)), 1.0)
+    threshold = max(float(rank_tolerance), float(rank_tolerance) * scale)
+    return int(np.sum(values > threshold))
 
 
 def class_alignment_matrices(
