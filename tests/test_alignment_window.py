@@ -28,6 +28,8 @@ class DummyFeatureSet:
     n_channels: int
     n_window_samples: int
     feature_order: str = "channel_time"
+    window_start_s: float | None = None
+    window_stop_s: float | None = None
 
 
 def test_resolved_alignment_window_defaults_to_decoding_window() -> None:
@@ -110,6 +112,45 @@ def test_transform_with_alignment_projection_defaults_to_mne_channel_time_order(
 
     # Preserve MNE channel_time flattening: [component0_t0, component0_t1, component1_t0, component1_t1].
     np.testing.assert_allclose(transformed, np.array([[3.0, 6.0, 12.0, 16.0]]))
+
+
+def test_transform_with_alignment_projection_collapses_same_width_different_windows() -> None:
+    decode = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.10,
+        window_stop_s=0.20,
+    )
+    alignment = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.00,
+        window_stop_s=0.10,
+    )
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+        ]
+    )
+    projection_mean = np.array([1.0, 3.0, 2.0, 4.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=projection_mean,
+        projection_feature_set=alignment,
+    )
+
+    np.testing.assert_allclose(transformed, np.array([[4.0, 6.0, 12.0, 15.0]]))
 
 
 def test_transform_with_alignment_projection_supports_explicit_time_channel_order() -> None:
