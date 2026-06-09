@@ -258,7 +258,10 @@ def fit_mcca(
         np.stack([_transform_with_projection(matrices[subject_id], projections[subject_id]) for subject_id in subject_ids], axis=0),
         axis=0,
     )
-    group_feature_mean, group_projection = _average_projection(projections)
+    group_feature_mean, group_projection = _average_projection(
+        projections,
+        matrices=matrices if normalize_components else None,
+    )
     explained = _explained_variance_ratio(singular_values)
     return MCCAModel(
         subject_ids=subject_ids,
@@ -470,13 +473,28 @@ def _transform_with_projection(features: np.ndarray, projection: SubjectMCCAProj
     return (features - projection.feature_mean) @ projection.projection
 
 
-def _average_projection(projections):
+def _average_projection(projections, *, matrices=None):
     feature_dims = {projection.projection.shape[0] for projection in projections.values()}
     if len(feature_dims) != 1:
         return None, None
     mean = np.mean(np.stack([projection.feature_mean for projection in projections.values()], axis=0), axis=0)
     matrix = np.mean(np.stack([projection.projection for projection in projections.values()], axis=0), axis=0)
+    if matrices is not None:
+        matrix = _rescale_group_projection(matrix, mean, matrices)
     return mean, matrix
+
+
+def _rescale_group_projection(matrix: np.ndarray, mean: np.ndarray, matrices) -> np.ndarray:
+    transformed = np.vstack(
+        [
+            (_feature_matrix(matrices[subject_id], name=f"matrices[{subject_id!r}]") - mean)
+            @ matrix
+            for subject_id in matrices
+        ]
+    )
+    scale = np.std(transformed, axis=0, ddof=1)
+    scale = np.where(scale < 1e-12, 1.0, scale)
+    return matrix / scale[None, :]
 
 
 def _class_mean_matrix(features: np.ndarray, labels: np.ndarray, classes: np.ndarray) -> np.ndarray:

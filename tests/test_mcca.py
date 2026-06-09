@@ -266,6 +266,30 @@ def test_fit_mcca_caps_components_to_centered_shared_rank():
     assert all(projection.projection.shape[1] == 2 for projection in model.projections.values())
 
 
+def test_fit_mcca_group_projection_keeps_normalized_scale_after_averaging():
+    rng = np.random.default_rng(123)
+    latent = rng.normal(size=(18, 4))
+    subjects = {}
+    for subject in range(5):
+        mixing = rng.normal(size=(4, 12))
+        shift = rng.normal(size=(12,)) * 0.5
+        subjects[subject] = latent @ mixing + shift + 0.02 * rng.normal(size=(18, 12))
+
+    model = fit_mcca(
+        subjects,
+        n_components=4,
+        regularization=1e-5,
+        normalize_components=True,
+    )
+    pooled_group = np.vstack([model.transform_group(features) for features in subjects.values()])
+
+    np.testing.assert_allclose(
+        np.std(pooled_group, axis=0, ddof=1),
+        np.ones(model.n_components),
+        atol=1e-6,
+    )
+
+
 def test_fit_target_mcca_projection_projects_held_out_subject_to_template():
     subjects = _synthetic_subjects()
     training_subjects = {subject: features for subject, features in subjects.items() if subject != 3}
