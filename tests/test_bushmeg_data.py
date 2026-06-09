@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from neureptrace.bushmeg_data import expected_bushmeg_files, prepare_bushmeg_smoke_data
+from neureptrace.bushmeg_data import _candidate_remote_paths, expected_bushmeg_files, prepare_bushmeg_smoke_data
 
 
 def test_expected_bushmeg_files_resolves_main_and_cue(tmp_path):
@@ -54,6 +54,41 @@ def test_prepare_bushmeg_smoke_data_can_allow_missing_downloads(tmp_path, monkey
 
     assert [file.relative_path for file in files] == ["Part2Data.mat"]
     assert not files[0].exists
+
+
+def test_candidate_remote_paths_include_configured_prefixes(monkeypatch):
+    monkeypatch.setenv("BUSHMEG_REMOTE_PREFIX", "private/bushmeg;alt")
+
+    assert _candidate_remote_paths("Part2Data.mat") == (
+        "Part2Data.mat",
+        "private/bushmeg/Part2Data.mat",
+        "alt/Part2Data.mat",
+    )
+
+
+def test_prepare_bushmeg_smoke_data_tries_discovered_remote_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("BUSHMEG_WEBDAV_URL", "https://example.invalid/data")
+    monkeypatch.setenv("BUSHMEG_DATA_KEY", "user")
+    monkeypatch.setenv("BUSHMEG_DATA_PASSWORD", "password")
+    attempted = []
+
+    def discover(**_kwargs):
+        return "nested/Part2Data.mat"
+
+    def download(**kwargs):
+        attempted.append(kwargs["relative_path"])
+        if kwargs["relative_path"] == "nested/Part2Data.mat":
+            kwargs["output_path"].write_bytes(b"main")
+            return
+        raise FileNotFoundError("not available")
+
+    monkeypatch.setattr("neureptrace.bushmeg_data._discover_webdav_file", discover)
+    monkeypatch.setattr("neureptrace.bushmeg_data._download_webdav_file", download)
+
+    files = prepare_bushmeg_smoke_data(tmp_path, participants="2", roles=("main",), max_files=1)
+
+    assert attempted == ["Part2Data.mat", "nested/Part2Data.mat"]
+    assert files[0].exists
 
 
 def test_expected_bushmeg_files_honors_max_files(tmp_path):
