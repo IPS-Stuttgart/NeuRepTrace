@@ -19,7 +19,14 @@ from neureptrace.decoding.hyperalignment_initialization import transform_with_pr
 from neureptrace.decoding.mcca import fit_class_mcca
 from neureptrace.decoding.sampling import DEFAULT_CLASS_LIMIT_SEED, DEFAULT_CLASS_LIMIT_SELECTION, select_class_limited_indices
 
-SOURCE_ALIGNMENT_METHODS = ("none", "procrustes", "hyperalignment", "mcca")
+SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS = ("procrustes", "hyperalignment", "mcca")
+SOURCE_ALIGNMENT_UNSUPERVISED_METHODS = (
+    "euclidean",
+    "coral",
+    "target_baseline_covariance",
+    "subject_sensor_covariance",
+)
+SOURCE_ALIGNMENT_METHODS = ("none", *SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS, *SOURCE_ALIGNMENT_UNSUPERVISED_METHODS)
 SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES = ("class_mean", "class_repetition")
 SOURCE_ALIGNMENT_STIMULUS_ANCHOR_MODES = (
     "stimulus_id_mean",
@@ -32,6 +39,8 @@ SOURCE_ALIGNMENT_TARGET_PROJECTIONS = ("group_projection", "oracle_target_calibr
 DEFAULT_ALIGNMENT_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
 DEFAULT_ALIGNMENT_REPETITION_CAP = 16
 DEFAULT_ALIGNMENT_COMPONENTS = 64
+MAX_FULL_COVARIANCE_FEATURES = 256
+MIN_COVARIANCE_EIGENVALUE = 1e-6
 ORACLE_TARGET_CALIBRATED_ALIGNMENT = "oracle_target_calibrated_alignment"
 ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "dataset",
@@ -59,6 +68,8 @@ ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "source_inner_aligned_balanced_accuracy",
     "source_inner_aligned_minus_raw",
     "source_inner_validation_type",
+    "uses_unlabeled_target_data",
+    "covariance_alignment_estimator",
     "target_transform_type",
 )
 
@@ -88,6 +99,7 @@ class SourceAlignmentConfig:
 
     def static_metadata(self) -> dict[str, Any]:
         oracle = self.oracle_target_calibrated
+        unsupervised = _uses_unlabeled_covariance_alignment(self.method)
         return {
             "alignment_method": self.method,
             "alignment_anchor_mode": self.anchor_mode,
@@ -97,10 +109,18 @@ class SourceAlignmentConfig:
             "alignment_times": "|".join(f"{time:.6g}" for time in self.times),
             "alignment_target_projection": self.target_projection,
             "alignment_strict_source_only": bool(self.enabled and not oracle),
+            "alignment_uses_unlabeled_target_data": bool(unsupervised),
+            "alignment_uses_class_labels": bool(self.method in SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS),
             "alignment_oracle_target_calibrated": bool(oracle),
             "alignment_debug_upper_bound": bool(oracle),
             "alignment_valid_for_benchmark": bool(not oracle),
-            "alignment_protocol": ORACLE_TARGET_CALIBRATED_ALIGNMENT if oracle else "strict_source_only",
+            "alignment_protocol": (
+                ORACLE_TARGET_CALIBRATED_ALIGNMENT
+                if oracle
+                else "unlabeled_target_covariance_alignment"
+                if unsupervised
+                else "strict_source_only"
+            ),
             "alignment_protocol_note": "debug upper bound only; not valid for benchmark" if oracle else "",
         }
 
@@ -126,10 +146,32 @@ class _SourceAlignmentFit:
     n_components: int
 
 
+@dataclass(frozen=True, slots=True)
+class _CovarianceStats:
+    mean: np.ndarray
+    sqrt: np.ndarray
+    inv_sqrt: np.ndarray
+    estimator: str
+
+
 def normalize_source_alignment_method(method: str | None) -> str:
     normalized = "none" if method is None else str(method).strip().lower().replace("-", "_")
     if normalized in {"off", "false", "identity", "raw"}:
         normalized = "none"
+    normalized = {
+        "euclidean_alignment": "euclidean",
+        "covariance_whitening": "euclidean",
+        "whitening": "euclidean",
+        "coral_alignment": "coral",
+        "coral_covariance": "coral",
+        "target_covariance": "target_baseline_covariance",
+        "target_covariance_alignment": "target_baseline_covariance",
+        "target_baseline_covariance_alignment": "target_baseline_covariance",
+        "subject_covariance": "subject_sensor_covariance",
+        "subject_covariance_normalization": "subject_sensor_covariance",
+        "subject_wise_sensor_covariance_normalization": "subject_sensor_covariance",
+        "sensor_covariance_normalization": "subject_sensor_covariance",
+    }.get(normalized, normalized)
     if normalized not in SOURCE_ALIGNMENT_METHODS:
         raise ValueError(
             f"Unknown source alignment method {method!r}. "
@@ -255,6 +297,8 @@ def source_alignment_config(
         raise ValueError("alignment hyperalignment_iterations must be positive.")
     if config.mcca_regularization < 0 or not np.isfinite(config.mcca_regularization):
         raise ValueError("alignment mcca_regularization must be finite and non-negative.")
+    if _uses_unlabeled_covariance_alignment(config.method) and config.oracle_target_calibrated:
+        raise ValueError("Unsupervised covariance alignment uses unlabeled target data and does not support oracle target labels.")
     return config
 
 
@@ -280,12 +324,15 @@ def align_train_test_features(
     event identifiers without changing the decoder labels.
     """
 
+    unsupervised_alignment = _uses_unlabeled_covariance_alignment(config.method)
     if target_labels is not None and not config.oracle_target_calibrated:
         raise ValueError("Strict source-only alignment does not accept target labels.")
     if target_anchor_values is not None and not config.oracle_target_calibrated:
         raise ValueError("Strict source-only alignment does not accept target anchor values.")
     class_anchor_mode = _uses_decoder_label_anchors(config.anchor_mode)
-    if not config.enabled and train_anchor_values is None:
+    if unsupervised_alignment:
+        train_anchor_source = "unlabeled_covariance"
+    elif not config.enabled and train_anchor_values is None:
         train_anchor_source = "decoder_labels"
         train_anchor_values = train_labels
     elif class_anchor_mode:
@@ -308,10 +355,14 @@ def align_train_test_features(
     train_vector = np.asarray(train_labels).reshape(-1)
     subject_vector = np.asarray(train_subject_ids, dtype=object).reshape(-1)
     target_vector = None if target_labels is None else np.asarray(target_labels).reshape(-1)
-    train_anchor_vector = _anchor_vector(
-        train_anchor_values,
-        expected_length=train_matrix.shape[0],
-        name="train_anchor_values",
+    train_anchor_vector = (
+        np.empty(train_matrix.shape[0], dtype=object)
+        if unsupervised_alignment
+        else _anchor_vector(
+            train_anchor_values,
+            expected_length=train_matrix.shape[0],
+            name="train_anchor_values",
+        )
     )
     target_anchor_vector = (
         None
@@ -366,6 +417,76 @@ def align_train_test_features(
     labels_by_subject = {subject_id: train_vector[subject_vector == subject_id] for subject_id in subject_ids}
     anchors_by_subject = {subject_id: train_anchor_vector[subject_vector == subject_id] for subject_id in subject_ids}
     sample_mode = _alignment_sample_mode(config.anchor_mode)
+    if unsupervised_alignment:
+        train_aligned, test_aligned, covariance_metadata = _transform_unsupervised_covariance_alignment(
+            features_by_subject,
+            test_matrix,
+            method=config.method,
+        )
+        source_inner_raw_ba = float("nan")
+        source_inner_aligned_ba = float("nan")
+        if compute_source_inner_diagnostics:
+            source_inner_raw_ba, source_inner_aligned_ba = _source_inner_unsupervised_loso_scores(
+                features_by_subject=features_by_subject,
+                labels_by_subject=labels_by_subject,
+                method=config.method,
+            )
+        source_inner_gain = (
+            source_inner_aligned_ba - source_inner_raw_ba
+            if np.isfinite(source_inner_aligned_ba) and np.isfinite(source_inner_raw_ba)
+            else float("nan")
+        )
+        diagnostics = {
+            "alignment_method": config.method,
+            "sample_mode": "unlabeled_covariance",
+            "n_source_subjects": len(subject_ids),
+            "n_classes": "",
+            "n_alignment_rows": 0,
+            "n_repetitions_per_class": "",
+            "requested_components": "unlabeled_covariance",
+            "actual_components": int(train_matrix.shape[1]),
+            "feature_dim": int(train_matrix.shape[1]),
+            "decode_feature_dim": int(test_aligned.shape[1]),
+            "uses_channel_projection_collapse": False,
+            "anchor_row_correlation_before": "",
+            "anchor_row_correlation_after": "",
+            "source_inner_decoding_before_alignment": _finite_or_blank(source_inner_raw_ba),
+            "source_inner_decoding_after_alignment": _finite_or_blank(source_inner_aligned_ba),
+            "source_inner_raw_balanced_accuracy": _finite_or_blank(source_inner_raw_ba),
+            "source_inner_aligned_balanced_accuracy": _finite_or_blank(source_inner_aligned_ba),
+            "source_inner_aligned_minus_raw": _finite_or_blank(source_inner_gain),
+            "source_inner_validation_type": (
+                "strict_source_loso_nearest_centroid_unlabeled_target_covariance"
+                if compute_source_inner_diagnostics
+                else ""
+            ),
+            "uses_unlabeled_target_data": True,
+            "covariance_alignment_estimator": covariance_metadata["covariance_alignment_estimator"],
+            "target_transform_type": covariance_metadata["target_transform_type"],
+        }
+        return SourceAlignmentResult(
+            train_features=train_aligned,
+            test_features=test_aligned,
+            metadata={
+                **metadata,
+                "alignment_n_components": int(train_matrix.shape[1]),
+                "alignment_n_source_subjects": len(subject_ids),
+                "alignment_n_classes": "",
+                "alignment_n_anchor_values": "",
+                "alignment_anchor_value_source": train_anchor_source,
+                "alignment_common_anchor_count": "",
+                "alignment_anchor_rows_used": 0,
+                "alignment_anchor_rows_dropped": 0,
+                "alignment_repetitions_per_class": "",
+                "alignment_target_alignment_rows": int(test_matrix.shape[0]),
+                "alignment_target_projection_fit": covariance_metadata["target_transform_type"],
+                "alignment_target_labels_used": False,
+                "alignment_target_anchor_values_used": False,
+                **covariance_metadata,
+            },
+            diagnostics=diagnostics,
+        )
+
     fit = _fit_source_alignment_model(
         features_by_subject,
         anchors_by_subject,
@@ -459,6 +580,8 @@ def align_train_test_features(
         "source_inner_validation_type": (
             "strict_source_loso_nearest_centroid_group_projection" if compute_source_inner_diagnostics else ""
         ),
+        "uses_unlabeled_target_data": False,
+        "covariance_alignment_estimator": "",
         "target_transform_type": target_projection_fit,
     }
 
@@ -613,6 +736,90 @@ def _fit_source_alignment_model(
     )
 
 
+def _transform_unsupervised_covariance_alignment(
+    features_by_subject: Mapping[Hashable, np.ndarray],
+    test_features: np.ndarray,
+    *,
+    method: str,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    subject_ids = tuple(features_by_subject)
+    target_stats = _covariance_stats(test_features)
+    pooled_source = np.vstack([features_by_subject[subject_id] for subject_id in subject_ids])
+    source_stats = _covariance_stats(pooled_source)
+    estimators = {target_stats.estimator, source_stats.estimator}
+    transformed_by_subject: list[np.ndarray] = []
+
+    if method in {"euclidean", "subject_sensor_covariance"}:
+        for subject_id in subject_ids:
+            stats = _covariance_stats(features_by_subject[subject_id])
+            estimators.add(stats.estimator)
+            transformed_by_subject.append(_covariance_whiten(features_by_subject[subject_id], stats))
+        transformed_test = _covariance_whiten(test_features, target_stats)
+        target_transform_type = "unlabeled_target_covariance_whitening"
+    elif method == "coral":
+        for subject_id in subject_ids:
+            stats = _covariance_stats(features_by_subject[subject_id])
+            estimators.add(stats.estimator)
+            transformed_by_subject.append(_covariance_recolor(_covariance_whiten(features_by_subject[subject_id], stats), target_stats))
+        transformed_test = np.asarray(test_features, dtype=float)
+        target_transform_type = "unlabeled_target_covariance_recoloring"
+    elif method == "target_baseline_covariance":
+        transformed_by_subject = [
+            _covariance_recolor(_covariance_whiten(features_by_subject[subject_id], source_stats), target_stats)
+            for subject_id in subject_ids
+        ]
+        transformed_test = np.asarray(test_features, dtype=float)
+        target_transform_type = "unlabeled_target_pooled_source_to_target_covariance"
+    else:  # pragma: no cover - guarded by normalization
+        raise ValueError(f"Unsupported unsupervised covariance alignment method: {method}.")
+
+    return (
+        np.vstack(transformed_by_subject),
+        transformed_test,
+        {
+            "alignment_uses_unlabeled_target_data": True,
+            "alignment_covariance_method": method,
+            "covariance_alignment_estimator": "|".join(sorted(estimators)),
+            "target_transform_type": target_transform_type,
+        },
+    )
+
+
+def _covariance_stats(features: np.ndarray) -> _CovarianceStats:
+    matrix = _feature_matrix(features, name="covariance_alignment_features")
+    mean = np.mean(matrix, axis=0)
+    centered = matrix - mean
+    n_rows, n_features = centered.shape
+    if n_features <= MAX_FULL_COVARIANCE_FEATURES and n_rows > 1:
+        covariance = centered.T @ centered / max(1, n_rows - 1)
+        scale = float(np.trace(covariance) / max(1, n_features))
+        floor = MIN_COVARIANCE_EIGENVALUE * max(scale, 1.0)
+        values, vectors = np.linalg.eigh(covariance)
+        values = np.maximum(values, floor)
+        sqrt = (vectors * np.sqrt(values)) @ vectors.T
+        inv_sqrt = (vectors * (1.0 / np.sqrt(values))) @ vectors.T
+        return _CovarianceStats(mean=mean, sqrt=sqrt, inv_sqrt=inv_sqrt, estimator="full")
+
+    variance = np.var(centered, axis=0, ddof=1 if n_rows > 1 else 0)
+    scale = float(np.mean(variance)) if variance.size else 1.0
+    floor = MIN_COVARIANCE_EIGENVALUE * max(scale, 1.0)
+    std = np.sqrt(np.maximum(variance, floor))
+    return _CovarianceStats(mean=mean, sqrt=std, inv_sqrt=1.0 / std, estimator="diagonal")
+
+
+def _covariance_whiten(features: np.ndarray, stats: _CovarianceStats) -> np.ndarray:
+    centered = np.asarray(features, dtype=float) - stats.mean
+    if stats.estimator == "full":
+        return centered @ stats.inv_sqrt
+    return centered * stats.inv_sqrt
+
+
+def _covariance_recolor(whitened_features: np.ndarray, target_stats: _CovarianceStats) -> np.ndarray:
+    if target_stats.estimator == "full":
+        return whitened_features @ target_stats.sqrt + target_stats.mean
+    return whitened_features * target_stats.sqrt + target_stats.mean
+
+
 def _effective_repetitions_per_class(
     labels_by_subject: Mapping[Hashable, np.ndarray],
     sample_mode: str,
@@ -690,6 +897,10 @@ def _common_anchor_values(anchors_by_subject: Mapping[Hashable, np.ndarray]) -> 
 
 def _uses_decoder_label_anchors(anchor_mode: str) -> bool:
     return anchor_mode in SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES
+
+
+def _uses_unlabeled_covariance_alignment(method: str) -> bool:
+    return method in SOURCE_ALIGNMENT_UNSUPERVISED_METHODS
 
 
 def _alignment_sample_mode(anchor_mode: str) -> str:
@@ -810,6 +1021,54 @@ def _source_inner_strict_loso_scores(
     return raw_score, aligned_score
 
 
+def _source_inner_unsupervised_loso_scores(
+    *,
+    features_by_subject: Mapping[Hashable, np.ndarray],
+    labels_by_subject: Mapping[Hashable, np.ndarray],
+    method: str,
+) -> tuple[float, float]:
+    subject_ids = tuple(features_by_subject)
+    if len(subject_ids) < 2:
+        return float("nan"), float("nan")
+    raw_predictions: list[Any] = []
+    raw_truth: list[Any] = []
+    aligned_predictions: list[Any] = []
+    aligned_truth: list[Any] = []
+    for test_subject in subject_ids:
+        train_subjects = tuple(subject_id for subject_id in subject_ids if subject_id != test_subject)
+        train_features = np.vstack([features_by_subject[subject_id] for subject_id in train_subjects])
+        train_labels = np.concatenate([labels_by_subject[subject_id] for subject_id in train_subjects])
+        test_features = features_by_subject[test_subject]
+        test_labels = labels_by_subject[test_subject]
+
+        predicted_raw = _nearest_centroid_predict(train_features, train_labels, test_features)
+        if predicted_raw.size:
+            raw_predictions.extend(predicted_raw.tolist())
+            raw_truth.extend(test_labels.tolist())
+
+        aligned_train_features, aligned_test_features, _metadata = _transform_unsupervised_covariance_alignment(
+            {subject_id: features_by_subject[subject_id] for subject_id in train_subjects},
+            test_features,
+            method=method,
+        )
+        predicted_aligned = _nearest_centroid_predict(aligned_train_features, train_labels, aligned_test_features)
+        if predicted_aligned.size:
+            aligned_predictions.extend(predicted_aligned.tolist())
+            aligned_truth.extend(test_labels.tolist())
+
+    raw_score = (
+        _balanced_accuracy(np.asarray(raw_truth, dtype=object), np.asarray(raw_predictions, dtype=object))
+        if raw_truth
+        else float("nan")
+    )
+    aligned_score = (
+        _balanced_accuracy(np.asarray(aligned_truth, dtype=object), np.asarray(aligned_predictions, dtype=object))
+        if aligned_truth
+        else float("nan")
+    )
+    return raw_score, aligned_score
+
+
 def _nearest_centroid_predict(train_features: np.ndarray, train_labels: np.ndarray, test_features: np.ndarray) -> np.ndarray:
     labels = np.asarray(train_labels).reshape(-1)
     classes = np.unique(labels)
@@ -848,8 +1107,10 @@ __all__ = [
     "DEFAULT_ALIGNMENT_TIMES",
     "ORACLE_TARGET_CALIBRATED_ALIGNMENT",
     "SOURCE_ALIGNMENT_ANCHOR_MODES",
+    "SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS",
     "SOURCE_ALIGNMENT_METHODS",
     "SOURCE_ALIGNMENT_TARGET_PROJECTIONS",
+    "SOURCE_ALIGNMENT_UNSUPERVISED_METHODS",
     "SourceAlignmentConfig",
     "SourceAlignmentResult",
     "align_train_test_features",

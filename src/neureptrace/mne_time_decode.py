@@ -37,6 +37,7 @@ from neureptrace.decoding.source_alignment import (
     SOURCE_ALIGNMENT_ANCHOR_MODES,
     SOURCE_ALIGNMENT_METHODS,
     SOURCE_ALIGNMENT_TARGET_PROJECTIONS,
+    SOURCE_ALIGNMENT_UNSUPERVISED_METHODS,
     SourceAlignmentResult,
     align_train_test_features,
     source_alignment_config,
@@ -1959,6 +1960,9 @@ def run_time_resolved_decode(
     labels = encoder.fit_transform(raw_labels)
     groups = metadata[group_column].to_numpy() if group_column else None
     session_values = metadata["session"].to_numpy() if "session" in metadata.columns else groups
+    alignment_needs_anchor_values = (
+        alignment_config.enabled and alignment_config.method not in SOURCE_ALIGNMENT_UNSUPERVISED_METHODS
+    )
     alignment_anchor_info = (
         _alignment_anchor_values(
             metadata,
@@ -1967,10 +1971,10 @@ def run_time_resolved_decode(
             anchor_mode=alignment_config.anchor_mode,
             anchor_column=alignment_config.anchor_column,
         )
-        if alignment_config.enabled
+        if alignment_needs_anchor_values
         else AlignmentAnchorValues(values=None, column="", source="")
     )
-    if alignment_config.enabled:
+    if alignment_needs_anchor_values:
         alignment_config = replace(alignment_config, anchor_column=alignment_anchor_info.column)
     splitter_name = "stratified-group-kfold" if groups is not None else "stratified-kfold"
     split_id = f"{splitter_name}-{n_splits}"

@@ -245,6 +245,59 @@ def test_run_time_resolved_decode_passes_target_labels_for_oracle_alignment(tmp_
     assert set(results["alignment_valid_for_benchmark"]) == {False}
 
 
+def test_run_time_resolved_decode_skips_anchor_lookup_for_unsupervised_alignment(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs["config"].method == "coral"
+        assert kwargs.get("train_anchor_values") is None
+        assert kwargs.get("target_anchor_values") is None
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "coral",
+                "alignment_anchor_mode": "stimulus_id_mean",
+                "alignment_target_projection": "group_projection",
+                "alignment_uses_unlabeled_target_data": True,
+            },
+            diagnostics={
+                "alignment_method": "coral",
+                "sample_mode": "unlabeled_covariance",
+                "uses_unlabeled_target_data": True,
+                "covariance_alignment_estimator": "diagonal",
+                "target_transform_type": "unlabeled_target_covariance_recoloring",
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "synthetic-epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "unsupervised_aligned.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=4,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        alignment_method="coral",
+        alignment_anchor_mode="stimulus_id_mean",
+    )
+
+    assert set(results["alignment_method"]) == {"coral"}
+
+
 def test_alignment_anchor_values_auto_select_ds000117_columns():
     metadata = pd.DataFrame(
         {

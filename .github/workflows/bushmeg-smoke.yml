@@ -21,6 +21,10 @@ on:
                     - procrustes
                     - hyperalignment
                     - mcca
+                    - euclidean
+                    - coral
+                    - target_baseline_covariance
+                    - subject_sensor_covariance
                 default: none
             alignment_anchor_mode:
                 description: "Source-label anchor representation"

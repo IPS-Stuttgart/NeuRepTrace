@@ -1,7 +1,12 @@
 import numpy as np
 import pytest
 
-from neureptrace.decoding.source_alignment import ORACLE_TARGET_CALIBRATED_ALIGNMENT, align_train_test_features, source_alignment_config
+from neureptrace.decoding.source_alignment import (
+    ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+    align_train_test_features,
+    normalize_source_alignment_method,
+    source_alignment_config,
+)
 
 
 def _rotated_subject_features(seed=13):
@@ -92,6 +97,19 @@ def test_strict_alignment_rejects_target_anchor_values():
         )
 
 
+@pytest.mark.parametrize(
+    ("alias", "method"),
+    [
+        ("euclidean_alignment", "euclidean"),
+        ("coral_alignment", "coral"),
+        ("target_covariance_alignment", "target_baseline_covariance"),
+        ("sensor_covariance_normalization", "subject_sensor_covariance"),
+    ],
+)
+def test_unsupervised_alignment_method_aliases(alias, method):
+    assert normalize_source_alignment_method(alias) == method
+
+
 def test_oracle_alignment_requires_target_labels():
     train_features, train_labels, train_subjects = _rotated_subject_features()
     with pytest.raises(ValueError, match="requires held-out target labels"):
@@ -146,6 +164,45 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert result.diagnostics["source_inner_validation_type"] == "strict_source_loso_nearest_centroid_group_projection"
     assert result.diagnostics["target_transform_type"] == "source_group_projection"
     assert aligned_distance < raw_distance
+
+
+@pytest.mark.parametrize(
+    ("method", "target_transform_type"),
+    [
+        ("euclidean", "unlabeled_target_covariance_whitening"),
+        ("coral", "unlabeled_target_covariance_recoloring"),
+        ("target_baseline_covariance", "unlabeled_target_pooled_source_to_target_covariance"),
+        ("subject_sensor_covariance", "unlabeled_target_covariance_whitening"),
+    ],
+)
+def test_unsupervised_covariance_alignment_uses_no_class_anchors(method, target_transform_type):
+    train_features, train_labels, train_subjects = _rotated_subject_features(seed=29)
+    target_features = train_features[train_subjects == "s2"] * np.array([1.5, 0.5, 1.2, 0.8])
+
+    result = align_train_test_features(
+        train_features=train_features[train_subjects != "s2"],
+        train_labels=train_labels[train_subjects != "s2"],
+        train_subject_ids=train_subjects[train_subjects != "s2"],
+        test_features=target_features,
+        config=source_alignment_config(method=method),
+    )
+
+    assert result.train_features.shape[1] == train_features.shape[1]
+    assert result.test_features.shape == target_features.shape
+    assert result.metadata["alignment_anchor_value_source"] == "unlabeled_covariance"
+    assert result.metadata["alignment_uses_unlabeled_target_data"] is True
+    assert result.metadata["alignment_uses_class_labels"] is False
+    assert result.metadata["alignment_target_labels_used"] is False
+    assert result.diagnostics["sample_mode"] == "unlabeled_covariance"
+    assert result.diagnostics["uses_unlabeled_target_data"] is True
+    assert result.diagnostics["target_transform_type"] == target_transform_type
+    assert result.diagnostics["covariance_alignment_estimator"] == "full"
+    assert np.isfinite(result.diagnostics["source_inner_raw_balanced_accuracy"])
+
+
+def test_unsupervised_covariance_alignment_rejects_oracle_target_projection():
+    with pytest.raises(ValueError, match="does not support oracle target labels"):
+        source_alignment_config(method="coral", target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT)
 
 
 @pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])

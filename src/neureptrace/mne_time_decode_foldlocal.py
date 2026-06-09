@@ -765,6 +765,9 @@ def run_time_resolved_decode(
     labels = encoder.fit_transform(raw_labels)
     groups = metadata[group_column].to_numpy() if group_column else None
     session_values = metadata["session"].to_numpy() if "session" in metadata.columns else groups
+    alignment_needs_anchor_values = (
+        alignment_config.enabled and alignment_config.method not in _base.SOURCE_ALIGNMENT_UNSUPERVISED_METHODS
+    )
     alignment_anchor_info = (
         _base._alignment_anchor_values(
             metadata,
@@ -773,10 +776,10 @@ def run_time_resolved_decode(
             anchor_mode=alignment_config.anchor_mode,
             anchor_column=alignment_config.anchor_column,
         )
-        if alignment_config.enabled
+        if alignment_needs_anchor_values
         else _base.AlignmentAnchorValues(values=None, column="", source="")
     )
-    if alignment_config.enabled:
+    if alignment_needs_anchor_values:
         alignment_config = replace(alignment_config, anchor_column=alignment_anchor_info.column)
     splitter_name = "stratified-group-kfold" if groups is not None else "stratified-kfold"
     split_id = f"{splitter_name}-{n_splits}"
