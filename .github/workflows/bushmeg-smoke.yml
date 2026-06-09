@@ -172,7 +172,7 @@ jobs:
                     --set "source_loso.alignment_anchor_mode=${{ inputs.alignment_anchor_mode }}" \
                     --set "source_loso.alignment_repetition_cap=16" \
                     --set "source_loso.alignment_components=64" \
-                    --set "source_loso.alignment_times=[0.088,0.136,0.184,0.232,0.280]" \
+                    --set "source_loso.alignment_times=same_decode_window" \
                     --set "source_loso.alignment_target_projection=group_projection" \
                     --set "source_loso.label_shuffle_control=${{ inputs.label_shuffle_control }}" \
                     --set "source_loso.label_shuffle_seed=${{ inputs.label_shuffle_seed }}"

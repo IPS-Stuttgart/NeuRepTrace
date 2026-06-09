@@ -113,10 +113,12 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
     metadata = pd.DataFrame({"condition": labels, "group": groups})
     epochs = FakeEpochs(data, times, metadata)
     alignment_train_labels = []
+    alignment_configs = []
 
     def fake_align_train_test_features(**kwargs):
         assert kwargs.get("target_labels") is None
         alignment_train_labels.append(np.asarray(kwargs["train_labels"], dtype=int).copy())
+        alignment_configs.append(kwargs["config"])
         return SourceAlignmentResult(
             train_features=np.asarray(kwargs["train_features"], dtype=float),
             test_features=np.asarray(kwargs["test_features"], dtype=float),
@@ -168,11 +170,13 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
         emission_mode="uncalibrated",
         time_decode_backend="sklearn",
         alignment_method="procrustes",
+        alignment_times="same_decode_window",
         label_shuffle_control=True,
         label_shuffle_seed=13,
     )
 
     assert alignment_train_labels
+    assert alignment_configs[0].same_decode_window is True
     unshuffled_train = labels[groups != "sub-01"]
     assert sorted(alignment_train_labels[0].tolist()) == sorted(unshuffled_train.tolist())
     assert not np.array_equal(alignment_train_labels[0], unshuffled_train)
@@ -188,6 +192,8 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
     assert diagnostics["source_inner_aligned_balanced_accuracy"].unique().tolist() == [0.75]
     assert diagnostics["source_inner_aligned_minus_raw"].unique().tolist() == [0.25]
     assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
+    assert np.allclose(diagnostics["alignment_window_center"], diagnostics["decode_window_center"])
+    assert np.allclose(diagnostics["alignment_window_size"], diagnostics["decode_window_size"])
 
 
 def test_run_time_resolved_decode_passes_target_labels_for_oracle_alignment(tmp_path: Path, monkeypatch):

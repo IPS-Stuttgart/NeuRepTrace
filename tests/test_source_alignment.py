@@ -110,6 +110,17 @@ def test_unsupervised_alignment_method_aliases(alias, method):
     assert normalize_source_alignment_method(alias) == method
 
 
+def test_alignment_times_same_decode_window_metadata():
+    config = source_alignment_config(method="procrustes", times="same_decode_window")
+    metadata = config.static_metadata()
+
+    assert config.same_decode_window is True
+    assert config.times == ()
+    assert metadata["alignment_times"] == "same_decode_window"
+    assert metadata["alignment_window_mode"] == "same_decode_window"
+    assert metadata["alignment_same_decode_window"] is True
+
+
 def test_oracle_alignment_requires_target_labels():
     train_features, train_labels, train_subjects = _rotated_subject_features()
     with pytest.raises(ValueError, match="requires held-out target labels"):

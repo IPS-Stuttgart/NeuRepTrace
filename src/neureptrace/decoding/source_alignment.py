@@ -37,6 +37,15 @@ SOURCE_ALIGNMENT_STIMULUS_ANCHOR_MODES = (
 SOURCE_ALIGNMENT_ANCHOR_MODES = (*SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES, *SOURCE_ALIGNMENT_STIMULUS_ANCHOR_MODES)
 SOURCE_ALIGNMENT_TARGET_PROJECTIONS = ("group_projection", "oracle_target_calibrated_alignment")
 DEFAULT_ALIGNMENT_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
+SAME_DECODE_WINDOW_ALIGNMENT = "same_decode_window"
+SAME_DECODE_WINDOW_ALIGNMENT_ALIASES = {
+    "same_decode_window",
+    "same_window",
+    "decode_window",
+    "current_decode_window",
+    "same-time",
+    "same_time",
+}
 DEFAULT_ALIGNMENT_REPETITION_CAP = 16
 DEFAULT_ALIGNMENT_COMPONENTS = 64
 MAX_FULL_COVARIANCE_FEATURES = 256
@@ -84,6 +93,7 @@ class SourceAlignmentConfig:
     repetition_cap: int | None = DEFAULT_ALIGNMENT_REPETITION_CAP
     components: int | float = DEFAULT_ALIGNMENT_COMPONENTS
     times: tuple[float, ...] = DEFAULT_ALIGNMENT_TIMES
+    same_decode_window: bool = False
     target_projection: str = "group_projection"
     hyperalignment_iterations: int = 10
     mcca_regularization: float = 1e-6
@@ -106,7 +116,13 @@ class SourceAlignmentConfig:
             "alignment_anchor_column": self.anchor_column,
             "alignment_repetition_cap": "" if self.repetition_cap is None else int(self.repetition_cap),
             "alignment_components": self.components,
-            "alignment_times": "|".join(f"{time:.6g}" for time in self.times),
+            "alignment_times": (
+                SAME_DECODE_WINDOW_ALIGNMENT
+                if self.same_decode_window
+                else "|".join(f"{time:.6g}" for time in self.times)
+            ),
+            "alignment_window_mode": SAME_DECODE_WINDOW_ALIGNMENT if self.same_decode_window else "fixed_centers",
+            "alignment_same_decode_window": bool(self.same_decode_window),
             "alignment_target_projection": self.target_projection,
             "alignment_strict_source_only": bool(self.enabled and not oracle),
             "alignment_uses_unlabeled_target_data": bool(unsupervised),
@@ -202,13 +218,16 @@ def normalize_source_alignment_target_projection(target_projection: str | None) 
     return normalized
 
 
-def parse_alignment_times(times: Sequence[float] | str | None) -> tuple[float, ...]:
+def parse_alignment_times(times: Sequence[float] | str | None) -> tuple[tuple[float, ...], bool]:
     if times is None:
-        return DEFAULT_ALIGNMENT_TIMES
+        return DEFAULT_ALIGNMENT_TIMES, False
     if isinstance(times, str):
         text = times.strip()
         if not text:
-            return DEFAULT_ALIGNMENT_TIMES
+            return DEFAULT_ALIGNMENT_TIMES, False
+        normalized = text.lower().replace("-", "_").replace(" ", "_")
+        if normalized in SAME_DECODE_WINDOW_ALIGNMENT_ALIASES:
+            return (), True
         if text.startswith("[") and text.endswith("]"):
             text = text[1:-1]
         parts = [part.strip() for chunk in text.split(",") for part in chunk.split() if part.strip()]
@@ -219,7 +238,7 @@ def parse_alignment_times(times: Sequence[float] | str | None) -> tuple[float, .
         raise ValueError("alignment_times must contain at least one time center.")
     if any(not np.isfinite(value) for value in values):
         raise ValueError("alignment_times must be finite.")
-    return values
+    return values, False
 
 
 def normalize_alignment_repetition_cap(value: int | str | None) -> int | None:
@@ -281,13 +300,15 @@ def source_alignment_config(
     mcca_subject_components = None
     if mcca_subject_pca_components not in {None, "", "none", "None"}:
         mcca_subject_components = normalize_alignment_components(mcca_subject_pca_components)
+    parsed_times, same_decode_window = parse_alignment_times(times)
     config = SourceAlignmentConfig(
         method=normalize_source_alignment_method(method),
         anchor_mode=normalize_source_alignment_anchor_mode(anchor_mode),
         anchor_column="" if anchor_column is None else str(anchor_column).strip(),
         repetition_cap=normalize_alignment_repetition_cap(repetition_cap),
         components=normalize_alignment_components(components),
-        times=parse_alignment_times(times),
+        times=parsed_times,
+        same_decode_window=same_decode_window,
         target_projection=normalize_source_alignment_target_projection(target_projection),
         hyperalignment_iterations=int(hyperalignment_iterations),
         mcca_regularization=float(mcca_regularization),
@@ -1106,6 +1127,7 @@ __all__ = [
     "DEFAULT_ALIGNMENT_REPETITION_CAP",
     "DEFAULT_ALIGNMENT_TIMES",
     "ORACLE_TARGET_CALIBRATED_ALIGNMENT",
+    "SAME_DECODE_WINDOW_ALIGNMENT",
     "SOURCE_ALIGNMENT_ANCHOR_MODES",
     "SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS",
     "SOURCE_ALIGNMENT_METHODS",
