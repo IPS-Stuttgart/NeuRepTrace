@@ -78,20 +78,46 @@ channel-projection-collapse fallback, so this diagnostic is consistent with a
 sparse/low-rank event-code-anchor bottleneck rather than a temporal-window
 collapse bug or a robust benchmark-valid alignment gain.
 
+## ds000117 Stimulus-ID Anchor Attempt
+
+Matched `stimulus_id_mean` runs were launched on commit 2f6f534 to test whether
+true image/stimulus identity anchors avoid the event-code bottleneck:
+
+| run | protocol | result | usable held-out subjects | fixed 0.184 s balanced accuracy |
+| --- | --- | --- | --- | ---: |
+| 27219457579 | strict source-only stimulus_id_mean | failed overall; partial aggregate only | sub-02, sub-04 | 0.3895 |
+| 27219463003 | oracle stimulus_id_mean | failed overall | none in aggregate | n/a |
+
+Failure logs show the limitation directly: several strict shards raised
+`No common source alignment anchors are shared by every source subject` or
+`M-CCA requires at least two aligned rows per subject`; oracle shards additionally
+failed when target subjects were missing source-shared anchors, for example
+`s083`, `u081`, `f112`, and `u141`.
+
+The strict partial aggregate is not benchmark-valid. Its diagnostics show only
+two common stimulus anchors/components (`n_alignment_rows=2`,
+`actual_components=2`) for the two successful held-out subjects, and the
+fixed-time score remains below raw. Thus the true-stimulus-ID route is currently
+limited by sparse/nonshared stimulus coverage across the six-subject/two-run
+setup, not by cross-window projection collapse.
+
 Current claim status:
 
 > Oracle target-calibrated alignment shows that ds000117 event-code anchors can
 > support a strong cross-subject common-space upper bound, but strict source-only
 > and sparse disjoint target-calibrated event-code alignment do not beat the raw
-> decoder. The result localizes the failure to valid target projection and
-> calibration, rather than proving a benchmark-valid cross-subject alignment
+> decoder. True stimulus-ID alignment is not currently evaluable as a full
+> six-subject benchmark because common-anchor coverage is too sparse. The result
+> localizes the current failure to valid target projection, calibration, and
+> anchor coverage, rather than proving a benchmark-valid cross-subject alignment
 > improvement.
 
 Remaining evidence needed before any stronger claim:
 
-- If this line of work continues, increase true-identity anchor rank or add a
-  richer valid calibration protocol before running more broad benchmark sweeps;
-  the current event-code mean setup gives only nine aligned components.
+- Before more broad benchmark sweeps, add an anchor-availability preflight or a
+  relaxed/coverage-weighted alignment protocol. Full common-anchor stimulus-ID
+  M-CCA has too little overlap in the current ds000117 six-subject/two-run
+  setup, and the event-code mean setup gives only nine aligned components.
 - Add matched `class_repetition` full runs at the same six-subject/all-event
   scope if the specific anchor-semantics question remains important.
 - A publishable positive alignment claim requires a benchmark-valid strict run
