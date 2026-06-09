@@ -111,6 +111,29 @@ def test_response_window_uniform_logit_ensemble_writes_metrics(tmp_path: Path):
     assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
 
 
+def test_response_window_metrics_preserve_constant_alignment_provenance(tmp_path: Path):
+    observations = _toy_observations()
+    observations["alignment_method"] = "mcca"
+    observations["alignment_anchor_mode"] = "event_code_mean"
+    observations["alignment_anchor_column"] = "trigger"
+    observations["alignment_target_projection"] = "oracle_target_calibrated_alignment"
+    observations["alignment_oracle_target_calibrated"] = True
+    observations["alignment_debug_upper_bound"] = True
+    observations["alignment_valid_for_benchmark"] = False
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    _ensembled, metrics = run_response_window_ensemble([csv_path], mode="uniform")
+
+    assert metrics["alignment_method"].unique().tolist() == ["mcca"]
+    assert metrics["alignment_anchor_mode"].unique().tolist() == ["event_code_mean"]
+    assert metrics["alignment_anchor_column"].unique().tolist() == ["trigger"]
+    assert metrics["alignment_target_projection"].unique().tolist() == ["oracle_target_calibrated_alignment"]
+    assert metrics["alignment_oracle_target_calibrated"].unique().tolist() == [True]
+    assert metrics["alignment_debug_upper_bound"].unique().tolist() == [True]
+    assert metrics["alignment_valid_for_benchmark"].unique().tolist() == [False]
+
+
 def test_response_window_uniform_probability_mean_uses_arithmetic_average(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     _toy_observations().to_csv(csv_path, index=False)

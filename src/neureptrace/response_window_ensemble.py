@@ -458,6 +458,7 @@ def run_response_window_ensemble(
             output_time=output_time,
         )
     metrics = metrics_from_probability_observations(ensembled, ece_bins=ece_bins)
+    metrics = _attach_response_window_provenance(metrics, ensembled)
     if out_observations is not None:
         out_observations.parent.mkdir(parents=True, exist_ok=True)
         ensembled.to_csv(out_observations, index=False)
@@ -465,6 +466,22 @@ def run_response_window_ensemble(
         out_metrics.parent.mkdir(parents=True, exist_ok=True)
         metrics.to_csv(out_metrics, index=False)
     return ensembled, metrics
+
+
+def _attach_response_window_provenance(metrics: pd.DataFrame, observations: pd.DataFrame) -> pd.DataFrame:
+    """Carry constant alignment/response-window provenance into metric rows."""
+
+    if metrics.empty:
+        return metrics
+    enriched = metrics.copy()
+    prefixes = ("alignment_", "response_window_")
+    for column in observations.columns:
+        if not column.startswith(prefixes):
+            continue
+        values = observations[column].drop_duplicates()
+        if len(values) == 1:
+            enriched[column] = values.iloc[0]
+    return enriched
 
 
 def _parse_times(text: str) -> tuple[float, ...]:
