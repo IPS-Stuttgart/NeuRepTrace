@@ -6,6 +6,8 @@ from neureptrace.decoding.hyperalignment_initialization import (
     class_alignment_matrices,
     fit_class_hyperalignment,
     fit_hyperalignment,
+    fit_projection_to_hyperalignment,
+    transform_with_projection,
 )
 
 
@@ -84,6 +86,30 @@ def test_hyperalignment_class_repetition_uses_common_offsets_when_counts_differ(
     assert np.allclose(
         alignment.aligned_by_subject["b"].ravel() - alignment.aligned_by_subject["a"].ravel(),
         np.full(alignment.aligned_by_subject["a"].shape[0], 10.0),
+    )
+
+
+def test_target_hyperalignment_projection_preserves_nonzero_template_mean() -> None:
+    features = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+        ]
+    )
+    rotation = np.array([[0.0, -1.0], [1.0, 0.0]])
+    template_offset = np.array([10.0, -3.0])
+    template = features @ rotation + template_offset
+
+    projection = fit_projection_to_hyperalignment(features, template=template)
+    transformed = transform_with_projection(features, projection)
+
+    np.testing.assert_allclose(np.mean(transformed, axis=0), np.mean(template, axis=0), atol=1e-10)
+    np.testing.assert_allclose(
+        transformed - np.mean(transformed, axis=0, keepdims=True),
+        template - np.mean(template, axis=0, keepdims=True),
+        atol=1e-10,
     )
 
 
