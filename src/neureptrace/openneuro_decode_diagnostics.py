@@ -17,6 +17,12 @@ MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 NULL_CHANCE_TOLERANCE = 0.03
 POSITIVE_CHANCE_MARGIN = 0.05
 SUMMARY_PROVENANCE_COLUMNS = (
+    "alignment_method",
+    "alignment_anchor_mode",
+    "alignment_repetition_cap",
+    "alignment_components",
+    "alignment_times",
+    "alignment_target_projection",
     "source_decoders",
     "ensemble_weights",
     "ensemble_source_temperatures",
@@ -360,6 +366,12 @@ def _workflow_quality_row(
     quality_summary_exists = bool(quality_path.is_file())
     n_subjects = stage_summary.get("n_subjects", manifest.get("n_subjects", ""))
     label_shuffle_control = _as_bool(manifest.get("label_shuffle_control", ""))
+    alignment_method = _provenance_value(manifest, summary_provenance, "alignment_method")
+    alignment_anchor_mode = _provenance_value(manifest, summary_provenance, "alignment_anchor_mode")
+    alignment_target_projection = _provenance_value(manifest, summary_provenance, "alignment_target_projection")
+    alignment_enabled = str(alignment_method).strip().lower() not in {"", "none"}
+    oracle_alignment = str(alignment_target_projection).strip().lower() == "oracle_target_calibrated_alignment"
+    alignment_protocol = "oracle_target_calibrated_alignment" if oracle_alignment else "strict_source_only" if alignment_enabled else ""
     quality_decision = _quality_decision(
         decode_summary_exists=decode_summary_exists,
         quality_summary_exists=quality_summary_exists,
@@ -391,6 +403,18 @@ def _workflow_quality_row(
         "label_shuffle_seed": manifest.get("label_shuffle_seed", ""),
         "time_decode_backend": manifest.get("time_decode_backend", ""),
         "source_calibration": _provenance_value(manifest, summary_provenance, "source_calibration"),
+        "alignment_method": alignment_method,
+        "alignment_anchor_mode": alignment_anchor_mode,
+        "alignment_repetition_cap": _provenance_value(manifest, summary_provenance, "alignment_repetition_cap"),
+        "alignment_components": _provenance_value(manifest, summary_provenance, "alignment_components"),
+        "alignment_times": _provenance_value(manifest, summary_provenance, "alignment_times"),
+        "alignment_target_projection": alignment_target_projection,
+        "alignment_strict_source_only": bool(alignment_enabled and not oracle_alignment),
+        "alignment_oracle_target_calibrated": bool(oracle_alignment),
+        "alignment_debug_upper_bound": bool(oracle_alignment),
+        "alignment_valid_for_benchmark": bool(not oracle_alignment),
+        "alignment_protocol": alignment_protocol,
+        "alignment_protocol_note": "debug upper bound only; not valid for benchmark" if oracle_alignment else "",
         "decoder_override": manifest.get("decoder_override", ""),
         "ensemble_weights": _provenance_value(manifest, summary_provenance, "ensemble_weights"),
         "ensemble_source_decoders": _provenance_value(
