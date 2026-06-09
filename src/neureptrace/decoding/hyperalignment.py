@@ -50,7 +50,12 @@ class HyperalignmentModel:
             raise KeyError(f"Unknown hyperalignment subject {subject_id!r}. Fitted subjects: {fitted}.") from exc
         return transform_with_projection(features, projection)
 
-    def transform_group(self, features: Sequence[Sequence[float]] | np.ndarray, *, feature_mean: Sequence[float] | np.ndarray | None = None) -> np.ndarray:
+    def transform_group(
+        self,
+        features: Sequence[Sequence[float]] | np.ndarray,
+        *,
+        feature_mean: Sequence[float] | np.ndarray | None = None,
+    ) -> np.ndarray:
         if self.group_projection is None or self.group_feature_mean is None:
             raise ValueError("A group projection is unavailable because fitted subjects have incompatible feature dimensions.")
         matrix = _feature_matrix(features, name="features")
@@ -264,7 +269,7 @@ def _orthogonal_procrustes_projection(centered: np.ndarray, template: np.ndarray
 def _normalize_template(template: np.ndarray) -> np.ndarray:
     template = template - np.mean(template, axis=0, keepdims=True)
     scale = np.std(template, axis=0, ddof=1)
-    scale = np.where(scale < 1e-12, 1.0)
+    scale = np.where(scale < 1e-12, 1.0, scale)
     return template / scale[None, :]
 
 
@@ -373,7 +378,7 @@ def _normalize_sample_mode(sample_mode: str) -> str:
 def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
     matrix = np.asarray(features, dtype=float)
     if matrix.ndim != 2:
-        raise ValueError(f"{name} must be a two-dimensional feature matrix.")
+        raise ValueError(f"{name} must be a two-dimensional matrix.")
     if matrix.shape[0] == 0 or matrix.shape[1] == 0:
         raise ValueError(f"{name} must have at least one row and one column.")
     if not np.all(np.isfinite(matrix)):
