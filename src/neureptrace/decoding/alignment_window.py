@@ -32,6 +32,8 @@ class WindowedFeatureSet(Protocol):
     labels: np.ndarray
     n_channels: int
     n_window_samples: int
+    # Concrete feature sets may also expose timing metadata such as
+    # window_center/window_size or window_start/window_stop variants.
 
 
 @dataclass(frozen=True)
@@ -106,10 +108,12 @@ def transform_with_alignment_projection(
 ) -> np.ndarray:
     """Apply an alignment projection to features from a possibly different window.
 
-    When feature widths match, this is the standard centered linear projection.
-    When widths differ, the projection and centering vector are collapsed to
-    channel space by averaging across the alignment-window samples, then applied
-    independently to each decoding-window sample.
+    When feature widths and window metadata match, this is the standard centered
+    linear projection. When widths differ, or when timing metadata show that the
+    projection was fitted on a different same-width window, the projection and
+    centering vector are collapsed to channel space by averaging across the
+    alignment-window samples, then applied independently to each decoding-window
+    sample.
     """
 
     matrix = _feature_matrix(features, name="features")
@@ -123,7 +127,10 @@ def transform_with_alignment_projection(
         explicit_feature_mean_set=feature_mean_set if feature_mean is not None else projection_feature_set,
     )
 
-    if matrix.shape[1] == projection.shape[0]:
+    if matrix.shape[1] == projection.shape[0] and _feature_windows_match(
+        decode_feature_set,
+        projection_feature_set,
+    ):
         if mean.shape[0] != matrix.shape[1]:
             raise ValueError(f"feature_mean length must match features columns: {mean.shape[0]} != {matrix.shape[1]}.")
         return (matrix - mean) @ projection
@@ -185,6 +192,37 @@ def _feature_order(feature_set: WindowedFeatureSet) -> FeatureOrder:
     if order not in {"channel_time", "time_channel"}:
         raise ValueError(f"feature_order must be 'channel_time' or 'time_channel', got {order!r}.")
     return order
+
+
+def _feature_windows_match(left: WindowedFeatureSet, right: WindowedFeatureSet) -> bool:
+    """Return whether two flattened feature sets refer to the same time window."""
+
+    if int(left.n_channels) != int(right.n_channels) or int(left.n_window_samples) != int(
+        right.n_window_samples
+    ):
+        return False
+    if _feature_order(left) != _feature_order(right):
+        return False
+
+    for attr in (
+        "window_center",
+        "window_center_s",
+        "window_size",
+        "window_size_s",
+        "window_start",
+        "window_start_s",
+        "window_stop",
+        "window_stop_s",
+    ):
+        left_value = getattr(left, attr, None)
+        right_value = getattr(right, attr, None)
+        if left_value is None and right_value is None:
+            continue
+        if left_value is None or right_value is None:
+            return False
+        if not np.isclose(float(left_value), float(right_value)):
+            return False
+    return True
 
 
 def _projection_to_channel_space(projection: np.ndarray, feature_set: WindowedFeatureSet) -> np.ndarray:

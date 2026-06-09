@@ -213,15 +213,31 @@ def transform_with_projection(
     if matrix.shape[1] != projection.projection.shape[0]:
         raise ValueError(f"features column count does not match projection: {matrix.shape[1]} != {projection.projection.shape[0]}.")
     transformed = (matrix - projection.feature_mean) @ projection.projection
-    if projection.template_mean is None:
-        return transformed
-    template_mean = np.asarray(projection.template_mean, dtype=float).ravel()
-    if template_mean.shape[0] != transformed.shape[1]:
-        raise ValueError(
-            "template_mean length must match transformed columns: "
-            f"{template_mean.shape[0]} != {transformed.shape[1]}."
-        )
-    return transformed + template_mean[None, :]
+    if projection.template_mean is not None:
+        transformed = _add_template_mean(transformed, projection.template_mean)
+    return transformed
+
+
+def _add_template_mean(
+    transformed: Sequence[Sequence[float]] | np.ndarray,
+    template_mean: Sequence[float] | np.ndarray,
+) -> np.ndarray:
+    """Add a common-space template mean to projected hyperalignment rows."""
+
+    matrix = _feature_matrix(transformed, name="transformed")
+    mean = np.asarray(template_mean, dtype=float).ravel()
+    if mean.size == 0:
+        raise ValueError("template_mean must contain at least one value.")
+    if not np.all(np.isfinite(mean)):
+        raise ValueError("template_mean contains non-finite values.")
+    if matrix.shape[1] == mean.shape[0]:
+        return matrix + mean
+    if matrix.shape[1] % mean.shape[0] == 0:
+        return matrix + np.tile(mean, matrix.shape[1] // mean.shape[0])
+    raise ValueError(
+        "transformed column count must match or be a multiple of the template width: "
+        f"{matrix.shape[1]} vs {mean.shape[0]}."
+    )
 
 
 def class_alignment_matrices(
