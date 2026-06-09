@@ -27,19 +27,22 @@ At fixed time 0.184 s:
 | --- | --- | --- | --- | --- | ---: |
 | 27201369939 | benchmark-valid raw | none | class_mean | group_projection | 0.5532 |
 | 27200779414 | benchmark-valid strict alignment | mcca | event_code_mean | group_projection | 0.4952 |
+| 27218830922 | benchmark-valid strict alignment with diagnostics | mcca | event_code_mean | group_projection | 0.4912 |
 | 27200264477 | oracle upper bound | procrustes | event_code_mean | oracle_target_calibrated_alignment | 0.7247 |
 | 27200273151 | oracle upper bound | hyperalignment | event_code_mean | oracle_target_calibrated_alignment | 0.7276 |
 | 27200777169 / 27200282180 | oracle upper bound | mcca | event_code_mean | oracle_target_calibrated_alignment | 0.7333 |
+| 27218835937 | oracle upper bound with diagnostics | mcca | event_code_mean | oracle_target_calibrated_alignment | 0.7321 |
 | 27216491916 | benchmark-valid disjoint target calibration | mcca | event_code_mean | target_calibrated_alignment | 0.4120 |
 
 Interpretation:
 
 - Strict event-code MCCA does not improve the benchmark-valid ds000117 full
-  run; it trails raw by -0.0581 balanced accuracy at 0.184 s.
+  run; the matched rerun with diagnostics trails raw by -0.0621 balanced
+  accuracy at 0.184 s.
 - Oracle target-calibrated event-code MCCA improves over strict event-code MCCA
-  by +0.2381 balanced accuracy at the same fixed time.
+  by +0.2410 balanced accuracy at the same fixed time.
 - Benchmark-valid disjoint target calibration does not rescue event-code MCCA in
-  the current setup. It trails strict event-code MCCA by -0.0831 and raw by
+  the current setup. It trails the matched strict event-code MCCA by -0.0791 and raw by
   -0.1412 balanced accuracy at 0.184 s.
 - Therefore the alignment machinery and event-code anchors can produce a strong
   upper-bound effect, but the source-only/group-projection target transform is
@@ -48,9 +51,10 @@ Interpretation:
 - This is a debug result, not a publishable alignment gain. The oracle rows are
   explicitly invalid for benchmark reporting.
 
-The 27216491916 target-calibrated run emitted `alignment_diagnostics.csv` for
-the aggregate and all six subject shards. Its aggregate diagnostics show why this
-variant is not a positive alignment result:
+The 27218830922 strict rerun and 27218835937 oracle rerun emitted
+`alignment_diagnostics.csv` for the aggregate and all six subject shards, as did
+the 27216491916 target-calibrated run. Their aggregate diagnostics show why this
+alignment family is not a benchmark-valid positive result:
 
 | field | value |
 | --- | ---: |
@@ -58,21 +62,21 @@ variant is not a positive alignment result:
 | actual_components | 9 |
 | feature_dim | 7650 |
 | decode_feature_dim | 9 |
+| uses_channel_projection_collapse | false |
 | alignment_dimensionality_reduction | true |
 | anchor_row_correlation_before | 0.7797 |
-| anchor_row_correlation_after | 0.8884 |
+| anchor_row_correlation_after | 0.8880-0.8884 |
 | source_inner_decoding_before_alignment | 0.4987 |
-| source_inner_decoding_after_alignment | 0.4645 |
+| source_inner_decoding_after_alignment | 0.4645-0.4652 |
 
 The target transform was
 `target_calibrated_template_ridge_least_squares`. Anchor correlation improved,
 but source-inner decoding worsened and the held-out target score fell. The
 projection also reduced the high-dimensional channel-time feature space to a
-9-dimensional aligned decode space, so this diagnostic is consistent with a
-sparse/low-rank calibration bottleneck rather than a robust benchmark-valid
-alignment gain. Subsequent diagnostics separate this ordinary aligned-space
-dimensionality reduction from the cross-window channel-projection-collapse
-fallback.
+9-dimensional aligned decode space without using the cross-window
+channel-projection-collapse fallback, so this diagnostic is consistent with a
+sparse/low-rank event-code-anchor bottleneck rather than a temporal-window
+collapse bug or a robust benchmark-valid alignment gain.
 
 Current claim status:
 
@@ -85,10 +89,9 @@ Current claim status:
 
 Remaining evidence needed before any stronger claim:
 
-- Re-run the full ds000117 strict and oracle alignment variants with
-  `alignment_diagnostics.csv` enabled if exact dimensionality is needed for
-  those older artifacts. The target-calibrated 27216491916 artifact already has
-  aggregate and per-shard diagnostics.
+- If this line of work continues, increase true-identity anchor rank or add a
+  richer valid calibration protocol before running more broad benchmark sweeps;
+  the current event-code mean setup gives only nine aligned components.
 - Add matched `class_repetition` full runs at the same six-subject/all-event
   scope if the specific anchor-semantics question remains important.
 - A publishable positive alignment claim requires a benchmark-valid strict run
