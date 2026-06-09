@@ -2,8 +2,8 @@
 
 The caller supplies row-aligned subject matrices, e.g. one row per class or per
 class/repetition anchor. The fitted model stores subject-specific semi-orthogonal
-maps into a common representational space and an average projection for
-calibration-free held-out-subject baselines.
+maps into a common representational space and a polar-stabilized average
+projection for calibration-free held-out-subject baselines.
 """
 
 from __future__ import annotations
@@ -274,7 +274,21 @@ def _average_projection(projections: Mapping[Hashable, SubjectHyperalignmentProj
         return None, None
     mean = np.mean(np.stack([projection.feature_mean for projection in projections.values()], axis=0), axis=0)
     matrix = np.mean(np.stack([projection.projection for projection in projections.values()], axis=0), axis=0)
-    return mean, matrix
+    return mean, _closest_semi_orthogonal(matrix)
+
+
+def _closest_semi_orthogonal(matrix: np.ndarray) -> np.ndarray:
+    """Return the nearest semi-orthogonal matrix to ``matrix``.
+
+    Averaging subject-specific Procrustes rotations is a convenient
+    calibration-free fallback for unseen subjects, but the raw arithmetic mean is
+    generally no longer semi-orthogonal.  Projecting it back to the Stiefel
+    manifold preserves the scale of the common-space axes instead of introducing
+    a shrinkage/shear that can silently disadvantage group-transform baselines.
+    """
+
+    u, _s, vt = np.linalg.svd(matrix, full_matrices=False)
+    return u @ vt
 
 
 def _class_mean_matrix(features: np.ndarray, labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
