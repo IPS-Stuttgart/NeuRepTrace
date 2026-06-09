@@ -134,6 +134,24 @@ def test_class_alignment_matrices_class_repetition_allows_legacy_first_selection
     assert alignment.aligned_by_subject["a"].ravel().tolist() == [1.0, 3.0, 2.0, 4.0]
 
 
+def test_class_alignment_matrices_class_repetition_uses_common_offsets_when_counts_differ():
+    features = {
+        "a": np.array([[0.0], [1.0], [2.0], [3.0], [100.0], [101.0], [102.0], [103.0]]),
+        "b": np.array([[10.0], [11.0], [12.0], [13.0], [14.0], [110.0], [111.0], [112.0], [113.0], [114.0]]),
+    }
+    labels = {
+        "a": np.array([1, 1, 1, 1, 2, 2, 2, 2]),
+        "b": np.array([1, 1, 1, 1, 1, 2, 2, 2, 2, 2]),
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_repetition", n_repetitions_per_class=2)
+
+    assert np.allclose(
+        alignment.aligned_by_subject["b"].ravel() - alignment.aligned_by_subject["a"].ravel(),
+        np.full(alignment.aligned_by_subject["a"].shape[0], 10.0),
+    )
+
+
 def test_target_class_alignment_matrix_reuses_repetition_sampling_options():
     features = np.array([[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]])
     labels = np.array([1, 2, 1, 2, 1, 2])

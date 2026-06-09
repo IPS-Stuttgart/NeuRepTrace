@@ -3,6 +3,7 @@ import pytest
 
 from neureptrace.decoding.hyperalignment_initialization import (
     HYPERALIGNMENT_INITIALIZATION_MODES,
+    class_alignment_matrices,
     fit_class_hyperalignment,
     fit_hyperalignment,
 )
@@ -65,6 +66,24 @@ def test_class_hyperalignment_accepts_mean_initialization():
     assert alignment.repetition_seed == 0
     assert model.template.shape == (6, 3)
     _assert_orthonormal_columns(model.group_projection)
+
+
+def test_hyperalignment_class_repetition_uses_common_offsets_when_counts_differ():
+    features = {
+        "a": np.array([[0.0], [1.0], [2.0], [3.0], [100.0], [101.0], [102.0], [103.0]]),
+        "b": np.array([[10.0], [11.0], [12.0], [13.0], [14.0], [110.0], [111.0], [112.0], [113.0], [114.0]]),
+    }
+    labels = {
+        "a": np.array([1, 1, 1, 1, 2, 2, 2, 2]),
+        "b": np.array([1, 1, 1, 1, 1, 2, 2, 2, 2, 2]),
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_repetition", n_repetitions_per_class=2)
+
+    assert np.allclose(
+        alignment.aligned_by_subject["b"].ravel() - alignment.aligned_by_subject["a"].ravel(),
+        np.full(alignment.aligned_by_subject["a"].shape[0], 10.0),
+    )
 
 
 def test_class_hyperalignment_alignment_exposes_rank_warning():
