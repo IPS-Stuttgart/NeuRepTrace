@@ -108,7 +108,8 @@ def test_transform_with_alignment_projection_defaults_to_mne_channel_time_order(
         projection_feature_set=alignment,
     )
 
-    np.testing.assert_allclose(transformed, np.array([[3.0, 12.0, 6.0, 16.0]]))
+    # Preserve MNE channel_time flattening: [component0_t0, component0_t1, component1_t0, component1_t1].
+    np.testing.assert_allclose(transformed, np.array([[3.0, 6.0, 12.0, 16.0]]))
 
 
 def test_transform_with_alignment_projection_supports_explicit_time_channel_order() -> None:
@@ -176,7 +177,42 @@ def test_transform_with_alignment_projection_infers_alignment_window_for_supplie
         feature_mean=alignment_mean,
     )
 
-    np.testing.assert_allclose(transformed, np.array([[3.0, 12.0, 6.0, 16.0]]))
+    np.testing.assert_allclose(transformed, np.array([[3.0, 6.0, 12.0, 16.0]]))
+
+
+def test_cross_window_adapter_preserves_channel_time_order_with_multiple_trials() -> None:
+    decode = DummyFeatureSet(np.zeros((2, 4)), np.array([1, 2]), n_channels=2, n_window_samples=2)
+    alignment = DummyFeatureSet(np.zeros((2, 6)), np.array([1, 2]), n_channels=2, n_window_samples=3)
+    features = np.array(
+        [
+            [4.0, 5.0, 7.0, 8.0],
+            [6.0, 7.0, 9.0, 10.0],
+        ]
+    )
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [5.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+            [0.0, 6.0],
+        ]
+    )
+    projection_mean = np.array([1.0, 3.0, 5.0, 2.0, 4.0, 6.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=projection_mean,
+        projection_feature_set=alignment,
+    )
+
+    np.testing.assert_allclose(
+        transformed,
+        np.array([[3.0, 6.0, 12.0, 16.0], [9.0, 12.0, 20.0, 24.0]]),
+    )
 
 
 def test_transform_with_alignment_projection_rejects_invalid_feature_order() -> None:

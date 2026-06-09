@@ -30,6 +30,7 @@ class SubjectHyperalignmentProjection:
     feature_mean: np.ndarray
     projection: np.ndarray
     n_alignment_rows: int
+    template_mean: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -193,12 +194,14 @@ def fit_projection_to_hyperalignment(
     if matrix.shape[0] != template_matrix.shape[0]:
         raise ValueError(f"features and template need the same row count: {matrix.shape[0]} != {template_matrix.shape[0]}.")
     mean = np.mean(matrix, axis=0)
-    projection = _orthogonal_procrustes_projection(matrix - mean, template_matrix)
+    template_mean = np.mean(template_matrix, axis=0)
+    projection = _orthogonal_procrustes_projection(matrix - mean, template_matrix - template_mean)
     return SubjectHyperalignmentProjection(
         subject_id="target",
         feature_mean=mean,
         projection=projection,
         n_alignment_rows=matrix.shape[0],
+        template_mean=template_mean,
     )
 
 
@@ -209,7 +212,16 @@ def transform_with_projection(
     matrix = _feature_matrix(features, name="features")
     if matrix.shape[1] != projection.projection.shape[0]:
         raise ValueError(f"features column count does not match projection: {matrix.shape[1]} != {projection.projection.shape[0]}.")
-    return (matrix - projection.feature_mean) @ projection.projection
+    transformed = (matrix - projection.feature_mean) @ projection.projection
+    if projection.template_mean is None:
+        return transformed
+    template_mean = np.asarray(projection.template_mean, dtype=float).ravel()
+    if template_mean.shape[0] != transformed.shape[1]:
+        raise ValueError(
+            "template_mean length must match transformed columns: "
+            f"{template_mean.shape[0]} != {transformed.shape[1]}."
+        )
+    return transformed + template_mean[None, :]
 
 
 def class_alignment_matrices(
