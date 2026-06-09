@@ -46,6 +46,33 @@ def test_decode_from_config_passes_outer_test_groups(tmp_path):
     assert kwargs["outer_test_groups"] == ("sub-01", "sub-07")
 
 
+def test_decode_from_config_passes_alignment_controls(tmp_path):
+    kwargs = _decode_kwargs(
+        {
+            "dataset": {"name": "demo"},
+            "decoding": {
+                "label_column": "condition",
+                "alignment_method": "mcca",
+                "alignment_anchor_mode": "class_repetition",
+                "alignment_repetition_cap": 12,
+                "alignment_components": 32,
+                "alignment_times": "0.088,0.136,0.184",
+                "alignment_target_projection": "group_projection",
+            },
+            "preprocessing": {},
+            "outputs": {"summary_csv": "summary.csv"},
+        },
+        config_dir=tmp_path,
+    )
+
+    assert kwargs["alignment_method"] == "mcca"
+    assert kwargs["alignment_anchor_mode"] == "class_repetition"
+    assert kwargs["alignment_repetition_cap"] == 12
+    assert kwargs["alignment_components"] == 32
+    assert kwargs["alignment_times"] == "0.088,0.136,0.184"
+    assert kwargs["alignment_target_projection"] == "group_projection"
+
+
 def test_decode_from_config_passes_ensemble_controls_for_ensemble_decoder(tmp_path):
     kwargs = _decode_kwargs(
         {

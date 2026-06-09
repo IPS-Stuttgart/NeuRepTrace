@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
+from neureptrace.decoding.source_alignment import SourceAlignmentResult
 from neureptrace.mne_time_decode import (
     _apply_class_prior_correction,
     _align_probability_columns,
@@ -99,6 +100,60 @@ def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     np.testing.assert_array_equal(shuffled_a, shuffled_b)
     assert sorted(shuffled_a.tolist()) == sorted(labels.tolist())
     assert not np.array_equal(shuffled_a, shuffled_c)
+
+
+def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_labels(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    for trial_index, label in enumerate(labels):
+        data[trial_index, :, :] = label
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    alignment_train_labels = []
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs.get("target_labels") is None
+        alignment_train_labels.append(np.asarray(kwargs["train_labels"], dtype=int).copy())
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "class_mean",
+                "alignment_target_projection": "group_projection",
+                "alignment_n_components": 2,
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "synthetic-epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "aligned.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=4,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        alignment_method="procrustes",
+        label_shuffle_control=True,
+        label_shuffle_seed=13,
+    )
+
+    assert alignment_train_labels
+    unshuffled_train = labels[groups != "sub-01"]
+    assert sorted(alignment_train_labels[0].tolist()) == sorted(unshuffled_train.tolist())
+    assert not np.array_equal(alignment_train_labels[0], unshuffled_train)
+    assert set(results["alignment_method"]) == {"procrustes"}
+    assert set(results["alignment_target_projection"]) == {"group_projection"}
 
 
 def test_outer_test_group_filter_preserves_fold_ids_and_accepts_subject_aliases():

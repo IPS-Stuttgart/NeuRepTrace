@@ -57,6 +57,11 @@ from neureptrace.decoding import (
     parse_c_grid,
     predict_emission_probabilities,
 )
+from neureptrace.decoding.source_alignment import (
+    SourceAlignmentConfig,
+    align_train_test_features,
+    source_alignment_config,
+)
 from neureptrace.io.fieldtrip_mat import load_fieldtrip_mat_epochs
 from neureptrace.bushmeg_cue_source_weights import (
     CueSourceWeights,
@@ -1947,9 +1952,20 @@ def _predict_candidate(
     test_subject: str,
     n_classes: int,
     max_iter: int,
+    alignment_config: SourceAlignmentConfig | None = None,
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
     subject_weight_multipliers: Mapping[str, float] | None = None,
 ) -> np.ndarray:
-    train_labels = _stack_subject_labels(subjects, train_subjects)
+    if alignment_config is None:
+        alignment_config = source_alignment_config()
+    train_labels = _base._fold_training_labels(
+        _stack_subject_labels(subjects, train_subjects),
+        np.arange(sum(len(subjects[subject].labels) for subject in train_subjects)),
+        label_shuffle_control=label_shuffle_control,
+        label_shuffle_seed=label_shuffle_seed,
+        context=("bushmeg_source_loso", test_subject, candidate.name),
+    )
     train_subject_ids = _stack_subject_ids(subjects, train_subjects)
     test_n = len(subjects[test_subject].labels)
     probabilities_sum = np.zeros((test_n, n_classes), dtype=float)
@@ -1958,6 +1974,11 @@ def _predict_candidate(
     class_bias_labels: np.ndarray | None = None
     classes = np.arange(n_classes)
     feature_kind = normalize_source_feature_kind(candidate.feature_kind)
+    feature_family = normalize_source_feature_family(candidate.feature_family)
+    if label_shuffle_control and feature_family != "bin_means":
+        raise ValueError("BUSH-MEG label_shuffle_control currently supports only bin_means feature_family.")
+    if label_shuffle_control and feature_kind in SUPERVISED_FEATURE_KINDS and feature_kind not in {"xdawn", "xdawn_prototype"}:
+        raise ValueError(f"BUSH-MEG label_shuffle_control cannot safely shuffle supervised feature kind {feature_kind!r}.")
     for window in candidate.windows:
         if feature_kind in {"xdawn", "xdawn_prototype"}:
             train_features, test_features = _xdawn_train_test_features(
@@ -1994,6 +2015,18 @@ def _predict_candidate(
                 window=window,
                 n_classes=n_classes,
             )
+        alignment_metadata: Mapping[str, Any] | None = None
+        if alignment_config.enabled:
+            alignment_result = align_train_test_features(
+                train_features=train_features,
+                train_labels=train_labels,
+                train_subject_ids=train_subject_ids,
+                test_features=test_features,
+                config=alignment_config,
+            )
+            train_features = alignment_result.train_features
+            test_features = alignment_result.test_features
+            alignment_metadata = alignment_result.metadata
         fit_features, fit_labels, fit_subjects = _source_class_pseudotrials(
             train_features,
             train_labels,
@@ -2010,6 +2043,8 @@ def _predict_candidate(
             subject_weight_multipliers=subject_weight_multipliers,
         )
         model = _candidate_model(candidate, max_iter=max_iter, n_features=fit_features.shape[1], n_samples=fit_features.shape[0])
+        if alignment_metadata is not None:
+            setattr(model, "_neureptrace_source_alignment_metadata", dict(alignment_metadata))
         _fit_candidate_model(model, fit_features, fit_labels, sample_weight=fit_sample_weight)
         probabilities = predict_emission_probabilities(
             model,
@@ -2066,10 +2101,21 @@ def _score_is_better(candidate_score: float, incumbent_score: float | None, *, m
     return candidate_score > incumbent_score
 
 
-def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
+def _candidate_rowspec(
+    candidate: CandidateSpec,
+    *,
+    alignment_config: SourceAlignmentConfig | None = None,
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
+) -> dict[str, Any]:
     pseudotrial_mode = _normalize_pseudotrial_mode(
         candidate.pseudotrial_mode,
         pseudotrials_per_class=int(candidate.pseudotrials_per_class),
+    )
+    alignment_metadata = (
+        source_alignment_config().static_metadata()
+        if alignment_config is None
+        else alignment_config.static_metadata()
     )
     return {
         "candidate": candidate.name,
@@ -2091,6 +2137,9 @@ def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
         "n_windows": len(candidate.windows),
         "window_centers": "|".join(f"{center:.6g}" for center in candidate.window_centers),
         "window_widths": "|".join(f"{width:.6g}" for width in candidate.window_widths),
+        **alignment_metadata,
+        "label_shuffle_control": bool(label_shuffle_control),
+        "label_shuffle_seed": int(label_shuffle_seed),
     }
 
 
@@ -2102,8 +2151,13 @@ def _inner_loso_scores(
     outer_test_subject: str,
     n_classes: int,
     max_iter: int,
+    alignment_config: SourceAlignmentConfig | None = None,
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
     cue_source_weights: CueSourceWeights | None = None,
 ) -> list[dict[str, Any]]:
+    if alignment_config is None:
+        alignment_config = source_alignment_config()
     source_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
     rows: list[dict[str, Any]] = []
     for inner_test_subject in source_subjects:
@@ -2116,6 +2170,9 @@ def _inner_loso_scores(
             test_subject=inner_test_subject,
             n_classes=n_classes,
             max_iter=max_iter,
+            alignment_config=alignment_config,
+            label_shuffle_control=label_shuffle_control,
+            label_shuffle_seed=label_shuffle_seed,
             subject_weight_multipliers=None if cue_source_weights is None else cue_source_weights.for_fold(inner_test_subject, train_subjects),
         )
         labels = subjects[inner_test_subject].labels
@@ -2123,7 +2180,12 @@ def _inner_loso_scores(
             {
                 "outer_test_subject": outer_test_subject,
                 "inner_test_subject": inner_test_subject,
-                **_candidate_rowspec(candidate),
+                **_candidate_rowspec(
+                    candidate,
+                    alignment_config=alignment_config,
+                    label_shuffle_control=label_shuffle_control,
+                    label_shuffle_seed=label_shuffle_seed,
+                ),
                 **_candidate_metrics(probabilities, labels, n_classes=n_classes),
                 "n_train_subjects": len(train_subjects),
                 "n_test_trials": len(labels),
@@ -2141,8 +2203,13 @@ def _select_candidate(
     n_classes: int,
     max_iter: int,
     selection_metric: str,
+    alignment_config: SourceAlignmentConfig | None = None,
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
     cue_source_weights: CueSourceWeights | None = None,
 ) -> tuple[CandidateSpec, list[dict[str, Any]], dict[str, Any]]:
+    if alignment_config is None:
+        alignment_config = source_alignment_config()
     if selection_metric not in SUPPORTED_SELECTION_METRICS:
         raise ValueError(f"Unknown selection metric '{selection_metric}'. Available metrics: {sorted(SUPPORTED_SELECTION_METRICS)}.")
     all_rows: list[dict[str, Any]] = []
@@ -2157,6 +2224,9 @@ def _select_candidate(
             outer_test_subject=outer_test_subject,
             n_classes=n_classes,
             max_iter=max_iter,
+            alignment_config=alignment_config,
+            label_shuffle_control=label_shuffle_control,
+            label_shuffle_seed=label_shuffle_seed,
             cue_source_weights=cue_source_weights,
         )
         all_rows.extend(rows)
@@ -2394,6 +2464,16 @@ def run_bushmeg_source_loso(
     source_loso = _section(config, "source_loso")
     selection_metric = str(source_loso.get("selection_metric", DEFAULT_SELECTION_METRIC))
     max_iter = int((_section(config, "decoding") or {}).get("max_iter", 1000))
+    alignment_config = source_alignment_config(
+        method=source_loso.get("alignment_method", source_loso.get("source_alignment", "none")),
+        anchor_mode=source_loso.get("alignment_anchor_mode", "class_mean"),
+        repetition_cap=source_loso.get("alignment_repetition_cap", 16),
+        components=source_loso.get("alignment_components", 64),
+        times=source_loso.get("alignment_times"),
+        target_projection=source_loso.get("alignment_target_projection", "group_projection"),
+    )
+    label_shuffle_control = _config_bool(source_loso.get("label_shuffle_control"), default=False)
+    label_shuffle_seed = int(source_loso.get("label_shuffle_seed", DEFAULT_RANDOM_SEED))
 
     subjects, encoder = _load_subjects_from_config(config, config_dir=config_path.parent)
     candidates = _candidate_grid(config)
@@ -2438,6 +2518,9 @@ def run_bushmeg_source_loso(
             n_classes=n_classes,
             max_iter=max_iter,
             selection_metric=selection_metric,
+            alignment_config=alignment_config,
+            label_shuffle_control=label_shuffle_control,
+            label_shuffle_seed=label_shuffle_seed,
             cue_source_weights=cue_source_weights,
         )
         inner_rows.extend(candidate_inner_rows)
@@ -2451,6 +2534,9 @@ def run_bushmeg_source_loso(
             test_subject=outer_test_subject,
             n_classes=n_classes,
             max_iter=max_iter,
+            alignment_config=alignment_config,
+            label_shuffle_control=label_shuffle_control,
+            label_shuffle_seed=label_shuffle_seed,
             subject_weight_multipliers=fold_subject_weights,
         )
         labels = subjects[outer_test_subject].labels
@@ -2458,7 +2544,12 @@ def run_bushmeg_source_loso(
         summary_rows.append(
             {
                 "outer_test_subject": outer_test_subject,
-                **_candidate_rowspec(selected),
+                **_candidate_rowspec(
+                    selected,
+                    alignment_config=alignment_config,
+                    label_shuffle_control=label_shuffle_control,
+                    label_shuffle_seed=label_shuffle_seed,
+                ),
                 **selected_summary,
                 **_candidate_metrics(probabilities, labels, n_classes=n_classes),
                 "n_train_subjects": len(train_subjects),
@@ -2476,6 +2567,9 @@ def run_bushmeg_source_loso(
                 "outer_test_subject": outer_test_subject,
                 "trial_index": int(row_idx),
                 "candidate": selected.name,
+                **alignment_config.static_metadata(),
+                "label_shuffle_control": bool(label_shuffle_control),
+                "label_shuffle_seed": int(label_shuffle_seed),
                 "true_label": int(true_label),
                 "true_class": str(encoder.classes_[true_label]),
                 "predicted_label": int(predicted_label),
@@ -2530,6 +2624,10 @@ def run_bushmeg_source_loso(
             "cue_files_used": cue_source_weights is not None,
             "cue_files_used_for_classifier_training": False,
             "target_labels_used_for_selection": False,
+            "source_alignment": alignment_config.static_metadata(),
+            "alignment_target_labels_used": False,
+            "label_shuffle_control": bool(label_shuffle_control),
+            "label_shuffle_seed": int(label_shuffle_seed),
             "cue_source_weighting_config": {} if cue_source_weights is None else dict(cue_source_weights.config or {}),
             "random_seed": DEFAULT_RANDOM_SEED,
         },

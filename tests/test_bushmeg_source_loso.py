@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import balanced_accuracy_score
 
+from neureptrace.decoding.source_alignment import source_alignment_config
 from neureptrace.decoding import make_decoder, normalize_decoder_name
 from neureptrace.bushmeg_source_loso import (
     CandidateSpec,
@@ -407,6 +408,48 @@ def test_select_candidate_uses_only_source_subjects_for_inner_loso():
     assert {row["inner_test_subject"] for row in rows} == {"0", "1", "2"}
     assert all(row["outer_test_subject"] == "3" for row in rows)
     assert summary["inner_n_folds"] == 3
+
+
+def test_select_candidate_carries_strict_alignment_metadata():
+    subjects = {}
+    times = np.array([0.10, 0.20])
+    for subject_idx in range(4):
+        labels = np.array([0, 0, 1, 1])
+        data = np.zeros((4, 2, 2), dtype=np.float32)
+        data[:, 0, :] = labels[:, None]
+        data[:, 1, :] = subject_idx * 0.01
+        subjects[str(subject_idx)] = SubjectEpochs(
+            subject=str(subject_idx),
+            data=data,
+            times=times,
+            metadata=pd.DataFrame(),
+            labels=labels,
+        )
+
+    candidate = CandidateSpec(
+        name="aligned_mean_bin",
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        feature_preprocessor="none",
+        pca_components=None,
+        classifier_param=1.0,
+        temporal_bins=1,
+        windows=(WindowSpec(center=0.15, width=0.20),),
+    )
+    selected, rows, _summary = _select_candidate(
+        subjects=subjects,
+        cache=FeatureCache(subjects),
+        candidates=[candidate],
+        outer_test_subject="3",
+        n_classes=2,
+        max_iter=200,
+        selection_metric="balanced_accuracy",
+        alignment_config=source_alignment_config(method="procrustes", components=1),
+    )
+
+    assert selected.name == "aligned_mean_bin"
+    assert {row["alignment_method"] for row in rows} == {"procrustes"}
+    assert {row["alignment_target_projection"] for row in rows} == {"group_projection"}
 
 
 def test_subject_class_balanced_sample_weights_equalize_observed_cells():
