@@ -153,6 +153,32 @@ def _alignment_diagnostic_summary(diagnostics: pd.DataFrame) -> dict[str, Any]:
         if "uses_channel_projection_collapse" in diagnostics.columns
         else pd.Series(dtype=bool)
     )
+    if not collapse.empty and {
+        "alignment_window_center",
+        "alignment_window_size",
+        "decode_window_center",
+        "decode_window_size",
+    }.issubset(diagnostics.columns):
+        same_window = (
+            pd.to_numeric(diagnostics["alignment_window_center"], errors="coerce")
+            .sub(pd.to_numeric(diagnostics["decode_window_center"], errors="coerce"))
+            .abs()
+            .le(1e-9)
+            & pd.to_numeric(diagnostics["alignment_window_size"], errors="coerce")
+            .sub(pd.to_numeric(diagnostics["decode_window_size"], errors="coerce"))
+            .abs()
+            .le(1e-9)
+        )
+        collapse = collapse & ~same_window.fillna(False)
+    if "alignment_dimensionality_reduction" in diagnostics.columns:
+        reduction = diagnostics["alignment_dimensionality_reduction"].map(_as_bool)
+    elif {"decode_feature_dim", "feature_dim"}.issubset(diagnostics.columns):
+        reduction = pd.to_numeric(diagnostics["decode_feature_dim"], errors="coerce") < pd.to_numeric(
+            diagnostics["feature_dim"],
+            errors="coerce",
+        )
+    else:
+        reduction = pd.Series(dtype=bool)
     before = _median(diagnostics, "anchor_row_correlation_before")
     after = _median(diagnostics, "anchor_row_correlation_after")
     inner_before = _median(diagnostics, "source_inner_decoding_before_alignment")
@@ -170,6 +196,8 @@ def _alignment_diagnostic_summary(diagnostics: pd.DataFrame) -> dict[str, Any]:
         "diagnostic_decode_feature_dim_median": _median(diagnostics, "decode_feature_dim"),
         "diagnostic_channel_projection_collapse_fraction": "" if collapse.empty else float(collapse.mean()),
         "diagnostic_uses_channel_projection_collapse_any": bool(collapse.any()) if not collapse.empty else "",
+        "diagnostic_dimensionality_reduction_fraction": "" if reduction.empty else float(reduction.mean()),
+        "diagnostic_uses_dimensionality_reduction_any": bool(reduction.any()) if not reduction.empty else "",
         "diagnostic_target_transform_type": _compact_unique(diagnostics, "target_transform_type"),
         "diagnostic_anchor_row_correlation_before_median": before,
         "diagnostic_anchor_row_correlation_after_median": after,
@@ -531,6 +559,12 @@ def build_alignment_debug_note(
             else pd.Series(False, index=variants.index)
         )
         collapse_count = collapse.map(_as_bool).sum()
+        reduction = (
+            variants["diagnostic_uses_dimensionality_reduction_any"]
+            if "diagnostic_uses_dimensionality_reduction_any" in variants.columns
+            else pd.Series(False, index=variants.index)
+        )
+        reduction_count = reduction.map(_as_bool).sum()
         diagnostic_count = (
             int(variants["alignment_diagnostics_present"].map(_as_bool).sum())
             if "alignment_diagnostics_present" in variants.columns
@@ -542,6 +576,7 @@ def build_alignment_debug_note(
                 "## Dimensionality Flags",
                 f"- Artifacts with alignment diagnostics: `{diagnostic_count}/{len(variants)}`",
                 f"- Artifacts with any channel projection collapse: `{int(collapse_count)}/{len(variants)}`",
+                f"- Artifacts with any aligned-space dimensionality reduction: `{int(reduction_count)}/{len(variants)}`",
                 "- Inspect `alignment_variant_summary.csv` for `diagnostic_actual_components_median`, "
                 "`diagnostic_n_alignment_rows_median`, and anchor correlation before/after.",
             ]

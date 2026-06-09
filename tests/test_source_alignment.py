@@ -165,7 +165,8 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert result.diagnostics["actual_components"] == 2
     assert result.diagnostics["feature_dim"] == train_features.shape[1]
     assert result.diagnostics["decode_feature_dim"] == 2
-    assert result.diagnostics["uses_channel_projection_collapse"] is True
+    assert result.diagnostics["uses_channel_projection_collapse"] is False
+    assert result.diagnostics["alignment_dimensionality_reduction"] is True
     assert np.isfinite(result.diagnostics["anchor_row_correlation_before"])
     assert np.isfinite(result.diagnostics["anchor_row_correlation_after"])
     assert np.isfinite(result.diagnostics["source_inner_decoding_before_alignment"])

@@ -140,6 +140,7 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
                 "feature_dim": 2,
                 "decode_feature_dim": 2,
                 "uses_channel_projection_collapse": False,
+                "alignment_dimensionality_reduction": False,
                 "anchor_row_correlation_before": 0.1,
                 "anchor_row_correlation_after": 0.9,
                 "source_inner_decoding_before_alignment": 0.5,
@@ -301,6 +302,7 @@ def test_run_time_resolved_decode_target_calibration_excludes_scored_rows(tmp_pa
                 "feature_dim": 2,
                 "decode_feature_dim": 2,
                 "uses_channel_projection_collapse": False,
+                "alignment_dimensionality_reduction": False,
                 "target_transform_type": "target_calibrated_template_procrustes",
             },
         )

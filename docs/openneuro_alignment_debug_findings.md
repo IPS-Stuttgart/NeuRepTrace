@@ -58,7 +58,7 @@ variant is not a positive alignment result:
 | actual_components | 9 |
 | feature_dim | 7650 |
 | decode_feature_dim | 9 |
-| uses_channel_projection_collapse | 1.0 |
+| alignment_dimensionality_reduction | true |
 | anchor_row_correlation_before | 0.7797 |
 | anchor_row_correlation_after | 0.8884 |
 | source_inner_decoding_before_alignment | 0.4987 |
@@ -67,10 +67,12 @@ variant is not a positive alignment result:
 The target transform was
 `target_calibrated_template_ridge_least_squares`. Anchor correlation improved,
 but source-inner decoding worsened and the held-out target score fell. The
-projection also collapsed the high-dimensional channel-time feature space to a
+projection also reduced the high-dimensional channel-time feature space to a
 9-dimensional aligned decode space, so this diagnostic is consistent with a
 sparse/low-rank calibration bottleneck rather than a robust benchmark-valid
-alignment gain.
+alignment gain. Subsequent diagnostics separate this ordinary aligned-space
+dimensionality reduction from the cross-window channel-projection-collapse
+fallback.
 
 Current claim status:
 

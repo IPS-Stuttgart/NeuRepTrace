@@ -65,7 +65,8 @@ def _write_alignment_artifact(
                 "alignment_window_size": [0.1],
                 "decode_window_center": [0.184],
                 "decode_window_size": [0.1],
-                "uses_channel_projection_collapse": [True],
+                "uses_channel_projection_collapse": [False],
+                "alignment_dimensionality_reduction": [True],
                 "anchor_row_correlation_before": [0.1],
                 "anchor_row_correlation_after": [0.8],
                 "source_inner_decoding_before_alignment": [0.4],
@@ -140,6 +141,8 @@ def test_alignment_compare_writes_variant_and_debug_decision_tables(tmp_path: Pa
         "stimulus-id-strict",
     ]
     assert variants["diagnostic_actual_components_median"].tolist() == [48.0, 48.0, 48.0, 2.0, 2.0]
+    assert variants["diagnostic_channel_projection_collapse_fraction"].tolist() == [0.0, 0.0, 0.0, 0.0, 0.0]
+    assert variants["diagnostic_dimensionality_reduction_fraction"].tolist() == [1.0, 1.0, 1.0, 1.0, 1.0]
     assert variants["diagnostic_target_transform_type"].tolist() == [
         "template_ridge_least_squares",
         "source_group_projection",
