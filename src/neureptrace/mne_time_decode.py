@@ -82,9 +82,11 @@ SOURCE_ALIGNMENT_RUN_ANCHOR_MODES = (
 )
 SOURCE_ALIGNMENT_RUN_TARGET_PROJECTIONS = (
     *SOURCE_ALIGNMENT_TARGET_PROJECTIONS,
+    "target",
     "oracle",
     "oracle_target",
     "target_calibrated",
+    "target_calibration",
     "oracle_target_calibrated",
 )
 CLASS_PRIOR_CORRECTION_CHOICES = ("none", "train_uniform")
@@ -331,6 +333,12 @@ class AlignmentAnchorValues:
     source: str
 
 
+@dataclass(frozen=True, slots=True)
+class AlignmentTargetCalibrationSplit:
+    evaluation_indices: np.ndarray
+    calibration_indices: np.ndarray
+
+
 _STIMULUS_ID_ANCHOR_COLUMNS = (
     "stimulus_id",
     "stim_file",
@@ -461,6 +469,68 @@ def _test_subject_label(groups: np.ndarray | None, test_idx: np.ndarray, *, fall
     return "|".join(values)
 
 
+def _alignment_target_calibration_split(
+    *,
+    labels: np.ndarray,
+    test_idx: np.ndarray,
+    alignment_config,
+    anchor_values: np.ndarray | None,
+    seed: int,
+    context: Sequence[object],
+) -> AlignmentTargetCalibrationSplit:
+    test_idx = np.asarray(test_idx, dtype=int)
+    if not alignment_config.target_calibrated:
+        return AlignmentTargetCalibrationSplit(evaluation_indices=test_idx, calibration_indices=np.asarray([], dtype=int))
+    if test_idx.size == 0:
+        raise ValueError("target_calibrated_alignment requires at least one held-out target row.")
+
+    target_values = labels[test_idx] if anchor_values is None else np.asarray(anchor_values, dtype=object)[test_idx]
+    target_values = np.asarray(target_values, dtype=object).reshape(-1)
+    per_anchor = int(alignment_config.target_calibration_per_anchor)
+    calibration_mask = np.zeros(test_idx.shape[0], dtype=bool)
+    anchor_order = pd.Series(target_values).drop_duplicates().tolist()
+    for anchor_position, anchor in enumerate(anchor_order):
+        positions = np.flatnonzero(target_values == anchor)
+        if positions.size <= per_anchor:
+            raise ValueError(
+                "target_calibrated_alignment needs at least "
+                f"{per_anchor + 1} held-out target rows for anchor {anchor!r} so calibration rows are disjoint from scored rows."
+            )
+        seed_value = int(
+            stable_hash(
+                {
+                    "seed": seed,
+                    "context": tuple(context),
+                    "anchor_position": anchor_position,
+                    "anchor": anchor,
+                }
+            ),
+            16,
+        ) % (2**32)
+        rng = np.random.default_rng(seed_value)
+        selected = rng.choice(positions, size=per_anchor, replace=False)
+        calibration_mask[selected] = True
+
+    evaluation_indices = test_idx[~calibration_mask]
+    calibration_indices = test_idx[calibration_mask]
+    if evaluation_indices.size == 0:
+        raise ValueError("target_calibrated_alignment left no target rows for scoring.")
+    missing_eval_classes = [
+        class_label
+        for class_label in np.unique(labels[test_idx])
+        if not np.any(labels[evaluation_indices] == class_label)
+    ]
+    if missing_eval_classes:
+        raise ValueError(
+            "target_calibrated_alignment removed all scored rows for target classes: "
+            f"{missing_eval_classes!r}. Reduce alignment_target_calibration_per_anchor or use more target trials."
+        )
+    return AlignmentTargetCalibrationSplit(
+        evaluation_indices=evaluation_indices,
+        calibration_indices=calibration_indices,
+    )
+
+
 def _alignment_diagnostic_row(
     result: SourceAlignmentResult,
     *,
@@ -472,6 +542,7 @@ def _alignment_diagnostic_row(
     decode_window_size: float,
 ) -> dict[str, object]:
     row = {column: "" for column in ALIGNMENT_DIAGNOSTIC_COLUMNS}
+    row.update({key: value for key, value in result.metadata.items() if key in ALIGNMENT_DIAGNOSTIC_COLUMNS})
     row.update(result.diagnostics)
     row.update(
         {
@@ -1848,6 +1919,8 @@ def run_time_resolved_decode(
     alignment_components: int | float | str | None = 64,
     alignment_times: Sequence[float] | str | None = None,
     alignment_target_projection: str = "group_projection",
+    alignment_target_calibration_per_anchor: int | str | None = 1,
+    alignment_target_calibration_seed: int = 13,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -1910,10 +1983,13 @@ def run_time_resolved_decode(
         components=alignment_components,
         times=alignment_times,
         target_projection=alignment_target_projection,
+        target_calibration_per_anchor=alignment_target_calibration_per_anchor,
+        target_calibration_seed=alignment_target_calibration_seed,
     )
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
+    alignment_target_calibration_seed = int(alignment_target_calibration_seed)
     dataset_name_value = "" if dataset_name is None else str(dataset_name)
     outer_test_groups_value = _normalize_outer_test_groups(outer_test_groups)
     if requested_time_decode_backend == "mne" and normalized_temporal_train_window is not None:
@@ -2342,7 +2418,6 @@ def run_time_resolved_decode(
             features = _features_for_window(data, time_window)
             start, stop, center = time_window
             for fold, (train_idx, test_idx) in splits:
-                test_labels = labels[test_idx]
                 train_labels = _fold_training_labels(
                     labels,
                     train_idx,
@@ -2350,8 +2425,19 @@ def run_time_resolved_decode(
                     label_shuffle_seed=label_shuffle_seed,
                     context=(split_id, fold, "same_time"),
                 )
+                target_split = _alignment_target_calibration_split(
+                    labels=labels,
+                    test_idx=test_idx,
+                    alignment_config=alignment_config,
+                    anchor_values=alignment_anchor_info.values,
+                    seed=alignment_target_calibration_seed,
+                    context=(split_id, fold, "same_time", center),
+                )
+                scored_test_idx = target_split.evaluation_indices
+                target_calibration_idx = target_split.calibration_indices
+                test_labels = labels[scored_test_idx]
                 train_feature_matrix = features[train_idx]
-                test_feature_matrix = features[test_idx]
+                test_feature_matrix = features[scored_test_idx]
                 alignment_metadata = None
                 if alignment_config.enabled:
                     alignment_result = align_train_test_features(
@@ -2370,7 +2456,20 @@ def run_time_resolved_decode(
                         target_anchor_values=(
                             None
                             if alignment_anchor_info.values is None or not alignment_config.oracle_target_calibrated
-                            else alignment_anchor_info.values[test_idx]
+                            else alignment_anchor_info.values[scored_test_idx]
+                        ),
+                        target_calibration_features=(
+                            None if target_calibration_idx.size == 0 else features[target_calibration_idx]
+                        ),
+                        target_calibration_labels=(
+                            labels[target_calibration_idx]
+                            if target_calibration_idx.size and alignment_anchor_info.values is None
+                            else None
+                        ),
+                        target_calibration_anchor_values=(
+                            alignment_anchor_info.values[target_calibration_idx]
+                            if target_calibration_idx.size and alignment_anchor_info.values is not None
+                            else None
                         ),
                         config=alignment_config,
                     )
@@ -2477,7 +2576,7 @@ def run_time_resolved_decode(
                         observation_rows=observation_rows,
                         probabilities=probabilities,
                         test_labels=test_labels,
-                        test_idx=test_idx,
+                        test_idx=scored_test_idx,
                         original_indices=original_indices,
                         session_values=session_values,
                         groups=groups,
@@ -2960,8 +3059,23 @@ def main() -> None:
         default="group_projection",
         help=(
             "Held-out target projection mode. group_projection is the benchmark-valid strict source-only mode; "
-            "oracle_target_calibrated_alignment uses held-out labels and is a debug upper bound only."
+            "target_calibrated_alignment uses disjoint target calibration rows; "
+            "oracle_target_calibrated_alignment uses scored held-out labels and is a debug upper bound only."
         ),
+    )
+    parser.add_argument(
+        "--alignment-target-calibration-per-anchor",
+        default="1",
+        help=(
+            "Rows per class/stimulus/event anchor reserved from each held-out target fold for "
+            "target_calibrated_alignment. Scored rows are disjoint."
+        ),
+    )
+    parser.add_argument(
+        "--alignment-target-calibration-seed",
+        type=int,
+        default=13,
+        help="Seed used to choose disjoint target calibration rows for target_calibrated_alignment.",
     )
     parser.add_argument(
         "--decode-window",
@@ -3054,6 +3168,8 @@ def main() -> None:
         alignment_components=args.alignment_components,
         alignment_times=args.alignment_times,
         alignment_target_projection=args.alignment_target_projection,
+        alignment_target_calibration_per_anchor=args.alignment_target_calibration_per_anchor,
+        alignment_target_calibration_seed=args.alignment_target_calibration_seed,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
     )

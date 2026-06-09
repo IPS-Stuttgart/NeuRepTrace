@@ -3,6 +3,7 @@ import pytest
 
 from neureptrace.decoding.source_alignment import (
     ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+    TARGET_CALIBRATED_ALIGNMENT,
     align_train_test_features,
     normalize_source_alignment_method,
     source_alignment_config,
@@ -212,7 +213,7 @@ def test_unsupervised_covariance_alignment_uses_no_class_anchors(method, target_
 
 
 def test_unsupervised_covariance_alignment_rejects_oracle_target_projection():
-    with pytest.raises(ValueError, match="does not support oracle target labels"):
+    with pytest.raises(ValueError, match="does not support target-calibrated projections"):
         source_alignment_config(method="coral", target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT)
 
 
@@ -319,6 +320,52 @@ def test_oracle_target_calibrated_alignment_accepts_target_anchor_values():
     assert oracle.metadata["alignment_target_labels_used"] is False
     assert oracle.metadata["alignment_target_anchor_values_used"] is True
     assert oracle.metadata["alignment_valid_for_benchmark"] is False
+
+
+@pytest.mark.parametrize(
+    ("method", "target_transform_type"),
+    [
+        ("procrustes", "target_calibrated_template_procrustes"),
+        ("hyperalignment", "target_calibrated_template_procrustes"),
+        ("mcca", "target_calibrated_template_ridge_least_squares"),
+    ],
+)
+def test_target_calibrated_alignment_uses_separate_calibration_rows(method, target_transform_type):
+    features, labels, subjects = _rotated_subject_features(seed=47)
+    source_mask = subjects != "s2"
+    target_positions = np.flatnonzero(subjects == "s2")
+    calibration_positions = np.asarray([target_positions[labels[target_positions] == label][0] for label in np.unique(labels)])
+    evaluation_positions = np.asarray([index for index in target_positions if index not in set(calibration_positions.tolist())])
+
+    target_calibrated = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        test_features=features[evaluation_positions],
+        target_calibration_features=features[calibration_positions],
+        target_calibration_labels=labels[calibration_positions],
+        config=source_alignment_config(
+            method=method,
+            components=2,
+            target_projection=TARGET_CALIBRATED_ALIGNMENT,
+            target_calibration_per_anchor=1,
+            target_calibration_seed=19,
+        ),
+    )
+
+    assert target_calibrated.test_features.shape[0] == evaluation_positions.size
+    assert target_calibrated.metadata["alignment_target_projection"] == TARGET_CALIBRATED_ALIGNMENT
+    assert target_calibrated.metadata["alignment_target_calibrated"] is True
+    assert target_calibrated.metadata["alignment_oracle_target_calibrated"] is False
+    assert target_calibrated.metadata["alignment_debug_upper_bound"] is False
+    assert target_calibrated.metadata["alignment_valid_for_benchmark"] is True
+    assert target_calibrated.metadata["alignment_target_alignment_rows"] == 3
+    assert target_calibrated.metadata["alignment_target_labels_used"] is True
+    assert target_calibrated.metadata["alignment_protocol"] == TARGET_CALIBRATED_ALIGNMENT
+    assert target_calibrated.metadata["alignment_protocol_note"] == (
+        "uses disjoint target calibration rows; not strict source-only"
+    )
+    assert target_calibrated.diagnostics["target_transform_type"] == target_transform_type
 
 
 def test_class_repetition_cap_is_capped_by_available_counts():

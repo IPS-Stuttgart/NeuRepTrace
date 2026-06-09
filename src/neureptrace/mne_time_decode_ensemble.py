@@ -158,6 +158,8 @@ def run_time_resolved_decode(
     alignment_components: int | float | str | None = 64,
     alignment_times: Sequence[float] | str | None = None,
     alignment_target_projection: str = "group_projection",
+    alignment_target_calibration_per_anchor: int | str | None = 1,
+    alignment_target_calibration_seed: int = 13,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
     ensemble_source_decoders: Sequence[str] | None = None,
@@ -224,6 +226,8 @@ def run_time_resolved_decode(
             alignment_components=alignment_components,
             alignment_times=alignment_times,
             alignment_target_projection=alignment_target_projection,
+            alignment_target_calibration_per_anchor=alignment_target_calibration_per_anchor,
+            alignment_target_calibration_seed=alignment_target_calibration_seed,
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
         )
@@ -293,6 +297,8 @@ def run_time_resolved_decode(
                     alignment_components=alignment_components,
                     alignment_times=alignment_times,
                     alignment_target_projection=alignment_target_projection,
+                    alignment_target_calibration_per_anchor=alignment_target_calibration_per_anchor,
+                    alignment_target_calibration_seed=alignment_target_calibration_seed,
                     label_shuffle_control=label_shuffle_control,
                     label_shuffle_seed=label_shuffle_seed,
                 )
@@ -351,6 +357,8 @@ def run_time_resolved_decode(
         else alignment_times or ""
     )
     results["alignment_target_projection"] = str(alignment_target_projection).strip().lower().replace("-", "_")
+    results["alignment_target_calibration_per_anchor"] = alignment_target_calibration_per_anchor
+    results["alignment_target_calibration_seed"] = int(alignment_target_calibration_seed)
     results["source_decoders"] = "|".join(source_decoders)
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
     results["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in source_temperatures)
@@ -546,8 +554,20 @@ def main(argv: Sequence[str] | None = None) -> None:
         default="group_projection",
         help=(
             "Projection used for held-out subjects. group_projection is the benchmark-valid strict source-only mode; "
-            "oracle_target_calibrated_alignment uses held-out labels and is a debug upper bound only."
+            "target_calibrated_alignment uses disjoint target calibration rows; "
+            "oracle_target_calibrated_alignment uses scored held-out labels and is a debug upper bound only."
         ),
+    )
+    parser.add_argument(
+        "--alignment-target-calibration-per-anchor",
+        default="1",
+        help="Rows per class/stimulus/event anchor reserved from each held-out target fold for target_calibrated_alignment.",
+    )
+    parser.add_argument(
+        "--alignment-target-calibration-seed",
+        type=int,
+        default=13,
+        help="Seed used to choose disjoint target calibration rows for target_calibrated_alignment.",
     )
     parser.add_argument(
         "--ensemble-source-decoder",
@@ -635,6 +655,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         alignment_components=args.alignment_components,
         alignment_times=args.alignment_times,
         alignment_target_projection=args.alignment_target_projection,
+        alignment_target_calibration_per_anchor=args.alignment_target_calibration_per_anchor,
+        alignment_target_calibration_seed=args.alignment_target_calibration_seed,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
         ensemble_source_decoders=tuple(args.ensemble_source_decoders) if args.ensemble_source_decoders is not None else None,

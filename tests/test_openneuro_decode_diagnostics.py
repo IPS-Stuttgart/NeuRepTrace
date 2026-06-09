@@ -344,15 +344,47 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
                 "accuracy": [1.0, 1.0 if subject == "sub-01" else 2 / 3],
             }
         ).to_csv(decode_dir / "time_decode_summary.csv", index=False)
+        pd.DataFrame(
+            {
+                "dataset": ["openneuro_ds006629_singsing"],
+                "test_subject": [subject],
+                "alignment_method": ["mcca"],
+                "sample_mode": ["class_mean"],
+                "n_source_subjects": [1],
+                "n_classes": [3],
+                "n_alignment_rows": [3],
+                "n_repetitions_per_class": [""],
+                "requested_components": [64],
+                "actual_components": [2],
+                "feature_dim": [64],
+                "decode_feature_dim": [2],
+                "alignment_window_center": [0.184],
+                "alignment_window_size": [0.1],
+                "decode_window_center": [0.184],
+                "decode_window_size": [0.1],
+                "uses_channel_projection_collapse": [False],
+                "anchor_row_correlation_before": [0.2],
+                "anchor_row_correlation_after": [0.6],
+                "source_inner_decoding_before_alignment": [0.5],
+                "source_inner_decoding_after_alignment": [0.55],
+                "target_transform_type": ["source_group_projection"],
+            }
+        ).to_csv(decode_dir / "alignment_diagnostics.csv", index=False)
 
     aggregate_dir = tmp_path / "aggregate"
     diagnostics, best = aggregate_workflow_outputs(source_dirs, out_dir=aggregate_dir)
 
     assert diagnostics["decode_summary"]["exists"] is True
     assert diagnostics["decode_summary"]["rows"] == 4
+    assert diagnostics["alignment_diagnostics"]["exists"] is True
+    assert diagnostics["alignment_diagnostics"]["rows"] == 2
     assert best.set_index("selection_metric").loc["balanced_accuracy", "selection_value"] == pytest.approx(1.0)
     assert pd.read_csv(aggregate_dir / "stage_summary.csv")["subject"].tolist() == ["sub-01", "sub-02"]
     assert len(pd.read_csv(aggregate_dir / "decode" / "observations.csv")) == 12
+    alignment = pd.read_csv(aggregate_dir / "decode" / "alignment_diagnostics.csv")
+    assert alignment["test_subject"].tolist() == ["sub-01", "sub-02"]
+    assert alignment["actual_components"].tolist() == [2, 2]
+    assert alignment["target_transform_type"].tolist() == ["source_group_projection", "source_group_projection"]
     manifest = json.loads((aggregate_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["artifact_name"] == "openneuro-meg-ds006629-full-shard-aggregate"
     assert manifest["outer_test_groups"] == "sub-01|sub-02"

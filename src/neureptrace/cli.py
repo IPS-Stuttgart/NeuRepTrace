@@ -48,6 +48,7 @@ COMMAND_MODULES = {
     "observation-schema": "neureptrace.observation_schema",
     "onset-detect": "neureptrace.onset_detection",
     "onset-detection": "neureptrace.onset_detection",
+    "openneuro-alignment-compare": "neureptrace.openneuro_alignment_compare",
     "openneuro-meg": "neureptrace.openneuro_meg",
     "openneuro-diagnostics": "neureptrace.openneuro_decode_diagnostics",
     "openneuro-real-vs-shuffle": "neureptrace.openneuro_real_shuffle_report",

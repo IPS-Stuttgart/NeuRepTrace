@@ -257,6 +257,8 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
         "alignment_components": decoding.get("alignment_components", 64),
         "alignment_times": decoding.get("alignment_times"),
         "alignment_target_projection": decoding.get("alignment_target_projection", "group_projection"),
+        "alignment_target_calibration_per_anchor": decoding.get("alignment_target_calibration_per_anchor", 1),
+        "alignment_target_calibration_seed": int(decoding.get("alignment_target_calibration_seed", 13)),
         "label_shuffle_control": _bool_value(decoding.get("label_shuffle_control"), name="decoding.label_shuffle_control"),
         "label_shuffle_seed": int(decoding.get("label_shuffle_seed", 13)),
     }

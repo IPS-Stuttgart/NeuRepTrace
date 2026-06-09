@@ -59,6 +59,8 @@ def test_decode_from_config_passes_alignment_controls(tmp_path):
                 "alignment_components": 32,
                 "alignment_times": "0.088,0.136,0.184",
                 "alignment_target_projection": "group_projection",
+                "alignment_target_calibration_per_anchor": 2,
+                "alignment_target_calibration_seed": 31,
             },
             "preprocessing": {},
             "outputs": {"summary_csv": "summary.csv"},
@@ -73,6 +75,8 @@ def test_decode_from_config_passes_alignment_controls(tmp_path):
     assert kwargs["alignment_components"] == 32
     assert kwargs["alignment_times"] == "0.088,0.136,0.184"
     assert kwargs["alignment_target_projection"] == "group_projection"
+    assert kwargs["alignment_target_calibration_per_anchor"] == 2
+    assert kwargs["alignment_target_calibration_seed"] == 31
 
 
 def test_decode_from_config_passes_ensemble_controls_for_ensemble_decoder(tmp_path):

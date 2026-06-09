@@ -213,6 +213,16 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_path: Path) -> dict[str,
             config.get("alignment_target_projection"),
             default="group_projection",
         ),
+        "alignment_target_calibration_per_anchor": _first(
+            decoding.get("alignment_target_calibration_per_anchor"),
+            config.get("alignment_target_calibration_per_anchor"),
+            default=1,
+        ),
+        "alignment_target_calibration_seed": _first(
+            decoding.get("alignment_target_calibration_seed"),
+            config.get("alignment_target_calibration_seed"),
+            default=13,
+        ),
         "label_shuffle_control": _as_bool(
             _first(decoding.get("label_shuffle_control"), config.get("label_shuffle_control")),
             default=False,

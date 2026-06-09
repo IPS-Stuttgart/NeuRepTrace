@@ -385,6 +385,9 @@ def test_ds000117_uses_face_stim_type_labels():
     )
 
     assert filtered["condition"].tolist() == ["Unfamiliar", "Famous", "Scrambled"]
+    assert filtered["stimulus_file"].tolist() == ["meg/u032.bmp", "meg/f123.bmp", "meg/s150.bmp"]
+    assert filtered["stimulus_id"].tolist() == ["u032", "f123", "s150"]
+    assert filtered["event_code"].tolist() == ["13", "5", "17"]
 
 
 def test_openneuro_subject_and_path_formatting():

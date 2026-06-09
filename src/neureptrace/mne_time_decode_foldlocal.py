@@ -664,6 +664,8 @@ def run_time_resolved_decode(
     alignment_components: int | float | str | None = 64,
     alignment_times: Sequence[float] | str | None = None,
     alignment_target_projection: str = "group_projection",
+    alignment_target_calibration_per_anchor: int | str | None = 1,
+    alignment_target_calibration_seed: int = 13,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -694,6 +696,7 @@ def run_time_resolved_decode(
         raise ValueError("Fold-local normalization currently supports only the sklearn time-decode backend.")
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
+    alignment_target_calibration_seed = int(alignment_target_calibration_seed)
     dataset_name_value = "" if dataset_name is None else str(dataset_name)
     baseline_window_value = _base._normalize_baseline_window(baseline_window)
     if feature_preprocessor_name == "none" and pca_components is not None:
@@ -729,6 +732,8 @@ def run_time_resolved_decode(
         components=alignment_components,
         times=alignment_times,
         target_projection=alignment_target_projection,
+        target_calibration_per_anchor=alignment_target_calibration_per_anchor,
+        target_calibration_seed=alignment_target_calibration_seed,
     )
     outer_test_groups_value = _base._normalize_outer_test_groups(outer_test_groups)
     if alignment_config.enabled:
@@ -1051,8 +1056,19 @@ def run_time_resolved_decode(
             for time_window in windows:
                 features = _base._features_for_window(fold_data, time_window)
                 start, stop, center = time_window
+                target_split = _base._alignment_target_calibration_split(
+                    labels=labels,
+                    test_idx=test_idx,
+                    alignment_config=alignment_config,
+                    anchor_values=alignment_anchor_info.values,
+                    seed=alignment_target_calibration_seed,
+                    context=(split_id, fold, "foldlocal_same_time", center),
+                )
+                scored_test_idx = target_split.evaluation_indices
+                target_calibration_idx = target_split.calibration_indices
+                test_labels = labels[scored_test_idx]
                 train_feature_matrix = features[train_idx]
-                test_feature_matrix = features[test_idx]
+                test_feature_matrix = features[scored_test_idx]
                 alignment_metadata = None
                 if alignment_config.enabled:
                     alignment_result = _base.align_train_test_features(
@@ -1071,7 +1087,20 @@ def run_time_resolved_decode(
                         target_anchor_values=(
                             None
                             if alignment_anchor_info.values is None or not alignment_config.oracle_target_calibrated
-                            else alignment_anchor_info.values[test_idx]
+                            else alignment_anchor_info.values[scored_test_idx]
+                        ),
+                        target_calibration_features=(
+                            None if target_calibration_idx.size == 0 else features[target_calibration_idx]
+                        ),
+                        target_calibration_labels=(
+                            labels[target_calibration_idx]
+                            if target_calibration_idx.size and alignment_anchor_info.values is None
+                            else None
+                        ),
+                        target_calibration_anchor_values=(
+                            alignment_anchor_info.values[target_calibration_idx]
+                            if target_calibration_idx.size and alignment_anchor_info.values is not None
+                            else None
                         ),
                         config=alignment_config,
                     )
@@ -1177,7 +1206,7 @@ def run_time_resolved_decode(
                         observation_rows=observation_rows,
                         probabilities=probabilities,
                         test_labels=test_labels,
-                        test_idx=test_idx,
+                        test_idx=scored_test_idx,
                         original_indices=original_indices,
                         session_values=session_values,
                         groups=groups,
