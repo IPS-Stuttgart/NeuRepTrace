@@ -101,7 +101,7 @@ def fit_hyperalignment(
     if actual < 1:
         raise ValueError("No hyperalignment components are available.")
 
-    means = {sid: np.mean(matrix, axis=0) for sid in subject_ids}
+    means = {sid: np.mean(matrices[sid], axis=0) for sid in subject_ids}
     centered = {sid: matrices[sid] - means[sid] for sid in subject_ids}
     projections = {sid: _initial_projection(centered[sid], actual) for sid in subject_ids}
     template = _normalize_template(np.mean(np.stack([centered[sid] @ projections[sid] for sid in subject_ids], axis=0), axis=0))
