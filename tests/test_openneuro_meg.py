@@ -98,6 +98,7 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert '--seed "$STAGE_SEED_INPUT"' in workflow
     assert "subjects-${{ inputs.subjects }}" not in workflow
     assert "stage_overwrite" in workflow
+    assert '"stage_overwrite": runner_environment == "self-hosted" and not no_download' in workflow
     assert 'runner_environment == "github-hosted" or no_download' in workflow
     assert 'if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" && "$NO_DOWNLOAD" != "true" ]]; then' in workflow
     assert "stage_args+=(--overwrite)" in workflow
@@ -153,6 +154,15 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     for dataset_id, config_name in OPENNEURO_DECODE_CONFIGS.items():
         assert f"- {dataset_id}" in workflow
         assert f'"{dataset_id}": "{config_name}"' in workflow
+
+
+def test_openneuro_safe_cache_workflow_reuses_complete_no_download_staging():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "openneuro-meg-loso-safe-cache.yml").read_text(encoding="utf-8")
+
+    assert '"stage_overwrite": runner_environment == "self-hosted" and not no_download' in workflow
+    assert 'runner_environment == "github-hosted" or no_download' in workflow
+    assert "steps.staged_check.outputs.ready != 'true'" in workflow
+    assert 'if [[ "$RUNNER_ENVIRONMENT" == "self-hosted" && "$NO_DOWNLOAD" != "true" ]]; then' in workflow
 
 
 def test_expected_relative_files_include_singsing_raw_and_events():
