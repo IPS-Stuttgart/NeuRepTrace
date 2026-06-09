@@ -20,6 +20,7 @@ from neureptrace.mne_time_decode import (
     RESULT_SUMMARY_METRIC_COLUMNS,
     SOURCE_ALIGNMENT_RUN_ANCHOR_MODES,
     SOURCE_ALIGNMENT_RUN_METHODS,
+    SOURCE_ALIGNMENT_RUN_TARGET_PROJECTIONS,
     SOURCE_CALIBRATION_RUN_CHOICES,
     DEFAULT_SOURCE_TIME_SELECTION_TIMES,
     SOURCE_TIME_SELECTION_RUN_CHOICES,
@@ -519,9 +520,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument(
         "--alignment-target-projection",
-        choices=("group_projection",),
+        choices=SOURCE_ALIGNMENT_RUN_TARGET_PROJECTIONS,
         default="group_projection",
-        help="Projection used for held-out subjects. Strict mode only supports source-fitted group_projection.",
+        help=(
+            "Projection used for held-out subjects. group_projection is the benchmark-valid strict source-only mode; "
+            "oracle_target_calibrated_alignment uses held-out labels and is a debug upper bound only."
+        ),
     )
     parser.add_argument(
         "--ensemble-source-decoder",

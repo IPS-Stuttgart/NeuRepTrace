@@ -2022,6 +2022,7 @@ def _predict_candidate(
                 train_labels=train_labels,
                 train_subject_ids=train_subject_ids,
                 test_features=test_features,
+                target_labels=subjects[test_subject].labels if alignment_config.oracle_target_calibrated else None,
                 config=alignment_config,
             )
             train_features = alignment_result.train_features

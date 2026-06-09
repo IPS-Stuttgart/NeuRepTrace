@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from neureptrace.decoding.source_alignment import align_train_test_features, source_alignment_config
+from neureptrace.decoding.source_alignment import ORACLE_TARGET_CALIBRATED_ALIGNMENT, align_train_test_features, source_alignment_config
 
 
 def _rotated_subject_features(seed=13):
@@ -41,6 +41,15 @@ def _mean_subject_class_distance(features, labels, subjects):
     return float(np.mean(distances))
 
 
+def _mean_source_target_class_distance(source_features, source_labels, target_features, target_labels):
+    distances = []
+    for label in np.unique(source_labels):
+        source_mean = source_features[source_labels == label].mean(axis=0)
+        target_mean = target_features[target_labels == label].mean(axis=0)
+        distances.append(float(np.linalg.norm(source_mean - target_mean)))
+    return float(np.mean(distances))
+
+
 def test_none_alignment_reproduces_raw_features():
     train_features = np.array([[1.0, 0.0], [0.0, 1.0]])
     test_features = np.array([[0.5, 0.5]])
@@ -70,6 +79,21 @@ def test_strict_alignment_rejects_target_labels():
         )
 
 
+def test_oracle_alignment_requires_target_labels():
+    train_features, train_labels, train_subjects = _rotated_subject_features()
+    with pytest.raises(ValueError, match="requires held-out target labels"):
+        align_train_test_features(
+            train_features=train_features,
+            train_labels=train_labels,
+            train_subject_ids=train_subjects,
+            test_features=train_features[:6],
+            config=source_alignment_config(
+                method="procrustes",
+                target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+            ),
+        )
+
+
 @pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
 def test_source_alignment_methods_expose_group_projection_metadata(method):
     train_features, train_labels, train_subjects = _rotated_subject_features()
@@ -90,6 +114,53 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert result.metadata["alignment_target_projection"] == "group_projection"
     assert result.metadata["alignment_n_components"] == 2
     assert aligned_distance < raw_distance
+
+
+@pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
+def test_oracle_target_calibrated_alignment_is_debug_upper_bound(method):
+    features, labels, subjects = _rotated_subject_features(seed=41)
+    source_mask = subjects != "s2"
+    target_mask = subjects == "s2"
+    config_kwargs = {"method": method, "components": 2}
+
+    strict = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        test_features=features[target_mask],
+        config=source_alignment_config(**config_kwargs),
+    )
+    oracle = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        test_features=features[target_mask],
+        target_labels=labels[target_mask],
+        config=source_alignment_config(
+            **config_kwargs,
+            target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+        ),
+    )
+
+    strict_distance = _mean_source_target_class_distance(
+        strict.train_features,
+        labels[source_mask],
+        strict.test_features,
+        labels[target_mask],
+    )
+    oracle_distance = _mean_source_target_class_distance(
+        oracle.train_features,
+        labels[source_mask],
+        oracle.test_features,
+        labels[target_mask],
+    )
+    assert oracle_distance < strict_distance
+    assert oracle.metadata["alignment_target_projection"] == ORACLE_TARGET_CALIBRATED_ALIGNMENT
+    assert oracle.metadata["alignment_oracle_target_calibrated"] is True
+    assert oracle.metadata["alignment_debug_upper_bound"] is True
+    assert oracle.metadata["alignment_valid_for_benchmark"] is False
+    assert oracle.metadata["alignment_target_labels_used"] is True
+    assert oracle.metadata["alignment_protocol_note"] == "debug upper bound only; not valid for benchmark"
 
 
 def test_class_repetition_cap_is_capped_by_available_counts():

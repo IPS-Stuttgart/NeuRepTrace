@@ -14,14 +14,18 @@ from typing import Any
 import numpy as np
 
 from neureptrace.decoding.hyperalignment_initialization import fit_class_hyperalignment
+from neureptrace.decoding.hyperalignment_initialization import fit_projection_to_hyperalignment
+from neureptrace.decoding.hyperalignment_initialization import transform_with_projection
 from neureptrace.decoding.mcca import fit_class_mcca
+from neureptrace.decoding.sampling import DEFAULT_CLASS_LIMIT_SEED, DEFAULT_CLASS_LIMIT_SELECTION, select_class_limited_indices
 
 SOURCE_ALIGNMENT_METHODS = ("none", "procrustes", "hyperalignment", "mcca")
 SOURCE_ALIGNMENT_ANCHOR_MODES = ("class_mean", "class_repetition")
-SOURCE_ALIGNMENT_TARGET_PROJECTIONS = ("group_projection",)
+SOURCE_ALIGNMENT_TARGET_PROJECTIONS = ("group_projection", "oracle_target_calibrated_alignment")
 DEFAULT_ALIGNMENT_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
 DEFAULT_ALIGNMENT_REPETITION_CAP = 16
 DEFAULT_ALIGNMENT_COMPONENTS = 64
+ORACLE_TARGET_CALIBRATED_ALIGNMENT = "oracle_target_calibrated_alignment"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +46,12 @@ class SourceAlignmentConfig:
     def enabled(self) -> bool:
         return self.method != "none"
 
+    @property
+    def oracle_target_calibrated(self) -> bool:
+        return self.enabled and self.target_projection == ORACLE_TARGET_CALIBRATED_ALIGNMENT
+
     def static_metadata(self) -> dict[str, Any]:
+        oracle = self.oracle_target_calibrated
         return {
             "alignment_method": self.method,
             "alignment_anchor_mode": self.anchor_mode,
@@ -50,7 +59,12 @@ class SourceAlignmentConfig:
             "alignment_components": self.components,
             "alignment_times": "|".join(f"{time:.6g}" for time in self.times),
             "alignment_target_projection": self.target_projection,
-            "alignment_strict_source_only": bool(self.enabled),
+            "alignment_strict_source_only": bool(self.enabled and not oracle),
+            "alignment_oracle_target_calibrated": bool(oracle),
+            "alignment_debug_upper_bound": bool(oracle),
+            "alignment_valid_for_benchmark": bool(not oracle),
+            "alignment_protocol": ORACLE_TARGET_CALIBRATED_ALIGNMENT if oracle else "strict_source_only",
+            "alignment_protocol_note": "debug upper bound only; not valid for benchmark" if oracle else "",
         }
 
 
@@ -87,10 +101,12 @@ def normalize_source_alignment_anchor_mode(anchor_mode: str | None) -> str:
 
 def normalize_source_alignment_target_projection(target_projection: str | None) -> str:
     normalized = "group_projection" if target_projection is None else str(target_projection).strip().lower().replace("-", "_")
+    if normalized in {"oracle", "oracle_target", "target_calibrated", "oracle_target_calibrated"}:
+        normalized = ORACLE_TARGET_CALIBRATED_ALIGNMENT
     if normalized not in SOURCE_ALIGNMENT_TARGET_PROJECTIONS:
         raise ValueError(
-            "Strict source-only alignment only supports target_projection='group_projection'. "
-            f"Got {target_projection!r}."
+            f"Unknown alignment target projection {target_projection!r}. "
+            f"Available target projections: {', '.join(SOURCE_ALIGNMENT_TARGET_PROJECTIONS)}."
         )
     return normalized
 
@@ -202,21 +218,30 @@ def align_train_test_features(
 ) -> SourceAlignmentResult:
     """Fit source-only alignment and transform train/test feature rows.
 
-    ``target_labels`` exists only as a guardrail: strict source-only alignment
-    rejects it rather than silently accepting held-out labels.
+    ``target_labels`` exists as a guardrail. Strict source-only alignment rejects
+    it rather than silently accepting held-out labels. The explicit
+    ``oracle_target_calibrated_alignment`` debug mode requires it and marks the
+    result as an upper bound that is not valid for benchmark reporting.
     """
 
-    if target_labels is not None:
+    if target_labels is not None and not config.oracle_target_calibrated:
         raise ValueError("Strict source-only alignment does not accept target labels.")
+    if config.oracle_target_calibrated and target_labels is None:
+        raise ValueError(
+            "oracle_target_calibrated_alignment requires held-out target labels and is not valid for benchmark reporting."
+        )
 
     train_matrix = _feature_matrix(train_features, name="train_features")
     test_matrix = _feature_matrix(test_features, name="test_features")
     train_vector = np.asarray(train_labels).reshape(-1)
     subject_vector = np.asarray(train_subject_ids, dtype=object).reshape(-1)
+    target_vector = None if target_labels is None else np.asarray(target_labels).reshape(-1)
     if train_matrix.shape[0] != train_vector.shape[0]:
         raise ValueError("train_features and train_labels must have the same row count.")
     if train_matrix.shape[0] != subject_vector.shape[0]:
         raise ValueError("train_features and train_subject_ids must have the same row count.")
+    if target_vector is not None and test_matrix.shape[0] != target_vector.shape[0]:
+        raise ValueError("test_features and target_labels must have the same row count.")
     if train_matrix.shape[1] != test_matrix.shape[1]:
         raise ValueError(
             "train_features and test_features must have the same feature width before alignment: "
@@ -234,6 +259,9 @@ def align_train_test_features(
                 "alignment_n_source_subjects": "",
                 "alignment_n_classes": "",
                 "alignment_repetitions_per_class": "",
+                "alignment_target_alignment_rows": "",
+                "alignment_target_projection_fit": "",
+                "alignment_target_labels_used": False,
             },
         )
 
@@ -257,7 +285,22 @@ def align_train_test_features(
             initialization="mean" if config.method == "procrustes" else "pca",
         )
         transformed_by_subject = {subject_id: model.transform(subject_id, features_by_subject[subject_id]) for subject_id in subject_ids}
-        transformed_test = model.transform_group(test_matrix)
+        if config.oracle_target_calibrated:
+            target_anchors = _target_alignment_matrix(
+                test_matrix,
+                target_vector,
+                classes=alignment.classes,
+                config=config,
+                n_repetitions_per_class=alignment.n_repetitions_per_class,
+            )
+            target_projection = fit_projection_to_hyperalignment(target_anchors, template=model.template)
+            transformed_test = transform_with_projection(test_matrix, target_projection)
+            target_alignment_rows = int(target_projection.n_alignment_rows)
+            target_projection_fit = "template_procrustes"
+        else:
+            transformed_test = model.transform_group(test_matrix)
+            target_alignment_rows = ""
+            target_projection_fit = "source_group_projection"
         n_components = model.n_components
     elif config.method == "mcca":
         model, alignment = fit_class_mcca(
@@ -270,7 +313,26 @@ def align_train_test_features(
             subject_pca_components=config.mcca_subject_pca_components,
         )
         transformed_by_subject = {subject_id: model.transform(subject_id, features_by_subject[subject_id]) for subject_id in subject_ids}
-        transformed_test = model.transform_group(test_matrix)
+        if config.oracle_target_calibrated:
+            target_anchors = _target_alignment_matrix(
+                test_matrix,
+                target_vector,
+                classes=alignment.classes,
+                config=config,
+                n_repetitions_per_class=alignment.n_repetitions_per_class,
+            )
+            target_mean, target_projection = _fit_target_projection_to_template(
+                target_anchors,
+                model.component_scores,
+                regularization=config.mcca_regularization,
+            )
+            transformed_test = (test_matrix - target_mean) @ target_projection
+            target_alignment_rows = int(target_anchors.shape[0])
+            target_projection_fit = "template_ridge_least_squares"
+        else:
+            transformed_test = model.transform_group(test_matrix)
+            target_alignment_rows = ""
+            target_projection_fit = "source_group_projection"
         n_components = model.n_components
     else:  # pragma: no cover - guarded by normalization
         raise ValueError(f"Unsupported source alignment method: {config.method}")
@@ -288,8 +350,86 @@ def align_train_test_features(
             "alignment_n_source_subjects": len(subject_ids),
             "alignment_n_classes": len(alignment.classes),
             "alignment_repetitions_per_class": "" if alignment.n_repetitions_per_class is None else int(alignment.n_repetitions_per_class),
+            "alignment_target_alignment_rows": target_alignment_rows,
+            "alignment_target_projection_fit": target_projection_fit,
+            "alignment_target_labels_used": bool(config.oracle_target_calibrated),
         },
     )
+
+
+def _target_alignment_matrix(
+    features: np.ndarray,
+    labels: np.ndarray | None,
+    *,
+    classes: np.ndarray,
+    config: SourceAlignmentConfig,
+    n_repetitions_per_class: int | None,
+) -> np.ndarray:
+    if labels is None:  # guarded earlier, but this keeps type-checkers honest
+        raise ValueError("oracle_target_calibrated_alignment requires target labels.")
+    labels = np.asarray(labels).reshape(-1)
+    if labels.shape[0] != features.shape[0]:
+        raise ValueError("target labels must have the same row count as target features.")
+    missing = [class_label for class_label in classes if not np.any(labels == class_label)]
+    if missing:
+        raise ValueError(f"Target subject is missing alignment classes: {missing!r}.")
+    if config.anchor_mode == "class_mean":
+        return np.vstack([np.mean(features[labels == class_label], axis=0) for class_label in classes])
+
+    if n_repetitions_per_class is None:
+        raise ValueError("class_repetition oracle target alignment requires a repetition count.")
+    rows = []
+    for class_position, class_label in enumerate(classes):
+        class_features = features[labels == class_label]
+        if class_features.shape[0] < n_repetitions_per_class:
+            raise ValueError(
+                f"Target class {class_label!r} has only {class_features.shape[0]} repetitions, "
+                f"need {n_repetitions_per_class}."
+            )
+        selected = select_class_limited_indices(
+            np.zeros(class_features.shape[0], dtype=int),
+            int(n_repetitions_per_class),
+            selection=DEFAULT_CLASS_LIMIT_SELECTION,
+            seed=DEFAULT_CLASS_LIMIT_SEED,
+            seed_context=class_position,
+        )
+        rows.extend(class_features[selected])
+    return np.vstack(rows)
+
+
+def _fit_target_projection_to_template(
+    features: np.ndarray,
+    template: np.ndarray,
+    *,
+    regularization: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fit a target-subject linear projection to an existing common template.
+
+    This intentionally uses target labels/anchors and is therefore only suitable
+    for the oracle debug upper bound.
+    """
+
+    matrix = _feature_matrix(features, name="target_alignment_features")
+    template_matrix = _feature_matrix(template, name="target_alignment_template")
+    if matrix.shape[0] != template_matrix.shape[0]:
+        raise ValueError(
+            "target alignment features and template must have the same row count: "
+            f"{matrix.shape[0]} != {template_matrix.shape[0]}."
+        )
+    mean = np.mean(matrix, axis=0)
+    centered = matrix - mean
+    ridge = float(regularization)
+    if ridge < 0 or not np.isfinite(ridge):
+        raise ValueError("target projection regularization must be finite and non-negative.")
+    dual = centered @ centered.T
+    if ridge > 0:
+        dual = dual + ridge * np.eye(dual.shape[0])
+    try:
+        coefficients = np.linalg.solve(dual, template_matrix)
+    except np.linalg.LinAlgError:
+        coefficients = np.linalg.pinv(dual) @ template_matrix
+    projection = centered.T @ coefficients
+    return mean, projection
 
 
 def _effective_repetitions_per_class(
@@ -329,8 +469,10 @@ __all__ = [
     "DEFAULT_ALIGNMENT_COMPONENTS",
     "DEFAULT_ALIGNMENT_REPETITION_CAP",
     "DEFAULT_ALIGNMENT_TIMES",
+    "ORACLE_TARGET_CALIBRATED_ALIGNMENT",
     "SOURCE_ALIGNMENT_ANCHOR_MODES",
     "SOURCE_ALIGNMENT_METHODS",
+    "SOURCE_ALIGNMENT_TARGET_PROJECTIONS",
     "SourceAlignmentConfig",
     "SourceAlignmentResult",
     "align_train_test_features",

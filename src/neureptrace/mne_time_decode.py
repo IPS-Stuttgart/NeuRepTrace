@@ -35,6 +35,7 @@ from neureptrace.decoding import (
 from neureptrace.decoding.source_alignment import (
     SOURCE_ALIGNMENT_ANCHOR_MODES,
     SOURCE_ALIGNMENT_METHODS,
+    SOURCE_ALIGNMENT_TARGET_PROJECTIONS,
     align_train_test_features,
     source_alignment_config,
 )
@@ -73,6 +74,13 @@ RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 TIME_DECODE_BACKEND_CHOICES = ("auto", "sklearn", "mne")
 SOURCE_ALIGNMENT_RUN_METHODS = (*SOURCE_ALIGNMENT_METHODS, "off", "raw")
 SOURCE_ALIGNMENT_RUN_ANCHOR_MODES = (*SOURCE_ALIGNMENT_ANCHOR_MODES, "class-mean", "class-repetition")
+SOURCE_ALIGNMENT_RUN_TARGET_PROJECTIONS = (
+    *SOURCE_ALIGNMENT_TARGET_PROJECTIONS,
+    "oracle",
+    "oracle_target",
+    "target_calibrated",
+    "oracle_target_calibrated",
+)
 CLASS_PRIOR_CORRECTION_CHOICES = ("none", "train_uniform")
 CLASS_PRIOR_CORRECTION_RUN_CHOICES = (*CLASS_PRIOR_CORRECTION_CHOICES, "train-uniform")
 SOURCE_CALIBRATION_CHOICES = (
@@ -2157,6 +2165,7 @@ def run_time_resolved_decode(
                         train_labels=train_labels,
                         train_subject_ids=groups[train_idx],
                         test_features=test_feature_matrix,
+                        target_labels=test_labels if alignment_config.oracle_target_calibrated else None,
                         config=alignment_config,
                     )
                     train_feature_matrix = alignment_result.train_features
@@ -2720,8 +2729,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--alignment-target-projection",
+        choices=SOURCE_ALIGNMENT_RUN_TARGET_PROJECTIONS,
         default="group_projection",
-        help="Held-out target projection mode. Strict source-only runs support only group_projection.",
+        help=(
+            "Held-out target projection mode. group_projection is the benchmark-valid strict source-only mode; "
+            "oracle_target_calibrated_alignment uses held-out labels and is a debug upper bound only."
+        ),
     )
     parser.add_argument(
         "--decode-window",

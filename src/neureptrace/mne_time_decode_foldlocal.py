@@ -1038,6 +1038,7 @@ def run_time_resolved_decode(
                         train_labels=train_labels,
                         train_subject_ids=groups[train_idx],
                         test_features=test_feature_matrix,
+                        target_labels=test_labels if alignment_config.oracle_target_calibrated else None,
                         config=alignment_config,
                     )
                     train_feature_matrix = alignment_result.train_features
