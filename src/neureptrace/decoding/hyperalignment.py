@@ -96,7 +96,7 @@ def fit_hyperalignment(
     if actual < 1:
         raise ValueError("No hyperalignment components are available.")
 
-    means = {sid: np.mean(matrix, axis=0) for sid, matrix in matrices.items()}
+    means = {sid: np.mean(matrix, axis=0) for sid in subject_ids}
     centered = {sid: matrices[sid] - means[sid] for sid in subject_ids}
     projections = {sid: _initial_projection(centered[sid], actual) for sid in subject_ids}
     template = _normalize_template(np.mean(np.stack([centered[sid] @ projections[sid] for sid in subject_ids], axis=0), axis=0))
@@ -264,7 +264,7 @@ def _orthogonal_procrustes_projection(centered: np.ndarray, template: np.ndarray
 def _normalize_template(template: np.ndarray) -> np.ndarray:
     template = template - np.mean(template, axis=0, keepdims=True)
     scale = np.std(template, axis=0, ddof=1)
-    scale = np.where(scale < 1e-12, 1.0, scale)
+    scale = np.where(scale < 1e-12, 1.0)
     return template / scale[None, :]
 
 
@@ -274,7 +274,20 @@ def _average_projection(projections: Mapping[Hashable, SubjectHyperalignmentProj
         return None, None
     mean = np.mean(np.stack([projection.feature_mean for projection in projections.values()], axis=0), axis=0)
     matrix = np.mean(np.stack([projection.projection for projection in projections.values()], axis=0), axis=0)
-    return mean, matrix
+    return mean, _orthonormalized_columns(matrix)
+
+
+def _orthonormalized_columns(matrix: np.ndarray) -> np.ndarray:
+    """Return the closest semi-orthogonal matrix with the same shape.
+
+    The source-only held-out-subject fallback applies an across-source average
+    projection.  A raw arithmetic mean of Procrustes maps is generally not itself
+    semi-orthogonal and can shrink projected target variance.  The polar factor
+    preserves the averaged orientation while keeping the transform well scaled.
+    """
+
+    u, _singular_values, vt = np.linalg.svd(matrix, full_matrices=False)
+    return u @ vt
 
 
 def _class_mean_matrix(features: np.ndarray, labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
