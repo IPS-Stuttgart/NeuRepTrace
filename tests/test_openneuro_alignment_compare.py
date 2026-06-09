@@ -73,6 +73,8 @@ def _write_alignment_artifact(
                 "target_transform_type": [
                     "template_ridge_least_squares"
                     if target_projection == "oracle_target_calibrated_alignment"
+                    else "target_calibrated_template_ridge_least_squares"
+                    if target_projection == "target_calibrated_alignment"
                     else "source_group_projection"
                 ],
             }
@@ -111,9 +113,16 @@ def test_alignment_compare_writes_variant_and_debug_decision_tables(tmp_path: Pa
         target_projection="oracle_target_calibrated_alignment",
         fixed_value=0.70,
     )
+    _write_alignment_artifact(
+        artifacts_root,
+        "class-repetition-target-calibrated",
+        anchor_mode="class_repetition",
+        target_projection="target_calibrated_alignment",
+        fixed_value=0.56,
+    )
 
     discovered = discover_output_dirs([artifacts_root])
-    assert len(discovered) == 4
+    assert len(discovered) == 5
 
     written = run_alignment_comparison(
         [artifacts_root],
@@ -126,13 +135,15 @@ def test_alignment_compare_writes_variant_and_debug_decision_tables(tmp_path: Pa
     assert variants["artifact_name"].tolist() == [
         "class-repetition-oracle",
         "class-repetition-strict",
+        "class-repetition-target-calibrated",
         "raw",
         "stimulus-id-strict",
     ]
-    assert variants["diagnostic_actual_components_median"].tolist() == [48.0, 48.0, 2.0, 2.0]
+    assert variants["diagnostic_actual_components_median"].tolist() == [48.0, 48.0, 48.0, 2.0, 2.0]
     assert variants["diagnostic_target_transform_type"].tolist() == [
         "template_ridge_least_squares",
         "source_group_projection",
+        "target_calibrated_template_ridge_least_squares",
         "source_group_projection",
         "source_group_projection",
     ]
@@ -151,9 +162,15 @@ def test_alignment_compare_writes_variant_and_debug_decision_tables(tmp_path: Pa
     assert oracle.loc[0, "decision"] == "oracle_target_calibration_helps"
     assert oracle.loc[0, "interpretation"] == "strict_source_only_target_projection_likely_bottleneck"
 
+    target = pd.read_csv(written["target_calibrated_comparison"])
+    assert target.loc[0, "decision"] == "target_calibrated_beats_strict_source_only"
+    assert target.loc[0, "interpretation"] == "small_target_calibration_can_help_this_alignment"
+    assert round(float(target.loc[0, "score_delta_target_calibrated_minus_strict"]), 2) == 0.06
+
     note = written["note"].read_text(encoding="utf-8")
     assert "Anchor Semantics" in note
     assert "Oracle Target Calibration" in note
+    assert "Disjoint Target Calibration" in note
 
 
 def test_alignment_compare_tolerates_older_artifacts_without_alignment_diagnostics(tmp_path: Path):

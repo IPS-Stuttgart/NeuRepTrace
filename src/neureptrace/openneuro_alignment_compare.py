@@ -19,6 +19,7 @@ IDENTITY_ANCHOR_MODES = {
 }
 CLASS_REPETITION_ANCHOR = "class_repetition"
 STRICT_TARGET_PROJECTION = "group_projection"
+TARGET_CALIBRATED_TARGET_PROJECTION = "target_calibrated_alignment"
 ORACLE_TARGET_PROJECTION = "oracle_target_calibrated_alignment"
 
 
@@ -213,6 +214,7 @@ def summarize_alignment_variant(
         manifest.get("alignment_target_projection", ""),
     )
     oracle = target_projection == ORACLE_TARGET_PROJECTION
+    target_calibrated = target_projection == TARGET_CALIBRATED_TARGET_PROJECTION
     row = {
         "output_dir": output.as_posix(),
         "artifact_name": manifest.get("artifact_name", output.name),
@@ -226,6 +228,7 @@ def summarize_alignment_variant(
         "alignment_anchor_mode": anchor_mode,
         "alignment_anchor_column": _first_nonempty(_compact_unique(summary, "alignment_anchor_column"), manifest.get("alignment_anchor_column", "")),
         "alignment_target_projection": target_projection,
+        "alignment_target_calibrated": target_calibrated,
         "alignment_oracle_target_calibrated": oracle,
         "alignment_valid_for_benchmark": bool(not oracle),
         "identity_anchor": anchor_mode in IDENTITY_ANCHOR_MODES,
@@ -337,6 +340,67 @@ def build_oracle_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -
     return pd.DataFrame(rows)
 
 
+def build_target_calibrated_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
+    """Compare disjoint target-calibrated projection against strict and raw rows."""
+
+    if variants.empty:
+        return pd.DataFrame()
+    rows: list[dict[str, Any]] = []
+    raw_groups = {
+        group_values: group
+        for group_values, group in variants[variants["alignment_method"].isin(["", "none"])].groupby(
+            ["dataset", "selection_metric"],
+            dropna=False,
+        )
+    }
+    group_columns = ["dataset", "alignment_method", "alignment_anchor_mode", "selection_metric"]
+    for group_values, group in variants.groupby(group_columns, dropna=False):
+        group_map = dict(zip(group_columns, group_values, strict=False))
+        target_rows = group[group["alignment_target_projection"] == TARGET_CALIBRATED_TARGET_PROJECTION]
+        if target_rows.empty:
+            continue
+        strict_rows = group[group["alignment_target_projection"] == STRICT_TARGET_PROJECTION]
+        raw_rows = raw_groups.get((group_map["dataset"], group_map["selection_metric"]), pd.DataFrame())
+        target_row = _best_row(target_rows)
+        strict_row = _best_row(strict_rows) if not strict_rows.empty else None
+        raw_row = _best_row(raw_rows) if not raw_rows.empty else None
+        delta_vs_strict = (
+            ""
+            if strict_row is None
+            else float(target_row["selection_score"]) - float(strict_row["selection_score"])
+        )
+        delta_vs_raw = "" if raw_row is None else float(target_row["selection_score"]) - float(raw_row["selection_score"])
+        if delta_vs_strict == "":
+            decision = "target_calibrated_without_strict_pair"
+            interpretation = "strict_source_only_pair_missing"
+        elif float(delta_vs_strict) > min_delta:
+            decision = "target_calibrated_beats_strict_source_only"
+            interpretation = "small_target_calibration_can_help_this_alignment"
+        elif float(delta_vs_strict) < -min_delta:
+            decision = "target_calibrated_hurts_strict_source_only"
+            interpretation = "target_calibration_not_sufficient_for_this_alignment"
+        else:
+            decision = "no_clear_target_calibration_gain_over_strict"
+            interpretation = "target_calibration_inconclusive"
+        rows.append(
+            {
+                **group_map,
+                "strict_artifact": "" if strict_row is None else strict_row["artifact_name"],
+                "strict_value": "" if strict_row is None else strict_row["selection_value"],
+                "target_calibrated_artifact": target_row["artifact_name"],
+                "target_calibrated_value": target_row["selection_value"],
+                "raw_artifact": "" if raw_row is None else raw_row["artifact_name"],
+                "raw_value": "" if raw_row is None else raw_row["selection_value"],
+                "score_delta_target_calibrated_minus_strict": delta_vs_strict,
+                "score_delta_target_calibrated_minus_raw": delta_vs_raw,
+                "min_delta": float(min_delta),
+                "decision": decision,
+                "interpretation": interpretation,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def build_raw_alignment_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
     """Compare the best alignment variant against the raw/no-alignment row."""
 
@@ -350,6 +414,7 @@ def build_raw_alignment_comparison(variants: pd.DataFrame, *, min_delta: float =
         aligned_rows = group[
             (~group["alignment_method"].isin(["", "none"]))
             & (group["alignment_valid_for_benchmark"].map(_as_bool))
+            & (group["alignment_target_projection"] == STRICT_TARGET_PROJECTION)
         ]
         if raw_rows.empty or aligned_rows.empty:
             continue
@@ -389,6 +454,7 @@ def build_alignment_debug_note(
     raw_comparison: pd.DataFrame,
     anchor_comparison: pd.DataFrame,
     oracle_comparison: pd.DataFrame,
+    target_calibrated_comparison: pd.DataFrame,
     *,
     metric: str,
     fixed_time: float | None,
@@ -446,6 +512,18 @@ def build_alignment_debug_note(
                 f"`{row.decision}` ({row.interpretation}), "
                 f"delta={row.score_delta_oracle_minus_strict:.4g}."
             )
+    lines.extend(["", "## Disjoint Target Calibration"])
+    if target_calibrated_comparison.empty:
+        lines.append("No matched disjoint target-calibrated runs were available.")
+    else:
+        for row in target_calibrated_comparison.itertuples(index=False):
+            delta_strict = row.score_delta_target_calibrated_minus_strict
+            delta_text = "missing strict pair" if delta_strict == "" else f"delta_vs_strict={float(delta_strict):.4g}"
+            lines.append(
+                "- "
+                f"{row.dataset} / {row.alignment_method} / {row.alignment_anchor_mode}: "
+                f"`{row.decision}` ({row.interpretation}), {delta_text}."
+            )
     if not variants.empty:
         collapse = (
             variants["diagnostic_uses_channel_projection_collapse_any"]
@@ -490,11 +568,13 @@ def run_alignment_comparison(
     raw_comparison = build_raw_alignment_comparison(variants, min_delta=min_delta)
     anchor_comparison = build_anchor_comparison(variants, min_delta=min_delta)
     oracle_comparison = build_oracle_comparison(variants, min_delta=min_delta)
+    target_calibrated_comparison = build_target_calibrated_comparison(variants, min_delta=min_delta)
     note = build_alignment_debug_note(
         variants,
         raw_comparison,
         anchor_comparison,
         oracle_comparison,
+        target_calibrated_comparison,
         metric=metric,
         fixed_time=fixed_time,
     )
@@ -504,12 +584,14 @@ def run_alignment_comparison(
         "raw_comparison": out / "alignment_vs_raw_comparison.csv",
         "anchor_comparison": out / "alignment_anchor_comparison.csv",
         "oracle_comparison": out / "alignment_oracle_comparison.csv",
+        "target_calibrated_comparison": out / "alignment_target_calibrated_comparison.csv",
         "note": out / "alignment_debug_summary.md",
     }
     variants.to_csv(paths_out["variant_summary"], index=False)
     raw_comparison.to_csv(paths_out["raw_comparison"], index=False)
     anchor_comparison.to_csv(paths_out["anchor_comparison"], index=False)
     oracle_comparison.to_csv(paths_out["oracle_comparison"], index=False)
+    target_calibrated_comparison.to_csv(paths_out["target_calibrated_comparison"], index=False)
     paths_out["note"].write_text(note, encoding="utf-8")
     return paths_out
 
