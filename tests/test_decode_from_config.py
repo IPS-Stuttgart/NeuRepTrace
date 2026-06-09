@@ -54,6 +54,7 @@ def test_decode_from_config_passes_alignment_controls(tmp_path):
                 "label_column": "condition",
                 "alignment_method": "mcca",
                 "alignment_anchor_mode": "class_repetition",
+                "alignment_anchor_column": "stim_file",
                 "alignment_repetition_cap": 12,
                 "alignment_components": 32,
                 "alignment_times": "0.088,0.136,0.184",
@@ -67,6 +68,7 @@ def test_decode_from_config_passes_alignment_controls(tmp_path):
 
     assert kwargs["alignment_method"] == "mcca"
     assert kwargs["alignment_anchor_mode"] == "class_repetition"
+    assert kwargs["alignment_anchor_column"] == "stim_file"
     assert kwargs["alignment_repetition_cap"] == 12
     assert kwargs["alignment_components"] == 32
     assert kwargs["alignment_times"] == "0.088,0.136,0.184"

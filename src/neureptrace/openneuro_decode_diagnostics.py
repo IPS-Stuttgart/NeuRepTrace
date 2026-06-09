@@ -19,6 +19,7 @@ POSITIVE_CHANCE_MARGIN = 0.05
 SUMMARY_PROVENANCE_COLUMNS = (
     "alignment_method",
     "alignment_anchor_mode",
+    "alignment_anchor_column",
     "alignment_repetition_cap",
     "alignment_components",
     "alignment_times",
@@ -368,6 +369,7 @@ def _workflow_quality_row(
     label_shuffle_control = _as_bool(manifest.get("label_shuffle_control", ""))
     alignment_method = _provenance_value(manifest, summary_provenance, "alignment_method")
     alignment_anchor_mode = _provenance_value(manifest, summary_provenance, "alignment_anchor_mode")
+    alignment_anchor_column = _provenance_value(manifest, summary_provenance, "alignment_anchor_column")
     alignment_target_projection = _provenance_value(manifest, summary_provenance, "alignment_target_projection")
     alignment_enabled = str(alignment_method).strip().lower() not in {"", "none"}
     oracle_alignment = str(alignment_target_projection).strip().lower() == "oracle_target_calibrated_alignment"
@@ -405,6 +407,7 @@ def _workflow_quality_row(
         "source_calibration": _provenance_value(manifest, summary_provenance, "source_calibration"),
         "alignment_method": alignment_method,
         "alignment_anchor_mode": alignment_anchor_mode,
+        "alignment_anchor_column": alignment_anchor_column,
         "alignment_repetition_cap": _provenance_value(manifest, summary_provenance, "alignment_repetition_cap"),
         "alignment_components": _provenance_value(manifest, summary_provenance, "alignment_components"),
         "alignment_times": _provenance_value(manifest, summary_provenance, "alignment_times"),

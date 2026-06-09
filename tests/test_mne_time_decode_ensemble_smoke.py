@@ -162,6 +162,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         source_time_selection_output_time=0.184,
         alignment_method="mcca",
         alignment_anchor_mode="class_repetition",
+        alignment_anchor_column="stim_file",
         alignment_repetition_cap=12,
         alignment_components=32,
         alignment_times=(0.088, 0.136, 0.184),
@@ -185,6 +186,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert all(call["source_time_selection_output_time"] == 0.184 for call in calls)
     assert all(call["alignment_method"] == "mcca" for call in calls)
     assert all(call["alignment_anchor_mode"] == "class_repetition" for call in calls)
+    assert all(call["alignment_anchor_column"] == "stim_file" for call in calls)
     assert all(call["alignment_repetition_cap"] == 12 for call in calls)
     assert all(call["alignment_components"] == 32 for call in calls)
     assert all(call["alignment_times"] == (0.088, 0.136, 0.184) for call in calls)
@@ -194,6 +196,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert results["source_time_selection"].unique().tolist() == ["source_oof_best_time"]
     assert results["alignment_method"].unique().tolist() == ["mcca"]
     assert results["alignment_anchor_mode"].unique().tolist() == ["class_repetition"]
+    assert results["alignment_anchor_column"].unique().tolist() == ["stim_file"]
     assert results["alignment_repetition_cap"].unique().tolist() == [12]
     assert results["alignment_components"].unique().tolist() == [32]
     assert results["alignment_times"].unique().tolist() == ["0.088,0.136,0.184"]

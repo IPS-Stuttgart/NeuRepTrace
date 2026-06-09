@@ -4,6 +4,7 @@ import csv
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -657,6 +658,7 @@ def run_time_resolved_decode(
     source_time_selection_output_time: float = 0.184,
     alignment_method: str = "none",
     alignment_anchor_mode: str = "class_mean",
+    alignment_anchor_column: str | None = None,
     alignment_repetition_cap: int | str | None = 16,
     alignment_components: int | float | str | None = 64,
     alignment_times: Sequence[float] | str | None = None,
@@ -720,6 +722,7 @@ def run_time_resolved_decode(
     alignment_config = _base.source_alignment_config(
         method=alignment_method,
         anchor_mode=alignment_anchor_mode,
+        anchor_column=alignment_anchor_column,
         repetition_cap=alignment_repetition_cap,
         components=alignment_components,
         times=alignment_times,
@@ -760,6 +763,19 @@ def run_time_resolved_decode(
     labels = encoder.fit_transform(raw_labels)
     groups = metadata[group_column].to_numpy() if group_column else None
     session_values = metadata["session"].to_numpy() if "session" in metadata.columns else groups
+    alignment_anchor_info = (
+        _base._alignment_anchor_values(
+            metadata,
+            labels,
+            label_column=label_column,
+            anchor_mode=alignment_config.anchor_mode,
+            anchor_column=alignment_config.anchor_column,
+        )
+        if alignment_config.enabled
+        else _base.AlignmentAnchorValues(values=None, column="", source="")
+    )
+    if alignment_config.enabled:
+        alignment_config = replace(alignment_config, anchor_column=alignment_anchor_info.column)
     splitter_name = "stratified-group-kfold" if groups is not None else "stratified-kfold"
     split_id = f"{splitter_name}-{n_splits}"
     if normalized_temporal_train_window is None:
@@ -1038,7 +1054,19 @@ def run_time_resolved_decode(
                         train_labels=train_labels,
                         train_subject_ids=groups[train_idx],
                         test_features=test_feature_matrix,
-                        target_labels=test_labels if alignment_config.oracle_target_calibrated else None,
+                        target_labels=(
+                            test_labels
+                            if alignment_config.oracle_target_calibrated and alignment_anchor_info.values is None
+                            else None
+                        ),
+                        train_anchor_values=(
+                            None if alignment_anchor_info.values is None else alignment_anchor_info.values[train_idx]
+                        ),
+                        target_anchor_values=(
+                            None
+                            if alignment_anchor_info.values is None or not alignment_config.oracle_target_calibrated
+                            else alignment_anchor_info.values[test_idx]
+                        ),
                         config=alignment_config,
                     )
                     train_feature_matrix = alignment_result.train_features

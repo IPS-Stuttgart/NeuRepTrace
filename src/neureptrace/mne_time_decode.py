@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import mne
@@ -73,7 +73,10 @@ RESULT_SUMMARY_METRIC_COLUMNS = RESULT_SELECTION_METRIC_CHOICES
 RESULT_SELECTION_MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 TIME_DECODE_BACKEND_CHOICES = ("auto", "sklearn", "mne")
 SOURCE_ALIGNMENT_RUN_METHODS = (*SOURCE_ALIGNMENT_METHODS, "off", "raw")
-SOURCE_ALIGNMENT_RUN_ANCHOR_MODES = (*SOURCE_ALIGNMENT_ANCHOR_MODES, "class-mean", "class-repetition")
+SOURCE_ALIGNMENT_RUN_ANCHOR_MODES = (
+    *SOURCE_ALIGNMENT_ANCHOR_MODES,
+    *(mode.replace("_", "-") for mode in SOURCE_ALIGNMENT_ANCHOR_MODES),
+)
 SOURCE_ALIGNMENT_RUN_TARGET_PROJECTIONS = (
     *SOURCE_ALIGNMENT_TARGET_PROJECTIONS,
     "oracle",
@@ -316,6 +319,136 @@ def _load_epochs_and_metadata(
             f"Metadata row count ({len(metadata)}) does not match epochs ({len(epochs)})."
         )
     return epochs, metadata.reset_index(drop=True)
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentAnchorValues:
+    values: np.ndarray | None
+    column: str
+    source: str
+
+
+_STIMULUS_ID_ANCHOR_COLUMNS = (
+    "stimulus_id",
+    "stim_file",
+    "stimulus_file",
+    "stimulus",
+    "stimulus_name",
+    "image_id",
+    "image",
+    "word",
+)
+_EVENT_CODE_ANCHOR_COLUMNS = (
+    "event_code",
+    "trigger",
+    "event_id",
+    "event",
+    "value",
+    "trial_type",
+)
+_RUN_ANCHOR_COLUMNS = ("run", "run_id", "run_label")
+
+
+def _alignment_anchor_values(
+    metadata: pd.DataFrame,
+    labels: np.ndarray,
+    *,
+    label_column: str,
+    anchor_mode: str,
+    anchor_column: str | None = None,
+) -> AlignmentAnchorValues:
+    """Resolve optional metadata-derived alignment anchors for one Epochs table."""
+
+    mode = str(anchor_mode).strip().lower().replace("-", "_")
+    requested_column = "" if anchor_column is None else str(anchor_column).strip()
+    if mode in {"class_mean", "class_repetition"}:
+        return AlignmentAnchorValues(values=None, column=requested_column, source="decoder_labels")
+    if mode in {"stimulus_id_mean", "stimulus_id_repetition"}:
+        column = _select_alignment_anchor_column(
+            metadata,
+            requested_column=requested_column,
+            candidates=_STIMULUS_ID_ANCHOR_COLUMNS,
+            mode=mode,
+        )
+        return AlignmentAnchorValues(values=_metadata_anchor_vector(metadata[column], name=column), column=column, source="metadata")
+    if mode == "event_code_mean":
+        column = _select_alignment_anchor_column(
+            metadata,
+            requested_column=requested_column,
+            candidates=_EVENT_CODE_ANCHOR_COLUMNS,
+            mode=mode,
+        )
+        return AlignmentAnchorValues(values=_metadata_anchor_vector(metadata[column], name=column), column=column, source="metadata")
+    if mode == "run_event_index_within_stimulus":
+        values, column = _run_event_index_within_stimulus_anchors(
+            metadata,
+            labels,
+            label_column=label_column,
+            requested_column=requested_column,
+        )
+        return AlignmentAnchorValues(values=values, column=column, source="derived_metadata")
+    raise ValueError(f"Unsupported alignment anchor mode: {anchor_mode!r}.")
+
+
+def _select_alignment_anchor_column(
+    metadata: pd.DataFrame,
+    *,
+    requested_column: str,
+    candidates: Sequence[str],
+    mode: str,
+) -> str:
+    if requested_column:
+        if requested_column not in metadata.columns:
+            raise ValueError(f"alignment_anchor_column '{requested_column}' not found for {mode}.")
+        return requested_column
+    for column in candidates:
+        if column in metadata.columns:
+            return column
+    raise ValueError(
+        f"{mode} requires an alignment anchor column. Tried: {', '.join(candidates)}. "
+        "Set decoding.alignment_anchor_column or --alignment-anchor-column explicitly."
+    )
+
+
+def _metadata_anchor_vector(values: Sequence[object] | pd.Series, *, name: str) -> np.ndarray:
+    series = pd.Series(values, copy=False)
+    if series.isna().any():
+        raise ValueError(f"alignment anchor column '{name}' contains missing values.")
+    return series.astype(str).to_numpy(dtype=object)
+
+
+def _run_event_index_within_stimulus_anchors(
+    metadata: pd.DataFrame,
+    labels: np.ndarray,
+    *,
+    label_column: str,
+    requested_column: str,
+) -> tuple[np.ndarray, str]:
+    stimulus_column = _select_alignment_anchor_column(
+        metadata,
+        requested_column=requested_column,
+        candidates=_STIMULUS_ID_ANCHOR_COLUMNS,
+        mode="run_event_index_within_stimulus",
+    )
+    run_column = next((column for column in _RUN_ANCHOR_COLUMNS if column in metadata.columns), "")
+    stimulus_values = _metadata_anchor_vector(metadata[stimulus_column], name=stimulus_column)
+    if run_column:
+        run_values = _metadata_anchor_vector(metadata[run_column], name=run_column)
+    else:
+        run_values = np.full(len(metadata), "run-unknown", dtype=object)
+    label_values = (
+        _metadata_anchor_vector(metadata[label_column], name=label_column)
+        if label_column in metadata.columns
+        else np.asarray(labels, dtype=object).astype(str)
+    )
+    counts: dict[tuple[str, str, str], int] = {}
+    anchors: list[str] = []
+    for run, stimulus, label in zip(run_values, stimulus_values, label_values, strict=False):
+        key = (str(run), str(stimulus), str(label))
+        counts[key] = counts.get(key, 0) + 1
+        anchors.append(f"run={key[0]}|stimulus={key[1]}|label={key[2]}|index={counts[key]}")
+    column = f"{run_column or 'run'}+{stimulus_column}+event_index"
+    return np.asarray(anchors, dtype=object), column
 
 
 def _best_params_json(models) -> str:
@@ -1669,6 +1802,7 @@ def run_time_resolved_decode(
     source_time_selection_output_time: float = 0.184,
     alignment_method: str = "none",
     alignment_anchor_mode: str = "class_mean",
+    alignment_anchor_column: str | None = None,
     alignment_repetition_cap: int | str | None = 16,
     alignment_components: int | float | str | None = 64,
     alignment_times: Sequence[float] | str | None = None,
@@ -1730,6 +1864,7 @@ def run_time_resolved_decode(
     alignment_config = source_alignment_config(
         method=alignment_method,
         anchor_mode=alignment_anchor_mode,
+        anchor_column=alignment_anchor_column,
         repetition_cap=alignment_repetition_cap,
         components=alignment_components,
         times=alignment_times,
@@ -1783,6 +1918,19 @@ def run_time_resolved_decode(
     labels = encoder.fit_transform(raw_labels)
     groups = metadata[group_column].to_numpy() if group_column else None
     session_values = metadata["session"].to_numpy() if "session" in metadata.columns else groups
+    alignment_anchor_info = (
+        _alignment_anchor_values(
+            metadata,
+            labels,
+            label_column=label_column,
+            anchor_mode=alignment_config.anchor_mode,
+            anchor_column=alignment_config.anchor_column,
+        )
+        if alignment_config.enabled
+        else AlignmentAnchorValues(values=None, column="", source="")
+    )
+    if alignment_config.enabled:
+        alignment_config = replace(alignment_config, anchor_column=alignment_anchor_info.column)
     splitter_name = "stratified-group-kfold" if groups is not None else "stratified-kfold"
     split_id = f"{splitter_name}-{n_splits}"
     if normalized_temporal_train_window is None:
@@ -2165,7 +2313,19 @@ def run_time_resolved_decode(
                         train_labels=train_labels,
                         train_subject_ids=groups[train_idx],
                         test_features=test_feature_matrix,
-                        target_labels=test_labels if alignment_config.oracle_target_calibrated else None,
+                        target_labels=(
+                            test_labels
+                            if alignment_config.oracle_target_calibrated and alignment_anchor_info.values is None
+                            else None
+                        ),
+                        train_anchor_values=(
+                            None if alignment_anchor_info.values is None else alignment_anchor_info.values[train_idx]
+                        ),
+                        target_anchor_values=(
+                            None
+                            if alignment_anchor_info.values is None or not alignment_config.oracle_target_calibrated
+                            else alignment_anchor_info.values[test_idx]
+                        ),
                         config=alignment_config,
                     )
                     train_feature_matrix = alignment_result.train_features
@@ -2710,7 +2870,14 @@ def main() -> None:
         "--alignment-anchor-mode",
         choices=SOURCE_ALIGNMENT_RUN_ANCHOR_MODES,
         default="class_mean",
-        help="Source-label anchor rows used to fit strict alignment.",
+        help="Source anchor rows used to fit strict alignment.",
+    )
+    parser.add_argument(
+        "--alignment-anchor-column",
+        help=(
+            "Metadata column for stimulus/event alignment anchors. If omitted, "
+            "stimulus_id modes auto-select columns such as stim_file, and event_code_mean auto-selects trigger."
+        ),
     )
     parser.add_argument(
         "--alignment-repetition-cap",
@@ -2821,6 +2988,7 @@ def main() -> None:
         source_time_selection_output_time=args.source_time_selection_output_time,
         alignment_method=args.alignment_method,
         alignment_anchor_mode=args.alignment_anchor_mode,
+        alignment_anchor_column=args.alignment_anchor_column,
         alignment_repetition_cap=args.alignment_repetition_cap,
         alignment_components=args.alignment_components,
         alignment_times=args.alignment_times,

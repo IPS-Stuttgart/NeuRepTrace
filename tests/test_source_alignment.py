@@ -79,6 +79,19 @@ def test_strict_alignment_rejects_target_labels():
         )
 
 
+def test_strict_alignment_rejects_target_anchor_values():
+    with pytest.raises(ValueError, match="target anchor values"):
+        align_train_test_features(
+            train_features=np.ones((4, 2)),
+            train_labels=np.array([0, 1, 0, 1]),
+            train_subject_ids=np.array(["a", "a", "b", "b"]),
+            test_features=np.ones((2, 2)),
+            train_anchor_values=np.array(["stim-a", "stim-b", "stim-a", "stim-b"]),
+            target_anchor_values=np.array(["stim-a", "stim-b"]),
+            config=source_alignment_config(method="procrustes", anchor_mode="stimulus_id_mean"),
+        )
+
+
 def test_oracle_alignment_requires_target_labels():
     train_features, train_labels, train_subjects = _rotated_subject_features()
     with pytest.raises(ValueError, match="requires held-out target labels"):
@@ -114,6 +127,35 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert result.metadata["alignment_target_projection"] == "group_projection"
     assert result.metadata["alignment_n_components"] == 2
     assert aligned_distance < raw_distance
+
+
+@pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
+def test_stimulus_anchor_values_are_distinct_from_decoder_labels(method):
+    train_features, train_labels, train_subjects = _rotated_subject_features(seed=11)
+    repetitions = np.tile(np.tile(np.arange(8), 3), 3)
+    train_anchors = np.asarray([f"stim-{label}-{rep % 2}" for label, rep in zip(train_labels, repetitions, strict=True)])
+
+    result = align_train_test_features(
+        train_features=train_features,
+        train_labels=train_labels,
+        train_subject_ids=train_subjects,
+        train_anchor_values=train_anchors,
+        test_features=train_features[:6],
+        config=source_alignment_config(
+            method=method,
+            anchor_mode="stimulus_id_mean",
+            anchor_column="stim_file",
+            components=2,
+        ),
+    )
+
+    assert result.train_features.shape == (train_features.shape[0], 2)
+    assert result.metadata["alignment_anchor_mode"] == "stimulus_id_mean"
+    assert result.metadata["alignment_anchor_column"] == "stim_file"
+    assert result.metadata["alignment_anchor_value_source"] == "metadata"
+    assert result.metadata["alignment_common_anchor_count"] == 6
+    assert result.metadata["alignment_anchor_rows_dropped"] == 0
+    assert result.metadata["alignment_target_anchor_values_used"] is False
 
 
 @pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
@@ -161,6 +203,35 @@ def test_oracle_target_calibrated_alignment_is_debug_upper_bound(method):
     assert oracle.metadata["alignment_valid_for_benchmark"] is False
     assert oracle.metadata["alignment_target_labels_used"] is True
     assert oracle.metadata["alignment_protocol_note"] == "debug upper bound only; not valid for benchmark"
+
+
+def test_oracle_target_calibrated_alignment_accepts_target_anchor_values():
+    features, labels, subjects = _rotated_subject_features(seed=43)
+    repetitions = np.tile(np.tile(np.arange(8), 3), 3)
+    anchors = np.asarray([f"stim-{label}-{rep % 2}" for label, rep in zip(labels, repetitions, strict=True)])
+    source_mask = subjects != "s2"
+    target_mask = subjects == "s2"
+
+    oracle = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        train_anchor_values=anchors[source_mask],
+        test_features=features[target_mask],
+        target_anchor_values=anchors[target_mask],
+        config=source_alignment_config(
+            method="procrustes",
+            anchor_mode="stimulus_id_mean",
+            anchor_column="stim_file",
+            components=2,
+            target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+        ),
+    )
+
+    assert oracle.metadata["alignment_target_projection"] == ORACLE_TARGET_CALIBRATED_ALIGNMENT
+    assert oracle.metadata["alignment_target_labels_used"] is False
+    assert oracle.metadata["alignment_target_anchor_values_used"] is True
+    assert oracle.metadata["alignment_valid_for_benchmark"] is False
 
 
 def test_class_repetition_cap_is_capped_by_available_counts():

@@ -150,6 +150,7 @@ def run_time_resolved_decode(
     source_time_selection_output_time: float = 0.184,
     alignment_method: str = "none",
     alignment_anchor_mode: str = "class_mean",
+    alignment_anchor_column: str | None = None,
     alignment_repetition_cap: int | str | None = 16,
     alignment_components: int | float | str | None = 64,
     alignment_times: Sequence[float] | str | None = None,
@@ -214,6 +215,7 @@ def run_time_resolved_decode(
             source_time_selection_output_time=source_time_selection_output_time,
             alignment_method=alignment_method,
             alignment_anchor_mode=alignment_anchor_mode,
+            alignment_anchor_column=alignment_anchor_column,
             alignment_repetition_cap=alignment_repetition_cap,
             alignment_components=alignment_components,
             alignment_times=alignment_times,
@@ -279,6 +281,7 @@ def run_time_resolved_decode(
                     source_time_selection_output_time=source_time_selection_output_time,
                     alignment_method=alignment_method,
                     alignment_anchor_mode=alignment_anchor_mode,
+                    alignment_anchor_column=alignment_anchor_column,
                     alignment_repetition_cap=alignment_repetition_cap,
                     alignment_components=alignment_components,
                     alignment_times=alignment_times,
@@ -329,6 +332,7 @@ def run_time_resolved_decode(
     results["source_time_selection_output_time"] = float(source_time_selection_output_time)
     results["alignment_method"] = str(alignment_method).strip().lower().replace("-", "_")
     results["alignment_anchor_mode"] = str(alignment_anchor_mode).strip().lower().replace("-", "_")
+    results["alignment_anchor_column"] = "" if alignment_anchor_column is None else str(alignment_anchor_column).strip()
     results["alignment_repetition_cap"] = "" if alignment_repetition_cap is None else alignment_repetition_cap
     results["alignment_components"] = "" if alignment_components is None else alignment_components
     results["alignment_times"] = (
@@ -509,7 +513,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--alignment-anchor-mode",
         choices=SOURCE_ALIGNMENT_RUN_ANCHOR_MODES,
         default="class_mean",
-        help="Source-label anchor representation used to fit strict source-only alignment.",
+        help="Source anchor representation used to fit strict source-only alignment.",
+    )
+    parser.add_argument(
+        "--alignment-anchor-column",
+        help="Metadata column for stimulus/event alignment anchors.",
     )
     parser.add_argument("--alignment-repetition-cap", type=int, default=16)
     parser.add_argument("--alignment-components", default="64")
@@ -607,6 +615,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         source_time_selection_output_time=args.source_time_selection_output_time,
         alignment_method=args.alignment_method,
         alignment_anchor_mode=args.alignment_anchor_mode,
+        alignment_anchor_column=args.alignment_anchor_column,
         alignment_repetition_cap=args.alignment_repetition_cap,
         alignment_components=args.alignment_components,
         alignment_times=args.alignment_times,
