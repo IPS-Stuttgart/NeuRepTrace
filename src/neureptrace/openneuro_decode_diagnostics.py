@@ -514,6 +514,7 @@ def summarize_decode_outputs(output_dir: str | Path) -> tuple[dict[str, Any], pd
     summary_path = decode_dir / "time_decode_summary.csv"
     observations_path = decode_dir / "observations.csv"
     calibration_path = decode_dir / "calibration.csv"
+    alignment_anchor_availability_path = decode_dir / "alignment_anchor_availability.csv"
     alignment_diagnostics_path = decode_dir / "alignment_diagnostics.csv"
 
     diagnostics: dict[str, Any] = {
@@ -525,6 +526,7 @@ def summarize_decode_outputs(output_dir: str | Path) -> tuple[dict[str, Any], pd
         "decode_summary": _csv_shape(summary_path),
         "observations": _csv_shape(observations_path),
         "calibration": _csv_shape(calibration_path),
+        "alignment_anchor_availability": _csv_shape(alignment_anchor_availability_path),
         "alignment_diagnostics": _csv_shape(alignment_diagnostics_path),
         "temporal_smoothing_summary": _csv_shape(decode_dir / "temporal_smoothing" / "time_decode_summary.csv"),
         "temporal_smoothing_observations": _csv_shape(decode_dir / "temporal_smoothing" / "observations.csv"),
@@ -600,6 +602,11 @@ def aggregate_workflow_outputs(
     )
     summary_path = _concat_existing_csvs(source_dirs, "decode/time_decode_summary.csv", decode_dir / "time_decode_summary.csv")
     observations_path = _concat_existing_csvs(source_dirs, "decode/observations.csv", decode_dir / "observations.csv")
+    _concat_existing_csvs(
+        source_dirs,
+        "decode/alignment_anchor_availability.csv",
+        decode_dir / "alignment_anchor_availability.csv",
+    )
     _concat_existing_csvs(source_dirs, "decode/alignment_diagnostics.csv", decode_dir / "alignment_diagnostics.csv")
 
     best_time = _diagnostics_best_time(source_dirs, diagnostics_best_time)

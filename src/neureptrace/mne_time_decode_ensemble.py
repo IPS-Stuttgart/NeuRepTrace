@@ -26,6 +26,7 @@ from neureptrace.mne_time_decode import (
     SOURCE_TIME_SELECTION_RUN_CHOICES,
     _best_time_by_metric,
     _normalize_outer_test_groups,
+    _write_alignment_anchor_availability,
     _write_alignment_diagnostics,
     TEMPORAL_TRAIN_MODE_RUN_CHOICES,
 )
@@ -248,6 +249,7 @@ def run_time_resolved_decode(
         source_observation_paths: list[Path] = []
         source_metric_frames: list[pd.DataFrame] = []
         alignment_diagnostic_frames: list[pd.DataFrame] = []
+        alignment_anchor_availability_frames: list[pd.DataFrame] = []
         for source_decoder in source_decoder_requests:
             source_out = tmp_dir / f"{normalize_decoder_name(source_decoder)}_time_decode.csv"
             source_observations = tmp_dir / f"{normalize_decoder_name(source_decoder)}_observations.csv"
@@ -306,6 +308,9 @@ def run_time_resolved_decode(
             alignment_diagnostics = tmp_dir / "alignment_diagnostics.csv"
             if alignment_enabled and alignment_diagnostics.exists():
                 alignment_diagnostic_frames.append(pd.read_csv(alignment_diagnostics))
+            alignment_anchor_availability = tmp_dir / "alignment_anchor_availability.csv"
+            if alignment_enabled and alignment_anchor_availability.exists():
+                alignment_anchor_availability_frames.append(pd.read_csv(alignment_anchor_availability))
             source_observation_paths.append(source_observations)
 
         observations = read_validated_probability_observations(
@@ -398,7 +403,13 @@ def run_time_resolved_decode(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(out_path, index=False)
     if alignment_enabled:
+        availability_rows = (
+            []
+            if not alignment_anchor_availability_frames
+            else pd.concat(alignment_anchor_availability_frames).to_dict("records")
+        )
         diagnostic_rows = [] if not alignment_diagnostic_frames else pd.concat(alignment_diagnostic_frames).to_dict("records")
+        _write_alignment_anchor_availability(out_path.parent / "alignment_anchor_availability.csv", availability_rows)
         _write_alignment_diagnostics(out_path.parent / "alignment_diagnostics.csv", diagnostic_rows)
 
     if calibration_out_path is not None:

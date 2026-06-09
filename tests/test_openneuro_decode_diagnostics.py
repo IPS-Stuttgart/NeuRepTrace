@@ -349,6 +349,30 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
                 "dataset": ["openneuro_ds006629_singsing"],
                 "test_subject": [subject],
                 "alignment_method": ["mcca"],
+                "alignment_anchor_mode": ["class_mean"],
+                "alignment_anchor_column": [""],
+                "sample_mode": ["class_mean"],
+                "alignment_target_projection": ["group_projection"],
+                "alignment_protocol": ["strict_source_only"],
+                "n_source_subjects": [1],
+                "n_source_rows": [24],
+                "source_anchor_value_source": ["decoder_labels"],
+                "n_source_anchor_values": [3],
+                "n_common_source_anchors": [3],
+                "common_source_anchor_values_preview": ["0|1|2"],
+                "source_anchor_rows_total": [24],
+                "source_anchor_rows_retained": [24],
+                "source_anchor_rows_dropped": [0],
+                "estimated_alignment_rows": [3],
+                "prefit_status": ["ok"],
+                "prefit_failure_reason": [""],
+            }
+        ).to_csv(decode_dir / "alignment_anchor_availability.csv", index=False)
+        pd.DataFrame(
+            {
+                "dataset": ["openneuro_ds006629_singsing"],
+                "test_subject": [subject],
+                "alignment_method": ["mcca"],
                 "sample_mode": ["class_mean"],
                 "n_source_subjects": [1],
                 "n_classes": [3],
@@ -376,6 +400,8 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
 
     assert diagnostics["decode_summary"]["exists"] is True
     assert diagnostics["decode_summary"]["rows"] == 4
+    assert diagnostics["alignment_anchor_availability"]["exists"] is True
+    assert diagnostics["alignment_anchor_availability"]["rows"] == 2
     assert diagnostics["alignment_diagnostics"]["exists"] is True
     assert diagnostics["alignment_diagnostics"]["rows"] == 2
     assert best.set_index("selection_metric").loc["balanced_accuracy", "selection_value"] == pytest.approx(1.0)
@@ -385,6 +411,10 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
     assert alignment["test_subject"].tolist() == ["sub-01", "sub-02"]
     assert alignment["actual_components"].tolist() == [2, 2]
     assert alignment["target_transform_type"].tolist() == ["source_group_projection", "source_group_projection"]
+    availability = pd.read_csv(aggregate_dir / "decode" / "alignment_anchor_availability.csv")
+    assert availability["test_subject"].tolist() == ["sub-01", "sub-02"]
+    assert availability["prefit_status"].tolist() == ["ok", "ok"]
+    assert availability["n_common_source_anchors"].tolist() == [3, 3]
     manifest = json.loads((aggregate_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["artifact_name"] == "openneuro-meg-ds006629-full-shard-aggregate"
     assert manifest["outer_test_groups"] == "sub-01|sub-02"

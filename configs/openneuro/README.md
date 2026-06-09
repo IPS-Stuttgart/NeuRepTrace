@@ -176,12 +176,18 @@ gh workflow run openneuro-meg-loso.yml \
   -f config_overrides='decoding.n_splits=6;decoding.alignment_method=mcca;decoding.alignment_anchor_mode=class_mean;decoding.alignment_target_projection=oracle_target_calibrated_alignment;workflow.outer_test_group_shards_json=["sub-01","sub-02","sub-04","sub-05","sub-07","sub-08"]'
 ```
 
-Inspect `time_decode_summary.csv`, `observations.csv`, and
-`alignment_diagnostics.csv` from both artifacts. If the oracle run improves
-while the paired strict run does not, the alignment machinery can work and the
-source-only/no-target-calibration protocol is the likely bottleneck. If the
-oracle run still hurts, treat feature construction, anchor construction, or the
-alignment implementation as the next debugging target.
+Inspect `time_decode_summary.csv`, `observations.csv`,
+`alignment_anchor_availability.csv`, and `alignment_diagnostics.csv` from both
+artifacts. `alignment_anchor_availability.csv` is written before each alignment
+fit, including folds that later fail, and reports common-anchor counts, retained
+anchor rows, target-anchor coverage, estimated alignment rows, and prefit failure
+reasons. `alignment_diagnostics.csv` is post-fit and reports the actual aligned
+dimensionality, anchor correlation before/after, source-inner decoding, target
+transform type, and channel-projection-collapse status. If the oracle run
+improves while the paired strict run does not, the alignment machinery can work
+and the source-only/no-target-calibration protocol is the likely bottleneck. If
+the oracle run still hurts, treat feature construction, anchor construction, or
+the alignment implementation as the next debugging target.
 
 After downloading several alignment artifacts into one directory, summarize the
 debug sweep with:

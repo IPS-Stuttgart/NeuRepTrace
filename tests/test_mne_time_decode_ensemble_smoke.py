@@ -148,6 +148,30 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
                         "dataset": kwargs.get("dataset_name", ""),
                         "test_subject": decoder,
                         "alignment_method": kwargs["alignment_method"],
+                        "alignment_anchor_mode": kwargs["alignment_anchor_mode"],
+                        "alignment_anchor_column": kwargs["alignment_anchor_column"],
+                        "sample_mode": kwargs["alignment_anchor_mode"],
+                        "alignment_target_projection": kwargs["alignment_target_projection"],
+                        "alignment_protocol": "strict_source_only",
+                        "n_source_subjects": 2,
+                        "n_source_rows": 20,
+                        "source_anchor_value_source": "decoder_labels",
+                        "n_source_anchor_values": 2,
+                        "n_common_source_anchors": 2,
+                        "source_anchor_rows_total": 20,
+                        "source_anchor_rows_retained": 20,
+                        "source_anchor_rows_dropped": 0,
+                        "estimated_alignment_rows": 4,
+                        "prefit_status": "ok",
+                    }
+                ]
+            ).to_csv(kwargs["out_path"].parent / "alignment_anchor_availability.csv", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "dataset": kwargs.get("dataset_name", ""),
+                        "test_subject": decoder,
+                        "alignment_method": kwargs["alignment_method"],
                         "sample_mode": kwargs["alignment_anchor_mode"],
                         "n_source_subjects": 2,
                         "n_classes": 2,
@@ -243,5 +267,9 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert diagnostics["actual_components"].unique().tolist() == [4]
     assert diagnostics["source_inner_aligned_minus_raw"].unique().tolist() == [0.2]
     assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["dataset"].unique().tolist() == ["ensemble-demo"]
+    assert set(availability["test_subject"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}
+    assert availability["prefit_status"].unique().tolist() == ["ok"]
     source_observations = pd.read_csv(tmp_path / "ensemble_source_observations.csv")
     assert set(source_observations["decoder"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}

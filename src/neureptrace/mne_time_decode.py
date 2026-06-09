@@ -33,6 +33,7 @@ from neureptrace.decoding import (
     time_windows,
 )
 from neureptrace.decoding.source_alignment import (
+    ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS,
     ALIGNMENT_DIAGNOSTIC_COLUMNS,
     SOURCE_ALIGNMENT_ANCHOR_MODES,
     SOURCE_ALIGNMENT_METHODS,
@@ -40,6 +41,7 @@ from neureptrace.decoding.source_alignment import (
     SOURCE_ALIGNMENT_UNSUPERVISED_METHODS,
     SourceAlignmentResult,
     align_train_test_features,
+    source_alignment_anchor_availability,
     source_alignment_config,
 )
 from neureptrace.fieldtrip_mat import INPUT_FORMAT_CHOICES, load_fieldtrip_raw_mat_epochs, parse_path_tokens
@@ -560,6 +562,54 @@ def _alignment_diagnostic_row(
 def _write_alignment_diagnostics(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(list(rows), columns=ALIGNMENT_DIAGNOSTIC_COLUMNS).to_csv(path, index=False)
+
+
+def _alignment_anchor_availability_row(
+    *,
+    train_labels: Sequence[object] | np.ndarray,
+    train_subject_ids: Sequence[object] | np.ndarray,
+    alignment_config,
+    dataset_name: str,
+    test_subject: str,
+    alignment_window_center: float,
+    alignment_window_size: float,
+    decode_window_center: float,
+    decode_window_size: float,
+    train_anchor_values: Sequence[object] | np.ndarray | None = None,
+    target_labels: Sequence[object] | np.ndarray | None = None,
+    target_anchor_values: Sequence[object] | np.ndarray | None = None,
+    target_calibration_labels: Sequence[object] | np.ndarray | None = None,
+    target_calibration_anchor_values: Sequence[object] | np.ndarray | None = None,
+) -> dict[str, object]:
+    row = {column: "" for column in ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS}
+    row.update(
+        source_alignment_anchor_availability(
+            train_labels=train_labels,
+            train_subject_ids=train_subject_ids,
+            train_anchor_values=train_anchor_values,
+            target_labels=target_labels,
+            target_anchor_values=target_anchor_values,
+            target_calibration_labels=target_calibration_labels,
+            target_calibration_anchor_values=target_calibration_anchor_values,
+            config=alignment_config,
+        )
+    )
+    row.update(
+        {
+            "dataset": dataset_name,
+            "test_subject": test_subject,
+            "alignment_window_center": float(alignment_window_center),
+            "alignment_window_size": float(alignment_window_size),
+            "decode_window_center": float(decode_window_center),
+            "decode_window_size": float(decode_window_size),
+        }
+    )
+    return row
+
+
+def _write_alignment_anchor_availability(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(list(rows), columns=ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS).to_csv(path, index=False)
 
 
 def _best_params_json(models) -> str:
@@ -2118,6 +2168,7 @@ def run_time_resolved_decode(
     calibration_rows: list[dict] = []
     observation_rows: list[dict] = []
     alignment_diagnostic_rows: list[dict[str, object]] = []
+    alignment_anchor_availability_rows: list[dict[str, object]] = []
     all_windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
     windows = _select_decode_windows(all_windows, normalized_decode_window)
     selected_train_windows = _select_temporal_train_windows(all_windows, normalized_temporal_train_window)
@@ -2440,37 +2491,60 @@ def run_time_resolved_decode(
                 test_feature_matrix = features[scored_test_idx]
                 alignment_metadata = None
                 if alignment_config.enabled:
+                    train_anchor_values = None if alignment_anchor_info.values is None else alignment_anchor_info.values[train_idx]
+                    oracle_target_labels = (
+                        test_labels
+                        if alignment_config.oracle_target_calibrated and alignment_anchor_info.values is None
+                        else None
+                    )
+                    target_anchor_values = (
+                        None
+                        if alignment_anchor_info.values is None or not alignment_config.oracle_target_calibrated
+                        else alignment_anchor_info.values[scored_test_idx]
+                    )
+                    target_calibration_features = None if target_calibration_idx.size == 0 else features[target_calibration_idx]
+                    target_calibration_labels = (
+                        labels[target_calibration_idx]
+                        if target_calibration_idx.size and alignment_anchor_info.values is None
+                        else None
+                    )
+                    target_calibration_anchor_values = (
+                        alignment_anchor_info.values[target_calibration_idx]
+                        if target_calibration_idx.size and alignment_anchor_info.values is not None
+                        else None
+                    )
+                    availability_row = _alignment_anchor_availability_row(
+                        train_labels=train_labels,
+                        train_subject_ids=groups[train_idx],
+                        train_anchor_values=train_anchor_values,
+                        target_labels=oracle_target_labels,
+                        target_anchor_values=target_anchor_values,
+                        target_calibration_labels=target_calibration_labels,
+                        target_calibration_anchor_values=target_calibration_anchor_values,
+                        alignment_config=alignment_config,
+                        dataset_name=dataset_name_value,
+                        test_subject=_test_subject_label(groups, test_idx, fallback=fold),
+                        alignment_window_center=center,
+                        alignment_window_size=float(window_ms) / 1000.0,
+                        decode_window_center=center,
+                        decode_window_size=float(window_ms) / 1000.0,
+                    )
+                    alignment_anchor_availability_rows.append(availability_row)
+                    _write_alignment_anchor_availability(
+                        out_path.parent / "alignment_anchor_availability.csv",
+                        alignment_anchor_availability_rows,
+                    )
                     alignment_result = align_train_test_features(
                         train_features=train_feature_matrix,
                         train_labels=train_labels,
                         train_subject_ids=groups[train_idx],
                         test_features=test_feature_matrix,
-                        target_labels=(
-                            test_labels
-                            if alignment_config.oracle_target_calibrated and alignment_anchor_info.values is None
-                            else None
-                        ),
-                        train_anchor_values=(
-                            None if alignment_anchor_info.values is None else alignment_anchor_info.values[train_idx]
-                        ),
-                        target_anchor_values=(
-                            None
-                            if alignment_anchor_info.values is None or not alignment_config.oracle_target_calibrated
-                            else alignment_anchor_info.values[scored_test_idx]
-                        ),
-                        target_calibration_features=(
-                            None if target_calibration_idx.size == 0 else features[target_calibration_idx]
-                        ),
-                        target_calibration_labels=(
-                            labels[target_calibration_idx]
-                            if target_calibration_idx.size and alignment_anchor_info.values is None
-                            else None
-                        ),
-                        target_calibration_anchor_values=(
-                            alignment_anchor_info.values[target_calibration_idx]
-                            if target_calibration_idx.size and alignment_anchor_info.values is not None
-                            else None
-                        ),
+                        target_labels=oracle_target_labels,
+                        train_anchor_values=train_anchor_values,
+                        target_anchor_values=target_anchor_values,
+                        target_calibration_features=target_calibration_features,
+                        target_calibration_labels=target_calibration_labels,
+                        target_calibration_anchor_values=target_calibration_anchor_values,
                         config=alignment_config,
                     )
                     train_feature_matrix = alignment_result.train_features
@@ -2882,6 +2956,10 @@ def run_time_resolved_decode(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(out_path, index=False)
     if alignment_config.enabled:
+        _write_alignment_anchor_availability(
+            out_path.parent / "alignment_anchor_availability.csv",
+            alignment_anchor_availability_rows,
+        )
         _write_alignment_diagnostics(out_path.parent / "alignment_diagnostics.csv", alignment_diagnostic_rows)
     if calibration_out_path is not None:
         calibration_out_path.parent.mkdir(parents=True, exist_ok=True)

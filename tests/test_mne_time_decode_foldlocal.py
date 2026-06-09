@@ -160,6 +160,10 @@ def test_foldlocal_accepts_strict_source_alignment(tmp_path: Path, monkeypatch):
     assert diagnostics["alignment_target_projection"].unique().tolist() == ["group_projection"]
     assert diagnostics["alignment_debug_upper_bound"].unique().tolist() == [False]
     assert diagnostics["alignment_valid_for_benchmark"].unique().tolist() == [True]
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["dataset"].unique().tolist() == ["foldlocal-demo"]
+    assert availability["prefit_status"].unique().tolist() == ["ok"]
+    assert availability["n_common_source_anchors"].unique().tolist() == [2]
 
 
 def test_foldlocal_accepts_oracle_target_calibrated_alignment(tmp_path: Path, monkeypatch):
@@ -214,6 +218,9 @@ def test_foldlocal_accepts_oracle_target_calibrated_alignment(tmp_path: Path, mo
     assert diagnostics["alignment_target_labels_used"].unique().tolist() == [True]
     assert diagnostics["alignment_debug_upper_bound"].unique().tolist() == [True]
     assert diagnostics["alignment_valid_for_benchmark"].unique().tolist() == [False]
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["target_anchor_values_used"].unique().tolist() == [True]
+    assert availability["target_missing_common_anchor_count"].unique().tolist() == [0]
 
 
 def test_foldlocal_accepts_disjoint_target_calibrated_alignment(tmp_path: Path, monkeypatch):

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
 from neureptrace.decoding.source_alignment import SourceAlignmentResult
@@ -195,6 +196,12 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
     assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
     assert np.allclose(diagnostics["alignment_window_center"], diagnostics["decode_window_center"])
     assert np.allclose(diagnostics["alignment_window_size"], diagnostics["decode_window_size"])
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["dataset"].unique().tolist() == ["synthetic"]
+    assert availability["test_subject"].unique().tolist() == ["sub-01"]
+    assert availability["prefit_status"].unique().tolist() == ["ok"]
+    assert availability["n_common_source_anchors"].unique().tolist() == [2]
+    assert availability["estimated_alignment_rows"].unique().tolist() == [2]
 
 
 def test_run_time_resolved_decode_passes_target_labels_for_oracle_alignment(tmp_path: Path, monkeypatch):
@@ -346,6 +353,10 @@ def test_run_time_resolved_decode_target_calibration_excludes_scored_rows(tmp_pa
     diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
     assert diagnostics["alignment_target_projection"].unique().tolist() == ["target_calibrated_alignment"]
     assert diagnostics["target_transform_type"].unique().tolist() == ["target_calibrated_template_procrustes"]
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["prefit_status"].unique().tolist() == ["ok"]
+    assert availability["target_calibration_anchor_values_used"].unique().tolist() == [True]
+    assert availability["target_calibration_missing_common_anchor_count"].unique().tolist() == [0]
 
 
 def test_run_time_resolved_decode_skips_anchor_lookup_for_unsupervised_alignment(tmp_path: Path, monkeypatch):
@@ -399,6 +410,9 @@ def test_run_time_resolved_decode_skips_anchor_lookup_for_unsupervised_alignment
     )
 
     assert set(results["alignment_method"]) == {"coral"}
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["prefit_status"].unique().tolist() == ["no_anchors_required"]
+    assert availability["sample_mode"].unique().tolist() == ["unlabeled_covariance"]
 
 
 def test_alignment_anchor_values_auto_select_ds000117_columns():
@@ -539,6 +553,59 @@ def test_run_time_resolved_decode_passes_metadata_stimulus_anchors(tmp_path: Pat
     assert anchor_calls
     np.testing.assert_array_equal(anchor_calls[0], stim_files[groups != "sub-01"])
     assert set(results["alignment_anchor_column"]) == {"stim_file"}
+
+
+def test_run_time_resolved_decode_writes_anchor_availability_before_alignment_failure(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    stim_files = np.array(
+        [
+            "stim-a",
+            "stim-b",
+            "stim-a",
+            "stim-b",
+            "stim-c",
+            "stim-d",
+            "stim-c",
+            "stim-d",
+            "stim-e",
+            "stim-f",
+            "stim-e",
+            "stim-f",
+        ],
+        dtype=object,
+    )
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    metadata = pd.DataFrame({"condition": labels, "group": groups, "stim_file": stim_files})
+    epochs = FakeEpochs(data, times, metadata)
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    with pytest.raises(ValueError, match="No common source alignment anchors"):
+        run_time_resolved_decode(
+            epochs_path=tmp_path / "synthetic-epo.fif",
+            dataset_name="synthetic",
+            label_column="condition",
+            group_column="group",
+            outer_test_groups=("sub-01",),
+            out_path=tmp_path / "stimulus_fail.csv",
+            n_splits=3,
+            window_ms=1,
+            step_ms=4,
+            decoder="logistic",
+            emission_mode="uncalibrated",
+            time_decode_backend="sklearn",
+            alignment_method="mcca",
+            alignment_anchor_mode="stimulus_id_mean",
+        )
+
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["dataset"].unique().tolist() == ["synthetic"]
+    assert availability["test_subject"].unique().tolist() == ["sub-01"]
+    assert availability["prefit_status"].unique().tolist() == ["likely_fit_failure"]
+    assert availability["n_common_source_anchors"].unique().tolist() == [0]
+    assert "no_common_source_alignment_anchors" in availability.loc[0, "prefit_failure_reason"]
 
 
 def test_run_time_resolved_decode_passes_target_anchors_for_oracle_stimulus_alignment(tmp_path: Path, monkeypatch):

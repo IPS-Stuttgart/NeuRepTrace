@@ -6,6 +6,7 @@ from neureptrace.decoding.source_alignment import (
     TARGET_CALIBRATED_ALIGNMENT,
     align_train_test_features,
     normalize_source_alignment_method,
+    source_alignment_anchor_availability,
     source_alignment_config,
 )
 
@@ -245,6 +246,42 @@ def test_stimulus_anchor_values_are_distinct_from_decoder_labels(method):
     assert result.metadata["alignment_common_anchor_count"] == 6
     assert result.metadata["alignment_anchor_rows_dropped"] == 0
     assert result.metadata["alignment_target_anchor_values_used"] is False
+
+
+def test_anchor_availability_flags_no_common_stimulus_anchors():
+    row = source_alignment_anchor_availability(
+        train_labels=np.array([0, 1, 0, 1]),
+        train_subject_ids=np.array(["s0", "s0", "s1", "s1"]),
+        train_anchor_values=np.array(["stim-a", "stim-b", "stim-c", "stim-d"], dtype=object),
+        config=source_alignment_config(method="mcca", anchor_mode="stimulus_id_mean"),
+    )
+
+    assert row["prefit_status"] == "likely_fit_failure"
+    assert "no_common_source_alignment_anchors" in row["prefit_failure_reason"]
+    assert row["n_common_source_anchors"] == 0
+    assert row["source_anchor_rows_retained"] == 0
+    assert row["source_anchor_rows_dropped"] == 4
+    assert row["estimated_alignment_rows"] == 0
+
+
+def test_anchor_availability_flags_missing_oracle_target_anchors():
+    row = source_alignment_anchor_availability(
+        train_labels=np.array([0, 1, 0, 1, 0, 1]),
+        train_subject_ids=np.array(["s0", "s0", "s0", "s1", "s1", "s1"]),
+        train_anchor_values=np.array(["stim-a", "stim-b", "stim-c", "stim-a", "stim-b", "stim-c"], dtype=object),
+        target_anchor_values=np.array(["stim-a", "stim-b"], dtype=object),
+        config=source_alignment_config(
+            method="mcca",
+            anchor_mode="stimulus_id_mean",
+            target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+        ),
+    )
+
+    assert row["prefit_status"] == "likely_fit_failure"
+    assert "target_subject_missing_alignment_anchors" in row["prefit_failure_reason"]
+    assert row["n_common_source_anchors"] == 3
+    assert row["target_missing_common_anchor_count"] == 1
+    assert row["target_missing_common_anchor_values_preview"] == "stim-c"
 
 
 @pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])

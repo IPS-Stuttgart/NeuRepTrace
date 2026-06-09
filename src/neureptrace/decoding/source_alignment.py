@@ -104,6 +104,49 @@ ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "alignment_protocol",
     "alignment_protocol_note",
 )
+ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS = (
+    "dataset",
+    "test_subject",
+    "alignment_method",
+    "alignment_anchor_mode",
+    "alignment_anchor_column",
+    "sample_mode",
+    "alignment_target_projection",
+    "alignment_protocol",
+    "n_source_subjects",
+    "n_source_rows",
+    "source_anchor_value_source",
+    "n_source_anchor_values",
+    "n_common_source_anchors",
+    "common_source_anchor_values_preview",
+    "source_anchor_rows_total",
+    "source_anchor_rows_retained",
+    "source_anchor_rows_dropped",
+    "min_source_unique_anchors_per_subject",
+    "median_source_unique_anchors_per_subject",
+    "max_source_unique_anchors_per_subject",
+    "min_source_common_anchor_rows_per_subject",
+    "median_source_common_anchor_rows_per_subject",
+    "max_source_common_anchor_rows_per_subject",
+    "estimated_alignment_rows",
+    "estimated_repetitions_per_anchor",
+    "target_anchor_values_used",
+    "n_target_rows",
+    "n_target_anchor_values",
+    "target_missing_common_anchor_count",
+    "target_missing_common_anchor_values_preview",
+    "target_calibration_anchor_values_used",
+    "n_target_calibration_rows",
+    "n_target_calibration_anchor_values",
+    "target_calibration_missing_common_anchor_count",
+    "target_calibration_missing_common_anchor_values_preview",
+    "prefit_status",
+    "prefit_failure_reason",
+    "alignment_window_center",
+    "alignment_window_size",
+    "decode_window_center",
+    "decode_window_size",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -751,6 +794,134 @@ def align_train_test_features(
     )
 
 
+def source_alignment_anchor_availability(
+    *,
+    train_labels: Sequence[Any] | np.ndarray,
+    train_subject_ids: Sequence[Hashable] | np.ndarray,
+    config: SourceAlignmentConfig,
+    train_anchor_values: Sequence[Any] | np.ndarray | None = None,
+    target_labels: Sequence[Any] | np.ndarray | None = None,
+    target_anchor_values: Sequence[Any] | np.ndarray | None = None,
+    target_calibration_labels: Sequence[Any] | np.ndarray | None = None,
+    target_calibration_anchor_values: Sequence[Any] | np.ndarray | None = None,
+) -> dict[str, Any]:
+    """Summarize fold-local anchor coverage before fitting alignment.
+
+    This is intentionally pre-fit and cheap: failed alignment folds should still
+    leave an artifact row explaining whether the source intersection, target
+    projection anchors, or M-CCA row count made the fit impossible.
+    """
+    row: dict[str, Any] = {column: "" for column in ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS}
+    row.update({key: value for key, value in config.static_metadata().items() if key in row})
+    row.update(
+        {
+            "alignment_method": config.method,
+            "alignment_anchor_mode": config.anchor_mode,
+            "alignment_anchor_column": config.anchor_column,
+            "sample_mode": "unlabeled_covariance"
+            if _uses_unlabeled_covariance_alignment(config.method)
+            else _alignment_sample_mode(config.anchor_mode),
+            "alignment_target_projection": config.target_projection,
+        }
+    )
+    if not config.enabled:
+        row["prefit_status"] = "alignment_disabled"
+        return row
+
+    train_vector = np.asarray(train_labels, dtype=object).reshape(-1)
+    subject_vector = np.asarray(train_subject_ids, dtype=object).reshape(-1)
+    if train_vector.shape[0] != subject_vector.shape[0]:
+        raise ValueError("train_labels and train_subject_ids must have the same row count.")
+
+    subject_ids = tuple(dict.fromkeys(subject_vector.tolist()))
+    row.update(
+        {
+            "n_source_subjects": len(subject_ids),
+            "n_source_rows": int(train_vector.shape[0]),
+        }
+    )
+    if _uses_unlabeled_covariance_alignment(config.method):
+        row["source_anchor_value_source"] = "unlabeled_covariance"
+        row["prefit_status"] = "no_anchors_required"
+        return row
+
+    class_anchor_mode = _uses_decoder_label_anchors(config.anchor_mode)
+    source_anchor_source = "decoder_labels" if class_anchor_mode else "metadata"
+    if class_anchor_mode and train_anchor_values is None:
+        train_anchor_values = train_vector
+    row["source_anchor_value_source"] = source_anchor_source
+    failures: list[str] = []
+    if train_anchor_values is None:
+        failures.append("missing_train_anchor_values")
+        row["prefit_status"] = "likely_fit_failure"
+        row["prefit_failure_reason"] = ";".join(failures)
+        return row
+
+    train_anchor_vector = _anchor_vector(
+        train_anchor_values,
+        expected_length=train_vector.shape[0],
+        name="train_anchor_values",
+    )
+    if len(subject_ids) < 2:
+        failures.append("strict_source_alignment_requires_at_least_two_source_subjects")
+    anchors_by_subject = {subject_id: train_anchor_vector[subject_vector == subject_id] for subject_id in subject_ids}
+    unique_counts = [int(np.unique(anchors).size) for anchors in anchors_by_subject.values()]
+    common_anchors = _common_anchor_values(anchors_by_subject) if subject_ids else np.asarray([], dtype=object)
+    common_set = set(common_anchors.tolist())
+    common_counts = [
+        int(np.sum(np.asarray([anchor in common_set for anchor in anchors], dtype=bool)))
+        for anchors in anchors_by_subject.values()
+    ]
+    retained_rows = int(sum(common_counts))
+    total_rows = int(train_anchor_vector.shape[0])
+    row.update(
+        {
+            "n_source_anchor_values": int(np.unique(train_anchor_vector).size),
+            "n_common_source_anchors": int(common_anchors.size),
+            "common_source_anchor_values_preview": _preview_values(common_anchors),
+            "source_anchor_rows_total": total_rows,
+            "source_anchor_rows_retained": retained_rows,
+            "source_anchor_rows_dropped": int(total_rows - retained_rows),
+            "min_source_unique_anchors_per_subject": min(unique_counts) if unique_counts else "",
+            "median_source_unique_anchors_per_subject": _median_int_or_blank(unique_counts),
+            "max_source_unique_anchors_per_subject": max(unique_counts) if unique_counts else "",
+            "min_source_common_anchor_rows_per_subject": min(common_counts) if common_counts else "",
+            "median_source_common_anchor_rows_per_subject": _median_int_or_blank(common_counts),
+            "max_source_common_anchor_rows_per_subject": max(common_counts) if common_counts else "",
+        }
+    )
+    if common_anchors.size < 1:
+        failures.append("no_common_source_alignment_anchors")
+    estimated_rows, estimated_repetitions = _estimate_alignment_rows(
+        anchors_by_subject,
+        common_anchors=common_anchors,
+        config=config,
+        sample_mode=str(row["sample_mode"]),
+    )
+    row["estimated_alignment_rows"] = estimated_rows
+    row["estimated_repetitions_per_anchor"] = estimated_repetitions
+    if config.method == "mcca" and estimated_rows != "" and int(estimated_rows) < 2:
+        failures.append("mcca_requires_at_least_two_aligned_rows")
+
+    if config.fits_target_projection:
+        projection_labels = target_calibration_labels if config.target_calibrated else target_labels
+        projection_anchors = target_calibration_anchor_values if config.target_calibrated else target_anchor_values
+        if class_anchor_mode and projection_anchors is None:
+            projection_anchors = projection_labels
+        prefix = "target_calibration" if config.target_calibrated else "target"
+        _update_projection_anchor_availability(
+            row,
+            prefix=prefix,
+            projection_anchors=projection_anchors,
+            common_anchors=common_anchors,
+            failures=failures,
+        )
+
+    row["prefit_status"] = "likely_fit_failure" if failures else "ok"
+    row["prefit_failure_reason"] = ";".join(dict.fromkeys(failures))
+    return row
+
+
 def _target_alignment_matrix(
     features: np.ndarray,
     labels: np.ndarray | None,
@@ -1072,6 +1243,74 @@ def _finite_or_blank(value: float) -> float | str:
     return float(value) if np.isfinite(value) else ""
 
 
+def _median_int_or_blank(values: Sequence[int]) -> int | float | str:
+    if not values:
+        return ""
+    median = float(np.median(np.asarray(values, dtype=float)))
+    return int(median) if median.is_integer() else median
+
+
+def _preview_values(values: Sequence[Any] | np.ndarray, *, limit: int = 8) -> str:
+    vector = np.asarray(values, dtype=object).reshape(-1)
+    preview = [str(value) for value in vector[:limit]]
+    if vector.size > limit:
+        preview.append("...")
+    return "|".join(preview)
+
+
+def _estimate_alignment_rows(
+    anchors_by_subject: Mapping[Hashable, np.ndarray],
+    *,
+    common_anchors: np.ndarray,
+    config: SourceAlignmentConfig,
+    sample_mode: str,
+) -> tuple[int | str, int | str]:
+    if common_anchors.size < 1:
+        return 0, ""
+    if sample_mode != "class_repetition":
+        return int(common_anchors.size), ""
+    common_set = set(common_anchors.tolist())
+    filtered = {
+        subject_id: np.asarray([anchor for anchor in anchors if anchor in common_set], dtype=object)
+        for subject_id, anchors in anchors_by_subject.items()
+    }
+    try:
+        repetitions = _effective_repetitions_per_class(filtered, sample_mode, config)
+    except ValueError:
+        return "", ""
+    if repetitions is None:
+        return int(common_anchors.size), ""
+    return int(common_anchors.size * repetitions), int(repetitions)
+
+
+def _update_projection_anchor_availability(
+    row: dict[str, Any],
+    *,
+    prefix: str,
+    projection_anchors: Sequence[Any] | np.ndarray | None,
+    common_anchors: np.ndarray,
+    failures: list[str],
+) -> None:
+    used_key = f"{prefix}_anchor_values_used"
+    rows_key = f"n_{prefix}_rows"
+    values_key = f"n_{prefix}_anchor_values"
+    missing_count_key = f"{prefix}_missing_common_anchor_count"
+    missing_preview_key = f"{prefix}_missing_common_anchor_values_preview"
+    row[used_key] = projection_anchors is not None
+    if projection_anchors is None:
+        failures.append(f"{prefix}_projection_missing_anchor_values")
+        return
+    vector = np.asarray(projection_anchors, dtype=object).reshape(-1)
+    row[rows_key] = int(vector.shape[0])
+    row[values_key] = int(np.unique(vector).size)
+    available = set(np.unique(vector).tolist())
+    missing = np.asarray([anchor for anchor in common_anchors if anchor not in available], dtype=object)
+    row[missing_count_key] = int(missing.size)
+    row[missing_preview_key] = _preview_values(missing)
+    if missing.size:
+        failures.append(f"{prefix}_subject_missing_alignment_anchors")
+
+
 def _mean_pairwise_anchor_row_correlation(matrices: Mapping[Hashable, np.ndarray]) -> float:
     subject_ids = tuple(matrices)
     if len(subject_ids) < 2:
@@ -1245,6 +1484,7 @@ def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: s
 
 
 __all__ = [
+    "ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS",
     "ALIGNMENT_DIAGNOSTIC_COLUMNS",
     "DEFAULT_ALIGNMENT_COMPONENTS",
     "DEFAULT_ALIGNMENT_REPETITION_CAP",
@@ -1262,5 +1502,6 @@ __all__ = [
     "align_train_test_features",
     "normalize_source_alignment_anchor_mode",
     "normalize_source_alignment_method",
+    "source_alignment_anchor_availability",
     "source_alignment_config",
 ]
