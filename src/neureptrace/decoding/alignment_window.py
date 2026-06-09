@@ -116,7 +116,12 @@ def transform_with_alignment_projection(
     projection = _feature_matrix(projection, name="projection")
     projection_mean = np.asarray(projection_feature_mean, dtype=float).ravel()
     mean = projection_mean if feature_mean is None else np.asarray(feature_mean, dtype=float).ravel()
-    mean_set = projection_feature_set if feature_mean is None else (feature_mean_set or decode_feature_set)
+    mean_set = _resolve_feature_mean_set(
+        mean,
+        decode_feature_set=decode_feature_set,
+        projection_feature_set=projection_feature_set,
+        explicit_feature_mean_set=feature_mean_set if feature_mean is not None else projection_feature_set,
+    )
 
     if matrix.shape[1] == projection.shape[0]:
         if mean.shape[0] != matrix.shape[1]:
@@ -126,6 +131,46 @@ def transform_with_alignment_projection(
     channel_projection = _projection_to_channel_space(projection, projection_feature_set)
     channel_mean = _feature_mean_to_channel_space(mean, mean_set)
     return _apply_channel_projection(matrix, decode_feature_set, channel_projection, channel_mean)
+
+
+def _resolve_feature_mean_set(
+    mean: np.ndarray,
+    *,
+    decode_feature_set: WindowedFeatureSet,
+    projection_feature_set: WindowedFeatureSet,
+    explicit_feature_mean_set: WindowedFeatureSet | None,
+) -> WindowedFeatureSet:
+    """Infer which feature window a supplied centering vector belongs to.
+
+    Cross-window alignment can apply a projection fitted on an alignment window to
+    features from a different decoding window.  Callers may pass an unsupervised
+    target mean via ``feature_mean``; historically, if ``feature_mean_set`` was
+    omitted we assumed that mean belonged to the decoding window.  That is unsafe:
+    target-calibrated alignment commonly estimates the mean from the alignment
+    rows/window, and interpreting an alignment-window mean as a decode-window mean
+    can either raise a false shape error or collapse channels with the wrong time
+    geometry.  Prefer the explicit set; otherwise infer from vector length.
+    """
+
+    if explicit_feature_mean_set is not None:
+        return explicit_feature_mean_set
+
+    mean_width = int(np.asarray(mean).shape[0])
+    projection_widths = _compatible_feature_mean_widths(projection_feature_set)
+    decode_widths = _compatible_feature_mean_widths(decode_feature_set)
+    if mean_width in projection_widths:
+        return projection_feature_set
+    if mean_width in decode_widths:
+        return decode_feature_set
+    # Return the projection set so the eventual shape error reports the alignment
+    # geometry that the projection was fitted with.
+    return projection_feature_set
+
+
+def _compatible_feature_mean_widths(feature_set: WindowedFeatureSet) -> set[int]:
+    n_channels = int(feature_set.n_channels)
+    n_window_samples = int(feature_set.n_window_samples)
+    return {n_channels, n_channels * n_window_samples}
 
 
 def _feature_matrix(value: np.ndarray, *, name: str) -> np.ndarray:

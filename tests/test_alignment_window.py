@@ -151,6 +151,34 @@ def test_transform_with_alignment_projection_supports_explicit_time_channel_orde
     np.testing.assert_allclose(transformed, np.array([[3.0, 9.0, 6.0, 12.0]]))
 
 
+def test_transform_with_alignment_projection_infers_alignment_window_for_supplied_mean() -> None:
+    decode = DummyFeatureSet(np.zeros((1, 4)), np.array([1]), n_channels=2, n_window_samples=2)
+    alignment = DummyFeatureSet(np.zeros((1, 6)), np.array([1]), n_channels=2, n_window_samples=3)
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [5.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+            [0.0, 6.0],
+        ]
+    )
+    alignment_mean = np.array([1.0, 3.0, 5.0, 2.0, 4.0, 6.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=np.zeros(6),
+        projection_feature_set=alignment,
+        feature_mean=alignment_mean,
+    )
+
+    np.testing.assert_allclose(transformed, np.array([[3.0, 12.0, 6.0, 16.0]]))
+
+
 def test_transform_with_alignment_projection_rejects_invalid_feature_order() -> None:
     decode = DummyFeatureSet(
         np.zeros((1, 4)),
