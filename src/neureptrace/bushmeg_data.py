@@ -214,9 +214,9 @@ def prepare_bushmeg_smoke_data(
                 output_path=file.local_path,
                 timeout=timeout,
             )
-        except Exception:
+        except Exception as exc:
             if not allow_missing:
-                raise
+                raise RuntimeError(f"Failed to download BUSH-MEG file {file.relative_path!r} from the configured WebDAV endpoint.") from exc
     return expected_bushmeg_files(
         data_root,
         participants=participants,
