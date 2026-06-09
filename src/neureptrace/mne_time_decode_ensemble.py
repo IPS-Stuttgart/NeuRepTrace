@@ -26,8 +26,10 @@ from neureptrace.mne_time_decode import (
     SOURCE_TIME_SELECTION_RUN_CHOICES,
     _best_time_by_metric,
     _normalize_outer_test_groups,
+    _write_alignment_diagnostics,
     TEMPORAL_TRAIN_MODE_RUN_CHOICES,
 )
+from neureptrace.decoding.source_alignment import normalize_source_alignment_method
 from neureptrace.mne_time_decode_foldlocal import run_time_resolved_decode as _run_time_resolved_decode
 from neureptrace.observation_ensemble import (
     DEFAULT_BASELINE_GROUP_COLUMNS as DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS,
@@ -115,6 +117,7 @@ def run_time_resolved_decode(
     label_column: str,
     out_path: Path,
     *,
+    dataset_name: str | None = None,
     metadata_csv: Path | None = None,
     group_column: str | None = None,
     outer_test_groups: Sequence[object] | str | None = None,
@@ -178,6 +181,7 @@ def run_time_resolved_decode(
     if not _is_ensemble_decoder(decoder):
         return _run_time_resolved_decode(
             epochs_path=epochs_path,
+            dataset_name=dataset_name,
             metadata_csv=metadata_csv,
             label_column=label_column,
             group_column=group_column,
@@ -233,17 +237,20 @@ def run_time_resolved_decode(
     ensemble_score_mode_name = normalize_ensemble_score_mode(ensemble_score_mode)
     normalized_weights = tuple(float(weight) / sum(weights) for weight in weights)
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
+    alignment_enabled = normalize_source_alignment_method(alignment_method) != "none"
 
     with tempfile.TemporaryDirectory(prefix="neureptrace_logistic_svm_ensemble_") as tmp_dir_name:
         tmp_dir = Path(tmp_dir_name)
         source_observation_paths: list[Path] = []
         source_metric_frames: list[pd.DataFrame] = []
+        alignment_diagnostic_frames: list[pd.DataFrame] = []
         for source_decoder in source_decoder_requests:
             source_out = tmp_dir / f"{normalize_decoder_name(source_decoder)}_time_decode.csv"
             source_observations = tmp_dir / f"{normalize_decoder_name(source_decoder)}_observations.csv"
             source_metric_frames.append(
                 _run_time_resolved_decode(
                     epochs_path=epochs_path,
+                    dataset_name=dataset_name,
                     metadata_csv=metadata_csv,
                     label_column=label_column,
                     group_column=group_column,
@@ -290,6 +297,9 @@ def run_time_resolved_decode(
                     label_shuffle_seed=label_shuffle_seed,
                 )
             )
+            alignment_diagnostics = tmp_dir / "alignment_diagnostics.csv"
+            if alignment_enabled and alignment_diagnostics.exists():
+                alignment_diagnostic_frames.append(pd.read_csv(alignment_diagnostics))
             source_observation_paths.append(source_observations)
 
         observations = read_validated_probability_observations(
@@ -379,6 +389,9 @@ def run_time_resolved_decode(
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(out_path, index=False)
+    if alignment_enabled:
+        diagnostic_rows = [] if not alignment_diagnostic_frames else pd.concat(alignment_diagnostic_frames).to_dict("records")
+        _write_alignment_diagnostics(out_path.parent / "alignment_diagnostics.csv", diagnostic_rows)
 
     if calibration_out_path is not None:
         calibration_out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -402,6 +415,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--epochs", type=Path, required=True)
     parser.add_argument("--label-column", required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--dataset-name")
     parser.add_argument("--metadata-csv", type=Path)
     parser.add_argument("--group-column")
     parser.add_argument(
@@ -579,6 +593,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     results = run_time_resolved_decode(
         epochs_path=args.epochs,
+        dataset_name=args.dataset_name,
         metadata_csv=args.metadata_csv,
         label_column=args.label_column,
         group_column=args.group_column,

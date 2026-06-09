@@ -141,12 +141,37 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
             ]
         )
         frame.to_csv(kwargs["out_path"], index=False)
+        if kwargs["alignment_method"] != "none":
+            pd.DataFrame(
+                [
+                    {
+                        "dataset": kwargs.get("dataset_name", ""),
+                        "test_subject": decoder,
+                        "alignment_method": kwargs["alignment_method"],
+                        "sample_mode": kwargs["alignment_anchor_mode"],
+                        "n_source_subjects": 2,
+                        "n_classes": 2,
+                        "n_alignment_rows": 4,
+                        "requested_components": kwargs["alignment_components"],
+                        "actual_components": 4,
+                        "feature_dim": 8,
+                        "decode_feature_dim": 4,
+                        "uses_channel_projection_collapse": True,
+                        "anchor_row_correlation_before": 0.1,
+                        "anchor_row_correlation_after": 0.8,
+                        "source_inner_decoding_before_alignment": 0.5,
+                        "source_inner_decoding_after_alignment": 0.7,
+                        "target_transform_type": "source_group_projection",
+                    }
+                ]
+            ).to_csv(kwargs["out_path"].parent / "alignment_diagnostics.csv", index=False)
         return frame
 
     monkeypatch.setattr("neureptrace.mne_time_decode_ensemble._run_time_resolved_decode", fake_source_decode)
 
     results = run_time_resolved_decode(
         epochs_path=tmp_path / "dummy-epo.fif",
+        dataset_name="ensemble-demo",
         label_column="condition",
         out_path=tmp_path / "ensemble.csv",
         observation_out_path=tmp_path / "observations.csv",
@@ -207,5 +232,10 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert results["ensemble_score_mode"].unique().tolist() == ["rank"]
     assert results["ensemble_source_baseline_debiasing"].unique().tolist() == [True]
     assert results["temporal_mode"].unique().tolist() == ["train_window_pooled"]
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["dataset"].unique().tolist() == ["ensemble-demo"]
+    assert set(diagnostics["test_subject"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}
+    assert diagnostics["actual_components"].unique().tolist() == [4]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
     source_observations = pd.read_csv(tmp_path / "ensemble_source_observations.csv")
     assert set(source_observations["decoder"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}

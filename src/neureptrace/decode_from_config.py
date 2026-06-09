@@ -185,6 +185,7 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
     kwargs = {
         "label_column": decoding["label_column"],
         "group_column": decoding.get("group_column"),
+        "dataset_name": (_section(config, "dataset") or {}).get("name", config.get("dataset", "")),
         "out_path": _resolve_output(
             config,
             config_dir=config_dir,

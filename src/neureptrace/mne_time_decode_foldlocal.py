@@ -618,6 +618,7 @@ def run_time_resolved_decode(
     label_column: str,
     out_path: Path,
     *,
+    dataset_name: str | None = None,
     metadata_csv: Path | None = None,
     input_format: str = "mne-epochs",
     fieldtrip_root_path: str | None = None,
@@ -693,6 +694,7 @@ def run_time_resolved_decode(
         raise ValueError("Fold-local normalization currently supports only the sklearn time-decode backend.")
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
+    dataset_name_value = "" if dataset_name is None else str(dataset_name)
     baseline_window_value = _base._normalize_baseline_window(baseline_window)
     if feature_preprocessor_name == "none" and pca_components is not None:
         raise ValueError(
@@ -835,6 +837,7 @@ def run_time_resolved_decode(
     rows: list[dict] = []
     calibration_rows: list[dict] = []
     observation_rows: list[dict] = []
+    alignment_diagnostic_rows: list[dict[str, object]] = []
     all_windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
     windows = _base._select_decode_windows(all_windows, normalized_decode_window)
     selected_train_windows = _base._select_temporal_train_windows(all_windows, normalized_temporal_train_window)
@@ -1072,6 +1075,17 @@ def run_time_resolved_decode(
                     train_feature_matrix = alignment_result.train_features
                     test_feature_matrix = alignment_result.test_features
                     alignment_metadata = alignment_result.metadata
+                    alignment_diagnostic_rows.append(
+                        _base._alignment_diagnostic_row(
+                            alignment_result,
+                            dataset_name=dataset_name_value,
+                            test_subject=_base._test_subject_label(groups, test_idx, fallback=fold),
+                            alignment_window_center=center,
+                            alignment_window_size=float(window_ms) / 1000.0,
+                            decode_window_center=center,
+                            decode_window_size=float(window_ms) / 1000.0,
+                        )
+                    )
                 for current_emission_mode in emission_modes:
                     tuning_cv = (
                         make_tuning_cross_validator(train_labels, None if groups is None else groups[train_idx], tuning_cv_splits)
@@ -1476,6 +1490,8 @@ def run_time_resolved_decode(
     results = pd.DataFrame(rows)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(out_path, index=False)
+    if alignment_config.enabled:
+        _base._write_alignment_diagnostics(out_path.parent / "alignment_diagnostics.csv", alignment_diagnostic_rows)
     if calibration_out_path is not None:
         calibration_out_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(calibration_rows).to_csv(calibration_out_path, index=False)

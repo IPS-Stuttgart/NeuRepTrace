@@ -1956,6 +1956,8 @@ def _predict_candidate(
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
     subject_weight_multipliers: Mapping[str, float] | None = None,
+    alignment_diagnostic_rows: list[dict[str, object]] | None = None,
+    diagnostic_dataset: str = "BUSH-MEG",
 ) -> np.ndarray:
     if alignment_config is None:
         alignment_config = source_alignment_config()
@@ -2028,6 +2030,18 @@ def _predict_candidate(
             train_features = alignment_result.train_features
             test_features = alignment_result.test_features
             alignment_metadata = alignment_result.metadata
+            if alignment_diagnostic_rows is not None:
+                alignment_diagnostic_rows.append(
+                    _base._alignment_diagnostic_row(
+                        alignment_result,
+                        dataset_name=diagnostic_dataset,
+                        test_subject=test_subject,
+                        alignment_window_center=window.center,
+                        alignment_window_size=window.width,
+                        decode_window_center=window.center,
+                        decode_window_size=window.width,
+                    )
+                )
         fit_features, fit_labels, fit_subjects = _source_class_pseudotrials(
             train_features,
             train_labels,
@@ -2156,6 +2170,7 @@ def _inner_loso_scores(
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
     cue_source_weights: CueSourceWeights | None = None,
+    alignment_diagnostic_rows: list[dict[str, object]] | None = None,
 ) -> list[dict[str, Any]]:
     if alignment_config is None:
         alignment_config = source_alignment_config()
@@ -2175,6 +2190,7 @@ def _inner_loso_scores(
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
             subject_weight_multipliers=None if cue_source_weights is None else cue_source_weights.for_fold(inner_test_subject, train_subjects),
+            alignment_diagnostic_rows=alignment_diagnostic_rows,
         )
         labels = subjects[inner_test_subject].labels
         rows.append(
@@ -2208,6 +2224,7 @@ def _select_candidate(
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
     cue_source_weights: CueSourceWeights | None = None,
+    alignment_diagnostic_rows: list[dict[str, object]] | None = None,
 ) -> tuple[CandidateSpec, list[dict[str, Any]], dict[str, Any]]:
     if alignment_config is None:
         alignment_config = source_alignment_config()
@@ -2229,6 +2246,7 @@ def _select_candidate(
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
             cue_source_weights=cue_source_weights,
+            alignment_diagnostic_rows=alignment_diagnostic_rows,
         )
         all_rows.extend(rows)
         frame = pd.DataFrame(rows)
@@ -2500,6 +2518,7 @@ def run_bushmeg_source_loso(
         key="source_loso_predictions_csv",
         default="source_loso_predictions.csv",
     )
+    alignment_diagnostics_out = out.with_name("alignment_diagnostics.csv")
     cue_weights_out = _resolve_output(
         config,
         config_dir=config_path.parent,
@@ -2510,6 +2529,7 @@ def run_bushmeg_source_loso(
     summary_rows: list[dict[str, Any]] = []
     inner_rows: list[dict[str, Any]] = []
     prediction_rows: list[dict[str, Any]] = []
+    alignment_diagnostic_rows: list[dict[str, object]] = []
     for outer_test_subject in sorted(subjects):
         selected, candidate_inner_rows, selected_summary = _select_candidate(
             subjects=subjects,
@@ -2523,6 +2543,7 @@ def run_bushmeg_source_loso(
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
             cue_source_weights=cue_source_weights,
+            alignment_diagnostic_rows=alignment_diagnostic_rows,
         )
         inner_rows.extend(candidate_inner_rows)
         train_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
@@ -2539,6 +2560,7 @@ def run_bushmeg_source_loso(
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
             subject_weight_multipliers=fold_subject_weights,
+            alignment_diagnostic_rows=alignment_diagnostic_rows,
         )
         labels = subjects[outer_test_subject].labels
         predictions = probabilities.argmax(axis=1)
@@ -2596,6 +2618,8 @@ def run_bushmeg_source_loso(
     summary.to_csv(out, index=False)
     inner.to_csv(inner_out, index=False)
     predictions.to_csv(predictions_out, index=False)
+    if alignment_config.enabled:
+        _base._write_alignment_diagnostics(alignment_diagnostics_out, alignment_diagnostic_rows)
     if cue_source_weights is not None:
         write_cue_source_weight_csv(cue_source_weights, sorted(subjects), cue_weights_out)
     _write_json_sidecar(
@@ -2626,6 +2650,7 @@ def run_bushmeg_source_loso(
             "cue_files_used_for_classifier_training": False,
             "target_labels_used_for_selection": False,
             "source_alignment": alignment_config.static_metadata(),
+            "alignment_diagnostics_csv": str(alignment_diagnostics_out) if alignment_config.enabled else "",
             "alignment_target_labels_used": False,
             "label_shuffle_control": bool(label_shuffle_control),
             "label_shuffle_seed": int(label_shuffle_seed),

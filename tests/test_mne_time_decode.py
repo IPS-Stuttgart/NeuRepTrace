@@ -126,6 +126,24 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
                 "alignment_target_projection": "group_projection",
                 "alignment_n_components": 2,
             },
+            diagnostics={
+                "alignment_method": "procrustes",
+                "sample_mode": "class_mean",
+                "n_source_subjects": 2,
+                "n_classes": 2,
+                "n_alignment_rows": 2,
+                "n_repetitions_per_class": "",
+                "requested_components": 2,
+                "actual_components": 2,
+                "feature_dim": 2,
+                "decode_feature_dim": 2,
+                "uses_channel_projection_collapse": False,
+                "anchor_row_correlation_before": 0.1,
+                "anchor_row_correlation_after": 0.9,
+                "source_inner_decoding_before_alignment": 0.5,
+                "source_inner_decoding_after_alignment": 0.75,
+                "target_transform_type": "source_group_projection",
+            },
         )
 
     monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
@@ -134,6 +152,7 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
 
     results = run_time_resolved_decode(
         epochs_path=tmp_path / "synthetic-epo.fif",
+        dataset_name="synthetic",
         label_column="condition",
         group_column="group",
         outer_test_groups=("sub-01",),
@@ -155,6 +174,13 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
     assert not np.array_equal(alignment_train_labels[0], unshuffled_train)
     assert set(results["alignment_method"]) == {"procrustes"}
     assert set(results["alignment_target_projection"]) == {"group_projection"}
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["dataset"].unique().tolist() == ["synthetic"]
+    assert diagnostics["test_subject"].unique().tolist() == ["sub-01"]
+    assert diagnostics["actual_components"].unique().tolist() == [2]
+    assert diagnostics["feature_dim"].unique().tolist() == [2]
+    assert diagnostics["decode_feature_dim"].unique().tolist() == [2]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
 
 
 def test_run_time_resolved_decode_passes_target_labels_for_oracle_alignment(tmp_path: Path, monkeypatch):

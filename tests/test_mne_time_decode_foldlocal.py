@@ -128,6 +128,7 @@ def test_foldlocal_accepts_strict_source_alignment(tmp_path: Path, monkeypatch):
     observations_out = tmp_path / "foldlocal_alignment_observations.csv"
     results = run_time_resolved_decode(
         epochs_path=tmp_path / "epochs.fif",
+        dataset_name="foldlocal-demo",
         label_column="condition",
         group_column="subject",
         out_path=tmp_path / "foldlocal_alignment.csv",
@@ -150,6 +151,12 @@ def test_foldlocal_accepts_strict_source_alignment(tmp_path: Path, monkeypatch):
     assert results["alignment_target_projection"].unique().tolist() == ["group_projection"]
     assert observations["alignment_method"].unique().tolist() == ["procrustes"]
     assert observations["alignment_n_source_subjects"].min() == 2
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["dataset"].unique().tolist() == ["foldlocal-demo"]
+    assert diagnostics["alignment_method"].unique().tolist() == ["procrustes"]
+    assert diagnostics["sample_mode"].unique().tolist() == ["class_mean"]
+    assert diagnostics["actual_components"].min() >= 1
+    assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
 
 
 def test_foldlocal_source_time_selection_is_inner_source_only(tmp_path: Path, monkeypatch):

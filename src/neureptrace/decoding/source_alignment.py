@@ -8,7 +8,7 @@ source-fitted group projection; target labels or cue labels are never accepted.
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -33,6 +33,30 @@ DEFAULT_ALIGNMENT_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
 DEFAULT_ALIGNMENT_REPETITION_CAP = 16
 DEFAULT_ALIGNMENT_COMPONENTS = 64
 ORACLE_TARGET_CALIBRATED_ALIGNMENT = "oracle_target_calibrated_alignment"
+ALIGNMENT_DIAGNOSTIC_COLUMNS = (
+    "dataset",
+    "test_subject",
+    "alignment_method",
+    "sample_mode",
+    "n_source_subjects",
+    "n_classes",
+    "n_alignment_rows",
+    "n_repetitions_per_class",
+    "requested_components",
+    "actual_components",
+    "feature_dim",
+    "decode_feature_dim",
+    "alignment_window_center",
+    "alignment_window_size",
+    "decode_window_center",
+    "decode_window_size",
+    "uses_channel_projection_collapse",
+    "anchor_row_correlation_before",
+    "anchor_row_correlation_after",
+    "source_inner_decoding_before_alignment",
+    "source_inner_decoding_after_alignment",
+    "target_transform_type",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +108,7 @@ class SourceAlignmentResult:
     train_features: np.ndarray
     test_features: np.ndarray
     metadata: dict[str, Any]
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 def normalize_source_alignment_method(method: str | None) -> str:
@@ -314,6 +339,7 @@ def align_train_test_features(
                 "alignment_target_labels_used": False,
                 "alignment_target_anchor_values_used": False,
             },
+            diagnostics={},
         )
 
     subject_ids = tuple(dict.fromkeys(subject_vector.tolist()))
@@ -359,6 +385,8 @@ def align_train_test_features(
             target_alignment_rows = ""
             target_projection_fit = "source_group_projection"
         n_components = model.n_components
+        anchor_before = alignment.aligned_by_subject
+        anchor_after = {subject_id: model.transform(subject_id, anchor_before[subject_id]) for subject_id in subject_ids}
     elif config.method == "mcca":
         model, alignment = fit_class_mcca(
             fit_features_by_subject,
@@ -391,12 +419,37 @@ def align_train_test_features(
             target_alignment_rows = ""
             target_projection_fit = "source_group_projection"
         n_components = model.n_components
+        anchor_before = alignment.aligned_by_subject
+        anchor_after = {subject_id: model.transform(subject_id, anchor_before[subject_id]) for subject_id in subject_ids}
     else:  # pragma: no cover - guarded by normalization
         raise ValueError(f"Unsupported source alignment method: {config.method}")
 
     transformed_train = np.empty((train_matrix.shape[0], transformed_test.shape[1]), dtype=float)
     for subject_id in subject_ids:
         transformed_train[subject_vector == subject_id] = transformed_by_subject[subject_id]
+    n_alignment_rows = int(next(iter(anchor_before.values())).shape[0])
+    diagnostics = {
+        "alignment_method": config.method,
+        "sample_mode": sample_mode,
+        "n_source_subjects": len(subject_ids),
+        "n_classes": len(alignment.classes),
+        "n_alignment_rows": n_alignment_rows,
+        "n_repetitions_per_class": "" if alignment.n_repetitions_per_class is None else int(alignment.n_repetitions_per_class),
+        "requested_components": _component_label(config.components),
+        "actual_components": int(n_components),
+        "feature_dim": int(train_matrix.shape[1]),
+        "decode_feature_dim": int(transformed_test.shape[1]),
+        "uses_channel_projection_collapse": bool(transformed_test.shape[1] < train_matrix.shape[1]),
+        "anchor_row_correlation_before": _finite_or_blank(_mean_pairwise_anchor_row_correlation(anchor_before)),
+        "anchor_row_correlation_after": _finite_or_blank(_mean_pairwise_anchor_row_correlation(anchor_after)),
+        "source_inner_decoding_before_alignment": _finite_or_blank(
+            _source_inner_nearest_centroid_score(train_matrix, train_vector, subject_vector)
+        ),
+        "source_inner_decoding_after_alignment": _finite_or_blank(
+            _source_inner_nearest_centroid_score(transformed_train, train_vector, subject_vector)
+        ),
+        "target_transform_type": target_projection_fit,
+    }
 
     return SourceAlignmentResult(
         train_features=transformed_train,
@@ -416,6 +469,7 @@ def align_train_test_features(
             "alignment_target_labels_used": bool(config.oracle_target_calibrated and target_labels is not None),
             "alignment_target_anchor_values_used": bool(config.oracle_target_calibrated and target_anchor_vector is not None),
         },
+        diagnostics=diagnostics,
     )
 
 
@@ -590,6 +644,81 @@ def _anchor_vector(values: Sequence[Any] | np.ndarray | None, *, expected_length
     return vector
 
 
+def _component_label(value: int | float) -> int | str:
+    return "inf" if value == float("inf") else int(value)
+
+
+def _finite_or_blank(value: float) -> float | str:
+    return float(value) if np.isfinite(value) else ""
+
+
+def _mean_pairwise_anchor_row_correlation(matrices: Mapping[Hashable, np.ndarray]) -> float:
+    subject_ids = tuple(matrices)
+    if len(subject_ids) < 2:
+        return float("nan")
+    values: list[float] = []
+    for left_index, left_subject in enumerate(subject_ids):
+        left = np.asarray(matrices[left_subject], dtype=float)
+        if left.ndim != 2 or left.shape[1] < 2:
+            continue
+        left_centered = left - np.mean(left, axis=1, keepdims=True)
+        left_norm = np.linalg.norm(left_centered, axis=1)
+        for right_subject in subject_ids[left_index + 1 :]:
+            right = np.asarray(matrices[right_subject], dtype=float)
+            if right.shape != left.shape:
+                continue
+            right_centered = right - np.mean(right, axis=1, keepdims=True)
+            right_norm = np.linalg.norm(right_centered, axis=1)
+            denom = left_norm * right_norm
+            valid = denom > 1e-12
+            if not np.any(valid):
+                continue
+            correlations = np.sum(left_centered[valid] * right_centered[valid], axis=1) / denom[valid]
+            values.extend(float(value) for value in correlations if np.isfinite(value))
+    return float(np.mean(values)) if values else float("nan")
+
+
+def _source_inner_nearest_centroid_score(
+    features: np.ndarray,
+    labels: np.ndarray,
+    subjects: np.ndarray,
+) -> float:
+    subject_ids = tuple(dict.fromkeys(np.asarray(subjects, dtype=object).reshape(-1).tolist()))
+    if len(subject_ids) < 2:
+        return float("nan")
+    labels = np.asarray(labels).reshape(-1)
+    predictions: list[Any] = []
+    truth: list[Any] = []
+    classes = np.unique(labels)
+    for test_subject in subject_ids:
+        train_mask = subjects != test_subject
+        test_mask = subjects == test_subject
+        if not np.any(train_mask) or not np.any(test_mask):
+            continue
+        available_classes = [class_label for class_label in classes if np.any(train_mask & (labels == class_label))]
+        if len(available_classes) < 2:
+            continue
+        centroids = np.vstack([np.mean(features[train_mask & (labels == class_label)], axis=0) for class_label in available_classes])
+        test_features = features[test_mask]
+        distances = np.sum((test_features[:, None, :] - centroids[None, :, :]) ** 2, axis=2)
+        predicted = np.asarray(available_classes, dtype=object)[distances.argmin(axis=1)]
+        predictions.extend(predicted.tolist())
+        truth.extend(labels[test_mask].tolist())
+    if not truth:
+        return float("nan")
+    return _balanced_accuracy(np.asarray(truth, dtype=object), np.asarray(predictions, dtype=object))
+
+
+def _balanced_accuracy(labels: np.ndarray, predictions: np.ndarray) -> float:
+    recalls: list[float] = []
+    for class_label in np.unique(labels):
+        mask = labels == class_label
+        if not np.any(mask):
+            continue
+        recalls.append(float(np.mean(predictions[mask] == class_label)))
+    return float(np.mean(recalls)) if recalls else float("nan")
+
+
 def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
     matrix = np.asarray(features, dtype=float)
     if matrix.ndim != 2:
@@ -602,6 +731,7 @@ def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: s
 
 
 __all__ = [
+    "ALIGNMENT_DIAGNOSTIC_COLUMNS",
     "DEFAULT_ALIGNMENT_COMPONENTS",
     "DEFAULT_ALIGNMENT_REPETITION_CAP",
     "DEFAULT_ALIGNMENT_TIMES",

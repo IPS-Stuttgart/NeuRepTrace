@@ -436,6 +436,7 @@ def test_select_candidate_carries_strict_alignment_metadata():
         temporal_bins=1,
         windows=(WindowSpec(center=0.15, width=0.20),),
     )
+    alignment_diagnostic_rows: list[dict[str, object]] = []
     selected, rows, _summary = _select_candidate(
         subjects=subjects,
         cache=FeatureCache(subjects),
@@ -445,11 +446,20 @@ def test_select_candidate_carries_strict_alignment_metadata():
         max_iter=200,
         selection_metric="balanced_accuracy",
         alignment_config=source_alignment_config(method="procrustes", components=1),
+        alignment_diagnostic_rows=alignment_diagnostic_rows,
     )
 
     assert selected.name == "aligned_mean_bin"
     assert {row["alignment_method"] for row in rows} == {"procrustes"}
     assert {row["alignment_target_projection"] for row in rows} == {"group_projection"}
+    diagnostics = pd.DataFrame(alignment_diagnostic_rows)
+    assert diagnostics["dataset"].unique().tolist() == ["BUSH-MEG"]
+    assert set(diagnostics["test_subject"]) == {"0", "1", "2"}
+    assert diagnostics["alignment_method"].unique().tolist() == ["procrustes"]
+    assert diagnostics["actual_components"].unique().tolist() == [1]
+    assert diagnostics["feature_dim"].unique().tolist() == [2]
+    assert diagnostics["decode_feature_dim"].unique().tolist() == [1]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
 
 
 def test_subject_class_balanced_sample_weights_equalize_observed_cells():

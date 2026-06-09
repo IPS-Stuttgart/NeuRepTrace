@@ -126,6 +126,21 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert result.metadata["alignment_method"] == method
     assert result.metadata["alignment_target_projection"] == "group_projection"
     assert result.metadata["alignment_n_components"] == 2
+    assert result.diagnostics["alignment_method"] == method
+    assert result.diagnostics["sample_mode"] == "class_mean"
+    assert result.diagnostics["n_source_subjects"] == 3
+    assert result.diagnostics["n_classes"] == 3
+    assert result.diagnostics["n_alignment_rows"] == 3
+    assert result.diagnostics["requested_components"] == 2
+    assert result.diagnostics["actual_components"] == 2
+    assert result.diagnostics["feature_dim"] == train_features.shape[1]
+    assert result.diagnostics["decode_feature_dim"] == 2
+    assert result.diagnostics["uses_channel_projection_collapse"] is True
+    assert np.isfinite(result.diagnostics["anchor_row_correlation_before"])
+    assert np.isfinite(result.diagnostics["anchor_row_correlation_after"])
+    assert np.isfinite(result.diagnostics["source_inner_decoding_before_alignment"])
+    assert np.isfinite(result.diagnostics["source_inner_decoding_after_alignment"])
+    assert result.diagnostics["target_transform_type"] == "source_group_projection"
     assert aligned_distance < raw_distance
 
 

@@ -33,9 +33,11 @@ from neureptrace.decoding import (
     time_windows,
 )
 from neureptrace.decoding.source_alignment import (
+    ALIGNMENT_DIAGNOSTIC_COLUMNS,
     SOURCE_ALIGNMENT_ANCHOR_MODES,
     SOURCE_ALIGNMENT_METHODS,
     SOURCE_ALIGNMENT_TARGET_PROJECTIONS,
+    SourceAlignmentResult,
     align_train_test_features,
     source_alignment_config,
 )
@@ -449,6 +451,43 @@ def _run_event_index_within_stimulus_anchors(
         anchors.append(f"run={key[0]}|stimulus={key[1]}|label={key[2]}|index={counts[key]}")
     column = f"{run_column or 'run'}+{stimulus_column}+event_index"
     return np.asarray(anchors, dtype=object), column
+
+
+def _test_subject_label(groups: np.ndarray | None, test_idx: np.ndarray, *, fallback: object = "") -> str:
+    if groups is None:
+        return str(fallback)
+    values = pd.Series(groups[test_idx]).dropna().astype(str).drop_duplicates().tolist()
+    return "|".join(values)
+
+
+def _alignment_diagnostic_row(
+    result: SourceAlignmentResult,
+    *,
+    dataset_name: str,
+    test_subject: str,
+    alignment_window_center: float,
+    alignment_window_size: float,
+    decode_window_center: float,
+    decode_window_size: float,
+) -> dict[str, object]:
+    row = {column: "" for column in ALIGNMENT_DIAGNOSTIC_COLUMNS}
+    row.update(result.diagnostics)
+    row.update(
+        {
+            "dataset": dataset_name,
+            "test_subject": test_subject,
+            "alignment_window_center": float(alignment_window_center),
+            "alignment_window_size": float(alignment_window_size),
+            "decode_window_center": float(decode_window_center),
+            "decode_window_size": float(decode_window_size),
+        }
+    )
+    return row
+
+
+def _write_alignment_diagnostics(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(list(rows), columns=ALIGNMENT_DIAGNOSTIC_COLUMNS).to_csv(path, index=False)
 
 
 def _best_params_json(models) -> str:
@@ -1762,6 +1801,7 @@ def run_time_resolved_decode(
     label_column: str,
     out_path: Path,
     *,
+    dataset_name: str | None = None,
     metadata_csv: Path | None = None,
     input_format: str = "mne-epochs",
     fieldtrip_root_path: str | None = None,
@@ -1873,6 +1913,7 @@ def run_time_resolved_decode(
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
+    dataset_name_value = "" if dataset_name is None else str(dataset_name)
     outer_test_groups_value = _normalize_outer_test_groups(outer_test_groups)
     if requested_time_decode_backend == "mne" and normalized_temporal_train_window is not None:
         raise ValueError("The MNE time-decode backend currently supports same-time decoding only.")
@@ -1996,6 +2037,7 @@ def run_time_resolved_decode(
     rows: list[dict] = []
     calibration_rows: list[dict] = []
     observation_rows: list[dict] = []
+    alignment_diagnostic_rows: list[dict[str, object]] = []
     all_windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
     windows = _select_decode_windows(all_windows, normalized_decode_window)
     selected_train_windows = _select_temporal_train_windows(all_windows, normalized_temporal_train_window)
@@ -2331,6 +2373,17 @@ def run_time_resolved_decode(
                     train_feature_matrix = alignment_result.train_features
                     test_feature_matrix = alignment_result.test_features
                     alignment_metadata = alignment_result.metadata
+                    alignment_diagnostic_rows.append(
+                        _alignment_diagnostic_row(
+                            alignment_result,
+                            dataset_name=dataset_name_value,
+                            test_subject=_test_subject_label(groups, test_idx, fallback=fold),
+                            alignment_window_center=center,
+                            alignment_window_size=float(window_ms) / 1000.0,
+                            decode_window_center=center,
+                            decode_window_size=float(window_ms) / 1000.0,
+                        )
+                    )
                 for current_emission_mode in emission_modes:
                     tuning_cv = (
                         make_tuning_cross_validator(train_labels, None if groups is None else groups[train_idx], tuning_cv_splits)
@@ -2725,6 +2778,8 @@ def run_time_resolved_decode(
     results = pd.DataFrame(rows)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(out_path, index=False)
+    if alignment_config.enabled:
+        _write_alignment_diagnostics(out_path.parent / "alignment_diagnostics.csv", alignment_diagnostic_rows)
     if calibration_out_path is not None:
         calibration_out_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(calibration_rows).to_csv(calibration_out_path, index=False)
@@ -2755,6 +2810,7 @@ def main() -> None:
     )
     parser.add_argument("--label-column", required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--dataset-name", help="Dataset identifier written to alignment_diagnostics.csv.")
     parser.add_argument("--metadata-csv", type=Path)
     parser.add_argument(
         "--fieldtrip-root-path",
@@ -2946,6 +3002,7 @@ def main() -> None:
 
     results = run_time_resolved_decode(
         epochs_path=args.epochs,
+        dataset_name=args.dataset_name,
         metadata_csv=args.metadata_csv,
         input_format=args.input_format,
         fieldtrip_root_path=args.fieldtrip_root_path,
