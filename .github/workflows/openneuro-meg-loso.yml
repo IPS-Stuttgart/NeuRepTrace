@@ -566,23 +566,16 @@ jobs:
                   if [[ -n "${OPENNEURO_API_KEY:-}" ]]; then
                     printf '%s\n' "$OPENNEURO_API_KEY" | openneuro-py login || true
                   fi
-                  python -m neureptrace.openneuro_meg print-download-includes \
+                  python -m neureptrace.openneuro_meg download-selected \
                     --dataset "$DATASET" \
+                    --bids-root "$OPENNEURO_DATA_ROOT" \
                     --subjects "$OPENNEURO_SUBJECTS" \
-                    --runs "$OPENNEURO_RUNS" > "$OPENNEURO_OUTPUT_DIR.includes.txt"
-                  while IFS= read -r include_path; do
-                    [[ -z "$include_path" ]] && continue
-                    target_path="$OPENNEURO_DATA_ROOT/$include_path"
-                    if [[ "$include_path" == *_meg.fif && -s "$target_path" ]]; then
-                      echo "Using cached $include_path"
-                      continue
-                    fi
-                    echo "Downloading $include_path"
-                    openneuro-py download \
-                      --dataset "$DATASET" \
-                      --target-dir "$OPENNEURO_DATA_ROOT" \
-                      --include "$include_path"
-                  done < "$OPENNEURO_OUTPUT_DIR.includes.txt"
+                    --runs "$OPENNEURO_RUNS" \
+                    --include-manifest "$OPENNEURO_OUTPUT_DIR.includes.txt" \
+                    --batch-size 24 \
+                    --max-attempts 3 \
+                    --max-concurrent-downloads 2 \
+                    --metadata-timeout 30
 
             - name: Re-check selected raw files
               if: steps.staged_check.outputs.ready != 'true'
