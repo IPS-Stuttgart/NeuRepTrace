@@ -459,6 +459,10 @@ def test_select_candidate_carries_strict_alignment_metadata():
     assert diagnostics["actual_components"].unique().tolist() == [1]
     assert diagnostics["feature_dim"].unique().tolist() == [2]
     assert diagnostics["decode_feature_dim"].unique().tolist() == [1]
+    assert "source_inner_raw_balanced_accuracy" in diagnostics.columns
+    assert diagnostics["source_inner_validation_type"].unique().tolist() == [
+        "strict_source_loso_nearest_centroid_group_projection"
+    ]
     assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
 
 

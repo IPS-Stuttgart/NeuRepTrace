@@ -142,6 +142,10 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
                 "anchor_row_correlation_after": 0.9,
                 "source_inner_decoding_before_alignment": 0.5,
                 "source_inner_decoding_after_alignment": 0.75,
+                "source_inner_raw_balanced_accuracy": 0.5,
+                "source_inner_aligned_balanced_accuracy": 0.75,
+                "source_inner_aligned_minus_raw": 0.25,
+                "source_inner_validation_type": "strict_source_loso_nearest_centroid_group_projection",
                 "target_transform_type": "source_group_projection",
             },
         )
@@ -180,6 +184,9 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
     assert diagnostics["actual_components"].unique().tolist() == [2]
     assert diagnostics["feature_dim"].unique().tolist() == [2]
     assert diagnostics["decode_feature_dim"].unique().tolist() == [2]
+    assert diagnostics["source_inner_raw_balanced_accuracy"].unique().tolist() == [0.5]
+    assert diagnostics["source_inner_aligned_balanced_accuracy"].unique().tolist() == [0.75]
+    assert diagnostics["source_inner_aligned_minus_raw"].unique().tolist() == [0.25]
     assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
 
 

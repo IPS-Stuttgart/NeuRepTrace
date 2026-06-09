@@ -161,6 +161,10 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
                         "anchor_row_correlation_after": 0.8,
                         "source_inner_decoding_before_alignment": 0.5,
                         "source_inner_decoding_after_alignment": 0.7,
+                        "source_inner_raw_balanced_accuracy": 0.5,
+                        "source_inner_aligned_balanced_accuracy": 0.7,
+                        "source_inner_aligned_minus_raw": 0.2,
+                        "source_inner_validation_type": "strict_source_loso_nearest_centroid_group_projection",
                         "target_transform_type": "source_group_projection",
                     }
                 ]
@@ -236,6 +240,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert diagnostics["dataset"].unique().tolist() == ["ensemble-demo"]
     assert set(diagnostics["test_subject"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}
     assert diagnostics["actual_components"].unique().tolist() == [4]
+    assert diagnostics["source_inner_aligned_minus_raw"].unique().tolist() == [0.2]
     assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
     source_observations = pd.read_csv(tmp_path / "ensemble_source_observations.csv")
     assert set(source_observations["decoder"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}

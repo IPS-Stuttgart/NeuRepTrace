@@ -140,6 +140,10 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert np.isfinite(result.diagnostics["anchor_row_correlation_after"])
     assert np.isfinite(result.diagnostics["source_inner_decoding_before_alignment"])
     assert np.isfinite(result.diagnostics["source_inner_decoding_after_alignment"])
+    assert result.diagnostics["source_inner_raw_balanced_accuracy"] == result.diagnostics["source_inner_decoding_before_alignment"]
+    assert result.diagnostics["source_inner_aligned_balanced_accuracy"] == result.diagnostics["source_inner_decoding_after_alignment"]
+    assert np.isfinite(result.diagnostics["source_inner_aligned_minus_raw"])
+    assert result.diagnostics["source_inner_validation_type"] == "strict_source_loso_nearest_centroid_group_projection"
     assert result.diagnostics["target_transform_type"] == "source_group_projection"
     assert aligned_distance < raw_distance
 

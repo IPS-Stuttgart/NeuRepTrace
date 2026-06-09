@@ -55,6 +55,10 @@ ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "anchor_row_correlation_after",
     "source_inner_decoding_before_alignment",
     "source_inner_decoding_after_alignment",
+    "source_inner_raw_balanced_accuracy",
+    "source_inner_aligned_balanced_accuracy",
+    "source_inner_aligned_minus_raw",
+    "source_inner_validation_type",
     "target_transform_type",
 )
 
@@ -109,6 +113,17 @@ class SourceAlignmentResult:
     test_features: np.ndarray
     metadata: dict[str, Any]
     diagnostics: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceAlignmentFit:
+    model: Any
+    alignment: Any
+    transformed_by_subject: dict[Hashable, np.ndarray]
+    anchor_filter_metadata: dict[str, Any]
+    anchor_before: Mapping[Hashable, np.ndarray]
+    anchor_after: dict[Hashable, np.ndarray]
+    n_components: int
 
 
 def normalize_source_alignment_method(method: str | None) -> str:
@@ -253,6 +268,7 @@ def align_train_test_features(
     target_labels: Sequence[Any] | np.ndarray | None = None,
     train_anchor_values: Sequence[Any] | np.ndarray | None = None,
     target_anchor_values: Sequence[Any] | np.ndarray | None = None,
+    compute_source_inner_diagnostics: bool = True,
 ) -> SourceAlignmentResult:
     """Fit source-only alignment and transform train/test feature rows.
 
@@ -347,27 +363,35 @@ def align_train_test_features(
         raise ValueError("Strict source-only alignment requires at least two source subjects.")
 
     features_by_subject = {subject_id: train_matrix[subject_vector == subject_id] for subject_id in subject_ids}
+    labels_by_subject = {subject_id: train_vector[subject_vector == subject_id] for subject_id in subject_ids}
     anchors_by_subject = {subject_id: train_anchor_vector[subject_vector == subject_id] for subject_id in subject_ids}
     sample_mode = _alignment_sample_mode(config.anchor_mode)
-    fit_features_by_subject, fit_anchors_by_subject, anchor_filter_metadata = _source_alignment_fit_inputs(
+    fit = _fit_source_alignment_model(
         features_by_subject,
         anchors_by_subject,
+        config=config,
+        sample_mode=sample_mode,
         external_anchor_mode=not class_anchor_mode,
     )
-    n_repetitions = _effective_repetitions_per_class(fit_anchors_by_subject, sample_mode, config)
+    model = fit.model
+    alignment = fit.alignment
+    transformed_by_subject = fit.transformed_by_subject
+    transformed_train = np.empty((train_matrix.shape[0], fit.n_components), dtype=float)
+    for subject_id in subject_ids:
+        transformed_train[subject_vector == subject_id] = transformed_by_subject[subject_id]
+    source_inner_raw_ba = float("nan")
+    source_inner_aligned_ba = float("nan")
+    if compute_source_inner_diagnostics:
+        source_inner_raw_ba, source_inner_aligned_ba = _source_inner_strict_loso_scores(
+            features_by_subject=features_by_subject,
+            labels_by_subject=labels_by_subject,
+            anchors_by_subject=anchors_by_subject,
+            config=config,
+            sample_mode=sample_mode,
+            external_anchor_mode=not class_anchor_mode,
+        )
 
     if config.method in {"procrustes", "hyperalignment"}:
-        iterations = 1 if config.method == "procrustes" else config.hyperalignment_iterations
-        model, alignment = fit_class_hyperalignment(
-            fit_features_by_subject,
-            fit_anchors_by_subject,
-            sample_mode=sample_mode,
-            n_repetitions_per_class=n_repetitions,
-            n_components=config.components,
-            n_iterations=iterations,
-            initialization="mean" if config.method == "procrustes" else "pca",
-        )
-        transformed_by_subject = {subject_id: model.transform(subject_id, features_by_subject[subject_id]) for subject_id in subject_ids}
         if config.oracle_target_calibrated:
             target_anchors = _target_alignment_matrix(
                 test_matrix,
@@ -384,20 +408,7 @@ def align_train_test_features(
             transformed_test = model.transform_group(test_matrix)
             target_alignment_rows = ""
             target_projection_fit = "source_group_projection"
-        n_components = model.n_components
-        anchor_before = alignment.aligned_by_subject
-        anchor_after = {subject_id: model.transform(subject_id, anchor_before[subject_id]) for subject_id in subject_ids}
     elif config.method == "mcca":
-        model, alignment = fit_class_mcca(
-            fit_features_by_subject,
-            fit_anchors_by_subject,
-            sample_mode=sample_mode,
-            n_repetitions_per_class=n_repetitions,
-            n_components=config.components,
-            regularization=config.mcca_regularization,
-            subject_pca_components=config.mcca_subject_pca_components,
-        )
-        transformed_by_subject = {subject_id: model.transform(subject_id, features_by_subject[subject_id]) for subject_id in subject_ids}
         if config.oracle_target_calibrated:
             target_anchors = _target_alignment_matrix(
                 test_matrix,
@@ -418,16 +429,14 @@ def align_train_test_features(
             transformed_test = model.transform_group(test_matrix)
             target_alignment_rows = ""
             target_projection_fit = "source_group_projection"
-        n_components = model.n_components
-        anchor_before = alignment.aligned_by_subject
-        anchor_after = {subject_id: model.transform(subject_id, anchor_before[subject_id]) for subject_id in subject_ids}
     else:  # pragma: no cover - guarded by normalization
         raise ValueError(f"Unsupported source alignment method: {config.method}")
-
-    transformed_train = np.empty((train_matrix.shape[0], transformed_test.shape[1]), dtype=float)
-    for subject_id in subject_ids:
-        transformed_train[subject_vector == subject_id] = transformed_by_subject[subject_id]
-    n_alignment_rows = int(next(iter(anchor_before.values())).shape[0])
+    n_alignment_rows = int(next(iter(fit.anchor_before.values())).shape[0])
+    source_inner_gain = (
+        source_inner_aligned_ba - source_inner_raw_ba
+        if np.isfinite(source_inner_aligned_ba) and np.isfinite(source_inner_raw_ba)
+        else float("nan")
+    )
     diagnostics = {
         "alignment_method": config.method,
         "sample_mode": sample_mode,
@@ -436,17 +445,19 @@ def align_train_test_features(
         "n_alignment_rows": n_alignment_rows,
         "n_repetitions_per_class": "" if alignment.n_repetitions_per_class is None else int(alignment.n_repetitions_per_class),
         "requested_components": _component_label(config.components),
-        "actual_components": int(n_components),
+        "actual_components": int(fit.n_components),
         "feature_dim": int(train_matrix.shape[1]),
         "decode_feature_dim": int(transformed_test.shape[1]),
         "uses_channel_projection_collapse": bool(transformed_test.shape[1] < train_matrix.shape[1]),
-        "anchor_row_correlation_before": _finite_or_blank(_mean_pairwise_anchor_row_correlation(anchor_before)),
-        "anchor_row_correlation_after": _finite_or_blank(_mean_pairwise_anchor_row_correlation(anchor_after)),
-        "source_inner_decoding_before_alignment": _finite_or_blank(
-            _source_inner_nearest_centroid_score(train_matrix, train_vector, subject_vector)
-        ),
-        "source_inner_decoding_after_alignment": _finite_or_blank(
-            _source_inner_nearest_centroid_score(transformed_train, train_vector, subject_vector)
+        "anchor_row_correlation_before": _finite_or_blank(_mean_pairwise_anchor_row_correlation(fit.anchor_before)),
+        "anchor_row_correlation_after": _finite_or_blank(_mean_pairwise_anchor_row_correlation(fit.anchor_after)),
+        "source_inner_decoding_before_alignment": _finite_or_blank(source_inner_raw_ba),
+        "source_inner_decoding_after_alignment": _finite_or_blank(source_inner_aligned_ba),
+        "source_inner_raw_balanced_accuracy": _finite_or_blank(source_inner_raw_ba),
+        "source_inner_aligned_balanced_accuracy": _finite_or_blank(source_inner_aligned_ba),
+        "source_inner_aligned_minus_raw": _finite_or_blank(source_inner_gain),
+        "source_inner_validation_type": (
+            "strict_source_loso_nearest_centroid_group_projection" if compute_source_inner_diagnostics else ""
         ),
         "target_transform_type": target_projection_fit,
     }
@@ -456,13 +467,13 @@ def align_train_test_features(
         test_features=transformed_test,
         metadata={
             **metadata,
-            "alignment_n_components": int(n_components),
+            "alignment_n_components": int(fit.n_components),
             "alignment_n_source_subjects": len(subject_ids),
             "alignment_n_classes": len(alignment.classes),
             "alignment_n_anchor_values": int(len(alignment.classes)),
             "alignment_anchor_value_source": train_anchor_source,
             "alignment_common_anchor_count": int(len(alignment.classes)),
-            **anchor_filter_metadata,
+            **fit.anchor_filter_metadata,
             "alignment_repetitions_per_class": "" if alignment.n_repetitions_per_class is None else int(alignment.n_repetitions_per_class),
             "alignment_target_alignment_rows": target_alignment_rows,
             "alignment_target_projection_fit": target_projection_fit,
@@ -546,6 +557,60 @@ def _fit_target_projection_to_template(
         coefficients = np.linalg.pinv(dual) @ template_matrix
     projection = centered.T @ coefficients
     return mean, projection
+
+
+def _fit_source_alignment_model(
+    features_by_subject: Mapping[Hashable, np.ndarray],
+    anchors_by_subject: Mapping[Hashable, np.ndarray],
+    *,
+    config: SourceAlignmentConfig,
+    sample_mode: str,
+    external_anchor_mode: bool,
+) -> _SourceAlignmentFit:
+    subject_ids = tuple(features_by_subject)
+    fit_features_by_subject, fit_anchors_by_subject, anchor_filter_metadata = _source_alignment_fit_inputs(
+        features_by_subject,
+        anchors_by_subject,
+        external_anchor_mode=external_anchor_mode,
+    )
+    n_repetitions = _effective_repetitions_per_class(fit_anchors_by_subject, sample_mode, config)
+
+    if config.method in {"procrustes", "hyperalignment"}:
+        iterations = 1 if config.method == "procrustes" else config.hyperalignment_iterations
+        model, alignment = fit_class_hyperalignment(
+            fit_features_by_subject,
+            fit_anchors_by_subject,
+            sample_mode=sample_mode,
+            n_repetitions_per_class=n_repetitions,
+            n_components=config.components,
+            n_iterations=iterations,
+            initialization="mean" if config.method == "procrustes" else "pca",
+        )
+    elif config.method == "mcca":
+        model, alignment = fit_class_mcca(
+            fit_features_by_subject,
+            fit_anchors_by_subject,
+            sample_mode=sample_mode,
+            n_repetitions_per_class=n_repetitions,
+            n_components=config.components,
+            regularization=config.mcca_regularization,
+            subject_pca_components=config.mcca_subject_pca_components,
+        )
+    else:  # pragma: no cover - guarded by normalization
+        raise ValueError(f"Unsupported source alignment method: {config.method}")
+
+    transformed_by_subject = {subject_id: model.transform(subject_id, features_by_subject[subject_id]) for subject_id in subject_ids}
+    anchor_before = alignment.aligned_by_subject
+    anchor_after = {subject_id: model.transform(subject_id, anchor_before[subject_id]) for subject_id in subject_ids}
+    return _SourceAlignmentFit(
+        model=model,
+        alignment=alignment,
+        transformed_by_subject=transformed_by_subject,
+        anchor_filter_metadata=anchor_filter_metadata,
+        anchor_before=anchor_before,
+        anchor_after=anchor_after,
+        n_components=int(model.n_components),
+    )
 
 
 def _effective_repetitions_per_class(
@@ -678,35 +743,81 @@ def _mean_pairwise_anchor_row_correlation(matrices: Mapping[Hashable, np.ndarray
     return float(np.mean(values)) if values else float("nan")
 
 
-def _source_inner_nearest_centroid_score(
-    features: np.ndarray,
-    labels: np.ndarray,
-    subjects: np.ndarray,
-) -> float:
-    subject_ids = tuple(dict.fromkeys(np.asarray(subjects, dtype=object).reshape(-1).tolist()))
+def _source_inner_strict_loso_scores(
+    *,
+    features_by_subject: Mapping[Hashable, np.ndarray],
+    labels_by_subject: Mapping[Hashable, np.ndarray],
+    anchors_by_subject: Mapping[Hashable, np.ndarray],
+    config: SourceAlignmentConfig,
+    sample_mode: str,
+    external_anchor_mode: bool,
+) -> tuple[float, float]:
+    """Compare raw vs aligned source-inner held-out-subject decoding.
+
+    The aligned side treats each source subject as target-like: the alignment
+    model is fit from the remaining source subjects and the held-out source is
+    transformed only with the source-fitted group projection.
+    """
+
+    subject_ids = tuple(features_by_subject)
     if len(subject_ids) < 2:
-        return float("nan")
-    labels = np.asarray(labels).reshape(-1)
-    predictions: list[Any] = []
-    truth: list[Any] = []
-    classes = np.unique(labels)
+        return float("nan"), float("nan")
+    raw_predictions: list[Any] = []
+    raw_truth: list[Any] = []
+    aligned_predictions: list[Any] = []
+    aligned_truth: list[Any] = []
     for test_subject in subject_ids:
-        train_mask = subjects != test_subject
-        test_mask = subjects == test_subject
-        if not np.any(train_mask) or not np.any(test_mask):
+        train_subjects = tuple(subject_id for subject_id in subject_ids if subject_id != test_subject)
+        train_features = np.vstack([features_by_subject[subject_id] for subject_id in train_subjects])
+        train_labels = np.concatenate([labels_by_subject[subject_id] for subject_id in train_subjects])
+        test_features = features_by_subject[test_subject]
+        test_labels = labels_by_subject[test_subject]
+
+        predicted_raw = _nearest_centroid_predict(train_features, train_labels, test_features)
+        if predicted_raw.size:
+            raw_predictions.extend(predicted_raw.tolist())
+            raw_truth.extend(test_labels.tolist())
+
+        if len(train_subjects) < 2:
             continue
-        available_classes = [class_label for class_label in classes if np.any(train_mask & (labels == class_label))]
-        if len(available_classes) < 2:
+        try:
+            inner_fit = _fit_source_alignment_model(
+                {subject_id: features_by_subject[subject_id] for subject_id in train_subjects},
+                {subject_id: anchors_by_subject[subject_id] for subject_id in train_subjects},
+                config=config,
+                sample_mode=sample_mode,
+                external_anchor_mode=external_anchor_mode,
+            )
+            aligned_train_features = np.vstack([inner_fit.transformed_by_subject[subject_id] for subject_id in train_subjects])
+            aligned_test_features = inner_fit.model.transform_group(test_features)
+        except (ValueError, np.linalg.LinAlgError):
             continue
-        centroids = np.vstack([np.mean(features[train_mask & (labels == class_label)], axis=0) for class_label in available_classes])
-        test_features = features[test_mask]
-        distances = np.sum((test_features[:, None, :] - centroids[None, :, :]) ** 2, axis=2)
-        predicted = np.asarray(available_classes, dtype=object)[distances.argmin(axis=1)]
-        predictions.extend(predicted.tolist())
-        truth.extend(labels[test_mask].tolist())
-    if not truth:
-        return float("nan")
-    return _balanced_accuracy(np.asarray(truth, dtype=object), np.asarray(predictions, dtype=object))
+        predicted_aligned = _nearest_centroid_predict(aligned_train_features, train_labels, aligned_test_features)
+        if predicted_aligned.size:
+            aligned_predictions.extend(predicted_aligned.tolist())
+            aligned_truth.extend(test_labels.tolist())
+
+    raw_score = (
+        _balanced_accuracy(np.asarray(raw_truth, dtype=object), np.asarray(raw_predictions, dtype=object))
+        if raw_truth
+        else float("nan")
+    )
+    aligned_score = (
+        _balanced_accuracy(np.asarray(aligned_truth, dtype=object), np.asarray(aligned_predictions, dtype=object))
+        if aligned_truth
+        else float("nan")
+    )
+    return raw_score, aligned_score
+
+
+def _nearest_centroid_predict(train_features: np.ndarray, train_labels: np.ndarray, test_features: np.ndarray) -> np.ndarray:
+    labels = np.asarray(train_labels).reshape(-1)
+    classes = np.unique(labels)
+    if len(classes) < 2:
+        return np.asarray([], dtype=object)
+    centroids = np.vstack([np.mean(train_features[labels == class_label], axis=0) for class_label in classes])
+    distances = np.sum((test_features[:, None, :] - centroids[None, :, :]) ** 2, axis=2)
+    return np.asarray(classes, dtype=object)[distances.argmin(axis=1)]
 
 
 def _balanced_accuracy(labels: np.ndarray, predictions: np.ndarray) -> float:

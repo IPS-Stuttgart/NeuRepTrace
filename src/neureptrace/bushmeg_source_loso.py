@@ -2026,6 +2026,7 @@ def _predict_candidate(
                 test_features=test_features,
                 target_labels=subjects[test_subject].labels if alignment_config.oracle_target_calibrated else None,
                 config=alignment_config,
+                compute_source_inner_diagnostics=alignment_diagnostic_rows is not None,
             )
             train_features = alignment_result.train_features
             test_features = alignment_result.test_features
@@ -2543,7 +2544,6 @@ def run_bushmeg_source_loso(
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
             cue_source_weights=cue_source_weights,
-            alignment_diagnostic_rows=alignment_diagnostic_rows,
         )
         inner_rows.extend(candidate_inner_rows)
         train_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
