@@ -17,6 +17,10 @@ def _aligned_subjects():
     }
 
 
+def _assert_orthonormal_columns(matrix: np.ndarray) -> None:
+    np.testing.assert_allclose(matrix.T @ matrix, np.eye(matrix.shape[1]), atol=1e-10)
+
+
 def test_mean_initialized_hyperalignment_fits_common_space():
     aligned = _aligned_subjects()
 
@@ -27,7 +31,17 @@ def test_mean_initialized_hyperalignment_fits_common_space():
     assert model.template.shape == (6, 3)
     assert model.group_feature_mean.shape == (4,)
     assert model.group_projection.shape == (4, 3)
+    _assert_orthonormal_columns(model.group_projection)
     assert model.transform("s1", aligned["s1"]).shape == (6, 3)
+
+
+def test_pca_initialized_group_projection_is_orthonormalized():
+    aligned = _aligned_subjects()
+
+    model = fit_hyperalignment(aligned, n_components=3, n_iterations=2, initialization="pca")
+
+    assert model.group_projection.shape == (4, 3)
+    _assert_orthonormal_columns(model.group_projection)
 
 
 def test_class_hyperalignment_accepts_mean_initialization():
@@ -50,6 +64,7 @@ def test_class_hyperalignment_accepts_mean_initialization():
     assert alignment.repetition_selection == "random"
     assert alignment.repetition_seed == 0
     assert model.template.shape == (6, 3)
+    _assert_orthonormal_columns(model.group_projection)
 
 
 def test_pca_initialization_still_allows_different_feature_dimensions():
