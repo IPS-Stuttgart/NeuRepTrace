@@ -238,6 +238,13 @@ def class_alignment_matrices(
         repetitions = _common_repetition_count(labels, classes, requested=n_repetitions_per_class)
         normalized_selection = normalize_class_limit_selection(repetition_selection)
         normalized_seed = normalize_class_limit_seed(repetition_seed)
+        repetition_offsets = _common_repetition_offsets(
+            labels,
+            classes,
+            repetitions,
+            selection=normalized_selection,
+            seed=normalized_seed,
+        )
         aligned = {
             sid: _class_repetition_matrix(
                 features[sid],
@@ -246,6 +253,7 @@ def class_alignment_matrices(
                 repetitions,
                 selection=normalized_selection,
                 seed=normalized_seed,
+                selected_offsets_by_class=repetition_offsets,
             )
             for sid in subject_ids
         }
@@ -343,21 +351,56 @@ def _class_repetition_matrix(
     *,
     selection: str = DEFAULT_CLASS_LIMIT_SELECTION,
     seed: int | str | None = DEFAULT_CLASS_LIMIT_SEED,
+    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None = None,
 ) -> np.ndarray:
     rows = []
     for class_position, class_label in enumerate(classes):
         class_features = features[labels == class_label]
         if class_features.shape[0] < repetitions:
             raise ValueError(f"Class {class_label!r} has only {class_features.shape[0]} repetitions, need {repetitions}.")
-        selected = select_class_limited_indices(
-            np.zeros(class_features.shape[0], dtype=int),
+        if selected_offsets_by_class is None:
+            selected = select_class_limited_indices(
+                np.zeros(class_features.shape[0], dtype=int),
+                repetitions,
+                selection=selection,
+                seed=seed,
+                seed_context=class_position,
+            )
+        else:
+            selected = np.asarray(selected_offsets_by_class[class_position], dtype=int)
+            if selected.ndim != 1:
+                raise ValueError("selected repetition offsets must be one-dimensional.")
+            if selected.size != repetitions:
+                raise ValueError(f"selected repetition offsets must contain {repetitions} entries, got {selected.size}.")
+            if selected.size and (int(np.min(selected)) < 0 or int(np.max(selected)) >= class_features.shape[0]):
+                raise ValueError(f"selected repetition offsets for class {class_label!r} are outside the available repetitions.")
+        rows.extend(class_features[selected])
+    return np.vstack(rows)
+
+
+def _common_repetition_offsets(
+    labels_by_subject: Mapping[Hashable, np.ndarray],
+    classes: np.ndarray,
+    repetitions: int,
+    *,
+    selection: str,
+    seed: int | str | None,
+) -> dict[int, np.ndarray]:
+    """Sample one common set of within-class offsets for all subjects."""
+
+    offsets = {}
+    for class_position, class_label in enumerate(classes):
+        available = min(int(np.sum(labels == class_label)) for labels in labels_by_subject.values())
+        if available < repetitions:
+            raise ValueError(f"Class {class_label!r} has only {available} common repetitions, need {repetitions}.")
+        offsets[class_position] = select_class_limited_indices(
+            np.zeros(available, dtype=int),
             repetitions,
             selection=selection,
             seed=seed,
             seed_context=class_position,
         )
-        rows.extend(class_features[selected])
-    return np.vstack(rows)
+    return offsets
 
 
 def _common_classes(labels_by_subject: Mapping[Hashable, np.ndarray]) -> np.ndarray:
