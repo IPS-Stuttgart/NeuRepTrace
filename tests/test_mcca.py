@@ -45,6 +45,10 @@ def test_class_alignment_matrices_class_mean():
     assert alignment.n_repetitions_per_class is None
     assert alignment.repetition_selection is None
     assert np.allclose(alignment.aligned_by_subject["a"], [[2.0, 0.0], [0.0, 3.0]])
+    assert alignment.n_alignment_rows == 2
+    assert alignment.n_classes == 2
+    assert alignment.max_centered_rank == 1
+    assert "class_mean" in str(alignment.low_rank_warning)
 
 
 def test_class_alignment_matrix_uses_explicit_class_order():
@@ -117,6 +121,21 @@ def test_fit_class_mcca_rejects_missing_class():
 
     with pytest.raises(ValueError, match="expected"):
         fit_class_mcca(features, labels)
+
+
+def test_fit_mcca_caps_components_to_centered_shared_rank():
+    rng = np.random.default_rng(42)
+    latent = rng.normal(size=(3, 2))
+    features = {}
+    for subject in range(3):
+        mixing = rng.normal(size=(2, 6))
+        features[subject] = latent @ mixing + 0.01 * rng.normal(size=(3, 6))
+
+    model = fit_mcca(features, n_components=64, regularization=1e-5)
+
+    assert model.n_components == 2
+    assert model.component_scores.shape == (3, 2)
+    assert all(projection.projection.shape[1] == 2 for projection in model.projections.values())
 
 
 def test_fit_target_mcca_projection_projects_held_out_subject_to_template():

@@ -67,6 +67,28 @@ def test_class_hyperalignment_accepts_mean_initialization():
     _assert_orthonormal_columns(model.group_projection)
 
 
+def test_class_hyperalignment_alignment_exposes_rank_warning():
+    features = {
+        "s1": np.array([[1.0, 0.0], [2.0, 0.0], [0.0, 1.0], [0.0, 2.0], [1.0, 1.0], [2.0, 2.0]]),
+        "s2": np.array([[1.1, 0.0], [2.1, 0.0], [0.0, 1.1], [0.0, 2.1], [1.1, 1.1], [2.1, 2.1]]),
+    }
+    labels = {subject: np.array([0, 0, 1, 1, 2, 2]) for subject in features}
+
+    model, alignment = fit_class_hyperalignment(
+        features,
+        labels,
+        sample_mode="class_mean",
+        n_components=64,
+        n_iterations=2,
+    )
+
+    assert alignment.n_alignment_rows == 3
+    assert alignment.n_classes == 3
+    assert alignment.max_centered_rank == 2
+    assert "class_mean" in str(alignment.low_rank_warning)
+    assert model.n_components == 2
+
+
 def test_pca_initialization_still_allows_different_feature_dimensions():
     rng = np.random.default_rng(1)
 

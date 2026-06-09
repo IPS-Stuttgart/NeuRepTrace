@@ -124,6 +124,42 @@ class ClassAlignment:
     repetition_selection: str | None = None
     repetition_seed: int | None = None
 
+    @property
+    def n_alignment_rows(self) -> int:
+        """Number of row anchors supplied to the common-space fit."""
+
+        row_counts = {np.asarray(matrix).shape[0] for matrix in self.aligned_by_subject.values()}
+        if not row_counts:
+            return 0
+        if len(row_counts) != 1:
+            raise ValueError(f"All subject alignment matrices must have the same row count, got {sorted(row_counts)}.")
+        return int(next(iter(row_counts)))
+
+    @property
+    def n_classes(self) -> int:
+        """Number of class labels used to build the alignment anchors."""
+
+        return int(np.asarray(self.classes).size)
+
+    @property
+    def max_centered_rank(self) -> int:
+        """Maximum rank available after centering the alignment anchors."""
+
+        return max(self.n_alignment_rows - 1, 0)
+
+    @property
+    def low_rank_warning(self) -> str | None:
+        """Human-readable warning for class-mean anchor rank collapse."""
+
+        if self.sample_mode == "class_mean" and self.n_classes <= 3:
+            return (
+                f"class_mean alignment has only {self.n_classes} class anchors; "
+                f"after centering, at most {self.max_centered_rank} common-space components are identifiable. "
+                "Use richer anchors such as class_repetition, pseudotrials, stimulus identity, "
+                "or target calibration before concluding alignment is ineffective."
+            )
+        return None
+
 
 # pylint: disable-next=too-many-locals
 def fit_mcca(
@@ -190,10 +226,13 @@ def fit_mcca(
     concatenated = np.hstack(whitened_blocks)
     concatenated = concatenated - np.mean(concatenated, axis=0, keepdims=True)
     _left, singular_values, right_t = np.linalg.svd(concatenated, full_matrices=False)
+
+    # Centering row-aligned matrices caps the identifiable common-space rank.
+    shared_rank = int(np.count_nonzero(singular_values > rank_tolerance))
     requested_components = _requested_component_count(n_components)
-    actual_components = min(requested_components, right_t.shape[0])
+    actual_components = min(requested_components, shared_rank)
     if actual_components < 1:
-        raise ValueError("No M-CCA components are available after whitening.")
+        raise ValueError("No M-CCA components are available after centering and whitening.")
 
     component_vectors = right_t.T[:, :actual_components]
     projections = _subject_projections_from_blocks(
