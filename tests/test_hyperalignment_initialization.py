@@ -30,6 +30,16 @@ def test_mean_initialized_hyperalignment_fits_common_space():
     assert model.transform("s1", aligned["s1"]).shape == (6, 3)
 
 
+def test_hyperalignment_group_projection_is_semi_orthogonal():
+    aligned = _aligned_subjects()
+
+    model = fit_hyperalignment(aligned, n_components=3, n_iterations=2, initialization="mean")
+
+    assert model.group_projection is not None
+    gram = model.group_projection.T @ model.group_projection
+    assert np.allclose(gram, np.eye(model.n_components), atol=1e-8)
+
+
 def test_class_hyperalignment_accepts_mean_initialization():
     aligned = _aligned_subjects()
     features = {subject: np.vstack([matrix, matrix + 0.01]) for subject, matrix in aligned.items()}
