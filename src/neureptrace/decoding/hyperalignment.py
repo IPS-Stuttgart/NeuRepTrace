@@ -76,6 +76,42 @@ class ClassAlignment:
     repetition_selection: str | None = None
     repetition_seed: int | None = None
 
+    @property
+    def n_alignment_rows(self) -> int:
+        """Number of row anchors supplied to the common-space fit."""
+
+        row_counts = {np.asarray(matrix).shape[0] for matrix in self.aligned_by_subject.values()}
+        if not row_counts:
+            return 0
+        if len(row_counts) != 1:
+            raise ValueError(f"All subject alignment matrices must have the same row count, got {sorted(row_counts)}.")
+        return int(next(iter(row_counts)))
+
+    @property
+    def n_classes(self) -> int:
+        """Number of class labels used to build the alignment anchors."""
+
+        return int(np.asarray(self.classes).size)
+
+    @property
+    def max_centered_rank(self) -> int:
+        """Maximum rank available after centering the alignment anchors."""
+
+        return max(self.n_alignment_rows - 1, 0)
+
+    @property
+    def low_rank_warning(self) -> str | None:
+        """Human-readable warning for class-mean anchor rank collapse."""
+
+        if self.sample_mode == "class_mean" and self.n_classes <= 3:
+            return (
+                f"class_mean alignment has only {self.n_classes} class anchors; "
+                f"after centering, at most {self.max_centered_rank} common-space components are identifiable. "
+                "Use richer anchors such as class_repetition, pseudotrials, stimulus identity, "
+                "or target calibration before concluding alignment is ineffective."
+            )
+        return None
+
 
 def fit_hyperalignment(
     aligned_by_subject: Mapping[Hashable, Sequence[Sequence[float]] | np.ndarray],
