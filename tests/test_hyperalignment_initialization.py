@@ -80,10 +80,33 @@ def test_hyperalignment_class_repetition_uses_common_offsets_when_counts_differ(
 
     alignment = class_alignment_matrices(features, labels, sample_mode="class_repetition", n_repetitions_per_class=2)
 
+    assert alignment.repetition_offsets_by_class is not None
     assert np.allclose(
         alignment.aligned_by_subject["b"].ravel() - alignment.aligned_by_subject["a"].ravel(),
         np.full(alignment.aligned_by_subject["a"].shape[0], 10.0),
     )
+
+
+def test_hyperalignment_caps_components_to_common_centered_rank():
+    subjects = {
+        "s1": np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]),
+        "s2": np.array([[0.0, 1.0], [1.0, 1.0], [2.0, 1.0]]),
+    }
+
+    model = fit_hyperalignment(subjects, n_components=8, n_iterations=2)
+
+    assert model.n_components == 1
+    assert model.template.shape == (3, 1)
+
+
+def test_hyperalignment_rejects_zero_centered_rank():
+    subjects = {
+        "s1": np.ones((3, 2)),
+        "s2": np.ones((3, 2)) * 2.0,
+    }
+
+    with pytest.raises(ValueError, match="after centering"):
+        fit_hyperalignment(subjects, n_components=8, n_iterations=2)
 
 
 def test_class_hyperalignment_alignment_exposes_rank_warning():

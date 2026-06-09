@@ -146,10 +146,74 @@ def test_class_alignment_matrices_class_repetition_uses_common_offsets_when_coun
 
     alignment = class_alignment_matrices(features, labels, sample_mode="class_repetition", n_repetitions_per_class=2)
 
+    assert alignment.repetition_offsets_by_class is not None
+    assert alignment.selected_offsets_by_class is not None
+    assert set(alignment.selected_offsets_by_class) == {0, 1}
     assert np.allclose(
         alignment.aligned_by_subject["b"].ravel() - alignment.aligned_by_subject["a"].ravel(),
         np.full(alignment.aligned_by_subject["a"].shape[0], 10.0),
     )
+
+
+def test_target_class_alignment_matrix_can_reuse_source_selected_offsets_when_counts_differ():
+    source_features = {
+        "a": np.array([[0.0], [1.0], [2.0], [3.0], [100.0], [101.0], [102.0], [103.0]]),
+        "b": np.array([[10.0], [11.0], [12.0], [13.0], [14.0], [110.0], [111.0], [112.0], [113.0], [114.0]]),
+    }
+    source_labels = {
+        "a": np.array([1, 1, 1, 1, 2, 2, 2, 2]),
+        "b": np.array([1, 1, 1, 1, 1, 2, 2, 2, 2, 2]),
+    }
+    source_alignment = class_alignment_matrices(
+        source_features,
+        source_labels,
+        sample_mode="class_repetition",
+        n_repetitions_per_class=2,
+    )
+    assert source_alignment.selected_offsets_by_class is not None
+    target_features = np.array(
+        [
+            [1000.0],
+            [1001.0],
+            [1002.0],
+            [1003.0],
+            [1004.0],
+            [2000.0],
+            [2001.0],
+            [2002.0],
+            [2003.0],
+            [2004.0],
+        ]
+    )
+    target_labels = np.array([1, 1, 1, 1, 1, 2, 2, 2, 2, 2])
+
+    aligned = class_alignment_matrix(
+        target_features,
+        target_labels,
+        classes=source_alignment.classes,
+        sample_mode="class_repetition",
+        n_repetitions_per_class=source_alignment.n_repetitions_per_class,
+        repetition_selection=source_alignment.repetition_selection or "random",
+        repetition_seed=source_alignment.repetition_seed,
+        selected_offsets_by_class=source_alignment.selected_offsets_by_class,
+    )
+    expected = np.vstack(
+        [
+            target_features[target_labels == class_label][source_alignment.selected_offsets_by_class[class_position]]
+            for class_position, class_label in enumerate(source_alignment.classes)
+        ]
+    )
+
+    np.testing.assert_allclose(aligned, expected)
+    with pytest.raises(ValueError, match="must match"):
+        class_alignment_matrix(
+            target_features,
+            target_labels,
+            classes=source_alignment.classes,
+            sample_mode="class_repetition",
+            n_repetitions_per_class=1,
+            selected_offsets_by_class=source_alignment.selected_offsets_by_class,
+        )
 
 
 def test_target_class_alignment_matrix_reuses_repetition_sampling_options():

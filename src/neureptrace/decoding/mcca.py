@@ -123,6 +123,7 @@ class ClassAlignment:
     n_repetitions_per_class: int | None
     repetition_selection: str | None = None
     repetition_seed: int | None = None
+    repetition_offsets_by_class: Mapping[int, np.ndarray] | None = None
 
     @property
     def n_alignment_rows(self) -> int:
@@ -159,6 +160,12 @@ class ClassAlignment:
                 "or target calibration before concluding alignment is ineffective."
             )
         return None
+
+    @property
+    def selected_offsets_by_class(self) -> Mapping[int, np.ndarray] | None:
+        """Backward-compatible alias for stored class-repetition offsets."""
+
+        return self.repetition_offsets_by_class
 
 
 # pylint: disable-next=too-many-locals
@@ -312,6 +319,7 @@ def class_alignment_matrices(
         repetitions = None
         normalized_selection = None
         normalized_seed = None
+        repetition_offsets = None
     else:
         repetitions = _common_repetition_count(labels, classes, requested=n_repetitions_per_class)
         normalized_selection = normalize_class_limit_selection(repetition_selection)
@@ -343,6 +351,7 @@ def class_alignment_matrices(
         n_repetitions_per_class=repetitions,
         repetition_selection=normalized_selection,
         repetition_seed=normalized_seed,
+        repetition_offsets_by_class=repetition_offsets,
     )
 
 
