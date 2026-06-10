@@ -381,3 +381,25 @@ def test_alignment_compare_ignores_invalid_raw_baseline(tmp_path: Path):
     variants = build_variant_summary([raw, aligned], fixed_time=0.184)
 
     assert build_raw_alignment_comparison(variants).empty
+
+
+def test_alignment_compare_writes_readable_empty_comparison_tables(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    _write_alignment_artifact(
+        artifacts_root,
+        "strict-only",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.55,
+    )
+
+    written = run_alignment_comparison(
+        [artifacts_root],
+        out_dir=tmp_path / "comparison",
+        fixed_time=0.184,
+    )
+
+    for key in ("raw_comparison", "anchor_comparison", "oracle_comparison", "target_calibrated_comparison"):
+        table = pd.read_csv(written[key])
+        assert table.empty
+        assert len(table.columns) > 0
