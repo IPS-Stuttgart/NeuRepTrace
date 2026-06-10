@@ -43,7 +43,13 @@ def _observation_rows(*, shuffle: bool, subjects: tuple[str, ...] = ("sub-01", "
     return pd.DataFrame(rows)
 
 
-def _write_artifact(root: Path, *, shuffle: bool, subjects: tuple[str, ...] = ("sub-01", "sub-02")) -> None:
+def _write_artifact(
+    root: Path,
+    *,
+    shuffle: bool,
+    subjects: tuple[str, ...] = ("sub-01", "sub-02"),
+    diagnostics_best_time: float = 0.184,
+) -> None:
     decode = root / "decode"
     decode.mkdir(parents=True)
     observations = decode / "observations.csv"
@@ -51,7 +57,7 @@ def _write_artifact(root: Path, *, shuffle: bool, subjects: tuple[str, ...] = ("
     write_loso_observation_diagnostics(
         observations,
         out_dir=decode / "diagnostics",
-        best_time=0.184,
+        best_time=diagnostics_best_time,
     )
 
 
@@ -106,6 +112,21 @@ def test_real_shuffle_report_rejects_nonoverlapping_subjects(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="no overlapping subjects"):
         write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+
+def test_real_shuffle_report_fallback_fixed_time_keeps_quality_fields(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False, diagnostics_best_time=0.232)
+    _write_artifact(shuffle, shuffle=True, diagnostics_best_time=0.232)
+
+    paths = write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+    summary = pd.read_csv(paths["summary"])
+    assert summary.loc[0, "fixed_time_real"] == 0.184
+    assert summary.loc[0, "n_subjects_real"] == 2
+    assert summary.loc[0, "n_classes"] == 3
 
 
 def test_openneuro_real_vs_shuffle_workflow_uses_locked_defaults() -> None:

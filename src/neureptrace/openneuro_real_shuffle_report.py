@@ -187,7 +187,10 @@ def _fixed_metric_row(quality: pd.DataFrame, time_course: pd.DataFrame, fixed_ti
             "time": "fixed_time",
         }
     )
-    return mapped
+    combined = row.copy()
+    for column, value in mapped.items():
+        combined[column] = value
+    return combined
 
 
 def _load_run(root: Path, fixed_time: float) -> dict[str, pd.DataFrame | pd.Series | Path]:
