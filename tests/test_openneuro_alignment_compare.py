@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.openneuro_alignment_compare import discover_output_dirs, run_alignment_comparison
 
@@ -213,3 +214,21 @@ def test_alignment_compare_tolerates_older_artifacts_without_alignment_diagnosti
     assert raw.loc[0, "decision"] == "alignment_improves_raw"
     note = written["note"].read_text(encoding="utf-8")
     assert "Artifacts with alignment diagnostics: `0/2`" in note
+
+
+def test_alignment_compare_rejects_mixed_alignment_metadata(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    output = _write_alignment_artifact(
+        artifacts_root,
+        "mixed-projection",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.50,
+    )
+    summary_path = output / "decode" / "time_decode_summary.csv"
+    summary = pd.read_csv(summary_path)
+    summary.loc[summary["time"] == 0.184, "alignment_target_projection"] = "oracle_target_calibrated_alignment"
+    summary.to_csv(summary_path, index=False)
+
+    with pytest.raises(ValueError, match="inconsistent 'alignment_target_projection'"):
+        run_alignment_comparison([artifacts_root], out_dir=tmp_path / "comparison", fixed_time=0.184)

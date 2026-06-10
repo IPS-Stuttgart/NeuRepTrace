@@ -69,6 +69,20 @@ def _compact_unique(frame: pd.DataFrame, column: str) -> str:
     return "|".join(dict.fromkeys(values))
 
 
+def _single_unique(frame: pd.DataFrame, column: str, *, artifact: str) -> str:
+    if column not in frame.columns:
+        return ""
+    values = [
+        str(value).strip()
+        for value in frame[column].dropna()
+        if str(value).strip()
+    ]
+    unique = list(dict.fromkeys(values))
+    if len(unique) > 1:
+        raise ValueError(f"Artifact {artifact!r} has inconsistent {column!r} values: {unique}")
+    return unique[0] if unique else ""
+
+
 def _first_nonempty(*values: Any) -> str:
     for value in values:
         if value not in {"", None}:
@@ -235,17 +249,21 @@ def summarize_alignment_variant(
     summary = pd.read_csv(summary_path)
     diagnostics = pd.read_csv(diagnostics_path) if diagnostics_path.is_file() and diagnostics_path.stat().st_size > 0 else pd.DataFrame()
     selection = _select_metric(summary, metric=metric, fixed_time=fixed_time)
-    method = _first_nonempty(_compact_unique(summary, "alignment_method"), manifest.get("alignment_method", ""))
-    anchor_mode = _first_nonempty(_compact_unique(summary, "alignment_anchor_mode"), manifest.get("alignment_anchor_mode", ""))
+    artifact_name = manifest.get("artifact_name", output.name)
+    method = _first_nonempty(_single_unique(summary, "alignment_method", artifact=artifact_name), manifest.get("alignment_method", ""))
+    anchor_mode = _first_nonempty(
+        _single_unique(summary, "alignment_anchor_mode", artifact=artifact_name),
+        manifest.get("alignment_anchor_mode", ""),
+    )
     target_projection = _first_nonempty(
-        _compact_unique(summary, "alignment_target_projection"),
+        _single_unique(summary, "alignment_target_projection", artifact=artifact_name),
         manifest.get("alignment_target_projection", ""),
     )
     oracle = target_projection == ORACLE_TARGET_PROJECTION
     target_calibrated = target_projection == TARGET_CALIBRATED_TARGET_PROJECTION
     row = {
         "output_dir": output.as_posix(),
-        "artifact_name": manifest.get("artifact_name", output.name),
+        "artifact_name": artifact_name,
         "github_run_id": manifest.get("github_run_id", ""),
         "dataset": _first_nonempty(manifest.get("dataset", ""), _compact_unique(summary, "dataset")),
         "mode": manifest.get("mode", ""),
@@ -254,7 +272,10 @@ def summarize_alignment_variant(
         "n_subjects": manifest.get("n_subjects", ""),
         "alignment_method": method,
         "alignment_anchor_mode": anchor_mode,
-        "alignment_anchor_column": _first_nonempty(_compact_unique(summary, "alignment_anchor_column"), manifest.get("alignment_anchor_column", "")),
+        "alignment_anchor_column": _first_nonempty(
+            _single_unique(summary, "alignment_anchor_column", artifact=artifact_name),
+            manifest.get("alignment_anchor_column", ""),
+        ),
         "alignment_target_projection": target_projection,
         "alignment_target_calibrated": target_calibrated,
         "alignment_oracle_target_calibrated": oracle,
