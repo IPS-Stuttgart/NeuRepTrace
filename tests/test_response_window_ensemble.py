@@ -2,13 +2,14 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.response_window_ensemble import run_response_window_ensemble
 
 
 def _toy_observations() -> pd.DataFrame:
     rows = []
-    times = (0.088, 0.136, 0.184, 0.232)
+    times = (0.088, 0.136, 0.184, 0.232, 0.280)
     for subject in ("sub-01", "sub-02", "sub-03"):
         for sample_index, true_label in enumerate((0, 1, 2, 0, 1, 2)):
             for time_index, time in enumerate(times):
@@ -106,9 +107,42 @@ def test_response_window_uniform_logit_ensemble_writes_metrics(tmp_path: Path):
     assert out_metrics.exists()
     assert ensembled["time"].unique().tolist() == [0.184]
     assert ensembled["response_window_mode"].unique().tolist() == ["uniform"]
-    assert ensembled["response_window_actual_times"].unique().tolist() == ["0.088|0.136|0.184|0.232"]
+    assert ensembled["response_window_actual_times"].unique().tolist() == ["0.088|0.136|0.184|0.232|0.28"]
     assert metrics["decoder"].unique().tolist() == ["poststimulus_response_window_logit_ensemble"]
     assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
+
+
+def test_response_window_rejects_duplicate_nearest_time_mapping(tmp_path: Path):
+    csv_path = tmp_path / "observations.csv"
+    observations = _toy_observations()
+    observations = observations.loc[observations["time"] != 0.280]
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="collapse to duplicate decoded time centers"):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
+def test_response_window_metrics_preserve_constant_alignment_provenance(tmp_path: Path):
+    observations = _toy_observations()
+    observations["alignment_method"] = "mcca"
+    observations["alignment_anchor_mode"] = "event_code_mean"
+    observations["alignment_anchor_column"] = "trigger"
+    observations["alignment_target_projection"] = "oracle_target_calibrated_alignment"
+    observations["alignment_oracle_target_calibrated"] = True
+    observations["alignment_debug_upper_bound"] = True
+    observations["alignment_valid_for_benchmark"] = False
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    _ensembled, metrics = run_response_window_ensemble([csv_path], mode="uniform")
+
+    assert metrics["alignment_method"].unique().tolist() == ["mcca"]
+    assert metrics["alignment_anchor_mode"].unique().tolist() == ["event_code_mean"]
+    assert metrics["alignment_anchor_column"].unique().tolist() == ["trigger"]
+    assert metrics["alignment_target_projection"].unique().tolist() == ["oracle_target_calibrated_alignment"]
+    assert metrics["alignment_oracle_target_calibrated"].unique().tolist() == [True]
+    assert metrics["alignment_debug_upper_bound"].unique().tolist() == [True]
+    assert metrics["alignment_valid_for_benchmark"].unique().tolist() == [False]
 
 
 def test_response_window_uniform_probability_mean_uses_arithmetic_average(tmp_path: Path):

@@ -2,12 +2,16 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
+from neureptrace.decoding.source_alignment import SourceAlignmentResult
 from neureptrace.mne_time_decode import (
     _apply_class_prior_correction,
     _align_probability_columns,
+    _alignment_anchor_values,
     _filter_splits_for_outer_test_groups,
+    _nearest_candidate_windows,
     _shuffle_training_labels,
     apply_source_probability_calibration,
     fit_source_probability_calibrator,
@@ -99,6 +103,600 @@ def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     np.testing.assert_array_equal(shuffled_a, shuffled_b)
     assert sorted(shuffled_a.tolist()) == sorted(labels.tolist())
     assert not np.array_equal(shuffled_a, shuffled_c)
+
+
+def test_source_time_selection_rejects_duplicate_nearest_windows():
+    windows = [(0, 2, 0.10), (1, 3, 0.20)]
+
+    with pytest.raises(ValueError, match="collapse to duplicate decode windows"):
+        _nearest_candidate_windows(windows, (0.09, 0.11))
+
+
+def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_labels(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    for trial_index, label in enumerate(labels):
+        data[trial_index, :, :] = label
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    alignment_train_labels = []
+    alignment_configs = []
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs.get("target_labels") is None
+        alignment_train_labels.append(np.asarray(kwargs["train_labels"], dtype=int).copy())
+        alignment_configs.append(kwargs["config"])
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "class_mean",
+                "alignment_target_projection": "group_projection",
+                "alignment_n_components": 2,
+            },
+            diagnostics={
+                "alignment_method": "procrustes",
+                "sample_mode": "class_mean",
+                "n_source_subjects": 2,
+                "n_classes": 2,
+                "n_alignment_rows": 2,
+                "n_repetitions_per_class": "",
+                "requested_components": 2,
+                "actual_components": 2,
+                "feature_dim": 2,
+                "decode_feature_dim": 2,
+                "uses_channel_projection_collapse": False,
+                "alignment_dimensionality_reduction": False,
+                "anchor_row_correlation_before": 0.1,
+                "anchor_row_correlation_after": 0.9,
+                "source_inner_decoding_before_alignment": 0.5,
+                "source_inner_decoding_after_alignment": 0.75,
+                "source_inner_raw_balanced_accuracy": 0.5,
+                "source_inner_aligned_balanced_accuracy": 0.75,
+                "source_inner_aligned_minus_raw": 0.25,
+                "source_inner_validation_type": "strict_source_loso_nearest_centroid_group_projection",
+                "target_transform_type": "source_group_projection",
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "synthetic-epo.fif",
+        dataset_name="synthetic",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "aligned.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=4,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        alignment_method="procrustes",
+        alignment_times="same_decode_window",
+        label_shuffle_control=True,
+        label_shuffle_seed=13,
+    )
+
+    assert alignment_train_labels
+    assert alignment_configs[0].same_decode_window is True
+    unshuffled_train = labels[groups != "sub-01"]
+    assert sorted(alignment_train_labels[0].tolist()) == sorted(unshuffled_train.tolist())
+    assert not np.array_equal(alignment_train_labels[0], unshuffled_train)
+    assert set(results["alignment_method"]) == {"procrustes"}
+    assert set(results["alignment_target_projection"]) == {"group_projection"}
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["dataset"].unique().tolist() == ["synthetic"]
+    assert diagnostics["test_subject"].unique().tolist() == ["sub-01"]
+    assert diagnostics["actual_components"].unique().tolist() == [2]
+    assert diagnostics["feature_dim"].unique().tolist() == [2]
+    assert diagnostics["decode_feature_dim"].unique().tolist() == [2]
+    assert diagnostics["source_inner_raw_balanced_accuracy"].unique().tolist() == [0.5]
+    assert diagnostics["source_inner_aligned_balanced_accuracy"].unique().tolist() == [0.75]
+    assert diagnostics["source_inner_aligned_minus_raw"].unique().tolist() == [0.25]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
+    assert np.allclose(diagnostics["alignment_window_center"], diagnostics["decode_window_center"])
+    assert np.allclose(diagnostics["alignment_window_size"], diagnostics["decode_window_size"])
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["dataset"].unique().tolist() == ["synthetic"]
+    assert availability["test_subject"].unique().tolist() == ["sub-01"]
+    assert availability["prefit_status"].unique().tolist() == ["ok"]
+    assert availability["n_common_source_anchors"].unique().tolist() == [2]
+    assert availability["estimated_alignment_rows"].unique().tolist() == [2]
+
+
+def test_run_time_resolved_decode_rejects_fixed_alignment_times_until_implemented(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    with pytest.raises(ValueError, match="same-window projection only"):
+        run_time_resolved_decode(
+            epochs_path=tmp_path / "synthetic-epo.fif",
+            label_column="condition",
+            group_column="group",
+            outer_test_groups=("sub-01",),
+            out_path=tmp_path / "fixed_alignment_times.csv",
+            n_splits=3,
+            window_ms=1,
+            step_ms=4,
+            decoder="logistic",
+            emission_mode="uncalibrated",
+            time_decode_backend="sklearn",
+            alignment_method="procrustes",
+            alignment_times=(0.088, 0.136, 0.184),
+        )
+
+
+def test_run_time_resolved_decode_passes_target_labels_for_oracle_alignment(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    for trial_index, label in enumerate(labels):
+        data[trial_index, :, :] = label
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    target_label_calls = []
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs.get("target_labels") is not None
+        target_label_calls.append(np.asarray(kwargs["target_labels"], dtype=int).copy())
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "class_mean",
+                "alignment_target_projection": "oracle_target_calibrated_alignment",
+                "alignment_oracle_target_calibrated": True,
+                "alignment_debug_upper_bound": True,
+                "alignment_valid_for_benchmark": False,
+                "alignment_protocol_note": "debug upper bound only; not valid for benchmark",
+                "alignment_n_components": 2,
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "synthetic-epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "oracle_aligned.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=4,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        alignment_method="procrustes",
+        alignment_target_projection="oracle_target_calibrated_alignment",
+    )
+
+    assert target_label_calls
+    np.testing.assert_array_equal(target_label_calls[0], labels[groups == "sub-01"])
+    assert set(results["alignment_target_projection"]) == {"oracle_target_calibrated_alignment"}
+    assert set(results["alignment_valid_for_benchmark"]) == {False}
+
+
+def test_run_time_resolved_decode_target_calibration_excludes_scored_rows(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 6)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    for trial_index in range(len(labels)):
+        data[trial_index, :, :] = trial_index
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    scored_feature_rows = []
+    calibration_feature_rows = []
+    calibration_label_rows = []
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs.get("target_labels") is None
+        assert kwargs.get("target_anchor_values") is None
+        assert kwargs.get("target_calibration_features") is not None
+        assert kwargs.get("target_calibration_labels") is not None
+        scored_feature_rows.append(np.asarray(kwargs["test_features"], dtype=float).copy())
+        calibration_feature_rows.append(np.asarray(kwargs["target_calibration_features"], dtype=float).copy())
+        calibration_label_rows.append(np.asarray(kwargs["target_calibration_labels"], dtype=int).copy())
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "class_mean",
+                "alignment_target_projection": "target_calibrated_alignment",
+                "alignment_target_calibrated": True,
+                "alignment_oracle_target_calibrated": False,
+                "alignment_debug_upper_bound": False,
+                "alignment_valid_for_benchmark": False,
+                "alignment_target_alignment_rows": 2,
+                "alignment_target_labels_used": True,
+                "alignment_target_calibration_per_anchor": 1,
+                "alignment_target_calibration_seed": 17,
+                "alignment_n_components": 2,
+            },
+            diagnostics={
+                "alignment_method": "procrustes",
+                "sample_mode": "class_mean",
+                "n_source_subjects": 2,
+                "n_classes": 2,
+                "n_alignment_rows": 2,
+                "n_repetitions_per_class": "",
+                "requested_components": 2,
+                "actual_components": 2,
+                "feature_dim": 2,
+                "decode_feature_dim": 2,
+                "uses_channel_projection_collapse": False,
+                "alignment_dimensionality_reduction": False,
+                "target_transform_type": "target_calibrated_template_procrustes",
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    observations_out = tmp_path / "target_calibrated_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "synthetic-epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "target_calibrated.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=4,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        alignment_method="procrustes",
+        alignment_target_projection="target_calibrated_alignment",
+        alignment_target_calibration_per_anchor=1,
+        alignment_target_calibration_seed=17,
+        observation_out_path=observations_out,
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert scored_feature_rows
+    assert {tuple(sorted(row.tolist())) for row in calibration_label_rows} == {(0, 1)}
+    assert all(features.shape[0] == 4 for features in scored_feature_rows)
+    assert all(features.shape[0] == 2 for features in calibration_feature_rows)
+    for scored, calibrated in zip(scored_feature_rows, calibration_feature_rows, strict=True):
+        assert set(scored[:, 0]).isdisjoint(set(calibrated[:, 0]))
+    assert set(results["alignment_target_projection"]) == {"target_calibrated_alignment"}
+    assert set(results["alignment_target_calibrated"]) == {True}
+    assert set(results["alignment_valid_for_benchmark"]) == {False}
+    assert set(results["n_test"]) == {4}
+    assert len(observations) == 4 * len(results)
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["alignment_target_projection"].unique().tolist() == ["target_calibrated_alignment"]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["target_calibrated_template_procrustes"]
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["prefit_status"].unique().tolist() == ["ok"]
+    assert availability["target_calibration_anchor_values_used"].unique().tolist() == [True]
+    assert availability["target_calibration_missing_common_anchor_count"].unique().tolist() == [0]
+
+
+def test_run_time_resolved_decode_skips_anchor_lookup_for_unsupervised_alignment(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs["config"].method == "coral"
+        assert kwargs.get("train_anchor_values") is None
+        assert kwargs.get("target_anchor_values") is None
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "coral",
+                "alignment_anchor_mode": "stimulus_id_mean",
+                "alignment_target_projection": "group_projection",
+                "alignment_uses_unlabeled_target_data": True,
+            },
+            diagnostics={
+                "alignment_method": "coral",
+                "sample_mode": "unlabeled_covariance",
+                "uses_unlabeled_target_data": True,
+                "covariance_alignment_estimator": "diagonal",
+                "target_transform_type": "unlabeled_target_covariance_recoloring",
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "synthetic-epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "unsupervised_aligned.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=4,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        alignment_method="coral",
+        alignment_anchor_mode="stimulus_id_mean",
+    )
+
+    assert set(results["alignment_method"]) == {"coral"}
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["prefit_status"].unique().tolist() == ["no_anchors_required"]
+    assert availability["sample_mode"].unique().tolist() == ["unlabeled_covariance"]
+
+
+def test_alignment_anchor_values_auto_select_ds000117_columns():
+    metadata = pd.DataFrame(
+        {
+            "condition": ["Famous", "Famous", "Scrambled"],
+            "stim_file": ["meg/f001.bmp", "meg/f001.bmp", "meg/s001.bmp"],
+            "trigger": [5, 6, 17],
+            "run": ["01", "01", "01"],
+        }
+    )
+    labels = np.array([0, 0, 1])
+
+    stimulus = _alignment_anchor_values(
+        metadata,
+        labels,
+        label_column="condition",
+        anchor_mode="stimulus_id_mean",
+    )
+    event = _alignment_anchor_values(
+        metadata,
+        labels,
+        label_column="condition",
+        anchor_mode="event_code_mean",
+    )
+    indexed = _alignment_anchor_values(
+        metadata,
+        labels,
+        label_column="condition",
+        anchor_mode="run_event_index_within_stimulus",
+    )
+
+    assert stimulus.column == "stim_file"
+    assert stimulus.values.tolist() == ["meg/f001.bmp", "meg/f001.bmp", "meg/s001.bmp"]
+    assert event.column == "trigger"
+    assert event.values.tolist() == ["5", "6", "17"]
+    assert indexed.column == "run+stim_file+event_index"
+    assert indexed.values.tolist() == [
+        "run=01|stimulus=meg/f001.bmp|label=Famous|index=1",
+        "run=01|stimulus=meg/f001.bmp|label=Famous|index=2",
+        "run=01|stimulus=meg/s001.bmp|label=Scrambled|index=1",
+    ]
+
+
+def test_alignment_anchor_values_prefer_ds000117_canonical_identity_columns():
+    metadata = pd.DataFrame(
+        {
+            "condition": ["Famous", "Famous", "Scrambled"],
+            "stimulus_id": ["f001", "f001", "s001"],
+            "stim_file": ["meg/f001.bmp", "meg/f001.bmp", "meg/s001.bmp"],
+            "event_code": ["5", "6", "17"],
+            "trigger": [5, 6, 17],
+            "run": ["01", "01", "01"],
+        }
+    )
+    labels = np.array([0, 0, 1])
+
+    stimulus = _alignment_anchor_values(
+        metadata,
+        labels,
+        label_column="condition",
+        anchor_mode="stimulus_id_mean",
+    )
+    event = _alignment_anchor_values(
+        metadata,
+        labels,
+        label_column="condition",
+        anchor_mode="event_code_mean",
+    )
+    indexed = _alignment_anchor_values(
+        metadata,
+        labels,
+        label_column="condition",
+        anchor_mode="run_event_index_within_stimulus",
+    )
+
+    assert stimulus.column == "stimulus_id"
+    assert stimulus.values.tolist() == ["f001", "f001", "s001"]
+    assert event.column == "event_code"
+    assert event.values.tolist() == ["5", "6", "17"]
+    assert indexed.column == "run+stimulus_id+event_index"
+    assert indexed.values.tolist() == [
+        "run=01|stimulus=f001|label=Famous|index=1",
+        "run=01|stimulus=f001|label=Famous|index=2",
+        "run=01|stimulus=s001|label=Scrambled|index=1",
+    ]
+
+
+def test_run_time_resolved_decode_passes_metadata_stimulus_anchors(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    stim_files = np.tile(np.array(["stim-a", "stim-b", "stim-a", "stim-b"]), 3)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    for trial_index, label in enumerate(labels):
+        data[trial_index, :, :] = label
+    metadata = pd.DataFrame({"condition": labels, "group": groups, "stim_file": stim_files})
+    epochs = FakeEpochs(data, times, metadata)
+    anchor_calls = []
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs.get("target_labels") is None
+        assert kwargs.get("target_anchor_values") is None
+        anchor_calls.append(np.asarray(kwargs["train_anchor_values"], dtype=object).copy())
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "stimulus_id_mean",
+                "alignment_anchor_column": "stim_file",
+                "alignment_anchor_value_source": "metadata",
+                "alignment_target_projection": "group_projection",
+                "alignment_n_components": 2,
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "synthetic-epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "stimulus_aligned.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=4,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        alignment_method="procrustes",
+        alignment_anchor_mode="stimulus_id_mean",
+    )
+
+    assert anchor_calls
+    np.testing.assert_array_equal(anchor_calls[0], stim_files[groups != "sub-01"])
+    assert set(results["alignment_anchor_column"]) == {"stim_file"}
+
+
+def test_run_time_resolved_decode_writes_anchor_availability_before_alignment_failure(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    stim_files = np.array(
+        [
+            "stim-a",
+            "stim-b",
+            "stim-a",
+            "stim-b",
+            "stim-c",
+            "stim-d",
+            "stim-c",
+            "stim-d",
+            "stim-e",
+            "stim-f",
+            "stim-e",
+            "stim-f",
+        ],
+        dtype=object,
+    )
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    metadata = pd.DataFrame({"condition": labels, "group": groups, "stim_file": stim_files})
+    epochs = FakeEpochs(data, times, metadata)
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    with pytest.raises(ValueError, match="No common source alignment anchors"):
+        run_time_resolved_decode(
+            epochs_path=tmp_path / "synthetic-epo.fif",
+            dataset_name="synthetic",
+            label_column="condition",
+            group_column="group",
+            outer_test_groups=("sub-01",),
+            out_path=tmp_path / "stimulus_fail.csv",
+            n_splits=3,
+            window_ms=1,
+            step_ms=4,
+            decoder="logistic",
+            emission_mode="uncalibrated",
+            time_decode_backend="sklearn",
+            alignment_method="mcca",
+            alignment_anchor_mode="stimulus_id_mean",
+        )
+
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["dataset"].unique().tolist() == ["synthetic"]
+    assert availability["test_subject"].unique().tolist() == ["sub-01"]
+    assert availability["prefit_status"].unique().tolist() == ["likely_fit_failure"]
+    assert availability["n_common_source_anchors"].unique().tolist() == [0]
+    assert "no_common_source_alignment_anchors" in availability.loc[0, "prefit_failure_reason"]
+
+
+def test_run_time_resolved_decode_passes_target_anchors_for_oracle_stimulus_alignment(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    stim_files = np.tile(np.array(["stim-a", "stim-b", "stim-a", "stim-b"]), 3)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    metadata = pd.DataFrame({"condition": labels, "group": groups, "stim_file": stim_files})
+    epochs = FakeEpochs(data, times, metadata)
+    target_anchor_calls = []
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs.get("target_labels") is None
+        target_anchor_calls.append(np.asarray(kwargs["target_anchor_values"], dtype=object).copy())
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "stimulus_id_mean",
+                "alignment_anchor_column": "stim_file",
+                "alignment_target_projection": "oracle_target_calibrated_alignment",
+                "alignment_oracle_target_calibrated": True,
+                "alignment_debug_upper_bound": True,
+                "alignment_valid_for_benchmark": False,
+                "alignment_target_anchor_values_used": True,
+                "alignment_protocol_note": "debug upper bound only; not valid for benchmark",
+                "alignment_n_components": 2,
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingFeatureDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    run_time_resolved_decode(
+        epochs_path=tmp_path / "synthetic-epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-01",),
+        out_path=tmp_path / "oracle_stimulus_aligned.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=4,
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        alignment_method="procrustes",
+        alignment_anchor_mode="stimulus_id_mean",
+        alignment_target_projection="oracle_target_calibrated_alignment",
+    )
+
+    assert target_anchor_calls
+    np.testing.assert_array_equal(target_anchor_calls[0], stim_files[groups == "sub-01"])
 
 
 def test_outer_test_group_filter_preserves_fold_ids_and_accepts_subject_aliases():

@@ -27,6 +27,7 @@ from neureptrace.openneuro_meg import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OPENNEURO_DECODE_CONFIGS = {
+    "ds000117": "ds000117_face_recognition.yml",
     "ds004276": "ds004276_words.yml",
     "ds006629": "ds006629_singsing.yml",
     "ds004330": "ds004330_object_drawing.yml",
@@ -80,6 +81,10 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
 
     assert "run-name: OpenNeuro MEG LOSO" in workflow
     assert "default: github-hosted" in workflow
+    assert '"ds000117": ("1,2,3", "01,02")' in workflow
+    assert '"ds004276": ("1-3", "all")' in workflow
+    assert '"ds006629": ("1,2,4", "0")' in workflow
+    assert '"ds004330": ("1,2,4", "01,02,03")' in workflow
     assert "GitHub-hosted starts immediately" in workflow
     assert "Cache OpenNeuro raw files on GitHub-hosted runners" in workflow
     assert "Resolve GitHub-hosted OpenNeuro cache keys" in workflow
@@ -131,6 +136,7 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "decoding.source_time_selection=source_oof_classwise_time_weighted_logits" in workflow
     assert "decoding.source_time_selection=source_oof_logit_stacker" in workflow
     assert "decoding.source_time_selection_times=[$RESPONSE_WINDOW_TIMES]" in workflow
+    assert "0.088,0.136,0.184,0.232,0.280" in workflow
     assert "$response_window_mode is produced inside each outer decode fold" in workflow
     assert "resolve-matrix" in workflow
     assert "workflow.outer_test_group_shards_json" in workflow
@@ -143,6 +149,8 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "OPENNEURO_SHARD_MATRIX_RESULT" in workflow
     assert "OUTER_TEST_GROUP_SHARDS_JSON" in workflow
     assert "shard_aggregation_status.json" in workflow
+    assert 'artifact_name.endswith("-shard-aggregate")' in workflow
+    assert 'artifact_name.endswith(f"-shard-{shard}")' in workflow
     assert "--aggregate-out \"$OPENNEURO_AGGREGATE_OUTPUT_DIR\"" in workflow
     assert "-shard-aggregate" in workflow
     assert "OPENNEURO_CONFIG" in workflow
@@ -161,6 +169,16 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
         assert f'"{dataset_id}": "{config_name}"' in workflow
 
 
+def test_openneuro_auxiliary_workflows_use_alignment_valid_smoke_cohorts():
+    safe_cache = (REPO_ROOT / ".github" / "workflows" / "openneuro-meg-loso-safe-cache.yml").read_text(encoding="utf-8")
+    decode_only = (REPO_ROOT / ".github" / "workflows" / "openneuro-meg-decode-only.yml").read_text(encoding="utf-8")
+
+    for workflow in (safe_cache, decode_only):
+        assert '"ds004276":' in workflow
+        assert "1-3" in workflow
+        assert "1,2,4" in workflow
+
+
 def test_openneuro_safe_cache_workflow_reuses_complete_no_download_staging():
     workflow = (REPO_ROOT / ".github" / "workflows" / "openneuro-meg-loso-safe-cache.yml").read_text(encoding="utf-8")
 
@@ -176,6 +194,15 @@ def test_expected_relative_files_include_singsing_raw_and_events():
         "sub-01/meg/sub-01_task-MMNHCS_run-0_events.tsv",
         "sub-02/meg/sub-02_task-MMNHCS_run-0_meg.fif",
         "sub-02/meg/sub-02_task-MMNHCS_run-0_events.tsv",
+    ]
+
+
+def test_expected_relative_files_include_ds000117_session_raw_and_events():
+    assert expected_relative_files("ds000117", subjects="1", runs="1,2") == [
+        "sub-01/ses-meg/meg/sub-01_ses-meg_task-facerecognition_run-01_meg.fif",
+        "sub-01/ses-meg/meg/sub-01_ses-meg_task-facerecognition_run-01_events.tsv",
+        "sub-01/ses-meg/meg/sub-01_ses-meg_task-facerecognition_run-02_meg.fif",
+        "sub-01/ses-meg/meg/sub-01_ses-meg_task-facerecognition_run-02_events.tsv",
     ]
 
 
@@ -357,9 +384,43 @@ def test_ds004330_derives_stimulus_form_and_id():
     assert metadata.loc[0, "stimulus_modality"] == "drawing"
 
 
+def test_ds000117_uses_face_stim_type_labels():
+    metadata = _derive_metadata(
+        DATASET_SPECS["ds000117"],
+        RunFiles(
+            subject="sub-01",
+            run="01",
+            raw_path=Path("sub-01_ses-meg_task-facerecognition_run-01_meg.fif"),
+            events_path=Path("sub-01_ses-meg_task-facerecognition_run-01_events.tsv"),
+        ),
+        pd.DataFrame(
+            {
+                "onset": [24.2, 36.5, 46.0],
+                "stim_type": ["Unfamiliar", "Famous", "Scrambled"],
+                "trigger": [13, 5, 17],
+                "stim_file": ["meg/u032.bmp", "meg/f123.bmp", "meg/s150.bmp"],
+            }
+        ),
+    )
+    filtered = _filter_metadata(
+        metadata,
+        label_column=DATASET_SPECS["ds000117"].default_label_column,
+        include_labels=None,
+        max_events_per_label=None,
+        selection="first",
+        seed=13,
+    )
+
+    assert filtered["condition"].tolist() == ["Unfamiliar", "Famous", "Scrambled"]
+    assert filtered["stimulus_file"].tolist() == ["meg/u032.bmp", "meg/f123.bmp", "meg/s150.bmp"]
+    assert filtered["stimulus_id"].tolist() == ["u032", "f123", "s150"]
+    assert filtered["event_code"].tolist() == ["13", "5", "17"]
+
+
 def test_openneuro_subject_and_path_formatting():
     assert parse_subjects(DATASET_SPECS["ds004276"], "1-2") == (1, 2)
     assert parse_runs(DATASET_SPECS["ds004330"], "1,2,3") == ("01", "02", "03")
+    assert parse_runs(DATASET_SPECS["ds000117"], "1,2") == ("01", "02")
     files = run_files(DATASET_SPECS["ds004276"], Path("root"), 1, None)
     assert files.raw_path == Path("root/sub-001/meg/sub-001_task-words_meg.fif")
     assert files.behavior_path == Path("root/sub-001/beh/sub-001_task-words_beh.tsv")

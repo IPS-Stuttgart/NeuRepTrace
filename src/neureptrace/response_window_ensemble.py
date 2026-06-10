@@ -12,7 +12,7 @@ from neureptrace.observations import stable_hash
 from neureptrace.temporal_model import probability_columns, read_probability_observations
 from neureptrace.temporal_smoothing import metrics_from_probability_observations, smooth_probability_observations
 
-DEFAULT_RESPONSE_TIMES = (0.088, 0.136, 0.184, 0.232)
+DEFAULT_RESPONSE_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
 ENSEMBLE_MODE_CHOICES = (
     "uniform",
     "source_oof_nonnegative",
@@ -51,6 +51,14 @@ def _nearest_times(available_times: np.ndarray, requested_times: tuple[float, ..
     selected = []
     for requested in requested_times:
         selected.append(float(available_times[np.argmin(np.abs(available_times - requested))]))
+    selected_labels = [_time_label(time) for time in selected]
+    if len(set(selected_labels)) != len(selected_labels):
+        requested_labels = "|".join(_time_label(time) for time in requested_times)
+        available_labels = "|".join(_time_label(time) for time in np.sort(available_times))
+        raise ValueError(
+            "Requested response-window times collapse to duplicate decoded time centers. "
+            f"requested={requested_labels}; available={available_labels}; selected={'|'.join(selected_labels)}"
+        )
     return tuple(selected)
 
 
@@ -458,6 +466,7 @@ def run_response_window_ensemble(
             output_time=output_time,
         )
     metrics = metrics_from_probability_observations(ensembled, ece_bins=ece_bins)
+    metrics = _attach_response_window_provenance(metrics, ensembled)
     if out_observations is not None:
         out_observations.parent.mkdir(parents=True, exist_ok=True)
         ensembled.to_csv(out_observations, index=False)
@@ -465,6 +474,22 @@ def run_response_window_ensemble(
         out_metrics.parent.mkdir(parents=True, exist_ok=True)
         metrics.to_csv(out_metrics, index=False)
     return ensembled, metrics
+
+
+def _attach_response_window_provenance(metrics: pd.DataFrame, observations: pd.DataFrame) -> pd.DataFrame:
+    """Carry constant alignment/response-window provenance into metric rows."""
+
+    if metrics.empty:
+        return metrics
+    enriched = metrics.copy()
+    prefixes = ("alignment_", "response_window_")
+    for column in observations.columns:
+        if not column.startswith(prefixes):
+            continue
+        values = observations[column].drop_duplicates()
+        if len(values) == 1:
+            enriched[column] = values.iloc[0]
+    return enriched
 
 
 def _parse_times(text: str) -> tuple[float, ...]:

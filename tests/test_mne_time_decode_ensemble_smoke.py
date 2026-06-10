@@ -141,12 +141,66 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
             ]
         )
         frame.to_csv(kwargs["out_path"], index=False)
+        if kwargs["alignment_method"] != "none":
+            pd.DataFrame(
+                [
+                    {
+                        "dataset": kwargs.get("dataset_name", ""),
+                        "test_subject": decoder,
+                        "alignment_method": kwargs["alignment_method"],
+                        "alignment_anchor_mode": kwargs["alignment_anchor_mode"],
+                        "alignment_anchor_column": kwargs["alignment_anchor_column"],
+                        "sample_mode": kwargs["alignment_anchor_mode"],
+                        "alignment_target_projection": kwargs["alignment_target_projection"],
+                        "alignment_protocol": "strict_source_only",
+                        "n_source_subjects": 2,
+                        "n_source_rows": 20,
+                        "source_anchor_value_source": "decoder_labels",
+                        "n_source_anchor_values": 2,
+                        "n_common_source_anchors": 2,
+                        "source_anchor_rows_total": 20,
+                        "source_anchor_rows_retained": 20,
+                        "source_anchor_rows_dropped": 0,
+                        "estimated_alignment_rows": 4,
+                        "prefit_status": "ok",
+                    }
+                ]
+            ).to_csv(kwargs["out_path"].parent / "alignment_anchor_availability.csv", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "dataset": kwargs.get("dataset_name", ""),
+                        "test_subject": decoder,
+                        "alignment_method": kwargs["alignment_method"],
+                        "sample_mode": kwargs["alignment_anchor_mode"],
+                        "n_source_subjects": 2,
+                        "n_classes": 2,
+                        "n_alignment_rows": 4,
+                        "requested_components": kwargs["alignment_components"],
+                        "actual_components": 4,
+                        "feature_dim": 8,
+                        "decode_feature_dim": 4,
+                        "uses_channel_projection_collapse": False,
+                        "alignment_dimensionality_reduction": True,
+                        "anchor_row_correlation_before": 0.1,
+                        "anchor_row_correlation_after": 0.8,
+                        "source_inner_decoding_before_alignment": 0.5,
+                        "source_inner_decoding_after_alignment": 0.7,
+                        "source_inner_raw_balanced_accuracy": 0.5,
+                        "source_inner_aligned_balanced_accuracy": 0.7,
+                        "source_inner_aligned_minus_raw": 0.2,
+                        "source_inner_validation_type": "strict_source_loso_nearest_centroid_group_projection",
+                        "target_transform_type": "source_group_projection",
+                    }
+                ]
+            ).to_csv(kwargs["out_path"].parent / "alignment_diagnostics.csv", index=False)
         return frame
 
     monkeypatch.setattr("neureptrace.mne_time_decode_ensemble._run_time_resolved_decode", fake_source_decode)
 
     results = run_time_resolved_decode(
         epochs_path=tmp_path / "dummy-epo.fif",
+        dataset_name="ensemble-demo",
         label_column="condition",
         out_path=tmp_path / "ensemble.csv",
         observation_out_path=tmp_path / "observations.csv",
@@ -160,6 +214,13 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         source_time_selection="source_oof_best_time",
         source_time_selection_times=(0.088, 0.184, 0.280),
         source_time_selection_output_time=0.184,
+        alignment_method="mcca",
+        alignment_anchor_mode="class_repetition",
+        alignment_anchor_column="stim_file",
+        alignment_repetition_cap=12,
+        alignment_components=32,
+        alignment_times="same_decode_window",
+        alignment_target_projection="group_projection",
         ensemble_source_decoders=("multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"),
         ensemble_source_temperatures=(1.25, 1.0, 0.8),
         ensemble_score_mode="rank",
@@ -177,14 +238,38 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert all(call["source_time_selection"] == "source_oof_best_time" for call in calls)
     assert all(call["source_time_selection_times"] == (0.088, 0.184, 0.280) for call in calls)
     assert all(call["source_time_selection_output_time"] == 0.184 for call in calls)
+    assert all(call["alignment_method"] == "mcca" for call in calls)
+    assert all(call["alignment_anchor_mode"] == "class_repetition" for call in calls)
+    assert all(call["alignment_anchor_column"] == "stim_file" for call in calls)
+    assert all(call["alignment_repetition_cap"] == 12 for call in calls)
+    assert all(call["alignment_components"] == 32 for call in calls)
+    assert all(call["alignment_times"] == "same_decode_window" for call in calls)
+    assert all(call["alignment_target_projection"] == "group_projection" for call in calls)
     assert results["class_prior_correction"].unique().tolist() == ["train_uniform"]
     assert results["source_calibration"].unique().tolist() == ["temperature_plus_class_bias"]
     assert results["source_time_selection"].unique().tolist() == ["source_oof_best_time"]
+    assert results["alignment_method"].unique().tolist() == ["mcca"]
+    assert results["alignment_anchor_mode"].unique().tolist() == ["class_repetition"]
+    assert results["alignment_anchor_column"].unique().tolist() == ["stim_file"]
+    assert results["alignment_repetition_cap"].unique().tolist() == [12]
+    assert results["alignment_components"].unique().tolist() == [32]
+    assert results["alignment_times"].unique().tolist() == ["same_decode_window"]
+    assert results["alignment_target_projection"].unique().tolist() == ["group_projection"]
     assert results["source_decoders"].unique().tolist() == ["multinomial-logistic-weighted|linear_svm|shrinkage_lda"]
     assert results["ensemble_weights"].unique().tolist() == ["0.333333333333|0.333333333333|0.333333333333"]
     assert results["ensemble_source_temperatures"].unique().tolist() == ["1.25|1|0.8"]
     assert results["ensemble_score_mode"].unique().tolist() == ["rank"]
     assert results["ensemble_source_baseline_debiasing"].unique().tolist() == [True]
     assert results["temporal_mode"].unique().tolist() == ["train_window_pooled"]
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["dataset"].unique().tolist() == ["ensemble-demo"]
+    assert set(diagnostics["test_subject"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}
+    assert diagnostics["actual_components"].unique().tolist() == [4]
+    assert diagnostics["source_inner_aligned_minus_raw"].unique().tolist() == [0.2]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["dataset"].unique().tolist() == ["ensemble-demo"]
+    assert set(availability["test_subject"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}
+    assert availability["prefit_status"].unique().tolist() == ["ok"]
     source_observations = pd.read_csv(tmp_path / "ensemble_source_observations.csv")
     assert set(source_observations["decoder"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}

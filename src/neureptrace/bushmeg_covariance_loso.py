@@ -698,6 +698,7 @@ def run_covariance_loso_subjects(
                 "feature_family": "covariance",
                 "covariance_feature_mode": normalize_covariance_feature_mode(selected.covariance_feature_mode),
                 "label_shuffle_control": bool(label_shuffle_control),
+                "label_shuffle_seed": int(label_shuffle_seed),
             }
             for column in ("participant", "condition", "stimulus_class"):
                 if column in metadata.columns:

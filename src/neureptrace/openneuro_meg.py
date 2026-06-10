@@ -7,7 +7,7 @@ import csv
 import subprocess
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import mne
 import numpy as np
@@ -52,6 +52,19 @@ DATASET_SPECS: dict[str, OpenNeuroMegSpec] = {
         task="MMNHCS",
         runs=("0",),
         default_label_column="trial_type",
+        default_tmin=-0.2,
+        default_tmax=0.8,
+    ),
+    "ds000117": OpenNeuroMegSpec(
+        dataset_id="ds000117",
+        name="face_recognition",
+        default_subjects=tuple(range(1, 17)),
+        subject_width=2,
+        task="facerecognition",
+        runs=("01", "02", "03", "04", "05", "06"),
+        session="meg",
+        run_width=2,
+        default_label_column="stim_type",
         default_tmin=-0.2,
         default_tmax=0.8,
     ),
@@ -416,10 +429,43 @@ def _ds004276_sound_events(events: pd.DataFrame) -> pd.DataFrame:
     return sound_events.reset_index(drop=True) if not sound_events.empty else events
 
 
+def _stimulus_id_from_file(value: object) -> object:
+    if pd.isna(value):
+        return pd.NA
+    text = str(value).strip()
+    if not text:
+        return pd.NA
+    return PurePosixPath(text.replace("\\", "/")).stem
+
+
+def _event_code_value(value: object) -> object:
+    if pd.isna(value):
+        return pd.NA
+    text = str(value).strip()
+    if not text:
+        return pd.NA
+    numeric = pd.to_numeric(pd.Series([text]), errors="coerce").iloc[0]
+    if pd.notna(numeric) and float(numeric).is_integer():
+        return str(int(numeric))
+    return text
+
+
+def _add_ds000117_identity_anchors(metadata: pd.DataFrame) -> pd.DataFrame:
+    if "stim_file" in metadata.columns:
+        metadata["stimulus_file"] = metadata["stim_file"].astype(str)
+        metadata["stimulus_id"] = metadata["stim_file"].map(_stimulus_id_from_file)
+    if "trigger" in metadata.columns:
+        metadata["event_code"] = metadata["trigger"].map(_event_code_value)
+    return metadata
+
+
 def _derive_metadata(spec: OpenNeuroMegSpec, files: RunFiles, events: pd.DataFrame) -> pd.DataFrame:
     metadata = events.copy().reset_index(drop=True)
     if "trial_type" in metadata.columns:
         metadata["trial_type"] = metadata["trial_type"].astype(str)
+
+    if spec.dataset_id == "ds000117":
+        metadata = _add_ds000117_identity_anchors(metadata)
 
     if spec.dataset_id == "ds004276":
         metadata = _ds004276_sound_events(metadata)

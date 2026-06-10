@@ -4,6 +4,7 @@ import csv
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -617,6 +618,7 @@ def run_time_resolved_decode(
     label_column: str,
     out_path: Path,
     *,
+    dataset_name: str | None = None,
     metadata_csv: Path | None = None,
     input_format: str = "mne-epochs",
     fieldtrip_root_path: str | None = None,
@@ -655,6 +657,15 @@ def run_time_resolved_decode(
     source_time_selection: str = "none",
     source_time_selection_times: Sequence[float] | str | None = None,
     source_time_selection_output_time: float = 0.184,
+    alignment_method: str = "none",
+    alignment_anchor_mode: str = "class_mean",
+    alignment_anchor_column: str | None = None,
+    alignment_repetition_cap: int | str | None = 16,
+    alignment_components: int | float | str | None = 64,
+    alignment_times: Sequence[float] | str | None = None,
+    alignment_target_projection: str = "group_projection",
+    alignment_target_calibration_per_anchor: int | str | None = 1,
+    alignment_target_calibration_seed: int = 13,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
 ) -> pd.DataFrame:
@@ -685,6 +696,8 @@ def run_time_resolved_decode(
         raise ValueError("Fold-local normalization currently supports only the sklearn time-decode backend.")
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
+    alignment_target_calibration_seed = int(alignment_target_calibration_seed)
+    dataset_name_value = "" if dataset_name is None else str(dataset_name)
     baseline_window_value = _base._normalize_baseline_window(baseline_window)
     if feature_preprocessor_name == "none" and pca_components is not None:
         raise ValueError(
@@ -711,7 +724,28 @@ def run_time_resolved_decode(
         default=_base.DEFAULT_SOURCE_TIME_SELECTION_TIMES,
     )
     source_time_selection_output_time = float(source_time_selection_output_time)
+    alignment_config = _base.source_alignment_config(
+        method=alignment_method,
+        anchor_mode=alignment_anchor_mode,
+        anchor_column=alignment_anchor_column,
+        repetition_cap=alignment_repetition_cap,
+        components=alignment_components,
+        times=alignment_times,
+        target_projection=alignment_target_projection,
+        target_calibration_per_anchor=alignment_target_calibration_per_anchor,
+        target_calibration_seed=alignment_target_calibration_seed,
+    )
+    _base._require_same_decode_window_alignment(alignment_config)
     outer_test_groups_value = _base._normalize_outer_test_groups(outer_test_groups)
+    if alignment_config.enabled:
+        if group_column is None:
+            raise ValueError("source alignment requires group_column so source subjects can be identified.")
+        if normalized_temporal_train_window is not None:
+            raise ValueError("source alignment currently supports same-time decoding only.")
+        if source_time_selection_name != "none":
+            raise ValueError("source alignment should be combined with posthoc response-window aggregation, not source_time_selection.")
+        if source_calibration_name != "none":
+            raise ValueError("source alignment currently requires source_calibration='none'.")
     if source_time_selection_name != "none" and normalized_temporal_train_window is not None:
         raise ValueError("source_time_selection currently supports same-time decoding only.")
     if source_time_selection_name != "none" and source_calibration_name != "none":
@@ -737,6 +771,22 @@ def run_time_resolved_decode(
     labels = encoder.fit_transform(raw_labels)
     groups = metadata[group_column].to_numpy() if group_column else None
     session_values = metadata["session"].to_numpy() if "session" in metadata.columns else groups
+    alignment_needs_anchor_values = (
+        alignment_config.enabled and alignment_config.method not in _base.SOURCE_ALIGNMENT_UNSUPERVISED_METHODS
+    )
+    alignment_anchor_info = (
+        _base._alignment_anchor_values(
+            metadata,
+            labels,
+            label_column=label_column,
+            anchor_mode=alignment_config.anchor_mode,
+            anchor_column=alignment_config.anchor_column,
+        )
+        if alignment_needs_anchor_values
+        else _base.AlignmentAnchorValues(values=None, column="", source="")
+    )
+    if alignment_needs_anchor_values:
+        alignment_config = replace(alignment_config, anchor_column=alignment_anchor_info.column)
     splitter_name = "stratified-group-kfold" if groups is not None else "stratified-kfold"
     split_id = f"{splitter_name}-{n_splits}"
     if normalized_temporal_train_window is None:
@@ -764,6 +814,7 @@ def run_time_resolved_decode(
             "source_calibration": source_calibration_name,
             "source_time_selection": source_time_selection_name,
             "source_time_selection_times": source_time_selection_time_values,
+            "source_alignment": alignment_config.static_metadata() if alignment_config.enabled else {},
             "outer_test_groups": outer_test_groups_value,
         }
     )
@@ -785,6 +836,7 @@ def run_time_resolved_decode(
         source_calibration=source_calibration_name,
         source_time_selection=source_time_selection_name,
         source_time_selection_times=source_time_selection_time_values,
+        alignment_metadata=alignment_config.static_metadata() if alignment_config.enabled else None,
         label_shuffle_control=label_shuffle_control,
         label_shuffle_seed=label_shuffle_seed,
     )
@@ -794,6 +846,8 @@ def run_time_resolved_decode(
     rows: list[dict] = []
     calibration_rows: list[dict] = []
     observation_rows: list[dict] = []
+    alignment_diagnostic_rows: list[dict[str, object]] = []
+    alignment_anchor_availability_rows: list[dict[str, object]] = []
     all_windows = time_windows(epochs.times, window_ms=window_ms, step_ms=step_ms)
     windows = _base._select_decode_windows(all_windows, normalized_decode_window)
     selected_train_windows = _base._select_temporal_train_windows(all_windows, normalized_temporal_train_window)
@@ -1004,6 +1058,91 @@ def run_time_resolved_decode(
             for time_window in windows:
                 features = _base._features_for_window(fold_data, time_window)
                 start, stop, center = time_window
+                target_split = _base._alignment_target_calibration_split(
+                    labels=labels,
+                    test_idx=test_idx,
+                    alignment_config=alignment_config,
+                    anchor_values=alignment_anchor_info.values,
+                    seed=alignment_target_calibration_seed,
+                    context=(split_id, fold, "foldlocal_same_time", center),
+                )
+                scored_test_idx = target_split.evaluation_indices
+                target_calibration_idx = target_split.calibration_indices
+                test_labels = labels[scored_test_idx]
+                train_feature_matrix = features[train_idx]
+                test_feature_matrix = features[scored_test_idx]
+                alignment_metadata = None
+                if alignment_config.enabled:
+                    train_anchor_values = None if alignment_anchor_info.values is None else alignment_anchor_info.values[train_idx]
+                    oracle_target_labels = (
+                        test_labels
+                        if alignment_config.oracle_target_calibrated and alignment_anchor_info.values is None
+                        else None
+                    )
+                    target_anchor_values = (
+                        None
+                        if alignment_anchor_info.values is None or not alignment_config.oracle_target_calibrated
+                        else alignment_anchor_info.values[scored_test_idx]
+                    )
+                    target_calibration_features = None if target_calibration_idx.size == 0 else features[target_calibration_idx]
+                    target_calibration_labels = (
+                        labels[target_calibration_idx]
+                        if target_calibration_idx.size and alignment_anchor_info.values is None
+                        else None
+                    )
+                    target_calibration_anchor_values = (
+                        alignment_anchor_info.values[target_calibration_idx]
+                        if target_calibration_idx.size and alignment_anchor_info.values is not None
+                        else None
+                    )
+                    availability_row = _base._alignment_anchor_availability_row(
+                        train_labels=train_labels,
+                        train_subject_ids=groups[train_idx],
+                        train_anchor_values=train_anchor_values,
+                        target_labels=oracle_target_labels,
+                        target_anchor_values=target_anchor_values,
+                        target_calibration_labels=target_calibration_labels,
+                        target_calibration_anchor_values=target_calibration_anchor_values,
+                        alignment_config=alignment_config,
+                        dataset_name=dataset_name_value,
+                        test_subject=_base._test_subject_label(groups, test_idx, fallback=fold),
+                        alignment_window_center=center,
+                        alignment_window_size=float(window_ms) / 1000.0,
+                        decode_window_center=center,
+                        decode_window_size=float(window_ms) / 1000.0,
+                    )
+                    alignment_anchor_availability_rows.append(availability_row)
+                    _base._write_alignment_anchor_availability(
+                        out_path.parent / "alignment_anchor_availability.csv",
+                        alignment_anchor_availability_rows,
+                    )
+                    alignment_result = _base.align_train_test_features(
+                        train_features=train_feature_matrix,
+                        train_labels=train_labels,
+                        train_subject_ids=groups[train_idx],
+                        test_features=test_feature_matrix,
+                        target_labels=oracle_target_labels,
+                        train_anchor_values=train_anchor_values,
+                        target_anchor_values=target_anchor_values,
+                        target_calibration_features=target_calibration_features,
+                        target_calibration_labels=target_calibration_labels,
+                        target_calibration_anchor_values=target_calibration_anchor_values,
+                        config=alignment_config,
+                    )
+                    train_feature_matrix = alignment_result.train_features
+                    test_feature_matrix = alignment_result.test_features
+                    alignment_metadata = alignment_result.metadata
+                    alignment_diagnostic_rows.append(
+                        _base._alignment_diagnostic_row(
+                            alignment_result,
+                            dataset_name=dataset_name_value,
+                            test_subject=_base._test_subject_label(groups, test_idx, fallback=fold),
+                            alignment_window_center=center,
+                            alignment_window_size=float(window_ms) / 1000.0,
+                            decode_window_center=center,
+                            decode_window_size=float(window_ms) / 1000.0,
+                        )
+                    )
                 for current_emission_mode in emission_modes:
                     tuning_cv = (
                         make_tuning_cross_validator(train_labels, None if groups is None else groups[train_idx], tuning_cv_splits)
@@ -1021,12 +1160,12 @@ def run_time_resolved_decode(
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
                     )
-                    model.fit(features[train_idx], train_labels)
+                    model.fit(train_feature_matrix, train_labels)
 
                     probabilities = _base._align_probability_columns(
                         predict_emission_probabilities(
                             model,
-                            features[test_idx],
+                            test_feature_matrix,
                             emission_mode=current_emission_mode,
                         ),
                         model=model,
@@ -1082,6 +1221,7 @@ def run_time_resolved_decode(
                         tuning_metadata=tuning_metadata,
                         class_prior_correction=class_prior_correction_name,
                         source_calibration=source_calibration_name,
+                        alignment_metadata=alignment_metadata,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                     )
@@ -1091,7 +1231,7 @@ def run_time_resolved_decode(
                         observation_rows=observation_rows,
                         probabilities=probabilities,
                         test_labels=test_labels,
-                        test_idx=test_idx,
+                        test_idx=scored_test_idx,
                         original_indices=original_indices,
                         session_values=session_values,
                         groups=groups,
@@ -1124,6 +1264,7 @@ def run_time_resolved_decode(
                         tuning_metadata=tuning_metadata,
                         class_prior_correction=class_prior_correction_name,
                         source_calibration_metadata=source_metadata,
+                        alignment_metadata=alignment_metadata,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
                         outer_test_groups=outer_test_groups_value,
@@ -1406,6 +1547,12 @@ def run_time_resolved_decode(
     results = pd.DataFrame(rows)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(out_path, index=False)
+    if alignment_config.enabled:
+        _base._write_alignment_anchor_availability(
+            out_path.parent / "alignment_anchor_availability.csv",
+            alignment_anchor_availability_rows,
+        )
+        _base._write_alignment_diagnostics(out_path.parent / "alignment_diagnostics.csv", alignment_diagnostic_rows)
     if calibration_out_path is not None:
         calibration_out_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(calibration_rows).to_csv(calibration_out_path, index=False)

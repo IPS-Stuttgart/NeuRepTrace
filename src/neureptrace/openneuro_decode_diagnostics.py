@@ -17,6 +17,15 @@ MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 NULL_CHANCE_TOLERANCE = 0.03
 POSITIVE_CHANCE_MARGIN = 0.05
 SUMMARY_PROVENANCE_COLUMNS = (
+    "alignment_method",
+    "alignment_anchor_mode",
+    "alignment_anchor_column",
+    "alignment_repetition_cap",
+    "alignment_components",
+    "alignment_times",
+    "alignment_target_projection",
+    "alignment_target_calibration_per_anchor",
+    "alignment_target_calibration_seed",
     "source_decoders",
     "ensemble_weights",
     "ensemble_source_temperatures",
@@ -360,6 +369,23 @@ def _workflow_quality_row(
     quality_summary_exists = bool(quality_path.is_file())
     n_subjects = stage_summary.get("n_subjects", manifest.get("n_subjects", ""))
     label_shuffle_control = _as_bool(manifest.get("label_shuffle_control", ""))
+    alignment_method = _provenance_value(manifest, summary_provenance, "alignment_method")
+    alignment_anchor_mode = _provenance_value(manifest, summary_provenance, "alignment_anchor_mode")
+    alignment_anchor_column = _provenance_value(manifest, summary_provenance, "alignment_anchor_column")
+    alignment_target_projection = _provenance_value(manifest, summary_provenance, "alignment_target_projection")
+    alignment_enabled = str(alignment_method).strip().lower() not in {"", "none"}
+    normalized_target_projection = str(alignment_target_projection).strip().lower()
+    oracle_alignment = normalized_target_projection == "oracle_target_calibrated_alignment"
+    target_calibrated_alignment = normalized_target_projection == "target_calibrated_alignment"
+    alignment_protocol = (
+        "oracle_target_calibrated_alignment"
+        if oracle_alignment
+        else "target_calibrated_alignment"
+        if target_calibrated_alignment
+        else "strict_source_only"
+        if alignment_enabled
+        else ""
+    )
     quality_decision = _quality_decision(
         decode_summary_exists=decode_summary_exists,
         quality_summary_exists=quality_summary_exists,
@@ -391,6 +417,36 @@ def _workflow_quality_row(
         "label_shuffle_seed": manifest.get("label_shuffle_seed", ""),
         "time_decode_backend": manifest.get("time_decode_backend", ""),
         "source_calibration": _provenance_value(manifest, summary_provenance, "source_calibration"),
+        "alignment_method": alignment_method,
+        "alignment_anchor_mode": alignment_anchor_mode,
+        "alignment_anchor_column": alignment_anchor_column,
+        "alignment_repetition_cap": _provenance_value(manifest, summary_provenance, "alignment_repetition_cap"),
+        "alignment_components": _provenance_value(manifest, summary_provenance, "alignment_components"),
+        "alignment_times": _provenance_value(manifest, summary_provenance, "alignment_times"),
+        "alignment_target_projection": alignment_target_projection,
+        "alignment_target_calibration_per_anchor": _provenance_value(
+            manifest,
+            summary_provenance,
+            "alignment_target_calibration_per_anchor",
+        ),
+        "alignment_target_calibration_seed": _provenance_value(
+            manifest,
+            summary_provenance,
+            "alignment_target_calibration_seed",
+        ),
+        "alignment_strict_source_only": bool(alignment_enabled and not oracle_alignment and not target_calibrated_alignment),
+        "alignment_target_calibrated": bool(target_calibrated_alignment),
+        "alignment_oracle_target_calibrated": bool(oracle_alignment),
+        "alignment_debug_upper_bound": bool(oracle_alignment),
+        "alignment_valid_for_benchmark": bool(not oracle_alignment and not target_calibrated_alignment),
+        "alignment_protocol": alignment_protocol,
+        "alignment_protocol_note": (
+            "debug upper bound only; not valid for benchmark"
+            if oracle_alignment
+            else "uses disjoint target calibration rows; not valid for strict source-only benchmark"
+            if target_calibrated_alignment
+            else ""
+        ),
         "decoder_override": manifest.get("decoder_override", ""),
         "ensemble_weights": _provenance_value(manifest, summary_provenance, "ensemble_weights"),
         "ensemble_source_decoders": _provenance_value(
@@ -458,6 +514,8 @@ def summarize_decode_outputs(output_dir: str | Path) -> tuple[dict[str, Any], pd
     summary_path = decode_dir / "time_decode_summary.csv"
     observations_path = decode_dir / "observations.csv"
     calibration_path = decode_dir / "calibration.csv"
+    alignment_anchor_availability_path = decode_dir / "alignment_anchor_availability.csv"
+    alignment_diagnostics_path = decode_dir / "alignment_diagnostics.csv"
 
     diagnostics: dict[str, Any] = {
         "output_dir": output_dir.as_posix(),
@@ -468,6 +526,8 @@ def summarize_decode_outputs(output_dir: str | Path) -> tuple[dict[str, Any], pd
         "decode_summary": _csv_shape(summary_path),
         "observations": _csv_shape(observations_path),
         "calibration": _csv_shape(calibration_path),
+        "alignment_anchor_availability": _csv_shape(alignment_anchor_availability_path),
+        "alignment_diagnostics": _csv_shape(alignment_diagnostics_path),
         "temporal_smoothing_summary": _csv_shape(decode_dir / "temporal_smoothing" / "time_decode_summary.csv"),
         "temporal_smoothing_observations": _csv_shape(decode_dir / "temporal_smoothing" / "observations.csv"),
     }
@@ -542,6 +602,12 @@ def aggregate_workflow_outputs(
     )
     summary_path = _concat_existing_csvs(source_dirs, "decode/time_decode_summary.csv", decode_dir / "time_decode_summary.csv")
     observations_path = _concat_existing_csvs(source_dirs, "decode/observations.csv", decode_dir / "observations.csv")
+    _concat_existing_csvs(
+        source_dirs,
+        "decode/alignment_anchor_availability.csv",
+        decode_dir / "alignment_anchor_availability.csv",
+    )
+    _concat_existing_csvs(source_dirs, "decode/alignment_diagnostics.csv", decode_dir / "alignment_diagnostics.csv")
 
     best_time = _diagnostics_best_time(source_dirs, diagnostics_best_time)
     if observations_path is not None and summary_path is not None:

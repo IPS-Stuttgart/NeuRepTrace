@@ -113,6 +113,167 @@ def test_subject_baseline_whiten_fit_excludes_test_fold_outlier():
     assert abs(float(fold_local[2, 0, 0])) > abs(float(contaminated[2, 0, 0]))
 
 
+def test_foldlocal_accepts_strict_source_alignment(tmp_path: Path, monkeypatch):
+    rng = np.random.default_rng(23)
+    subjects = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    labels = np.tile(["left", "right"], 6)
+    times = np.array([0.00, 0.01, 0.02, 0.03])
+    data = rng.normal(scale=0.05, size=(len(labels), 2, len(times)))
+    data[labels == "left", 0, 1:3] += 0.9
+    data[labels == "right", 1, 1:3] += 0.9
+    metadata = pd.DataFrame({"condition": labels, "subject": subjects})
+    epochs = FakeEpochs(data, times, metadata)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    observations_out = tmp_path / "foldlocal_alignment_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "epochs.fif",
+        dataset_name="foldlocal-demo",
+        label_column="condition",
+        group_column="subject",
+        out_path=tmp_path / "foldlocal_alignment.csv",
+        n_splits=3,
+        window_ms=20,
+        step_ms=20,
+        max_iter=1000,
+        emission_mode="uncalibrated",
+        normalization="none",
+        alignment_method="procrustes",
+        alignment_anchor_mode="class_mean",
+        alignment_components=4,
+        alignment_times="same_decode_window",
+        observation_out_path=observations_out,
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert results["alignment_method"].unique().tolist() == ["procrustes"]
+    assert results["alignment_anchor_mode"].unique().tolist() == ["class_mean"]
+    assert results["alignment_target_projection"].unique().tolist() == ["group_projection"]
+    assert observations["alignment_method"].unique().tolist() == ["procrustes"]
+    assert observations["alignment_n_source_subjects"].min() == 2
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["dataset"].unique().tolist() == ["foldlocal-demo"]
+    assert diagnostics["alignment_method"].unique().tolist() == ["procrustes"]
+    assert diagnostics["sample_mode"].unique().tolist() == ["class_mean"]
+    assert diagnostics["actual_components"].min() >= 1
+    assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
+    assert diagnostics["alignment_target_projection"].unique().tolist() == ["group_projection"]
+    assert diagnostics["alignment_debug_upper_bound"].unique().tolist() == [False]
+    assert diagnostics["alignment_valid_for_benchmark"].unique().tolist() == [True]
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["dataset"].unique().tolist() == ["foldlocal-demo"]
+    assert availability["prefit_status"].unique().tolist() == ["ok"]
+    assert availability["n_common_source_anchors"].unique().tolist() == [2]
+
+
+def test_foldlocal_accepts_oracle_target_calibrated_alignment(tmp_path: Path, monkeypatch):
+    rng = np.random.default_rng(29)
+    subjects = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    labels = np.tile(["left", "right"], 6)
+    times = np.array([0.00, 0.01, 0.02, 0.03])
+    data = rng.normal(scale=0.05, size=(len(labels), 2, len(times)))
+    data[labels == "left", 0, 1:3] += 0.9
+    data[labels == "right", 1, 1:3] += 0.9
+    metadata = pd.DataFrame({"condition": labels, "subject": subjects})
+    epochs = FakeEpochs(data, times, metadata)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    observations_out = tmp_path / "foldlocal_oracle_alignment_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "epochs.fif",
+        dataset_name="foldlocal-demo",
+        label_column="condition",
+        group_column="subject",
+        out_path=tmp_path / "foldlocal_oracle_alignment.csv",
+        n_splits=3,
+        window_ms=20,
+        step_ms=20,
+        max_iter=1000,
+        emission_mode="uncalibrated",
+        normalization="none",
+        alignment_method="procrustes",
+        alignment_anchor_mode="class_mean",
+        alignment_components=4,
+        alignment_times="same_decode_window",
+        alignment_target_projection="oracle_target_calibrated_alignment",
+        observation_out_path=observations_out,
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert results["alignment_target_projection"].unique().tolist() == ["oracle_target_calibrated_alignment"]
+    assert results["alignment_oracle_target_calibrated"].unique().tolist() == [True]
+    assert results["alignment_debug_upper_bound"].unique().tolist() == [True]
+    assert results["alignment_valid_for_benchmark"].unique().tolist() == [False]
+    assert results["alignment_protocol_note"].unique().tolist() == [
+        "debug upper bound only; not valid for benchmark"
+    ]
+    assert observations["alignment_target_projection"].unique().tolist() == ["oracle_target_calibrated_alignment"]
+    assert observations["alignment_valid_for_benchmark"].unique().tolist() == [False]
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["dataset"].unique().tolist() == ["foldlocal-demo"]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["template_procrustes"]
+    assert diagnostics["alignment_target_projection"].unique().tolist() == ["oracle_target_calibrated_alignment"]
+    assert diagnostics["alignment_target_projection_fit"].unique().tolist() == ["template_procrustes"]
+    assert diagnostics["alignment_target_alignment_rows"].unique().tolist() == [2]
+    assert diagnostics["alignment_target_labels_used"].unique().tolist() == [True]
+    assert diagnostics["alignment_debug_upper_bound"].unique().tolist() == [True]
+    assert diagnostics["alignment_valid_for_benchmark"].unique().tolist() == [False]
+    availability = pd.read_csv(tmp_path / "alignment_anchor_availability.csv")
+    assert availability["target_anchor_values_used"].unique().tolist() == [True]
+    assert availability["target_missing_common_anchor_count"].unique().tolist() == [0]
+
+
+def test_foldlocal_accepts_disjoint_target_calibrated_alignment(tmp_path: Path, monkeypatch):
+    rng = np.random.default_rng(30)
+    subjects = np.repeat(["sub-01", "sub-02", "sub-03"], 6)
+    labels = np.tile(["left", "right"], 9)
+    times = np.array([0.00, 0.01, 0.02, 0.03])
+    data = rng.normal(scale=0.05, size=(len(labels), 2, len(times)))
+    data[labels == "left", 0, 1:3] += 0.9
+    data[labels == "right", 1, 1:3] += 0.9
+    metadata = pd.DataFrame({"condition": labels, "subject": subjects})
+    epochs = FakeEpochs(data, times, metadata)
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    observations_out = tmp_path / "foldlocal_target_calibrated_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "epochs.fif",
+        dataset_name="foldlocal-demo",
+        label_column="condition",
+        group_column="subject",
+        out_path=tmp_path / "foldlocal_target_calibrated.csv",
+        n_splits=3,
+        window_ms=20,
+        step_ms=20,
+        max_iter=1000,
+        emission_mode="uncalibrated",
+        normalization="none",
+        alignment_method="procrustes",
+        alignment_anchor_mode="class_mean",
+        alignment_components=4,
+        alignment_times="same_decode_window",
+        alignment_target_projection="target_calibrated_alignment",
+        alignment_target_calibration_per_anchor=1,
+        alignment_target_calibration_seed=23,
+        observation_out_path=observations_out,
+    )
+    observations = pd.read_csv(observations_out)
+
+    assert results["alignment_target_projection"].unique().tolist() == ["target_calibrated_alignment"]
+    assert results["alignment_target_calibrated"].unique().tolist() == [True]
+    assert results["alignment_oracle_target_calibrated"].unique().tolist() == [False]
+    assert results["alignment_debug_upper_bound"].unique().tolist() == [False]
+    assert results["alignment_valid_for_benchmark"].unique().tolist() == [False]
+    assert results["n_test"].unique().tolist() == [4]
+    assert len(observations) == 4 * len(results)
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["alignment_target_projection"].unique().tolist() == ["target_calibrated_alignment"]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["target_calibrated_template_procrustes"]
+    assert diagnostics["alignment_target_alignment_rows"].unique().tolist() == [2]
+    assert diagnostics["alignment_target_labels_used"].unique().tolist() == [True]
+    assert diagnostics["alignment_target_calibration_seed"].unique().tolist() == [23]
+
+
 def test_foldlocal_source_time_selection_is_inner_source_only(tmp_path: Path, monkeypatch):
     rng = np.random.default_rng(31)
     subjects = np.repeat(["sub-01", "sub-02", "sub-03"], 6)
