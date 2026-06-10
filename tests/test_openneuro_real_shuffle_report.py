@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.loso_observation_diagnostics import write_loso_observation_diagnostics
 from neureptrace.openneuro_real_shuffle_report import write_real_shuffle_report
@@ -32,6 +33,8 @@ def _observation_rows(*, shuffle: bool) -> pd.DataFrame:
                         "true_class": f"class_{true_label}",
                         "predicted_label": predicted,
                         "predicted_class": f"class_{predicted}",
+                        "label_shuffle_control": bool(shuffle),
+                        "label_shuffle_seed": 13 if shuffle else "",
                         "prob_class_0": probabilities[0],
                         "prob_class_1": probabilities[1],
                         "prob_class_2": probabilities[2],
@@ -69,6 +72,9 @@ def test_real_shuffle_report_writes_auditable_outputs(tmp_path: Path) -> None:
     markdown = paths["markdown"].read_text(encoding="utf-8")
 
     assert summary.loc[0, "fixed_balanced_accuracy_real"] > summary.loc[0, "fixed_balanced_accuracy_shuffle"]
+    assert bool(summary.loc[0, "real_label_shuffle_control"]) is False
+    assert bool(summary.loc[0, "shuffle_label_shuffle_control"]) is True
+    assert summary.loc[0, "shuffle_label_shuffle_seed"] == 13
     assert summary.loc[0, "top3_interpretation"] == "automatic_ceiling"
     assert per_subject["fixed_balanced_accuracy_delta"].notna().all()
     assert "## Fixed-Time Real vs Shuffle" in markdown
@@ -78,6 +84,17 @@ def test_real_shuffle_report_writes_auditable_outputs(tmp_path: Path) -> None:
     assert "## Classwise Balanced Recalls" in markdown
     assert "Top-2 is informative" in markdown
     assert "Top-3 is automatic ceiling" in markdown
+
+
+def test_real_shuffle_report_rejects_swapped_artifacts(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True)
+
+    with pytest.raises(ValueError, match="real artifact is marked label_shuffle_control=true"):
+        write_real_shuffle_report(real_dir=shuffle, shuffle_dir=real, out_dir=out, fixed_time=0.184)
 
 
 def test_openneuro_real_vs_shuffle_workflow_uses_locked_defaults() -> None:

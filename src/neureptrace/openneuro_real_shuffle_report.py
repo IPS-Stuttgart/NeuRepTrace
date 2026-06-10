@@ -123,6 +123,53 @@ def _string(row: pd.Series, column: str, default: str = "") -> str:
     return str(row[column])
 
 
+def _as_bool_token(value: object) -> bool:
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"Cannot parse boolean provenance value {value!r}.")
+
+
+def _provenance_values(run: dict[str, object], column: str) -> list[str]:
+    values: list[str] = []
+    for table_name in ("observations", "quality"):
+        table = run.get(table_name)
+        if not isinstance(table, pd.DataFrame) or column not in table.columns:
+            continue
+        values.extend(
+            value
+            for value in table[column].dropna().astype(str).str.strip().drop_duplicates().tolist()
+            if value
+        )
+    return sorted(set(values))
+
+
+def _single_provenance_value(run: dict[str, object], column: str, *, label: str) -> str:
+    values = _provenance_values(run, column)
+    if not values:
+        raise ValueError(f"{label} artifact is missing required {column!r} provenance.")
+    if len(values) != 1:
+        raise ValueError(f"{label} artifact has inconsistent {column!r} provenance values: {values}")
+    return values[0]
+
+
+def _validate_shuffle_provenance(real: dict[str, object], shuffle: dict[str, object]) -> dict[str, object]:
+    real_control = _as_bool_token(_single_provenance_value(real, "label_shuffle_control", label="real"))
+    shuffle_control = _as_bool_token(_single_provenance_value(shuffle, "label_shuffle_control", label="shuffle"))
+    if real_control:
+        raise ValueError("real artifact is marked label_shuffle_control=true; pass the non-shuffled artifact as --real-dir.")
+    if not shuffle_control:
+        raise ValueError("shuffle artifact is not marked label_shuffle_control=true; pass a train-label-shuffle artifact as --shuffle-dir.")
+    return {
+        "real_label_shuffle_control": real_control,
+        "shuffle_label_shuffle_control": shuffle_control,
+        "real_label_shuffle_seed": ",".join(_provenance_values(real, "label_shuffle_seed")),
+        "shuffle_label_shuffle_seed": ",".join(_provenance_values(shuffle, "label_shuffle_seed")),
+    }
+
+
 def _fixed_metric_row(quality: pd.DataFrame, time_course: pd.DataFrame, fixed_time: float) -> pd.Series:
     row = _first_row(quality)
     if "fixed_time" in row and np.isclose(_float(row, "fixed_time"), fixed_time):
@@ -482,7 +529,10 @@ def write_real_shuffle_report(
     shuffle_root = _artifact_root(shuffle_dir)
     real = _load_run(real_root, fixed_time)
     shuffle = _load_run(shuffle_root, fixed_time)
+    shuffle_provenance = _validate_shuffle_provenance(real, shuffle)
     summary = _summary_row(real, shuffle, fixed_time)
+    for column, value in shuffle_provenance.items():
+        summary[column] = value
     real_per_subject = real["per_subject"]
     shuffle_per_subject = shuffle["per_subject"]
     assert isinstance(real_per_subject, pd.DataFrame)
