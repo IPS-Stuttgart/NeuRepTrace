@@ -53,6 +53,31 @@ def test_group_projection_without_target_calibration_warns():
         warn_for_alignment_diagnostics(diagnostics)
 
 
+@pytest.mark.parametrize(
+    "target_projection_kind",
+    [
+        "source_group_projection_target_centered",
+        "group_projection_target_centered",
+        "target_centered_group_projection",
+    ],
+)
+def test_target_centered_group_projection_is_still_group_fallback(target_projection_kind):
+    diagnostics = make_alignment_diagnostics(
+        method="hyperalignment",
+        sample_mode="class_repetition",
+        n_alignment_rows=30,
+        n_components=16,
+        actual_components=16,
+        target_projection_kind=target_projection_kind,
+        target_calibration_rows=0,
+    )
+
+    assert diagnostics.uses_group_projection_fallback
+    assert not diagnostics.has_target_calibration
+    with pytest.warns(AlignmentDiagnosticWarning, match="calibration-free fallback"):
+        warn_for_alignment_diagnostics(diagnostics)
+
+
 def test_target_calibrated_projection_does_not_warn_about_group_fallback():
     diagnostics = make_alignment_diagnostics(
         method="mcca",

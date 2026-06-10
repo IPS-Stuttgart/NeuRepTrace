@@ -137,6 +137,18 @@ def test_alignment_defaults_to_same_decode_window_until_fixed_windows_are_implem
     assert metadata["alignment_window_mode"] == "same_decode_window"
 
 
+def test_alignment_times_accept_metadata_pipe_roundtrip():
+    config = source_alignment_config(
+        method="procrustes",
+        times="0.088|0.136|0.184",
+    )
+    metadata = config.static_metadata()
+
+    assert config.same_decode_window is False
+    assert config.times == (0.088, 0.136, 0.184)
+    assert metadata["alignment_times"] == "0.088|0.136|0.184"
+
+
 def test_oracle_alignment_requires_target_labels():
     train_features, train_labels, train_subjects = _rotated_subject_features()
     with pytest.raises(ValueError, match="requires held-out target labels"):
@@ -226,7 +238,28 @@ def test_target_centered_group_projection_uses_unlabeled_target_mean(method):
     assert centered.metadata["alignment_uses_unlabeled_target_data"] is True
     assert centered.diagnostics["uses_unlabeled_target_data"] is True
     assert centered.diagnostics["target_transform_type"] == "source_group_projection_target_centered"
+    assert (
+        centered.diagnostics["source_inner_validation_type"]
+        == "strict_source_loso_nearest_centroid_target_centered_group_projection"
+    )
     assert not np.allclose(strict.test_features, centered.test_features)
+
+
+def test_metadata_anchor_values_reject_numpy_missing_values():
+    train_features = np.arange(12, dtype=float).reshape(6, 2)
+    train_labels = np.array([0, 1, 2, 0, 1, 2])
+    train_subjects = np.array(["s0", "s0", "s0", "s1", "s1", "s1"], dtype=object)
+    train_anchors = np.array(["a", "b", "c", "a", np.float64("nan"), "c"], dtype=object)
+
+    with pytest.raises(ValueError, match="missing values"):
+        align_train_test_features(
+            train_features=train_features,
+            train_labels=train_labels,
+            train_subject_ids=train_subjects,
+            train_anchor_values=train_anchors,
+            test_features=train_features[:3],
+            config=source_alignment_config(method="mcca", anchor_mode="stimulus_id_mean"),
+        )
 
 
 @pytest.mark.parametrize(
