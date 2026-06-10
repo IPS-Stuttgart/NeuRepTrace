@@ -317,7 +317,7 @@ def prepare_bushmeg_smoke_data(
         if not file.local_path.exists() and not allow_missing:
             attempted = ", ".join(remote_paths)
             details = "; ".join(errors)
-            raise FileNotFoundError(
+            raise RuntimeError(
                 f"Could not download BUSH-MEG participant={file.participant} role={file.role} "
                 f"to {file.local_path}. Tried remote path(s): {attempted}. {details}"
             )

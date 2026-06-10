@@ -28,6 +28,8 @@ class DummyFeatureSet:
     n_channels: int
     n_window_samples: int
     feature_order: str = "channel_time"
+    window_start_s: float | None = None
+    window_stop_s: float | None = None
 
 
 def test_resolved_alignment_window_defaults_to_decoding_window() -> None:
@@ -83,6 +85,101 @@ def test_transform_with_alignment_projection_uses_direct_projection_when_widths_
     np.testing.assert_allclose(transformed, (features - mean) @ projection)
 
 
+def test_transform_with_alignment_projection_keeps_direct_projection_for_same_window_metadata() -> None:
+    feature_set = DummyFeatureSet(
+        np.zeros((2, 4)),
+        np.array([1, 2]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.10,
+        window_stop_s=0.20,
+    )
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+        ]
+    )
+    projection_mean = np.array([1.0, 3.0, 2.0, 4.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=feature_set,
+        projection=projection,
+        projection_feature_mean=projection_mean,
+        projection_feature_set=feature_set,
+    )
+
+    np.testing.assert_allclose(transformed, (features - projection_mean) @ projection)
+
+
+def test_transform_with_alignment_projection_keeps_direct_projection_for_distinct_same_window_metadata() -> None:
+    decode = DummyFeatureSet(
+        np.zeros((2, 4)),
+        np.array([1, 2]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.10,
+        window_stop_s=0.20,
+    )
+    alignment = DummyFeatureSet(
+        np.zeros((2, 4)),
+        np.array([1, 2]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.10,
+        window_stop_s=0.20,
+    )
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+        ]
+    )
+    projection_mean = np.array([1.0, 3.0, 2.0, 4.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=projection_mean,
+        projection_feature_set=alignment,
+    )
+
+    np.testing.assert_allclose(transformed, (features - projection_mean) @ projection)
+
+
+def test_transform_with_alignment_projection_uses_direct_projection_without_timing_metadata() -> None:
+    decode = DummyFeatureSet(np.zeros((2, 4)), np.array([1, 2]), n_channels=2, n_window_samples=2)
+    alignment = DummyFeatureSet(np.zeros((2, 4)), np.array([1, 2]), n_channels=2, n_window_samples=2)
+    features = np.array([[1.0, 2.0, 4.0, 8.0], [2.0, 3.0, 5.0, 9.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [2.0, 0.0],
+            [0.0, 2.0],
+        ]
+    )
+    mean = np.array([0.5, 1.0, 1.5, 2.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=mean,
+        projection_feature_set=alignment,
+    )
+
+    np.testing.assert_allclose(transformed, (features - mean) @ projection)
+
+
 def test_transform_with_alignment_projection_defaults_to_mne_channel_time_order() -> None:
     decode = DummyFeatureSet(np.zeros((1, 4)), np.array([1]), n_channels=2, n_window_samples=2)
     alignment = DummyFeatureSet(np.zeros((1, 6)), np.array([1]), n_channels=2, n_window_samples=3)
@@ -108,7 +205,133 @@ def test_transform_with_alignment_projection_defaults_to_mne_channel_time_order(
         projection_feature_set=alignment,
     )
 
-    np.testing.assert_allclose(transformed, np.array([[3.0, 12.0, 6.0, 16.0]]))
+    # Preserve MNE/channel-major layout after replacing channels with aligned
+    # components: [component0_t0, component0_t1, component1_t0, component1_t1].
+    # The old implementation returned time-major [3, 12, 6, 16].
+    np.testing.assert_allclose(transformed, np.array([[3.0, 6.0, 12.0, 16.0]]))
+
+
+def test_transform_with_alignment_projection_collapses_same_width_different_windows() -> None:
+    decode = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.10,
+        window_stop_s=0.20,
+    )
+    alignment = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.00,
+        window_stop_s=0.10,
+    )
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+        ]
+    )
+    projection_mean = np.array([1.0, 3.0, 2.0, 4.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=projection_mean,
+        projection_feature_set=alignment,
+    )
+
+    np.testing.assert_allclose(transformed, np.array([[4.0, 6.0, 12.0, 15.0]]))
+
+
+def test_transform_with_alignment_projection_keeps_direct_projection_for_distinct_sets_without_timing() -> None:
+    decode = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+    )
+    alignment = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+    )
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+        ]
+    )
+    projection_mean = np.array([1.0, 3.0, 2.0, 4.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=projection_mean,
+        projection_feature_set=alignment,
+    )
+
+    np.testing.assert_allclose(transformed, (features - projection_mean) @ projection)
+
+
+def test_transform_with_alignment_projection_rejects_ambiguous_explicit_cross_window_mean() -> None:
+    decode = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.10,
+        window_stop_s=0.20,
+    )
+    alignment = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.00,
+        window_stop_s=0.10,
+    )
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+        ]
+    )
+
+    with pytest.raises(ValueError, match="feature_mean_set"):
+        transform_with_alignment_projection(
+            np.array([[4.0, 5.0, 7.0, 8.0]]),
+            decode_feature_set=decode,
+            projection=projection,
+            projection_feature_mean=np.array([1.0, 3.0, 2.0, 4.0]),
+            projection_feature_set=alignment,
+            feature_mean=np.array([1.0, 2.0, 3.0, 4.0]),
+        )
+
+    transformed = transform_with_alignment_projection(
+        np.array([[4.0, 5.0, 7.0, 8.0]]),
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=np.array([1.0, 3.0, 2.0, 4.0]),
+        projection_feature_set=alignment,
+        feature_mean=np.array([1.0, 2.0, 3.0, 4.0]),
+        feature_mean_set=decode,
+    )
+
+    np.testing.assert_allclose(transformed, np.array([[5.0, 7.0, 10.5, 13.5]]))
 
 
 def test_transform_with_alignment_projection_supports_explicit_time_channel_order() -> None:
@@ -151,6 +374,97 @@ def test_transform_with_alignment_projection_supports_explicit_time_channel_orde
     np.testing.assert_allclose(transformed, np.array([[3.0, 9.0, 6.0, 12.0]]))
 
 
+def test_transform_with_alignment_projection_infers_alignment_window_for_supplied_mean() -> None:
+    decode = DummyFeatureSet(np.zeros((1, 4)), np.array([1]), n_channels=2, n_window_samples=2)
+    alignment = DummyFeatureSet(np.zeros((1, 6)), np.array([1]), n_channels=2, n_window_samples=3)
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [5.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+            [0.0, 6.0],
+        ]
+    )
+    alignment_mean = np.array([1.0, 3.0, 5.0, 2.0, 4.0, 6.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=np.zeros(6),
+        projection_feature_set=alignment,
+        feature_mean=alignment_mean,
+    )
+
+    np.testing.assert_allclose(transformed, np.array([[3.0, 6.0, 12.0, 16.0]]))
+
+
+def test_transform_with_alignment_projection_accepts_channel_mean_across_windows() -> None:
+    decode = DummyFeatureSet(np.zeros((1, 4)), np.array([1]), n_channels=2, n_window_samples=2)
+    alignment = DummyFeatureSet(np.zeros((1, 6)), np.array([1]), n_channels=2, n_window_samples=3)
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [5.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+            [0.0, 6.0],
+        ]
+    )
+    channel_mean = np.array([1.0, 2.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=np.zeros(6),
+        projection_feature_set=alignment,
+        feature_mean=channel_mean,
+    )
+
+    np.testing.assert_allclose(transformed, np.array([[9.0, 12.0, 20.0, 24.0]]))
+
+
+def test_cross_window_adapter_preserves_channel_time_order_with_multiple_trials() -> None:
+    decode = DummyFeatureSet(np.zeros((2, 4)), np.array([1, 2]), n_channels=2, n_window_samples=2)
+    alignment = DummyFeatureSet(np.zeros((2, 6)), np.array([1, 2]), n_channels=2, n_window_samples=3)
+    features = np.array(
+        [
+            [4.0, 5.0, 7.0, 8.0],
+            [6.0, 7.0, 9.0, 10.0],
+        ]
+    )
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [5.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+            [0.0, 6.0],
+        ]
+    )
+    projection_mean = np.array([1.0, 3.0, 5.0, 2.0, 4.0, 6.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=projection_mean,
+        projection_feature_set=alignment,
+    )
+
+    np.testing.assert_allclose(
+        transformed,
+        np.array([[3.0, 6.0, 12.0, 16.0], [9.0, 12.0, 20.0, 24.0]]),
+    )
+
+
 def test_transform_with_alignment_projection_rejects_invalid_feature_order() -> None:
     decode = DummyFeatureSet(
         np.zeros((1, 4)),
@@ -180,6 +494,21 @@ def test_transform_with_alignment_projection_rejects_incompatible_projection_wid
             np.zeros((1, 4)),
             decode_feature_set=decode,
             projection=np.zeros((5, 2)),
+            projection_feature_mean=np.zeros(6),
+            projection_feature_set=alignment,
+        )
+
+
+def test_transform_with_alignment_projection_rejects_channel_projection_mismatch() -> None:
+    alignment = DummyFeatureSet(np.zeros((1, 6)), np.array([1]), n_channels=2, n_window_samples=3)
+    projection = np.ones((6, 2))
+    bad_decode = DummyFeatureSet(np.zeros((1, 9)), np.array([1]), n_channels=3, n_window_samples=3)
+
+    with pytest.raises(ValueError, match="projection rows"):
+        transform_with_alignment_projection(
+            np.zeros((1, 9)),
+            decode_feature_set=bad_decode,
+            projection=projection,
             projection_feature_mean=np.zeros(6),
             projection_feature_set=alignment,
         )

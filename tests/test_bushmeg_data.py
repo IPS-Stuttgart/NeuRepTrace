@@ -91,6 +91,20 @@ def test_prepare_bushmeg_smoke_data_tries_discovered_remote_path(tmp_path, monke
     assert files[0].exists
 
 
+def test_prepare_bushmeg_smoke_data_reports_missing_download_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("BUSHMEG_WEBDAV_URL", "https://example.invalid/data")
+    monkeypatch.setenv("BUSHMEG_DATA_KEY", "user")
+    monkeypatch.setenv("BUSHMEG_DATA_PASSWORD", "password")
+
+    def fail_download(**_kwargs):
+        raise FileNotFoundError("not available")
+
+    monkeypatch.setattr("neureptrace.bushmeg_data._download_webdav_file", fail_download)
+
+    with pytest.raises(RuntimeError, match="Part2Data.mat"):
+        prepare_bushmeg_smoke_data(tmp_path, participants="2", roles=("main",), max_files=1)
+
+
 def test_expected_bushmeg_files_honors_max_files(tmp_path):
     files = expected_bushmeg_files(tmp_path, participants="1-2", roles=("main", "cue"), max_files=2)
 

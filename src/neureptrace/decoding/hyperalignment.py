@@ -30,6 +30,7 @@ class SubjectHyperalignmentProjection:
     feature_mean: np.ndarray
     projection: np.ndarray
     n_alignment_rows: int
+    template_mean: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,12 @@ class HyperalignmentModel:
             raise KeyError(f"Unknown hyperalignment subject {subject_id!r}. Fitted subjects: {fitted}.") from exc
         return transform_with_projection(features, projection)
 
-    def transform_group(self, features: Sequence[Sequence[float]] | np.ndarray, *, feature_mean: Sequence[float] | np.ndarray | None = None) -> np.ndarray:
+    def transform_group(
+        self,
+        features: Sequence[Sequence[float]] | np.ndarray,
+        *,
+        feature_mean: Sequence[float] | np.ndarray | None = None,
+    ) -> np.ndarray:
         if self.group_projection is None or self.group_feature_mean is None:
             raise ValueError("A group projection is unavailable because fitted subjects have incompatible feature dimensions.")
         matrix = _feature_matrix(features, name="features")
@@ -70,6 +76,49 @@ class ClassAlignment:
     n_repetitions_per_class: int | None
     repetition_selection: str | None = None
     repetition_seed: int | None = None
+    repetition_offsets_by_class: Mapping[int, np.ndarray] | None = None
+
+    @property
+    def n_alignment_rows(self) -> int:
+        """Number of row anchors supplied to the common-space fit."""
+
+        row_counts = {np.asarray(matrix).shape[0] for matrix in self.aligned_by_subject.values()}
+        if not row_counts:
+            return 0
+        if len(row_counts) != 1:
+            raise ValueError(f"All subject alignment matrices must have the same row count, got {sorted(row_counts)}.")
+        return int(next(iter(row_counts)))
+
+    @property
+    def n_classes(self) -> int:
+        """Number of class labels used to build the alignment anchors."""
+
+        return int(np.asarray(self.classes).size)
+
+    @property
+    def max_centered_rank(self) -> int:
+        """Maximum rank available after centering the alignment anchors."""
+
+        return max(self.n_alignment_rows - 1, 0)
+
+    @property
+    def low_rank_warning(self) -> str | None:
+        """Human-readable warning for class-mean anchor rank collapse."""
+
+        if self.sample_mode == "class_mean" and self.n_classes <= 3:
+            return (
+                f"class_mean alignment has only {self.n_classes} class anchors; "
+                f"after centering, at most {self.max_centered_rank} common-space components are identifiable. "
+                "Use richer anchors such as class_repetition, pseudotrials, stimulus identity, "
+                "or target calibration before concluding alignment is ineffective."
+            )
+        return None
+
+    @property
+    def selected_offsets_by_class(self) -> Mapping[int, np.ndarray] | None:
+        """Backward-compatible alias for stored class-repetition offsets."""
+
+        return self.repetition_offsets_by_class
 
 
 def fit_hyperalignment(
@@ -78,6 +127,7 @@ def fit_hyperalignment(
     n_components: int | float = 64,
     n_iterations: int = 10,
     template_tolerance: float = 1e-8,
+    rank_tolerance: float = 1e-10,
 ) -> HyperalignmentModel:
     """Fit an iterative Procrustes common-space model from row-aligned matrices."""
 
@@ -91,13 +141,14 @@ def fit_hyperalignment(
     n_rows = _check_common_alignment_rows(matrices)
     if n_rows < 2:
         raise ValueError("Hyperalignment requires at least two aligned rows per subject.")
-    requested = _requested_component_count(n_components)
-    actual = min(requested, n_rows - 1, *(matrix.shape[1] for matrix in matrices.values()))
-    if actual < 1:
-        raise ValueError("No hyperalignment components are available.")
-
-    means = {sid: np.mean(matrix, axis=0) for sid, matrix in matrices.items()}
+    means = {sid: np.mean(matrices[sid], axis=0) for sid in subject_ids}
     centered = {sid: matrices[sid] - means[sid] for sid in subject_ids}
+    requested = _requested_component_count(n_components)
+    common_rank = _common_centered_rank(centered, rank_tolerance=rank_tolerance)
+    actual = min(requested, common_rank)
+    if actual < 1:
+        raise ValueError("No hyperalignment components are available after centering.")
+
     projections = {sid: _initial_projection(centered[sid], actual) for sid in subject_ids}
     template = _normalize_template(np.mean(np.stack([centered[sid] @ projections[sid] for sid in subject_ids], axis=0), axis=0))
 
@@ -134,21 +185,32 @@ def fit_hyperalignment(
 def fit_projection_to_hyperalignment(
     features: Sequence[Sequence[float]] | np.ndarray,
     *,
-    template: Sequence[Sequence[float]] | np.ndarray,
+    template: HyperalignmentModel | Sequence[Sequence[float]] | np.ndarray,
 ) -> SubjectHyperalignmentProjection:
-    """Fit one subject projection to an existing template from labeled anchors."""
+    """Fit one subject projection to an existing template from labeled anchors.
+
+    ``template`` may be either a fitted :class:`HyperalignmentModel` or an
+    explicit row-aligned template matrix.  Accepting the fitted model mirrors the
+    M-CCA target-calibration helper and avoids callers accidentally passing a
+    source projection matrix or rebuilding a template with inconsistent rows.
+    """
 
     matrix = _feature_matrix(features, name="features")
-    template_matrix = _feature_matrix(template, name="template")
+    if isinstance(template, HyperalignmentModel):
+        template_matrix = _feature_matrix(template.template, name="template.template")
+    else:
+        template_matrix = _feature_matrix(template, name="template")
     if matrix.shape[0] != template_matrix.shape[0]:
         raise ValueError(f"features and template need the same row count: {matrix.shape[0]} != {template_matrix.shape[0]}.")
     mean = np.mean(matrix, axis=0)
-    projection = _orthogonal_procrustes_projection(matrix - mean, template_matrix)
+    template_mean = np.mean(template_matrix, axis=0)
+    projection = _orthogonal_procrustes_projection(matrix - mean, template_matrix - template_mean)
     return SubjectHyperalignmentProjection(
         subject_id="target",
         feature_mean=mean,
         projection=projection,
         n_alignment_rows=matrix.shape[0],
+        template_mean=template_mean,
     )
 
 
@@ -159,7 +221,32 @@ def transform_with_projection(
     matrix = _feature_matrix(features, name="features")
     if matrix.shape[1] != projection.projection.shape[0]:
         raise ValueError(f"features column count does not match projection: {matrix.shape[1]} != {projection.projection.shape[0]}.")
-    return (matrix - projection.feature_mean) @ projection.projection
+    transformed = (matrix - projection.feature_mean) @ projection.projection
+    if projection.template_mean is not None:
+        transformed = _add_template_mean(transformed, projection.template_mean)
+    return transformed
+
+
+def _add_template_mean(
+    transformed: Sequence[Sequence[float]] | np.ndarray,
+    template_mean: Sequence[float] | np.ndarray,
+) -> np.ndarray:
+    """Add a common-space template mean to projected hyperalignment rows."""
+
+    matrix = _feature_matrix(transformed, name="transformed")
+    mean = np.asarray(template_mean, dtype=float).ravel()
+    if mean.size == 0:
+        raise ValueError("template_mean must contain at least one value.")
+    if not np.all(np.isfinite(mean)):
+        raise ValueError("template_mean contains non-finite values.")
+    if matrix.shape[1] == mean.shape[0]:
+        return matrix + mean
+    if matrix.shape[1] % mean.shape[0] == 0:
+        return matrix + np.tile(mean, matrix.shape[1] // mean.shape[0])
+    raise ValueError(
+        "transformed column count must match or be a multiple of the template width: "
+        f"{matrix.shape[1]} vs {mean.shape[0]}."
+    )
 
 
 def class_alignment_matrices(
@@ -193,10 +280,18 @@ def class_alignment_matrices(
         repetitions = None
         normalized_selection = None
         normalized_seed = None
+        repetition_offsets = None
     else:
         repetitions = _common_repetition_count(labels, classes, requested=n_repetitions_per_class)
         normalized_selection = normalize_class_limit_selection(repetition_selection)
         normalized_seed = normalize_class_limit_seed(repetition_seed)
+        repetition_offsets = _common_repetition_offsets(
+            labels,
+            classes,
+            repetitions,
+            selection=normalized_selection,
+            seed=normalized_seed,
+        )
         aligned = {
             sid: _class_repetition_matrix(
                 features[sid],
@@ -205,6 +300,7 @@ def class_alignment_matrices(
                 repetitions,
                 selection=normalized_selection,
                 seed=normalized_seed,
+                selected_offsets_by_class=repetition_offsets,
             )
             for sid in subject_ids
         }
@@ -215,6 +311,7 @@ def class_alignment_matrices(
         n_repetitions_per_class=repetitions,
         repetition_selection=normalized_selection,
         repetition_seed=normalized_seed,
+        repetition_offsets_by_class=repetition_offsets,
     )
 
 
@@ -229,6 +326,7 @@ def fit_class_hyperalignment(
     n_components: int | float = 64,
     n_iterations: int = 10,
     template_tolerance: float = 1e-8,
+    rank_tolerance: float = 1e-10,
 ) -> tuple[HyperalignmentModel, ClassAlignment]:
     alignment = class_alignment_matrices(
         features_by_subject,
@@ -243,6 +341,7 @@ def fit_class_hyperalignment(
         n_components=n_components,
         n_iterations=n_iterations,
         template_tolerance=template_tolerance,
+        rank_tolerance=rank_tolerance,
     )
     return model, alignment
 
@@ -274,7 +373,37 @@ def _average_projection(projections: Mapping[Hashable, SubjectHyperalignmentProj
         return None, None
     mean = np.mean(np.stack([projection.feature_mean for projection in projections.values()], axis=0), axis=0)
     matrix = np.mean(np.stack([projection.projection for projection in projections.values()], axis=0), axis=0)
-    return mean, matrix
+    return mean, _orthonormalized_columns(matrix)
+
+
+def _orthonormalized_columns(matrix: np.ndarray) -> np.ndarray:
+    """Return the closest semi-orthogonal matrix with the same shape.
+
+    The source-only held-out-subject fallback applies an across-source average
+    projection.  A raw arithmetic mean of Procrustes maps is generally not itself
+    semi-orthogonal and can shrink projected target variance.  The polar factor
+    preserves the averaged orientation while keeping the transform well scaled.
+    """
+
+    u, _singular_values, vt = np.linalg.svd(matrix, full_matrices=False)
+    return u @ vt
+
+
+def _common_centered_rank(centered_by_subject: Mapping[Hashable, np.ndarray], *, rank_tolerance: float) -> int:
+    """Return the common numerical rank available across centered anchors."""
+
+    if not centered_by_subject:
+        return 0
+    return min(_numerical_matrix_rank(matrix, rank_tolerance=rank_tolerance) for matrix in centered_by_subject.values())
+
+
+def _numerical_matrix_rank(matrix: np.ndarray, *, rank_tolerance: float) -> int:
+    singular_values = np.linalg.svd(matrix, compute_uv=False)
+    if singular_values.size == 0:
+        return 0
+    scale = max(float(np.max(singular_values)), 1.0)
+    threshold = max(float(rank_tolerance), float(rank_tolerance) * scale)
+    return int(np.sum(singular_values > threshold))
 
 
 def _class_mean_matrix(features: np.ndarray, labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
@@ -289,21 +418,56 @@ def _class_repetition_matrix(
     *,
     selection: str = DEFAULT_CLASS_LIMIT_SELECTION,
     seed: int | str | None = DEFAULT_CLASS_LIMIT_SEED,
+    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None = None,
 ) -> np.ndarray:
     rows = []
     for class_position, class_label in enumerate(classes):
         class_features = features[labels == class_label]
         if class_features.shape[0] < repetitions:
             raise ValueError(f"Class {class_label!r} has only {class_features.shape[0]} repetitions, need {repetitions}.")
-        selected = select_class_limited_indices(
-            np.zeros(class_features.shape[0], dtype=int),
+        if selected_offsets_by_class is None:
+            selected = select_class_limited_indices(
+                np.zeros(class_features.shape[0], dtype=int),
+                repetitions,
+                selection=selection,
+                seed=seed,
+                seed_context=class_position,
+            )
+        else:
+            selected = np.asarray(selected_offsets_by_class[class_position], dtype=int)
+            if selected.ndim != 1:
+                raise ValueError("selected repetition offsets must be one-dimensional.")
+            if selected.size != repetitions:
+                raise ValueError(f"selected repetition offsets must contain {repetitions} entries, got {selected.size}.")
+            if selected.size and (int(np.min(selected)) < 0 or int(np.max(selected)) >= class_features.shape[0]):
+                raise ValueError(f"selected repetition offsets for class {class_label!r} are outside the available repetitions.")
+        rows.extend(class_features[selected])
+    return np.vstack(rows)
+
+
+def _common_repetition_offsets(
+    labels_by_subject: Mapping[Hashable, np.ndarray],
+    classes: np.ndarray,
+    repetitions: int,
+    *,
+    selection: str,
+    seed: int | str | None,
+) -> dict[int, np.ndarray]:
+    """Sample one common set of within-class offsets for all subjects."""
+
+    offsets = {}
+    for class_position, class_label in enumerate(classes):
+        available = min(int(np.sum(labels == class_label)) for labels in labels_by_subject.values())
+        if available < repetitions:
+            raise ValueError(f"Class {class_label!r} has only {available} common repetitions, need {repetitions}.")
+        offsets[class_position] = select_class_limited_indices(
+            np.zeros(available, dtype=int),
             repetitions,
             selection=selection,
             seed=seed,
             seed_context=class_position,
         )
-        rows.extend(class_features[selected])
-    return np.vstack(rows)
+    return offsets
 
 
 def _common_classes(labels_by_subject: Mapping[Hashable, np.ndarray]) -> np.ndarray:
@@ -344,9 +508,23 @@ def _check_subject_keys(features_by_subject, labels_by_subject) -> None:
 def _requested_component_count(n_components: int | float) -> int:
     if n_components == float("inf"):
         return np.iinfo(np.int32).max
-    requested = int(n_components)
+
+    try:
+        value = float(n_components)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_components must be a positive integer component count or infinity.") from exc
+
+    if not np.isfinite(value):
+        raise ValueError("n_components must be a positive integer component count or infinity.")
+    if not value.is_integer():
+        raise ValueError(
+            "n_components must be an integer component count or infinity; "
+            "fractional variance-ratio requests are not supported for hyperalignment components."
+        )
+
+    requested = int(value)
     if requested < 1:
-        raise ValueError("n_components must be positive or infinity.")
+        raise ValueError("n_components must be a positive integer component count or infinity.")
     return requested
 
 

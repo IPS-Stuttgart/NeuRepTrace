@@ -396,6 +396,7 @@ jobs:
                   else:
                       max_events_arg = f"--max-events-per-label {max_events}"
                   runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "")
+                  no_download = os.environ.get("NO_DOWNLOAD", "").lower() == "true"
                   dataset_cache_root = (
                       Path("/home/github-runner/.cache/datasets")
                       if runner_environment == "self-hosted"
@@ -442,7 +443,7 @@ jobs:
                       "runner_environment": runner_environment or "unknown",
                       "data_root": data_root.as_posix(),
                       "staged_root": staged_root.as_posix(),
-                      "stage_overwrite": runner_environment == "self-hosted",
+                      "stage_overwrite": runner_environment == "self-hosted" and not no_download,
                       "output_dir": output_dir.as_posix(),
                       "artifact_name": artifact_name,
                       "max_events_per_label": max_events,
