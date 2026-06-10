@@ -2677,8 +2677,6 @@ def run_bushmeg_source_loso(
                 "probability_true_class": float(probabilities[row_idx, true_label]),
                 "confidence": float(np.max(probabilities[row_idx])),
                 "is_correct": bool(predicted_label == true_label),
-                "label_shuffle_control": bool(label_shuffle_control),
-                "label_shuffle_seed": int(label_shuffle_seed),
             }
             for column in ("participant", "condition", "stimulus_class"):
                 if column in metadata.columns:
@@ -2735,8 +2733,6 @@ def run_bushmeg_source_loso(
             "alignment_diagnostics_csv": str(alignment_diagnostics_out) if alignment_config.enabled else "",
             "alignment_target_labels_used": bool(alignment_config.oracle_target_calibrated),
             "alignment_target_anchor_values_used": False,
-            "label_shuffle_control": bool(label_shuffle_control),
-            "label_shuffle_seed": int(label_shuffle_seed),
             "cue_source_weighting_config": {} if cue_source_weights is None else dict(cue_source_weights.config or {}),
             "random_seed": DEFAULT_RANDOM_SEED,
         },
