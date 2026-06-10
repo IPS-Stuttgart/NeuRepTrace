@@ -232,3 +232,24 @@ def test_alignment_compare_rejects_mixed_alignment_metadata(tmp_path: Path):
 
     with pytest.raises(ValueError, match="inconsistent 'alignment_target_projection'"):
         run_alignment_comparison([artifacts_root], out_dir=tmp_path / "comparison", fixed_time=0.184)
+
+
+def test_alignment_compare_respects_explicit_invalid_benchmark_flag(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    output = _write_alignment_artifact(
+        artifacts_root,
+        "invalid-strict-looking",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.80,
+    )
+    summary_path = output / "decode" / "time_decode_summary.csv"
+    summary = pd.read_csv(summary_path)
+    summary["alignment_valid_for_benchmark"] = False
+    summary.to_csv(summary_path, index=False)
+
+    written = run_alignment_comparison([artifacts_root], out_dir=tmp_path / "comparison", fixed_time=0.184)
+
+    variants = pd.read_csv(written["variant_summary"])
+    assert variants["alignment_target_projection"].unique().tolist() == ["group_projection"]
+    assert variants["alignment_valid_for_benchmark"].unique().tolist() == [False]

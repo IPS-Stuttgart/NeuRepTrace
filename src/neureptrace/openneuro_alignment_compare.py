@@ -261,6 +261,10 @@ def summarize_alignment_variant(
     )
     oracle = target_projection == ORACLE_TARGET_PROJECTION
     target_calibrated = target_projection == TARGET_CALIBRATED_TARGET_PROJECTION
+    explicit_valid_text = _single_unique(summary, "alignment_valid_for_benchmark", artifact=artifact_name)
+    explicit_valid = None if explicit_valid_text == "" else _as_bool(explicit_valid_text)
+    projection_valid = bool(not oracle and not target_calibrated)
+    valid_for_benchmark = projection_valid if explicit_valid is None else bool(projection_valid and explicit_valid)
     row = {
         "output_dir": output.as_posix(),
         "artifact_name": artifact_name,
@@ -279,7 +283,7 @@ def summarize_alignment_variant(
         "alignment_target_projection": target_projection,
         "alignment_target_calibrated": target_calibrated,
         "alignment_oracle_target_calibrated": oracle,
-        "alignment_valid_for_benchmark": bool(not oracle and not target_calibrated),
+        "alignment_valid_for_benchmark": valid_for_benchmark,
         "identity_anchor": anchor_mode in IDENTITY_ANCHOR_MODES,
         "class_repetition_anchor": anchor_mode == CLASS_REPETITION_ANCHOR,
         "time_decode_summary_rows": int(len(summary)),
