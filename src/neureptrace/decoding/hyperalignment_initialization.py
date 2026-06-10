@@ -18,6 +18,7 @@ from neureptrace.decoding.hyperalignment import (
     SubjectHyperalignmentProjection,
     _average_projection,
     _check_common_alignment_rows,
+    _common_centered_rank,
     _feature_matrix,
     _initial_projection,
     _normalize_template,
@@ -28,6 +29,7 @@ from neureptrace.decoding.hyperalignment import (
     fit_projection_to_hyperalignment,
     transform_with_projection,
 )
+from neureptrace.decoding.mcca_target import class_alignment_matrix
 from neureptrace.decoding.sampling import DEFAULT_CLASS_LIMIT_SEED, DEFAULT_CLASS_LIMIT_SELECTION
 
 HYPERALIGNMENT_INITIALIZATION_MODES = ("pca", "mean")
@@ -40,6 +42,7 @@ def fit_hyperalignment(
     n_iterations: int = 10,
     template_tolerance: float = 1e-8,
     initialization: str = "pca",
+    rank_tolerance: float = 1e-10,
 ) -> HyperalignmentModel:
     """Fit Procrustes hyperalignment with a selectable template initialization.
 
@@ -56,12 +59,14 @@ def fit_hyperalignment(
             n_components=n_components,
             n_iterations=n_iterations,
             template_tolerance=template_tolerance,
+            rank_tolerance=rank_tolerance,
         )
     return _fit_mean_initialized_hyperalignment(
         aligned_by_subject,
         n_components=n_components,
         n_iterations=n_iterations,
         template_tolerance=template_tolerance,
+        rank_tolerance=rank_tolerance,
     )
 
 
@@ -77,6 +82,7 @@ def fit_class_hyperalignment(
     n_iterations: int = 10,
     template_tolerance: float = 1e-8,
     initialization: str = "pca",
+    rank_tolerance: float = 1e-10,
 ) -> tuple[HyperalignmentModel, ClassAlignment]:
     """Build class anchors and fit initialized Procrustes hyperalignment."""
 
@@ -94,6 +100,7 @@ def fit_class_hyperalignment(
         n_iterations=n_iterations,
         template_tolerance=template_tolerance,
         initialization=initialization,
+        rank_tolerance=rank_tolerance,
     )
     return model, alignment
 
@@ -116,6 +123,7 @@ def _fit_mean_initialized_hyperalignment(
     n_components: int | float,
     n_iterations: int,
     template_tolerance: float,
+    rank_tolerance: float,
 ) -> HyperalignmentModel:
     if len(aligned_by_subject) < 2:
         raise ValueError("Hyperalignment requires at least two subjects.")
@@ -132,14 +140,20 @@ def _fit_mean_initialized_hyperalignment(
     if len(feature_dims) != 1:
         raise ValueError("Mean hyperalignment initialization requires all subjects to have the same feature dimension.")
 
-    requested = _requested_component_count(n_components)
-    actual = min(requested, n_rows - 1, next(iter(feature_dims)))
-    if actual < 1:
-        raise ValueError("No hyperalignment components are available.")
-
     means = {subject_id: np.mean(matrix, axis=0) for subject_id, matrix in matrices.items()}
     centered = {subject_id: matrices[subject_id] - means[subject_id] for subject_id in subject_ids}
     mean_centered = np.mean(np.stack([centered[subject_id] for subject_id in subject_ids], axis=0), axis=0)
+
+    requested = _requested_component_count(n_components)
+    common_rank = _common_centered_rank(centered, rank_tolerance=rank_tolerance)
+    mean_rank = _common_centered_rank({"grand_mean": mean_centered}, rank_tolerance=rank_tolerance)
+    actual = min(requested, common_rank, mean_rank)
+    if actual < 1:
+        raise ValueError(
+            "No mean-initialized hyperalignment components are available after centering. "
+            "The grand-mean anchor template is rank deficient; use PCA initialization or richer anchors."
+        )
+
     mean_projection = _initial_projection(mean_centered, actual)
     template = _normalize_template(mean_centered @ mean_projection)
     projections = {subject_id: _orthogonal_procrustes_projection(centered[subject_id], template) for subject_id in subject_ids}
@@ -182,6 +196,7 @@ __all__ = [
     "ClassAlignment",
     "HyperalignmentModel",
     "SubjectHyperalignmentProjection",
+    "class_alignment_matrix",
     "class_alignment_matrices",
     "fit_class_hyperalignment",
     "fit_hyperalignment",

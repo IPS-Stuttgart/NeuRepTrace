@@ -3,9 +3,14 @@ import pytest
 
 from neureptrace.decoding.hyperalignment_initialization import (
     HYPERALIGNMENT_INITIALIZATION_MODES,
+    class_alignment_matrix,
+    class_alignment_matrices,
     fit_class_hyperalignment,
     fit_hyperalignment,
+    fit_projection_to_hyperalignment,
+    transform_with_projection,
 )
+from neureptrace.decoding.mcca_target import class_alignment_matrix as target_class_alignment_matrix
 
 
 def _aligned_subjects():
@@ -67,6 +72,108 @@ def test_class_hyperalignment_accepts_mean_initialization():
     _assert_orthonormal_columns(model.group_projection)
 
 
+def test_hyperalignment_class_repetition_uses_common_offsets_when_counts_differ():
+    features = {
+        "a": np.array([[0.0], [1.0], [2.0], [3.0], [100.0], [101.0], [102.0], [103.0]]),
+        "b": np.array([[10.0], [11.0], [12.0], [13.0], [14.0], [110.0], [111.0], [112.0], [113.0], [114.0]]),
+    }
+    labels = {
+        "a": np.array([1, 1, 1, 1, 2, 2, 2, 2]),
+        "b": np.array([1, 1, 1, 1, 1, 2, 2, 2, 2, 2]),
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_repetition", n_repetitions_per_class=2)
+
+    assert alignment.repetition_offsets_by_class is not None
+    assert np.allclose(
+        alignment.aligned_by_subject["b"].ravel() - alignment.aligned_by_subject["a"].ravel(),
+        np.full(alignment.aligned_by_subject["a"].shape[0], 10.0),
+    )
+
+
+def test_target_hyperalignment_projection_preserves_nonzero_template_mean() -> None:
+    features = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+        ]
+    )
+    rotation = np.array([[0.0, -1.0], [1.0, 0.0]])
+    template_offset = np.array([10.0, -3.0])
+    template = features @ rotation + template_offset
+
+    projection = fit_projection_to_hyperalignment(features, template=template)
+    transformed = transform_with_projection(features, projection)
+
+    np.testing.assert_allclose(np.mean(transformed, axis=0), np.mean(template, axis=0), atol=1e-10)
+    np.testing.assert_allclose(
+        transformed - np.mean(transformed, axis=0, keepdims=True),
+        template - np.mean(template, axis=0, keepdims=True),
+        atol=1e-10,
+    )
+
+
+def test_target_hyperalignment_projection_accepts_model_template() -> None:
+    aligned = _aligned_subjects()
+    model = fit_hyperalignment(aligned, n_components=3, n_iterations=2)
+
+    projection = fit_projection_to_hyperalignment(aligned["s1"], template=model)
+    transformed = transform_with_projection(aligned["s1"], projection)
+
+    assert transformed.shape == model.template.shape
+    np.testing.assert_allclose(np.mean(transformed, axis=0), np.mean(model.template, axis=0), atol=1e-10)
+
+
+def test_target_hyperalignment_exports_target_class_alignment_matrix() -> None:
+    assert class_alignment_matrix is target_class_alignment_matrix
+
+
+def test_hyperalignment_caps_components_to_common_centered_rank():
+    subjects = {
+        "s1": np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]),
+        "s2": np.array([[0.0, 1.0], [1.0, 1.0], [2.0, 1.0]]),
+    }
+
+    model = fit_hyperalignment(subjects, n_components=8, n_iterations=2)
+
+    assert model.n_components == 1
+    assert model.template.shape == (3, 1)
+
+
+def test_hyperalignment_rejects_zero_centered_rank():
+    subjects = {
+        "s1": np.ones((3, 2)),
+        "s2": np.ones((3, 2)) * 2.0,
+    }
+
+    with pytest.raises(ValueError, match="after centering"):
+        fit_hyperalignment(subjects, n_components=8, n_iterations=2)
+
+
+def test_class_hyperalignment_alignment_exposes_rank_warning():
+    features = {
+        "s1": np.array([[1.0, 0.0], [2.0, 0.0], [0.0, 1.0], [0.0, 2.0], [1.0, 1.0], [2.0, 2.0]]),
+        "s2": np.array([[1.1, 0.0], [2.1, 0.0], [0.0, 1.1], [0.0, 2.1], [1.1, 1.1], [2.1, 2.1]]),
+    }
+    labels = {subject: np.array([0, 0, 1, 1, 2, 2]) for subject in features}
+
+    model, alignment = fit_class_hyperalignment(
+        features,
+        labels,
+        sample_mode="class_mean",
+        n_components=64,
+        n_iterations=2,
+    )
+
+    assert alignment.n_alignment_rows == 3
+    assert alignment.n_classes == 3
+    assert alignment.max_centered_rank == 2
+    assert "class_mean" in str(alignment.low_rank_warning)
+    assert model.n_components == 2
+
+
 def test_pca_initialization_still_allows_different_feature_dimensions():
     rng = np.random.default_rng(1)
 
@@ -75,6 +182,38 @@ def test_pca_initialization_still_allows_different_feature_dimensions():
     assert model.n_components == 3
     assert model.group_feature_mean is None
     assert model.group_projection is None
+
+
+def test_hyperalignment_rejects_fractional_component_counts():
+    with pytest.raises(ValueError, match="integer component count"):
+        fit_hyperalignment(_aligned_subjects(), n_components=1.5)
+
+
+def test_mean_initialization_caps_components_to_grand_mean_rank():
+    # Both subjects have centered rank 2, but their grand mean cancels the second
+    # dimension.  Mean initialization must not create an arbitrary zero-variance
+    # template column for the cancelled dimension.
+    subjects = {
+        "s1": np.array(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [-1.0, -1.0],
+            ]
+        ),
+        "s2": np.array(
+            [
+                [1.0, 0.0],
+                [0.0, -1.0],
+                [-1.0, 1.0],
+            ]
+        ),
+    }
+
+    model = fit_hyperalignment(subjects, n_components=2, initialization="mean", n_iterations=1)
+
+    assert model.n_components == 1
+    assert model.template.shape == (3, 1)
 
 
 def test_mean_initialization_requires_matching_feature_dimensions():

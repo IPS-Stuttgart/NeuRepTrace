@@ -9,7 +9,7 @@ windowing assumptions to NeuRepTrace.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -75,6 +75,7 @@ def class_alignment_matrix(
     n_repetitions_per_class: int | None = None,
     repetition_selection: str = DEFAULT_CLASS_LIMIT_SELECTION,
     repetition_seed: int | str | None = DEFAULT_CLASS_LIMIT_SEED,
+    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None = None,
 ) -> np.ndarray:
     """Build one subject's class-aligned feature matrix.
 
@@ -82,6 +83,9 @@ def class_alignment_matrix(
     calibration where the target rows must match an already fitted class
     alignment or M-CCA component template. For ``class_repetition``, use the
     same ``repetition_selection`` and ``repetition_seed`` as the fitted template.
+    Passing ``selected_offsets_by_class`` is safer when the fitted training
+    alignment stored common within-class offsets and the target subject has a
+    different number of available repetitions.
     """
 
     sample_mode = _normalize_sample_mode(sample_mode)
@@ -96,7 +100,21 @@ def class_alignment_matrix(
     if sample_mode == "class_mean":
         return _class_mean_matrix(matrix, vector, class_order)
 
-    if n_repetitions_per_class is None:
+    selected_offsets: dict[int, np.ndarray] | None = None
+    if selected_offsets_by_class is not None:
+        selected_offsets, selected_repetitions = _normalize_selected_offsets_by_class(
+            selected_offsets_by_class,
+            labels=vector,
+            classes=class_order,
+        )
+        if n_repetitions_per_class is None:
+            n_repetitions_per_class = selected_repetitions
+        elif int(n_repetitions_per_class) != selected_repetitions:
+            raise ValueError(
+                "n_repetitions_per_class must match selected_offsets_by_class length: "
+                f"{n_repetitions_per_class} != {selected_repetitions}."
+            )
+    elif n_repetitions_per_class is None:
         n_repetitions_per_class = _minimum_class_count(vector, class_order)
     repetitions = int(n_repetitions_per_class)
     if repetitions < 1:
@@ -108,7 +126,41 @@ def class_alignment_matrix(
         repetitions,
         selection=repetition_selection,
         seed=repetition_seed,
+        selected_offsets_by_class=selected_offsets,
     )
+
+
+def _normalize_selected_offsets_by_class(
+    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray],
+    *,
+    labels: np.ndarray,
+    classes: np.ndarray,
+) -> tuple[dict[int, np.ndarray], int]:
+    """Validate source-template repetition offsets for a target subject."""
+
+    normalized: dict[int, np.ndarray] = {}
+    sizes: list[int] = []
+    for class_position, class_label in enumerate(classes):
+        try:
+            offsets = np.asarray(selected_offsets_by_class[class_position], dtype=int)
+        except KeyError as exc:
+            raise ValueError(f"selected_offsets_by_class is missing class position {class_position}.") from exc
+        if offsets.ndim != 1:
+            raise ValueError("selected_offsets_by_class entries must be one-dimensional.")
+        if offsets.size < 1:
+            raise ValueError("selected_offsets_by_class entries must not be empty.")
+        class_count = int(np.sum(labels == class_label))
+        if int(np.min(offsets)) < 0 or int(np.max(offsets)) >= class_count:
+            raise ValueError(
+                f"selected offsets for class {class_label!r} are outside the target subject's "
+                f"available repetitions: max offset {int(np.max(offsets))}, count {class_count}."
+            )
+        normalized[class_position] = offsets
+        sizes.append(int(offsets.size))
+    unique_sizes = set(sizes)
+    if len(unique_sizes) != 1:
+        raise ValueError(f"selected_offsets_by_class entries must have equal lengths, got {sizes}.")
+    return normalized, int(sizes[0])
 
 
 def fit_target_mcca_projection(

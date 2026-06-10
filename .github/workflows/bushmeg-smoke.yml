@@ -2,6 +2,47 @@ name: BUSH-MEG smoke
 
 on:
     workflow_dispatch:
+        inputs:
+            run_source_loso_alignment:
+                description: "Also run strict source-only BUSH-MEG LOSO alignment smoke"
+                required: true
+                type: boolean
+                default: false
+            source_loso_participants:
+                description: "BUSH-MEG participants for source LOSO alignment smoke; use at least 3"
+                required: false
+                default: "1-3"
+            alignment_method:
+                description: "Strict source-only alignment method"
+                required: true
+                type: choice
+                options:
+                    - none
+                    - procrustes
+                    - hyperalignment
+                    - mcca
+                    - euclidean
+                    - coral
+                    - target_baseline_covariance
+                    - subject_sensor_covariance
+                default: none
+            alignment_anchor_mode:
+                description: "Source-label anchor representation"
+                required: true
+                type: choice
+                options:
+                    - class_mean
+                    - class_repetition
+                default: class_mean
+            label_shuffle_control:
+                description: "Shuffle train-fold labels as a matched null control"
+                required: true
+                type: boolean
+                default: false
+            label_shuffle_seed:
+                description: "Seed for label-shuffle null controls"
+                required: true
+                default: "13"
     pull_request:
         paths:
             - ".github/workflows/bushmeg-smoke.yml"
@@ -17,6 +58,7 @@ jobs:
     bushmeg-smoke:
         runs-on: ubuntu-latest
         env:
+            BUSH_MEG_DATA_DIR: ${{ github.workspace }}/.cache/bushmeg
             BUSHMEG_DATA_DIR: ${{ github.workspace }}/.cache/bushmeg
             BUSHMEG_WEBDAV_URL: ${{ secrets.BUSHMEG_WEBDAV_URL }}
             BUSHMEG_DATA_KEY: ${{ secrets.BUSHMEG_DATA_KEY }}
@@ -110,3 +152,34 @@ jobs:
                   assert rows["n_test"].min() > 0
                   assert rows["n_classes"].min() >= 2
                   PY
+
+            - name: Download BUSH-MEG source LOSO smoke files
+              if: github.event_name == 'workflow_dispatch' && inputs.run_source_loso_alignment
+              run: |
+                  python -m neureptrace.bushmeg_data prepare-smoke \
+                    --data-dir "$BUSH_MEG_DATA_DIR" \
+                    --participants "${{ inputs.source_loso_participants }}" \
+                    --roles main \
+                    --max-files 3
+
+            - name: Run strict source-only BUSH-MEG LOSO alignment smoke
+              if: github.event_name == 'workflow_dispatch' && inputs.run_source_loso_alignment
+              run: |
+                  python -m neureptrace.bushmeg_source_loso \
+                    configs/bush_meg/source_loso_alignment_smoke.yml \
+                    --set "participants.ids=${{ inputs.source_loso_participants }}" \
+                    --set "source_loso.alignment_method=${{ inputs.alignment_method }}" \
+                    --set "source_loso.alignment_anchor_mode=${{ inputs.alignment_anchor_mode }}" \
+                    --set "source_loso.alignment_repetition_cap=16" \
+                    --set "source_loso.alignment_components=64" \
+                    --set "source_loso.alignment_times=same_decode_window" \
+                    --set "source_loso.alignment_target_projection=group_projection" \
+                    --set "source_loso.label_shuffle_control=${{ inputs.label_shuffle_control }}" \
+                    --set "source_loso.label_shuffle_seed=${{ inputs.label_shuffle_seed }}"
+
+            - name: Upload BUSH-MEG source LOSO alignment smoke output
+              if: github.event_name == 'workflow_dispatch' && inputs.run_source_loso_alignment
+              uses: actions/upload-artifact@v7
+              with:
+                  name: bushmeg-source-loso-alignment-smoke-${{ inputs.alignment_method }}-${{ inputs.alignment_anchor_mode }}-shuffle-${{ inputs.label_shuffle_control }}
+                  path: outputs/bushmeg_source_loso_alignment_smoke

@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import posixpath
 import shutil
 import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote, urljoin
-from urllib.request import HTTPBasicAuthHandler, HTTPDigestAuthHandler, HTTPPasswordMgrWithDefaultRealm, build_opener
+from urllib.error import HTTPError
+from urllib.parse import quote, unquote, urljoin, urlparse
+from urllib.request import HTTPBasicAuthHandler, HTTPDigestAuthHandler, HTTPPasswordMgrWithDefaultRealm, Request, build_opener
+from xml.etree import ElementTree
 
 from neureptrace.dataset_config import parse_participant_ids
 
@@ -23,6 +26,8 @@ BUSHMEG_WEBDAV_URL_ENV = "BUSHMEG_WEBDAV_URL"
 BUSHMEG_DATA_KEY_ENV = "BUSHMEG_DATA_KEY"
 BUSHMEG_DATA_PASSWORD_ENV = "BUSHMEG_DATA_PASSWORD"
 BUSHMEG_DATA_DIR_ENV = "BUSHMEG_DATA_DIR"
+BUSHMEG_REMOTE_PREFIX_ENV = "BUSHMEG_REMOTE_PREFIX"
+BUSHMEG_DISCOVER_WEBDAV_ENV = "BUSHMEG_DISCOVER_WEBDAV"
 
 DEFAULT_SMOKE_PARTICIPANTS = ("2",)
 DEFAULT_SMOKE_ROLES = ("main", "cue")
@@ -127,6 +132,78 @@ def _webdav_file_url(base_url: str, relative_path: str) -> str:
     return urljoin(base, quoted)
 
 
+def _remote_prefixes(remote_prefix: str | None = None) -> tuple[str, ...]:
+    configured = remote_prefix if remote_prefix is not None else os.environ.get(BUSHMEG_REMOTE_PREFIX_ENV, "")
+    prefixes = [""]
+    for raw in str(configured or "").replace(";", ",").split(","):
+        prefix = raw.strip().strip("/")
+        if prefix and prefix not in prefixes:
+            prefixes.append(prefix)
+    return tuple(prefixes)
+
+
+def _candidate_remote_paths(relative_path: str, *, remote_prefix: str | None = None) -> tuple[str, ...]:
+    paths = []
+    for prefix in _remote_prefixes(remote_prefix):
+        candidate = f"{prefix}/{relative_path}" if prefix else relative_path
+        if candidate not in paths:
+            paths.append(candidate)
+    return tuple(paths)
+
+
+def _build_webdav_opener(base_url: str, username: str, password: str):
+    password_manager = HTTPPasswordMgrWithDefaultRealm()
+    password_manager.add_password(None, base_url, username, password)
+    return build_opener(
+        HTTPBasicAuthHandler(password_manager),
+        HTTPDigestAuthHandler(password_manager),
+    )
+
+
+class _PropfindRequest(Request):
+    def get_method(self) -> str:
+        return "PROPFIND"
+
+
+def _discover_webdav_file(
+    *,
+    base_url: str,
+    username: str,
+    password: str,
+    relative_path: str,
+    timeout: float,
+) -> str | None:
+    """Return a discovered remote path for ``relative_path`` when WebDAV lists it.
+
+    Some private WebDAV shares point the secret at a parent directory instead of
+    the directory that directly contains the BUSH-MEG MATLAB files. A shallow
+    PROPFIND gives CI a chance to discover the real path without logging the
+    secret base URL.
+    """
+
+    opener = _build_webdav_opener(base_url, username, password)
+    request = _PropfindRequest(base_url.rstrip("/") + "/", headers={"Depth": "1"})
+    with opener.open(request, timeout=timeout) as response:
+        payload = response.read()
+    root = ElementTree.fromstring(payload)
+    wanted_name = posixpath.basename(relative_path.replace(os.sep, "/"))
+    base_path = urlparse(base_url.rstrip("/") + "/").path.rstrip("/") + "/"
+    for element in root.iter():
+        if not element.tag.endswith("href"):
+            continue
+        href = (element.text or "").strip()
+        if not href:
+            continue
+        parsed = urlparse(href)
+        href_path = unquote(parsed.path if parsed.scheme else href)
+        if posixpath.basename(href_path.rstrip("/")) != wanted_name:
+            continue
+        if href_path.startswith(base_path):
+            return href_path[len(base_path) :].lstrip("/")
+        return href_path.lstrip("/")
+    return None
+
+
 def _download_webdav_file(
     *,
     base_url: str,
@@ -137,12 +214,7 @@ def _download_webdav_file(
     timeout: float,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    password_manager = HTTPPasswordMgrWithDefaultRealm()
-    password_manager.add_password(None, base_url, username, password)
-    opener = build_opener(
-        HTTPBasicAuthHandler(password_manager),
-        HTTPDigestAuthHandler(password_manager),
-    )
+    opener = _build_webdav_opener(base_url, username, password)
     url = _webdav_file_url(base_url, relative_path)
 
     with tempfile.NamedTemporaryFile(prefix=output_path.name + ".", suffix=".tmp", dir=output_path.parent, delete=False) as temporary:
@@ -167,6 +239,8 @@ def prepare_bushmeg_smoke_data(
     webdav_url: str | None = None,
     username: str | None = None,
     password: str | None = None,
+    remote_prefix: str | None = None,
+    discover_webdav: bool | None = None,
     prefer_existing: bool = True,
     allow_missing: bool = False,
     timeout: float = 120.0,
@@ -205,18 +279,48 @@ def prepare_bushmeg_smoke_data(
     for file in missing:
         if prefer_existing and file.local_path.exists():
             continue
-        try:
-            _download_webdav_file(
-                base_url=resolved_url,
-                username=resolved_username,
-                password=resolved_password,
-                relative_path=file.relative_path,
-                output_path=file.local_path,
-                timeout=timeout,
+        errors: list[str] = []
+        remote_paths = list(_candidate_remote_paths(file.relative_path, remote_prefix=remote_prefix))
+        should_discover = discover_webdav
+        if should_discover is None:
+            should_discover = os.environ.get(BUSHMEG_DISCOVER_WEBDAV_ENV, "true").lower() not in {"0", "false", "no", "off"}
+        if should_discover:
+            try:
+                discovered = _discover_webdav_file(
+                    base_url=resolved_url,
+                    username=resolved_username,
+                    password=resolved_password,
+                    relative_path=file.relative_path,
+                    timeout=timeout,
+                )
+            except Exception as exc:  # pragma: no cover - exercised only when private WebDAV permits PROPFIND.
+                errors.append(f"PROPFIND discovery failed: {exc}")
+            else:
+                if discovered and discovered not in remote_paths:
+                    remote_paths.append(discovered)
+
+        for remote_path in remote_paths:
+            try:
+                _download_webdav_file(
+                    base_url=resolved_url,
+                    username=resolved_username,
+                    password=resolved_password,
+                    relative_path=remote_path,
+                    output_path=file.local_path,
+                    timeout=timeout,
+                )
+                break
+            except HTTPError as exc:
+                errors.append(f"{remote_path}: HTTP {exc.code} {exc.reason}")
+            except Exception as exc:
+                errors.append(f"{remote_path}: {exc}")
+        if not file.local_path.exists() and not allow_missing:
+            attempted = ", ".join(remote_paths)
+            details = "; ".join(errors)
+            raise RuntimeError(
+                f"Could not download BUSH-MEG participant={file.participant} role={file.role} "
+                f"to {file.local_path}. Tried remote path(s): {attempted}. {details}"
             )
-        except Exception:
-            if not allow_missing:
-                raise
     return expected_bushmeg_files(
         data_root,
         participants=participants,
@@ -250,6 +354,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     prepare.add_argument("--webdav-url", default=None, help=f"Override {BUSHMEG_WEBDAV_URL_ENV}.")
     prepare.add_argument("--username", default=None, help=f"Override {BUSHMEG_DATA_KEY_ENV}.")
     prepare.add_argument("--password", default=None, help=f"Override {BUSHMEG_DATA_PASSWORD_ENV}. Prefer the environment variable in CI.")
+    prepare.add_argument("--remote-prefix", default=None, help=f"Optional comma-separated remote subdirectory prefix(es), or {BUSHMEG_REMOTE_PREFIX_ENV}.")
+    prepare.add_argument("--no-discover-webdav", action="store_true", help="Disable shallow WebDAV PROPFIND discovery for matching filenames.")
     prepare.add_argument("--allow-missing", action="store_true", help="Exit successfully even when requested private files cannot be downloaded.")
     prepare.add_argument("--timeout", type=float, default=120.0)
 
@@ -269,6 +375,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             webdav_url=args.webdav_url,
             username=args.username,
             password=args.password,
+            remote_prefix=args.remote_prefix,
+            discover_webdav=not args.no_discover_webdav,
             allow_missing=args.allow_missing,
             timeout=args.timeout,
         )

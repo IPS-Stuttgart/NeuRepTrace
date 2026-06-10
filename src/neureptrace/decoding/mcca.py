@@ -123,6 +123,49 @@ class ClassAlignment:
     n_repetitions_per_class: int | None
     repetition_selection: str | None = None
     repetition_seed: int | None = None
+    repetition_offsets_by_class: Mapping[int, np.ndarray] | None = None
+
+    @property
+    def n_alignment_rows(self) -> int:
+        """Number of row anchors supplied to the common-space fit."""
+
+        row_counts = {np.asarray(matrix).shape[0] for matrix in self.aligned_by_subject.values()}
+        if not row_counts:
+            return 0
+        if len(row_counts) != 1:
+            raise ValueError(f"All subject alignment matrices must have the same row count, got {sorted(row_counts)}.")
+        return int(next(iter(row_counts)))
+
+    @property
+    def n_classes(self) -> int:
+        """Number of class labels used to build the alignment anchors."""
+
+        return int(np.asarray(self.classes).size)
+
+    @property
+    def max_centered_rank(self) -> int:
+        """Maximum rank available after centering the alignment anchors."""
+
+        return max(self.n_alignment_rows - 1, 0)
+
+    @property
+    def low_rank_warning(self) -> str | None:
+        """Human-readable warning for class-mean anchor rank collapse."""
+
+        if self.sample_mode == "class_mean" and self.n_classes <= 3:
+            return (
+                f"class_mean alignment has only {self.n_classes} class anchors; "
+                f"after centering, at most {self.max_centered_rank} common-space components are identifiable. "
+                "Use richer anchors such as class_repetition, pseudotrials, stimulus identity, "
+                "or target calibration before concluding alignment is ineffective."
+            )
+        return None
+
+    @property
+    def selected_offsets_by_class(self) -> Mapping[int, np.ndarray] | None:
+        """Backward-compatible alias for stored class-repetition offsets."""
+
+        return self.repetition_offsets_by_class
 
 
 # pylint: disable-next=too-many-locals
@@ -178,6 +221,7 @@ def fit_mcca(
     for subject_id in subject_ids:
         mean, prewhitener, whitened = _fit_subject_prewhitener(
             matrices[subject_id],
+            subject_id=subject_id,
             regularization=regularization,
             subject_pca_components=subject_pca_components,
             rank_tolerance=rank_tolerance,
@@ -190,10 +234,13 @@ def fit_mcca(
     concatenated = np.hstack(whitened_blocks)
     concatenated = concatenated - np.mean(concatenated, axis=0, keepdims=True)
     _left, singular_values, right_t = np.linalg.svd(concatenated, full_matrices=False)
+
+    # Centering row-aligned matrices caps the identifiable common-space rank.
+    shared_rank = _numerical_svd_rank(singular_values, rank_tolerance=rank_tolerance)
     requested_components = _requested_component_count(n_components)
-    actual_components = min(requested_components, right_t.shape[0])
+    actual_components = min(requested_components, shared_rank)
     if actual_components < 1:
-        raise ValueError("No M-CCA components are available after whitening.")
+        raise ValueError("No M-CCA components are available after the shared-space SVD.")
 
     component_vectors = right_t.T[:, :actual_components]
     projections = _subject_projections_from_blocks(
@@ -212,7 +259,10 @@ def fit_mcca(
         np.stack([_transform_with_projection(matrices[subject_id], projections[subject_id]) for subject_id in subject_ids], axis=0),
         axis=0,
     )
-    group_feature_mean, group_projection = _average_projection(projections)
+    group_feature_mean, group_projection = _average_projection(
+        projections,
+        matrices=matrices if normalize_components else None,
+    )
     explained = _explained_variance_ratio(singular_values)
     return MCCAModel(
         subject_ids=subject_ids,
@@ -226,6 +276,15 @@ def fit_mcca(
         group_projection=group_projection,
         normalize_components=bool(normalize_components),
     )
+
+
+def _numerical_svd_rank(singular_values: np.ndarray, *, rank_tolerance: float) -> int:
+    values = np.asarray(singular_values, dtype=float).ravel()
+    if values.size == 0:
+        return 0
+    scale = max(float(np.max(values)), 1.0)
+    threshold = max(float(rank_tolerance), float(rank_tolerance) * scale)
+    return int(np.sum(values > threshold))
 
 
 def class_alignment_matrices(
@@ -264,10 +323,18 @@ def class_alignment_matrices(
         repetitions = None
         normalized_selection = None
         normalized_seed = None
+        repetition_offsets = None
     else:
         repetitions = _common_repetition_count(labels, classes, requested=n_repetitions_per_class)
         normalized_selection = normalize_class_limit_selection(repetition_selection)
         normalized_seed = normalize_class_limit_seed(repetition_seed)
+        repetition_offsets = _common_repetition_offsets(
+            labels,
+            classes,
+            repetitions,
+            selection=normalized_selection,
+            seed=normalized_seed,
+        )
         aligned = {
             subject_id: _class_repetition_matrix(
                 features[subject_id],
@@ -276,6 +343,7 @@ def class_alignment_matrices(
                 repetitions,
                 selection=normalized_selection,
                 seed=normalized_seed,
+                selected_offsets_by_class=repetition_offsets,
             )
             for subject_id in subject_ids
         }
@@ -287,6 +355,7 @@ def class_alignment_matrices(
         n_repetitions_per_class=repetitions,
         repetition_selection=normalized_selection,
         repetition_seed=normalized_seed,
+        repetition_offsets_by_class=repetition_offsets,
     )
 
 
@@ -328,6 +397,7 @@ def fit_class_mcca(
 def _fit_subject_prewhitener(
     matrix: np.ndarray,
     *,
+    subject_id: Hashable | None = None,
     regularization: float,
     subject_pca_components: int | float | None,
     rank_tolerance: float,
@@ -347,7 +417,11 @@ def _fit_subject_prewhitener(
     else:
         keep_indices = np.flatnonzero(keep)
     if keep_indices.size == 0:
-        keep_indices = np.array([0])
+        context = "" if subject_id is None else f" for subject {subject_id!r}"
+        raise ValueError(
+            f"Subject alignment matrix{context} has no retained centered components. "
+            "The alignment anchors are rank deficient after centering; use richer anchors or lower rank_tolerance."
+        )
     components = vt[keep_indices].T
     scales = 1.0 / np.sqrt(eigenvalues[keep_indices] + regularization)
     prewhitener = components * scales[None, :]
@@ -405,13 +479,41 @@ def _transform_with_projection(features: np.ndarray, projection: SubjectMCCAProj
     return (features - projection.feature_mean) @ projection.projection
 
 
-def _average_projection(projections):
+def _average_projection(projections, *, matrices=None):
     feature_dims = {projection.projection.shape[0] for projection in projections.values()}
     if len(feature_dims) != 1:
         return None, None
     mean = np.mean(np.stack([projection.feature_mean for projection in projections.values()], axis=0), axis=0)
     matrix = np.mean(np.stack([projection.projection for projection in projections.values()], axis=0), axis=0)
+    if matrices is not None:
+        matrix = _rescale_group_projection(matrix, projections, matrices)
     return mean, matrix
+
+
+def _rescale_group_projection(matrix: np.ndarray, projections, matrices) -> np.ndarray:
+    """Scale the source-average fallback projection on subject-centered data.
+
+    The group projection is a calibration-free fallback for unseen subjects, but
+    its scale is estimated from fitted source subjects.  Source subjects must be
+    centered with their own fitted alignment means when estimating this scale.
+    Centering every source matrix with the across-source average mean introduces
+    between-subject offsets into the variance estimate; with large MEG baseline
+    offsets this can shrink the fallback projection and make source-only M-CCA
+    look worse than it is.
+    """
+    transformed = np.vstack(
+        [
+            (
+                _feature_matrix(matrices[subject_id], name=f"matrices[{subject_id!r}]")
+                - projections[subject_id].feature_mean
+            )
+            @ matrix
+            for subject_id in matrices
+        ]
+    )
+    scale = np.std(transformed, axis=0, ddof=1)
+    scale = np.where(scale < 1e-12, 1.0, scale)
+    return matrix / scale[None, :]
 
 
 def _class_mean_matrix(features: np.ndarray, labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
@@ -426,21 +528,56 @@ def _class_repetition_matrix(
     *,
     selection: str = DEFAULT_CLASS_LIMIT_SELECTION,
     seed: int | str | None = DEFAULT_CLASS_LIMIT_SEED,
+    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None = None,
 ) -> np.ndarray:
     rows = []
     for class_position, class_label in enumerate(classes):
         class_features = features[labels == class_label]
         if class_features.shape[0] < repetitions:
             raise ValueError(f"Class {class_label!r} has only {class_features.shape[0]} repetitions, need {repetitions}.")
-        selected = select_class_limited_indices(
-            np.zeros(class_features.shape[0], dtype=int),
+        if selected_offsets_by_class is None:
+            selected = select_class_limited_indices(
+                np.zeros(class_features.shape[0], dtype=int),
+                repetitions,
+                selection=selection,
+                seed=seed,
+                seed_context=class_position,
+            )
+        else:
+            selected = np.asarray(selected_offsets_by_class[class_position], dtype=int)
+            if selected.ndim != 1:
+                raise ValueError("selected repetition offsets must be one-dimensional.")
+            if selected.size != repetitions:
+                raise ValueError(f"selected repetition offsets must contain {repetitions} entries, got {selected.size}.")
+            if selected.size and (int(np.min(selected)) < 0 or int(np.max(selected)) >= class_features.shape[0]):
+                raise ValueError(f"selected repetition offsets for class {class_label!r} are outside the available repetitions.")
+        rows.extend(class_features[selected])
+    return np.vstack(rows)
+
+
+def _common_repetition_offsets(
+    labels_by_subject: Mapping[Hashable, np.ndarray],
+    classes: np.ndarray,
+    repetitions: int,
+    *,
+    selection: str,
+    seed: int | str | None,
+) -> dict[int, np.ndarray]:
+    """Sample one common set of within-class offsets for all subjects."""
+
+    offsets = {}
+    for class_position, class_label in enumerate(classes):
+        available = min(int(np.sum(labels == class_label)) for labels in labels_by_subject.values())
+        if available < repetitions:
+            raise ValueError(f"Class {class_label!r} has only {available} common repetitions, need {repetitions}.")
+        offsets[class_position] = select_class_limited_indices(
+            np.zeros(available, dtype=int),
             repetitions,
             selection=selection,
             seed=seed,
             seed_context=class_position,
         )
-        rows.extend(class_features[selected])
-    return np.vstack(rows)
+    return offsets
 
 
 def _common_classes(labels_by_subject: Mapping[Hashable, np.ndarray]) -> np.ndarray:
@@ -487,9 +624,23 @@ def _check_subject_keys(features_by_subject, labels_by_subject) -> None:
 def _requested_component_count(n_components: int | float) -> int:
     if n_components == float("inf"):
         return np.iinfo(np.int32).max
-    requested = int(n_components)
+
+    try:
+        value = float(n_components)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_components must be a positive integer component count or infinity.") from exc
+
+    if not np.isfinite(value):
+        raise ValueError("n_components must be a positive integer component count or infinity.")
+    if not value.is_integer():
+        raise ValueError(
+            "n_components must be an integer component count or infinity; "
+            "fractional variance-ratio requests are not supported for M-CCA alignment components."
+        )
+
+    requested = int(value)
     if requested < 1:
-        raise ValueError("n_components must be positive or infinity.")
+        raise ValueError("n_components must be a positive integer component count or infinity.")
     return requested
 
 

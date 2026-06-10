@@ -101,6 +101,8 @@ def test_covariance_loso_runs_on_in_memory_subjects():
     assert set(summary["covariance_feature_mode"]) == {"correlation_upper"}
     assert np.all(np.isfinite(summary["balanced_accuracy"]))
     assert {"prob_class_0", "prob_class_1"}.issubset(predictions.columns)
+    assert predictions["label_shuffle_control"].unique().tolist() == [False]
+    assert predictions["label_shuffle_seed"].unique().tolist() == [0]
 
 
 def test_label_shuffle_control_is_deterministic_and_count_preserving():

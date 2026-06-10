@@ -342,9 +342,10 @@ def _write_markdown(
     shuffle_pre = _pre_stimulus_summary(shuffle_time)
     real_recalls = _classwise_recalls(real_confusion).merge(_classwise_recalls(shuffle_confusion), on="class", suffixes=("_real", "_shuffle"))
     real_recalls["recall_delta"] = real_recalls["recall_real"] - real_recalls["recall_shuffle"]
+    report_label = out_path.stem.replace("_", " ").strip() or "OpenNeuro"
 
     lines = [
-        "# ds006629 Real vs Label-Shuffle LOSO Report",
+        f"# {report_label} Real vs Label-Shuffle LOSO Report",
         "",
         f"Fixed diagnostic time: {_format_value(summary_row['fixed_time_real'])} s real, {_format_value(summary_row['fixed_time_shuffle'])} s shuffle.",
         f"Subjects compared: {int(summary_row['subjects_compared'])}; classes: {int(summary_row['n_classes'])}.",

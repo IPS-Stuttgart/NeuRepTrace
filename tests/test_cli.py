@@ -35,6 +35,7 @@ def test_grouped_cli_exposes_synthetic_fieldtrip_generator():
 
 
 def test_grouped_cli_exposes_openneuro_helpers():
+    assert cli.COMMAND_MODULES["openneuro-alignment-compare"] == "neureptrace.openneuro_alignment_compare"
     assert cli.COMMAND_MODULES["openneuro-meg"] == "neureptrace.openneuro_meg"
     assert cli.COMMAND_MODULES["openneuro-diagnostics"] == "neureptrace.openneuro_decode_diagnostics"
     assert cli.COMMAND_MODULES["openneuro-real-vs-shuffle"] == "neureptrace.openneuro_real_shuffle_report"
@@ -58,6 +59,7 @@ def test_poetry_scripts_expose_openneuro_helpers():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject["tool"]["poetry"]["scripts"]
 
+    assert scripts["neureptrace-openneuro-alignment-compare"] == "neureptrace.openneuro_alignment_compare:main"
     assert scripts["neureptrace-openneuro-meg"] == "neureptrace.openneuro_meg:main"
     assert scripts["neureptrace-openneuro-diagnostics"] == "neureptrace.openneuro_decode_diagnostics:main"
     assert scripts["neureptrace-openneuro-real-vs-shuffle"] == "neureptrace.openneuro_real_shuffle_report:main"

@@ -57,6 +57,11 @@ from neureptrace.decoding import (
     parse_c_grid,
     predict_emission_probabilities,
 )
+from neureptrace.decoding.source_alignment import (
+    SourceAlignmentConfig,
+    align_train_test_features,
+    source_alignment_config,
+)
 from neureptrace.io.fieldtrip_mat import load_fieldtrip_mat_epochs
 from neureptrace.bushmeg_cue_source_weights import (
     CueSourceWeights,
@@ -75,6 +80,7 @@ SOURCE_FEATURE_FAMILIES = (
 MINIMIZE_SELECTION_METRICS = {"log_loss"}
 SAMPLE_WEIGHTING_MODES = {"none", "class_balanced", "subject_balanced", "subject_class_balanced"}
 CLASS_BIAS_MODES = {"none", "log_prior", "balanced_accuracy"}
+WINDOW_COMBINE_MODES = {"probability_mean", "log_probability_mean"}
 PSEUDOTRIAL_TRAINING_MODES = {"off", "replace", "augment"}
 DEFAULT_CLASS_BIAS_DELTAS = (-2.0, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 2.0)
 DEFAULT_CLASS_BIAS_ROUNDS = 2
@@ -210,6 +216,7 @@ class CandidateSpec:
     feature_family: str = "bin_means"
     sample_weighting: str = "none"
     class_bias: str = "none"
+    window_combine: str = "probability_mean"
     pseudotrials_per_class: int = 0
     pseudotrial_mode: str = "off"
     pseudotrial_seed: int = DEFAULT_RANDOM_SEED
@@ -365,6 +372,28 @@ def _normalize_class_bias(value: str | None) -> str:
         return "balanced_accuracy"
     if normalized not in CLASS_BIAS_MODES:
         raise ValueError(f"Unknown class-bias mode '{value}'. Available modes: {sorted(CLASS_BIAS_MODES)}.")
+    return normalized
+
+
+def _normalize_window_combine(value: str | None) -> str:
+    normalized = "probability_mean" if value is None else str(value).strip().lower().replace("-", "_")
+    aliases = {
+        "": "probability_mean",
+        "mean": "probability_mean",
+        "probability": "probability_mean",
+        "probability_average": "probability_mean",
+        "probability_mean": "probability_mean",
+        "prob_mean": "probability_mean",
+        "log": "log_probability_mean",
+        "logit": "log_probability_mean",
+        "logit_mean": "log_probability_mean",
+        "log_probability": "log_probability_mean",
+        "log_probability_average": "log_probability_mean",
+        "log_probability_mean": "log_probability_mean",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in WINDOW_COMBINE_MODES:
+        raise ValueError(f"Unknown window-combine mode '{value}'. Available modes: {sorted(WINDOW_COMBINE_MODES)}.")
     return normalized
 
 
@@ -1075,6 +1104,7 @@ def _prepare_window_train_test_features(
     test_subject: str,
     window: WindowSpec,
     n_classes: int,
+    train_labels: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return fold-local features for one candidate/window."""
 
@@ -1090,12 +1120,13 @@ def _prepare_window_train_test_features(
             test_subject=test_subject,
             window=window,
             n_classes=n_classes,
+            train_labels=train_labels,
         )
         prototype_train_features, prototype_test_features = (
             _class_prototype_similarity_features(
                 train_features,
                 test_features,
-                _stack_subject_labels(subjects, train_subjects),
+                _stack_subject_labels(subjects, train_subjects) if train_labels is None else train_labels,
                 n_classes=n_classes,
             )
         )
@@ -1758,6 +1789,19 @@ def _apply_class_bias(probabilities: np.ndarray, bias: np.ndarray) -> np.ndarray
     return exp_logits / exp_logits.sum(axis=1, keepdims=True)
 
 
+def _combine_window_probabilities(accumulator: np.ndarray, n_windows: int, mode: str) -> np.ndarray:
+    mode = _normalize_window_combine(mode)
+    if mode == "probability_mean":
+        return _base._probability_average(accumulator, n_windows)
+    logits = accumulator / float(n_windows)
+    logits -= np.max(logits, axis=1, keepdims=True)
+    exp_logits = np.exp(np.clip(logits, -50.0, 50.0))
+    row_sums = exp_logits.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("Combined log probabilities must have positive row sums.")
+    return exp_logits / row_sums
+
+
 def _fit_class_bias(probabilities: np.ndarray, labels: np.ndarray, *, n_classes: int, mode: str) -> np.ndarray:
     """Fit a target-free per-class logit bias from source training predictions."""
 
@@ -1947,17 +1991,37 @@ def _predict_candidate(
     test_subject: str,
     n_classes: int,
     max_iter: int,
+    alignment_config: SourceAlignmentConfig | None = None,
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
     subject_weight_multipliers: Mapping[str, float] | None = None,
+    alignment_diagnostic_rows: list[dict[str, object]] | None = None,
+    diagnostic_dataset: str = "BUSH-MEG",
+    shuffle_context: Sequence[object] = (),
 ) -> np.ndarray:
+    if alignment_config is None:
+        alignment_config = source_alignment_config()
     train_labels = _stack_subject_labels(subjects, train_subjects)
+    if label_shuffle_control:
+        train_labels = _base._shuffle_training_labels(
+            train_labels,
+            seed=int(label_shuffle_seed),
+            context=("bushmeg_source_loso", *shuffle_context, tuple(train_subjects), test_subject, candidate.name),
+        )
     train_subject_ids = _stack_subject_ids(subjects, train_subjects)
     test_n = len(subjects[test_subject].labels)
-    probabilities_sum = np.zeros((test_n, n_classes), dtype=float)
+    window_combine = _normalize_window_combine(candidate.window_combine)
+    probabilities_accumulator = np.zeros((test_n, n_classes), dtype=float)
     class_bias_mode = _normalize_class_bias(candidate.class_bias)
-    train_probabilities_sum: np.ndarray | None = None
+    train_probabilities_accumulator: np.ndarray | None = None
     class_bias_labels: np.ndarray | None = None
     classes = np.arange(n_classes)
     feature_kind = normalize_source_feature_kind(candidate.feature_kind)
+    feature_family = normalize_source_feature_family(candidate.feature_family)
+    if label_shuffle_control and feature_kind in SUPERVISED_FEATURE_KINDS and feature_kind not in {"xdawn", "xdawn_prototype"}:
+        raise ValueError(f"BUSH-MEG label_shuffle_control cannot safely shuffle supervised feature kind {feature_kind!r}.")
+    if label_shuffle_control and feature_family in {"template_similarity", "template_similarity_plus_bin_means"}:
+        raise ValueError("Train-label shuffle is not supported for template-similarity source feature families.")
     for window in candidate.windows:
         if feature_kind in {"xdawn", "xdawn_prototype"}:
             train_features, test_features = _xdawn_train_test_features(
@@ -1993,7 +2057,34 @@ def _predict_candidate(
                 test_subject=test_subject,
                 window=window,
                 n_classes=n_classes,
+                train_labels=train_labels,
             )
+        alignment_metadata: Mapping[str, Any] | None = None
+        if alignment_config.enabled:
+            alignment_result = align_train_test_features(
+                train_features=train_features,
+                train_labels=train_labels,
+                train_subject_ids=train_subject_ids,
+                test_features=test_features,
+                target_labels=subjects[test_subject].labels if alignment_config.oracle_target_calibrated else None,
+                config=alignment_config,
+                compute_source_inner_diagnostics=alignment_diagnostic_rows is not None,
+            )
+            train_features = alignment_result.train_features
+            test_features = alignment_result.test_features
+            alignment_metadata = alignment_result.metadata
+            if alignment_diagnostic_rows is not None:
+                alignment_diagnostic_rows.append(
+                    _base._alignment_diagnostic_row(
+                        alignment_result,
+                        dataset_name=diagnostic_dataset,
+                        test_subject=test_subject,
+                        alignment_window_center=window.center,
+                        alignment_window_size=window.width,
+                        decode_window_center=window.center,
+                        decode_window_size=window.width,
+                    )
+                )
         fit_features, fit_labels, fit_subjects = _source_class_pseudotrials(
             train_features,
             train_labels,
@@ -2010,21 +2101,27 @@ def _predict_candidate(
             subject_weight_multipliers=subject_weight_multipliers,
         )
         model = _candidate_model(candidate, max_iter=max_iter, n_features=fit_features.shape[1], n_samples=fit_features.shape[0])
+        if alignment_metadata is not None:
+            setattr(model, "_neureptrace_source_alignment_metadata", dict(alignment_metadata))
         _fit_candidate_model(model, fit_features, fit_labels, sample_weight=fit_sample_weight)
         probabilities = predict_emission_probabilities(
             model,
             test_features,
             emission_mode=candidate.emission_mode,
         )
-        probabilities_sum += _base._align_probability_columns(
+        aligned_probabilities = _base._align_probability_columns(
             probabilities,
             model=model,
             classes=classes,
         )
-        if class_bias_mode != "none" and train_probabilities_sum is None:
-            train_probabilities_sum = np.zeros((len(fit_labels), n_classes), dtype=float)
+        if window_combine == "log_probability_mean":
+            probabilities_accumulator += np.log(np.clip(aligned_probabilities, 1e-12, 1.0))
+        else:
+            probabilities_accumulator += aligned_probabilities
+        if class_bias_mode != "none" and train_probabilities_accumulator is None:
+            train_probabilities_accumulator = np.zeros((len(fit_labels), n_classes), dtype=float)
             class_bias_labels = fit_labels
-        if train_probabilities_sum is not None:
+        if train_probabilities_accumulator is not None:
             if class_bias_labels is None or len(class_bias_labels) != len(fit_labels) or not np.array_equal(class_bias_labels, fit_labels):
                 raise ValueError("Class-bias fitting requires a stable source-training representation across candidate windows.")
             train_probabilities = predict_emission_probabilities(
@@ -2032,15 +2129,19 @@ def _predict_candidate(
                 fit_features,
                 emission_mode=candidate.emission_mode,
             )
-            train_probabilities_sum += _base._align_probability_columns(
+            aligned_train_probabilities = _base._align_probability_columns(
                 train_probabilities,
                 model=model,
                 classes=classes,
             )
-    averaged = _base._probability_average(probabilities_sum, len(candidate.windows))
-    if train_probabilities_sum is None:
+            if window_combine == "log_probability_mean":
+                train_probabilities_accumulator += np.log(np.clip(aligned_train_probabilities, 1e-12, 1.0))
+            else:
+                train_probabilities_accumulator += aligned_train_probabilities
+    averaged = _combine_window_probabilities(probabilities_accumulator, len(candidate.windows), window_combine)
+    if train_probabilities_accumulator is None:
         return averaged
-    train_averaged = _base._probability_average(train_probabilities_sum, len(candidate.windows))
+    train_averaged = _combine_window_probabilities(train_probabilities_accumulator, len(candidate.windows), window_combine)
     assert class_bias_labels is not None
     bias = _fit_class_bias(train_averaged, class_bias_labels, n_classes=n_classes, mode=class_bias_mode)
     return _apply_class_bias(averaged, bias)
@@ -2066,10 +2167,21 @@ def _score_is_better(candidate_score: float, incumbent_score: float | None, *, m
     return candidate_score > incumbent_score
 
 
-def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
+def _candidate_rowspec(
+    candidate: CandidateSpec,
+    *,
+    alignment_config: SourceAlignmentConfig | None = None,
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
+) -> dict[str, Any]:
     pseudotrial_mode = _normalize_pseudotrial_mode(
         candidate.pseudotrial_mode,
         pseudotrials_per_class=int(candidate.pseudotrials_per_class),
+    )
+    alignment_metadata = (
+        source_alignment_config().static_metadata()
+        if alignment_config is None
+        else alignment_config.static_metadata()
     )
     return {
         "candidate": candidate.name,
@@ -2081,6 +2193,7 @@ def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
         "classifier_param": "" if candidate.classifier_param is None else candidate.classifier_param,
         "sample_weighting": _normalize_sample_weighting(candidate.sample_weighting),
         "class_bias": _normalize_class_bias(candidate.class_bias),
+        "window_combine": _normalize_window_combine(candidate.window_combine),
         "pseudotrials_per_class": int(candidate.pseudotrials_per_class) if pseudotrial_mode != "off" else 0,
         "pseudotrial_mode": pseudotrial_mode,
         "pseudotrial_seed": "" if pseudotrial_mode == "off" else int(candidate.pseudotrial_seed),
@@ -2091,6 +2204,9 @@ def _candidate_rowspec(candidate: CandidateSpec) -> dict[str, Any]:
         "n_windows": len(candidate.windows),
         "window_centers": "|".join(f"{center:.6g}" for center in candidate.window_centers),
         "window_widths": "|".join(f"{width:.6g}" for width in candidate.window_widths),
+        **alignment_metadata,
+        "label_shuffle_control": bool(label_shuffle_control),
+        "label_shuffle_seed": int(label_shuffle_seed),
     }
 
 
@@ -2102,8 +2218,14 @@ def _inner_loso_scores(
     outer_test_subject: str,
     n_classes: int,
     max_iter: int,
+    alignment_config: SourceAlignmentConfig | None = None,
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
     cue_source_weights: CueSourceWeights | None = None,
+    alignment_diagnostic_rows: list[dict[str, object]] | None = None,
 ) -> list[dict[str, Any]]:
+    if alignment_config is None:
+        alignment_config = source_alignment_config()
     source_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
     rows: list[dict[str, Any]] = []
     for inner_test_subject in source_subjects:
@@ -2116,15 +2238,27 @@ def _inner_loso_scores(
             test_subject=inner_test_subject,
             n_classes=n_classes,
             max_iter=max_iter,
+            alignment_config=alignment_config,
+            label_shuffle_control=label_shuffle_control,
+            label_shuffle_seed=label_shuffle_seed,
             subject_weight_multipliers=None if cue_source_weights is None else cue_source_weights.for_fold(inner_test_subject, train_subjects),
+            alignment_diagnostic_rows=alignment_diagnostic_rows,
+            shuffle_context=("inner", outer_test_subject, inner_test_subject),
         )
         labels = subjects[inner_test_subject].labels
         rows.append(
             {
                 "outer_test_subject": outer_test_subject,
                 "inner_test_subject": inner_test_subject,
-                **_candidate_rowspec(candidate),
+                **_candidate_rowspec(
+                    candidate,
+                    alignment_config=alignment_config,
+                    label_shuffle_control=label_shuffle_control,
+                    label_shuffle_seed=label_shuffle_seed,
+                ),
                 **_candidate_metrics(probabilities, labels, n_classes=n_classes),
+                "label_shuffle_control": bool(label_shuffle_control),
+                "label_shuffle_seed": int(label_shuffle_seed),
                 "n_train_subjects": len(train_subjects),
                 "n_test_trials": len(labels),
             }
@@ -2141,8 +2275,14 @@ def _select_candidate(
     n_classes: int,
     max_iter: int,
     selection_metric: str,
+    alignment_config: SourceAlignmentConfig | None = None,
+    label_shuffle_control: bool = False,
+    label_shuffle_seed: int = DEFAULT_RANDOM_SEED,
     cue_source_weights: CueSourceWeights | None = None,
+    alignment_diagnostic_rows: list[dict[str, object]] | None = None,
 ) -> tuple[CandidateSpec, list[dict[str, Any]], dict[str, Any]]:
+    if alignment_config is None:
+        alignment_config = source_alignment_config()
     if selection_metric not in SUPPORTED_SELECTION_METRICS:
         raise ValueError(f"Unknown selection metric '{selection_metric}'. Available metrics: {sorted(SUPPORTED_SELECTION_METRICS)}.")
     all_rows: list[dict[str, Any]] = []
@@ -2157,7 +2297,11 @@ def _select_candidate(
             outer_test_subject=outer_test_subject,
             n_classes=n_classes,
             max_iter=max_iter,
+            alignment_config=alignment_config,
+            label_shuffle_control=label_shuffle_control,
+            label_shuffle_seed=label_shuffle_seed,
             cue_source_weights=cue_source_weights,
+            alignment_diagnostic_rows=alignment_diagnostic_rows,
         )
         all_rows.extend(rows)
         frame = pd.DataFrame(rows)
@@ -2226,6 +2370,13 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
             ["none"],
         )
     ]
+    window_combine_values = [
+        _normalize_window_combine(value)
+        for value in _list_value(
+            grid.get("window_combines", grid.get("window_combine", source_loso.get("window_combine", "probability_mean"))),
+            ["probability_mean"],
+        )
+    ]
     pseudotrial_values = list(
         dict.fromkeys(
             max(0, int(value))
@@ -2272,6 +2423,9 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                 pseudotrial_options.append((int(count), mode, int(seed)))
     pseudotrial_options = list(dict.fromkeys(pseudotrial_options))
     include_pseudotrial_name_token = len(pseudotrial_options) > 1 or any(count > 0 for count, _mode, _seed in pseudotrial_options)
+    include_window_combine_name_token = len(window_combine_values) > 1 or any(
+        value != "probability_mean" for value in window_combine_values
+    )
 
     candidates: list[CandidateSpec] = []
     for window_name, windows in window_sets:
@@ -2309,67 +2463,71 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                                                 )
                                                 for sample_weighting in sample_weighting_values:
                                                     for class_bias in class_bias_values:
-                                                        for classifier_value in classifier_grid:
-                                                            parameter_token = (
-                                                                f"wd{classifier_value:g}"
-                                                                if normalized_decoder == "torch_mlp"
-                                                                else f"c{classifier_value:g}"
-                                                            )
-                                                            name_tokens = [
-                                                                window_name,
-                                                                feature_family,
-                                                                normalized_decoder,
-                                                                normalize_emission_mode(emission_mode),
-                                                                normalize_feature_preprocessor(feature_preprocessor),
-                                                                "pca"
-                                                                + (
-                                                                    "none"
-                                                                    if pca_components is None
-                                                                    else str(pca_components)
-                                                                ),
-                                                                f"bins{temporal_bins}",
-                                                                f"feat{feature_kind}",
-                                                                f"xdawn{'' if xdawn_components is None else xdawn_components}",
-                                                                f"covch{covariance_max_channels}",
-                                                            ]
-                                                            if include_pseudotrial_name_token:
-                                                                if pseudotrial_mode == "replace":
-                                                                    name_tokens.append(f"pt{pseudotrials_per_class}")
-                                                                else:
-                                                                    name_tokens.append(f"pt{pseudotrial_mode}{pseudotrials_per_class}")
-                                                                if pseudotrial_mode not in {"off", "replace"}:
-                                                                    name_tokens.append(f"ptmode{pseudotrial_mode}")
-                                                                if pseudotrial_mode != "off":
-                                                                    name_tokens.append(f"ptseed{pseudotrial_seed}")
-                                                            name_tokens.extend(
-                                                                [
-                                                                    _normalize_sample_weighting(sample_weighting),
-                                                                    _normalize_class_bias(class_bias),
-                                                                    parameter_token,
-                                                                ]
-                                                            )
-                                                            name = "__".join(name_tokens)
-                                                            candidates.append(
-                                                                CandidateSpec(
-                                                                    name=name,
-                                                                    decoder=decoder,
-                                                                    emission_mode=emission_mode,
-                                                                    feature_preprocessor=feature_preprocessor,
-                                                                    pca_components=pca_components,
-                                                                    classifier_param=classifier_value,
-                                                                    temporal_bins=temporal_bins,
-                                                                    windows=windows,
-                                                                    feature_kind=feature_kind,
-                                                                    xdawn_components=xdawn_components,
-                                                                    covariance_max_channels=covariance_max_channels,
-                                                                    feature_family=feature_family,
-                                                                    sample_weighting=sample_weighting,
-                                                                    class_bias=class_bias,
-                                                                    pseudotrials_per_class=pseudotrials_per_class,
-                                                                    pseudotrial_mode=pseudotrial_mode,
-                                                                    pseudotrial_seed=pseudotrial_seed,
+                                                        for window_combine in window_combine_values:
+                                                            for classifier_value in classifier_grid:
+                                                                parameter_token = (
+                                                                    f"wd{classifier_value:g}"
+                                                                    if normalized_decoder == "torch_mlp"
+                                                                    else f"c{classifier_value:g}"
                                                                 )
-                                                            )
+                                                                name_tokens = [
+                                                                    window_name,
+                                                                    feature_family,
+                                                                    normalized_decoder,
+                                                                    normalize_emission_mode(emission_mode),
+                                                                    normalize_feature_preprocessor(feature_preprocessor),
+                                                                    "pca"
+                                                                    + (
+                                                                        "none"
+                                                                        if pca_components is None
+                                                                        else str(pca_components)
+                                                                    ),
+                                                                    f"bins{temporal_bins}",
+                                                                    f"feat{feature_kind}",
+                                                                    f"xdawn{'' if xdawn_components is None else xdawn_components}",
+                                                                    f"covch{covariance_max_channels}",
+                                                                ]
+                                                                if include_window_combine_name_token:
+                                                                    name_tokens.append(_normalize_window_combine(window_combine))
+                                                                if include_pseudotrial_name_token:
+                                                                    if pseudotrial_mode == "replace":
+                                                                        name_tokens.append(f"pt{pseudotrials_per_class}")
+                                                                    else:
+                                                                        name_tokens.append(f"pt{pseudotrial_mode}{pseudotrials_per_class}")
+                                                                    if pseudotrial_mode not in {"off", "replace"}:
+                                                                        name_tokens.append(f"ptmode{pseudotrial_mode}")
+                                                                    if pseudotrial_mode != "off":
+                                                                        name_tokens.append(f"ptseed{pseudotrial_seed}")
+                                                                name_tokens.extend(
+                                                                    [
+                                                                        _normalize_sample_weighting(sample_weighting),
+                                                                        _normalize_class_bias(class_bias),
+                                                                        parameter_token,
+                                                                    ]
+                                                                )
+                                                                name = "__".join(name_tokens)
+                                                                candidates.append(
+                                                                    CandidateSpec(
+                                                                        name=name,
+                                                                        decoder=decoder,
+                                                                        emission_mode=emission_mode,
+                                                                        feature_preprocessor=feature_preprocessor,
+                                                                        pca_components=pca_components,
+                                                                        classifier_param=classifier_value,
+                                                                        temporal_bins=temporal_bins,
+                                                                        windows=windows,
+                                                                        feature_kind=feature_kind,
+                                                                        xdawn_components=xdawn_components,
+                                                                        covariance_max_channels=covariance_max_channels,
+                                                                        feature_family=feature_family,
+                                                                        sample_weighting=sample_weighting,
+                                                                        class_bias=class_bias,
+                                                                        window_combine=window_combine,
+                                                                        pseudotrials_per_class=pseudotrials_per_class,
+                                                                        pseudotrial_mode=pseudotrial_mode,
+                                                                        pseudotrial_seed=pseudotrial_seed,
+                                                                    )
+                                                                )
     return candidates
 
 
@@ -2392,8 +2550,23 @@ def run_bushmeg_source_loso(
     config_path = Path(config_path)
     config = apply_overrides(load_config(config_path), overrides)
     source_loso = _section(config, "source_loso")
+    decoding = _section(config, "decoding") or _section(config, "workflow")
     selection_metric = str(source_loso.get("selection_metric", DEFAULT_SELECTION_METRIC))
-    max_iter = int((_section(config, "decoding") or {}).get("max_iter", 1000))
+    max_iter = int(decoding.get("max_iter", 1000))
+    alignment_config = source_alignment_config(
+        method=source_loso.get("alignment_method", source_loso.get("source_alignment", "none")),
+        anchor_mode=source_loso.get("alignment_anchor_mode", "class_mean"),
+        repetition_cap=source_loso.get("alignment_repetition_cap", 16),
+        components=source_loso.get("alignment_components", 64),
+        times=source_loso.get("alignment_times"),
+        target_projection=source_loso.get("alignment_target_projection", "group_projection"),
+    )
+    _base._require_same_decode_window_alignment(alignment_config)
+    label_shuffle_control = _config_bool(
+        source_loso.get("label_shuffle_control", decoding.get("label_shuffle_control")),
+        default=False,
+    )
+    label_shuffle_seed = int(source_loso.get("label_shuffle_seed", decoding.get("label_shuffle_seed", DEFAULT_RANDOM_SEED)))
 
     subjects, encoder = _load_subjects_from_config(config, config_dir=config_path.parent)
     candidates = _candidate_grid(config)
@@ -2419,6 +2592,7 @@ def run_bushmeg_source_loso(
         key="source_loso_predictions_csv",
         default="source_loso_predictions.csv",
     )
+    alignment_diagnostics_out = out.with_name("alignment_diagnostics.csv")
     cue_weights_out = _resolve_output(
         config,
         config_dir=config_path.parent,
@@ -2429,6 +2603,7 @@ def run_bushmeg_source_loso(
     summary_rows: list[dict[str, Any]] = []
     inner_rows: list[dict[str, Any]] = []
     prediction_rows: list[dict[str, Any]] = []
+    alignment_diagnostic_rows: list[dict[str, object]] = []
     for outer_test_subject in sorted(subjects):
         selected, candidate_inner_rows, selected_summary = _select_candidate(
             subjects=subjects,
@@ -2438,7 +2613,11 @@ def run_bushmeg_source_loso(
             n_classes=n_classes,
             max_iter=max_iter,
             selection_metric=selection_metric,
+            alignment_config=alignment_config,
+            label_shuffle_control=label_shuffle_control,
+            label_shuffle_seed=label_shuffle_seed,
             cue_source_weights=cue_source_weights,
+            alignment_diagnostic_rows=alignment_diagnostic_rows,
         )
         inner_rows.extend(candidate_inner_rows)
         train_subjects = [subject for subject in sorted(subjects) if subject != outer_test_subject]
@@ -2451,16 +2630,28 @@ def run_bushmeg_source_loso(
             test_subject=outer_test_subject,
             n_classes=n_classes,
             max_iter=max_iter,
+            alignment_config=alignment_config,
+            label_shuffle_control=label_shuffle_control,
+            label_shuffle_seed=label_shuffle_seed,
             subject_weight_multipliers=fold_subject_weights,
+            alignment_diagnostic_rows=alignment_diagnostic_rows,
+            shuffle_context=("outer", outer_test_subject),
         )
         labels = subjects[outer_test_subject].labels
         predictions = probabilities.argmax(axis=1)
         summary_rows.append(
             {
                 "outer_test_subject": outer_test_subject,
-                **_candidate_rowspec(selected),
+                **_candidate_rowspec(
+                    selected,
+                    alignment_config=alignment_config,
+                    label_shuffle_control=label_shuffle_control,
+                    label_shuffle_seed=label_shuffle_seed,
+                ),
                 **selected_summary,
                 **_candidate_metrics(probabilities, labels, n_classes=n_classes),
+                "label_shuffle_control": bool(label_shuffle_control),
+                "label_shuffle_seed": int(label_shuffle_seed),
                 "n_train_subjects": len(train_subjects),
                 "cue_source_weighting": "" if cue_source_weights is None else cue_source_weights.mode,
                 "cue_source_weighting_blend": "" if cue_source_weights is None else cue_source_weights.blend,
@@ -2476,6 +2667,9 @@ def run_bushmeg_source_loso(
                 "outer_test_subject": outer_test_subject,
                 "trial_index": int(row_idx),
                 "candidate": selected.name,
+                **alignment_config.static_metadata(),
+                "label_shuffle_control": bool(label_shuffle_control),
+                "label_shuffle_seed": int(label_shuffle_seed),
                 "true_label": int(true_label),
                 "true_class": str(encoder.classes_[true_label]),
                 "predicted_label": int(predicted_label),
@@ -2501,6 +2695,8 @@ def run_bushmeg_source_loso(
     summary.to_csv(out, index=False)
     inner.to_csv(inner_out, index=False)
     predictions.to_csv(predictions_out, index=False)
+    if alignment_config.enabled:
+        _base._write_alignment_diagnostics(alignment_diagnostics_out, alignment_diagnostic_rows)
     if cue_source_weights is not None:
         write_cue_source_weight_csv(cue_source_weights, sorted(subjects), cue_weights_out)
     _write_json_sidecar(
@@ -2517,6 +2713,9 @@ def run_bushmeg_source_loso(
             ),
             "sample_weighting_modes": sorted({candidate.sample_weighting for candidate in candidates}),
             "class_bias_modes": sorted({candidate.class_bias for candidate in candidates}),
+            "window_combine_modes": sorted({_normalize_window_combine(candidate.window_combine) for candidate in candidates}),
+            "label_shuffle_control": bool(label_shuffle_control),
+            "label_shuffle_seed": int(label_shuffle_seed),
             "pseudotrials_per_class": sorted({int(candidate.pseudotrials_per_class) for candidate in candidates}),
             "pseudotrial_modes": sorted(
                 {
@@ -2530,6 +2729,10 @@ def run_bushmeg_source_loso(
             "cue_files_used": cue_source_weights is not None,
             "cue_files_used_for_classifier_training": False,
             "target_labels_used_for_selection": False,
+            "source_alignment": alignment_config.static_metadata(),
+            "alignment_diagnostics_csv": str(alignment_diagnostics_out) if alignment_config.enabled else "",
+            "alignment_target_labels_used": bool(alignment_config.oracle_target_calibrated),
+            "alignment_target_anchor_values_used": False,
             "cue_source_weighting_config": {} if cue_source_weights is None else dict(cue_source_weights.config or {}),
             "random_seed": DEFAULT_RANDOM_SEED,
         },
