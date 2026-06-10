@@ -228,6 +228,11 @@ def _feature_windows_match(left: WindowedFeatureSet, right: WindowedFeatureSet) 
 
     left_window = _feature_window_bounds(left)
     right_window = _feature_window_bounds(right)
+    # Legacy/smoke feature-set objects often omit timing metadata. When shape
+    # and flattening order match and neither side advertises a window, keep the
+    # exact fitted projection instead of collapsing to channel space.
+    if left_window is None and right_window is None:
+        return True
     if left_window is None or right_window is None:
         return False
     return np.allclose(left_window, right_window)
