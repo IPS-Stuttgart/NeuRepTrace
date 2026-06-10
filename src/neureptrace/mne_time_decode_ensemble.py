@@ -30,7 +30,7 @@ from neureptrace.mne_time_decode import (
     _write_alignment_diagnostics,
     TEMPORAL_TRAIN_MODE_RUN_CHOICES,
 )
-from neureptrace.decoding.source_alignment import normalize_source_alignment_method
+from neureptrace.decoding.source_alignment import normalize_source_alignment_method, source_alignment_config
 from neureptrace.mne_time_decode_foldlocal import run_time_resolved_decode as _run_time_resolved_decode
 from neureptrace.observation_ensemble import (
     DEFAULT_BASELINE_GROUP_COLUMNS as DEFAULT_ENSEMBLE_BASELINE_GROUP_COLUMNS,
@@ -111,6 +111,11 @@ def _parse_source_decoders(source_decoders: Sequence[str] | None) -> tuple[tuple
         raise ValueError("logistic_svm_ensemble expects at least two source decoders.")
     normalized = tuple(normalize_decoder_name(decoder) for decoder in requests)
     return requests, normalized
+
+
+def _set_result_column_if_missing(results: pd.DataFrame, column: str, value: object) -> None:
+    if column not in results.columns:
+        results[column] = value
 
 
 def run_time_resolved_decode(
@@ -243,6 +248,21 @@ def run_time_resolved_decode(
     normalized_weights = tuple(float(weight) / sum(weights) for weight in weights)
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
     alignment_enabled = normalize_source_alignment_method(alignment_method) != "none"
+    alignment_metadata = (
+        source_alignment_config(
+            method=alignment_method,
+            anchor_mode=alignment_anchor_mode,
+            anchor_column=alignment_anchor_column,
+            repetition_cap=alignment_repetition_cap,
+            components=alignment_components,
+            times=alignment_times,
+            target_projection=alignment_target_projection,
+            target_calibration_per_anchor=alignment_target_calibration_per_anchor,
+            target_calibration_seed=alignment_target_calibration_seed,
+        ).static_metadata()
+        if alignment_enabled
+        else {}
+    )
 
     with tempfile.TemporaryDirectory(prefix="neureptrace_logistic_svm_ensemble_") as tmp_dir_name:
         tmp_dir = Path(tmp_dir_name)
@@ -351,19 +371,24 @@ def run_time_resolved_decode(
         else source_time_selection_times or ",".join(str(time) for time in DEFAULT_SOURCE_TIME_SELECTION_TIMES)
     )
     results["source_time_selection_output_time"] = float(source_time_selection_output_time)
-    results["alignment_method"] = str(alignment_method).strip().lower().replace("-", "_")
-    results["alignment_anchor_mode"] = str(alignment_anchor_mode).strip().lower().replace("-", "_")
-    results["alignment_anchor_column"] = "" if alignment_anchor_column is None else str(alignment_anchor_column).strip()
-    results["alignment_repetition_cap"] = "" if alignment_repetition_cap is None else alignment_repetition_cap
-    results["alignment_components"] = "" if alignment_components is None else alignment_components
-    results["alignment_times"] = (
-        ",".join(str(time) for time in alignment_times)
-        if isinstance(alignment_times, Sequence) and not isinstance(alignment_times, str)
-        else alignment_times or ""
-    )
-    results["alignment_target_projection"] = str(alignment_target_projection).strip().lower().replace("-", "_")
-    results["alignment_target_calibration_per_anchor"] = alignment_target_calibration_per_anchor
-    results["alignment_target_calibration_seed"] = int(alignment_target_calibration_seed)
+    for column, value in alignment_metadata.items():
+        _set_result_column_if_missing(results, column, value)
+    if not alignment_enabled:
+        _set_result_column_if_missing(results, "alignment_method", "none")
+        _set_result_column_if_missing(results, "alignment_anchor_mode", str(alignment_anchor_mode).strip().lower().replace("-", "_"))
+        _set_result_column_if_missing(results, "alignment_anchor_column", "" if alignment_anchor_column is None else str(alignment_anchor_column).strip())
+        _set_result_column_if_missing(results, "alignment_repetition_cap", "" if alignment_repetition_cap is None else alignment_repetition_cap)
+        _set_result_column_if_missing(results, "alignment_components", "" if alignment_components is None else alignment_components)
+        _set_result_column_if_missing(
+            results,
+            "alignment_times",
+            ",".join(str(time) for time in alignment_times)
+            if isinstance(alignment_times, Sequence) and not isinstance(alignment_times, str)
+            else alignment_times or "",
+        )
+        _set_result_column_if_missing(results, "alignment_target_projection", str(alignment_target_projection).strip().lower().replace("-", "_"))
+        _set_result_column_if_missing(results, "alignment_target_calibration_per_anchor", alignment_target_calibration_per_anchor)
+        _set_result_column_if_missing(results, "alignment_target_calibration_seed", int(alignment_target_calibration_seed))
     results["source_decoders"] = "|".join(source_decoders)
     results["ensemble_weights"] = "|".join(f"{weight:.12g}" for weight in normalized_weights)
     results["ensemble_source_temperatures"] = "|".join(f"{temperature:.12g}" for temperature in source_temperatures)
