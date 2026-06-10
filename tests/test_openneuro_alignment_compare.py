@@ -6,7 +6,15 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from neureptrace.openneuro_alignment_compare import discover_output_dirs, run_alignment_comparison
+from neureptrace.openneuro_alignment_compare import (
+    build_anchor_comparison,
+    build_oracle_comparison,
+    build_raw_alignment_comparison,
+    build_target_calibrated_comparison,
+    build_variant_summary,
+    discover_output_dirs,
+    run_alignment_comparison,
+)
 
 
 def _write_alignment_artifact(
@@ -280,3 +288,118 @@ def test_alignment_compare_respects_explicit_invalid_benchmark_flag(tmp_path: Pa
     variants = pd.read_csv(written["variant_summary"])
     assert variants["alignment_target_projection"].unique().tolist() == ["group_projection"]
     assert variants["alignment_valid_for_benchmark"].unique().tolist() == [False]
+
+
+def test_alignment_compare_ignores_invalid_strict_rows_for_debug_baselines(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    invalid_strict = _write_alignment_artifact(
+        artifacts_root,
+        "invalid-strict-looking",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.80,
+    )
+    summary_path = invalid_strict / "decode" / "time_decode_summary.csv"
+    summary = pd.read_csv(summary_path)
+    summary["alignment_valid_for_benchmark"] = False
+    summary.to_csv(summary_path, index=False)
+    oracle = _write_alignment_artifact(
+        artifacts_root,
+        "oracle-debug",
+        anchor_mode="class_repetition",
+        target_projection="oracle_target_calibrated_alignment",
+        fixed_value=0.90,
+    )
+    target_calibrated = _write_alignment_artifact(
+        artifacts_root,
+        "target-calibrated-debug",
+        anchor_mode="class_repetition",
+        target_projection="target_calibrated_alignment",
+        fixed_value=0.85,
+    )
+
+    variants = build_variant_summary(
+        [invalid_strict, oracle, target_calibrated],
+        fixed_time=0.184,
+    )
+
+    assert build_oracle_comparison(variants).empty
+    target_comparison = build_target_calibrated_comparison(variants)
+    assert target_comparison.loc[0, "decision"] == "target_calibrated_without_strict_pair"
+    assert target_comparison.loc[0, "strict_artifact"] == ""
+
+
+def test_alignment_compare_ignores_invalid_anchor_semantics_rows(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    class_row = _write_alignment_artifact(
+        artifacts_root,
+        "invalid-class-repetition",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.50,
+    )
+    identity_row = _write_alignment_artifact(
+        artifacts_root,
+        "invalid-stimulus-id",
+        anchor_mode="stimulus_id_mean",
+        target_projection="group_projection",
+        fixed_value=0.70,
+    )
+    for output in (class_row, identity_row):
+        summary_path = output / "decode" / "time_decode_summary.csv"
+        summary = pd.read_csv(summary_path)
+        summary["alignment_valid_for_benchmark"] = False
+        summary.to_csv(summary_path, index=False)
+
+    variants = build_variant_summary([class_row, identity_row], fixed_time=0.184)
+
+    assert build_anchor_comparison(variants).empty
+
+
+def test_alignment_compare_ignores_invalid_raw_baseline(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    raw = _write_alignment_artifact(
+        artifacts_root,
+        "invalid-raw",
+        method="none",
+        anchor_mode="class_mean",
+        target_projection="group_projection",
+        fixed_value=0.40,
+    )
+    raw_summary_path = raw / "decode" / "time_decode_summary.csv"
+    raw_summary = pd.read_csv(raw_summary_path)
+    raw_summary["alignment_valid_for_benchmark"] = False
+    raw_summary.to_csv(raw_summary_path, index=False)
+    aligned = _write_alignment_artifact(
+        artifacts_root,
+        "strict-aligned",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.60,
+    )
+
+    variants = build_variant_summary([raw, aligned], fixed_time=0.184)
+
+    assert build_raw_alignment_comparison(variants).empty
+
+
+def test_alignment_compare_writes_readable_empty_comparison_tables(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    _write_alignment_artifact(
+        artifacts_root,
+        "strict-only",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.55,
+    )
+
+    written = run_alignment_comparison(
+        [artifacts_root],
+        out_dir=tmp_path / "comparison",
+        fixed_time=0.184,
+    )
+
+    for key in ("raw_comparison", "anchor_comparison", "oracle_comparison", "target_calibrated_comparison"):
+        table = pd.read_csv(written[key])
+        assert table.empty
+        assert len(table.columns) > 0

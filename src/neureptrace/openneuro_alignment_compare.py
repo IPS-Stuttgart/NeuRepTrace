@@ -21,6 +21,67 @@ CLASS_REPETITION_ANCHOR = "class_repetition"
 STRICT_TARGET_PROJECTION = "group_projection"
 TARGET_CALIBRATED_TARGET_PROJECTION = "target_calibrated_alignment"
 ORACLE_TARGET_PROJECTION = "oracle_target_calibrated_alignment"
+ANCHOR_COMPARISON_COLUMNS = [
+    "dataset",
+    "alignment_method",
+    "alignment_target_projection",
+    "selection_metric",
+    "class_repetition_artifact",
+    "class_repetition_value",
+    "best_identity_anchor_mode",
+    "best_identity_artifact",
+    "best_identity_value",
+    "score_delta_identity_minus_class_repetition",
+    "min_delta",
+    "decision",
+    "interpretation",
+]
+ORACLE_COMPARISON_COLUMNS = [
+    "dataset",
+    "alignment_method",
+    "alignment_anchor_mode",
+    "selection_metric",
+    "strict_artifact",
+    "strict_value",
+    "oracle_artifact",
+    "oracle_value",
+    "score_delta_oracle_minus_strict",
+    "min_delta",
+    "decision",
+    "interpretation",
+]
+TARGET_CALIBRATED_COMPARISON_COLUMNS = [
+    "dataset",
+    "alignment_method",
+    "alignment_anchor_mode",
+    "selection_metric",
+    "strict_artifact",
+    "strict_value",
+    "target_calibrated_artifact",
+    "target_calibrated_value",
+    "raw_artifact",
+    "raw_value",
+    "score_delta_target_calibrated_minus_strict",
+    "score_delta_target_calibrated_minus_raw",
+    "min_delta",
+    "decision",
+    "interpretation",
+]
+RAW_COMPARISON_COLUMNS = [
+    "dataset",
+    "selection_metric",
+    "raw_artifact",
+    "raw_value",
+    "best_alignment_artifact",
+    "best_alignment_method",
+    "best_alignment_anchor_mode",
+    "best_alignment_target_projection",
+    "best_alignment_value",
+    "score_delta_alignment_minus_raw",
+    "min_delta",
+    "decision",
+    "interpretation",
+]
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -317,14 +378,29 @@ def _best_row(frame: pd.DataFrame) -> pd.Series:
     return frame.sort_values(["selection_score", "selection_value"], ascending=[False, False]).iloc[0]
 
 
+def _valid_strict_rows(group: pd.DataFrame) -> pd.DataFrame:
+    return group[
+        (group["alignment_target_projection"] == STRICT_TARGET_PROJECTION)
+        & (group["alignment_valid_for_benchmark"].map(_as_bool))
+    ]
+
+
+def _valid_raw_rows(group: pd.DataFrame) -> pd.DataFrame:
+    return group[
+        group["alignment_method"].isin(["", "none"])
+        & (group["alignment_valid_for_benchmark"].map(_as_bool))
+    ]
+
+
 def build_anchor_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
     """Compare true identity anchors against class_repetition within matched groups."""
 
     if variants.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=ANCHOR_COMPARISON_COLUMNS)
     rows: list[dict[str, Any]] = []
     group_columns = ["dataset", "alignment_method", "alignment_target_projection", "selection_metric"]
-    for group_values, group in variants.groupby(group_columns, dropna=False):
+    benchmark_variants = _valid_strict_rows(variants)
+    for group_values, group in benchmark_variants.groupby(group_columns, dropna=False):
         group_map = dict(zip(group_columns, group_values, strict=False))
         class_rows = group[group["alignment_anchor_mode"] == CLASS_REPETITION_ANCHOR]
         identity_rows = group[group["alignment_anchor_mode"].isin(IDENTITY_ANCHOR_MODES)]
@@ -356,19 +432,19 @@ def build_anchor_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -
                 "interpretation": interpretation,
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=ANCHOR_COMPARISON_COLUMNS)
 
 
 def build_oracle_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
     """Compare oracle target-calibrated projection against strict group projection."""
 
     if variants.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=ORACLE_COMPARISON_COLUMNS)
     rows: list[dict[str, Any]] = []
     group_columns = ["dataset", "alignment_method", "alignment_anchor_mode", "selection_metric"]
     for group_values, group in variants.groupby(group_columns, dropna=False):
         group_map = dict(zip(group_columns, group_values, strict=False))
-        strict_rows = group[group["alignment_target_projection"] == STRICT_TARGET_PROJECTION]
+        strict_rows = _valid_strict_rows(group)
         oracle_rows = group[group["alignment_target_projection"] == ORACLE_TARGET_PROJECTION]
         if strict_rows.empty or oracle_rows.empty:
             continue
@@ -397,18 +473,18 @@ def build_oracle_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -
                 "interpretation": interpretation,
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=ORACLE_COMPARISON_COLUMNS)
 
 
 def build_target_calibrated_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
     """Compare disjoint target-calibrated projection against strict and raw rows."""
 
     if variants.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=TARGET_CALIBRATED_COMPARISON_COLUMNS)
     rows: list[dict[str, Any]] = []
     raw_groups = {
         group_values: group
-        for group_values, group in variants[variants["alignment_method"].isin(["", "none"])].groupby(
+        for group_values, group in _valid_raw_rows(variants).groupby(
             ["dataset", "selection_metric"],
             dropna=False,
         )
@@ -419,7 +495,7 @@ def build_target_calibrated_comparison(variants: pd.DataFrame, *, min_delta: flo
         target_rows = group[group["alignment_target_projection"] == TARGET_CALIBRATED_TARGET_PROJECTION]
         if target_rows.empty:
             continue
-        strict_rows = group[group["alignment_target_projection"] == STRICT_TARGET_PROJECTION]
+        strict_rows = _valid_strict_rows(group)
         raw_rows = raw_groups.get((group_map["dataset"], group_map["selection_metric"]), pd.DataFrame())
         target_row = _best_row(target_rows)
         strict_row = _best_row(strict_rows) if not strict_rows.empty else None
@@ -458,19 +534,19 @@ def build_target_calibrated_comparison(variants: pd.DataFrame, *, min_delta: flo
                 "interpretation": interpretation,
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=TARGET_CALIBRATED_COMPARISON_COLUMNS)
 
 
 def build_raw_alignment_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
     """Compare the best alignment variant against the raw/no-alignment row."""
 
     if variants.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=RAW_COMPARISON_COLUMNS)
     rows: list[dict[str, Any]] = []
     group_columns = ["dataset", "selection_metric"]
     for group_values, group in variants.groupby(group_columns, dropna=False):
         group_map = dict(zip(group_columns, group_values, strict=False))
-        raw_rows = group[group["alignment_method"].isin(["", "none"])]
+        raw_rows = _valid_raw_rows(group)
         aligned_rows = group[
             (~group["alignment_method"].isin(["", "none"]))
             & (group["alignment_valid_for_benchmark"].map(_as_bool))
@@ -506,7 +582,7 @@ def build_raw_alignment_comparison(variants: pd.DataFrame, *, min_delta: float =
                 "interpretation": interpretation,
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=RAW_COMPARISON_COLUMNS)
 
 
 def build_alignment_debug_note(

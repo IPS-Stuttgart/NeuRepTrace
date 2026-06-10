@@ -294,6 +294,36 @@ def test_real_shuffle_report_rejects_mismatched_resolved_fixed_times(tmp_path: P
         write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
 
 
+def test_real_shuffle_report_rejects_mismatched_chance_metadata(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True)
+    quality_path = shuffle / "decode" / "diagnostics" / "quality_summary.csv"
+    quality = pd.read_csv(quality_path)
+    quality["chance_accuracy"] = 0.5
+    quality.to_csv(quality_path, index=False)
+
+    with pytest.raises(ValueError, match="different chance_accuracy"):
+        write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+
+def test_real_shuffle_report_rejects_mismatched_topk_interpretation(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True)
+    quality_path = shuffle / "decode" / "diagnostics" / "quality_summary.csv"
+    quality = pd.read_csv(quality_path)
+    quality["top2_interpretation"] = "automatic_ceiling"
+    quality.to_csv(quality_path, index=False)
+
+    with pytest.raises(ValueError, match="different top2_interpretation"):
+        write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+
 def test_openneuro_real_vs_shuffle_workflow_uses_locked_defaults() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "openneuro-real-vs-shuffle-report.yml").read_text(encoding="utf-8")
 

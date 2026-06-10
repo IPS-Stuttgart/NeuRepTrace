@@ -16,6 +16,14 @@ METRIC_COLUMNS = ("balanced_accuracy", "accuracy", "top2_accuracy", "top3_accura
 MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 NULL_CHANCE_TOLERANCE = 0.03
 POSITIVE_CHANCE_MARGIN = 0.05
+OBSERVATION_DUPLICATE_COLUMNS = (
+    "group",
+    "time",
+    "sample_index",
+    "decoder",
+    "emission_mode",
+)
+OBSERVATION_DUPLICATE_REQUIRED_COLUMNS = ("group", "time", "sample_index")
 SUMMARY_PROVENANCE_COLUMNS = (
     "alignment_method",
     "alignment_anchor_mode",
@@ -288,6 +296,8 @@ def _concat_existing_csvs(
     out_path: Path,
     *,
     drop_duplicate_columns: Sequence[str] = (),
+    fail_duplicate_columns: Sequence[str] = (),
+    fail_duplicate_required_columns: Sequence[str] = (),
 ) -> Path | None:
     frames = []
     for output_dir in output_dirs:
@@ -299,6 +309,14 @@ def _concat_existing_csvs(
     combined = pd.concat(frames, ignore_index=True)
     if drop_duplicate_columns and all(column in combined.columns for column in drop_duplicate_columns):
         combined = combined.drop_duplicates(subset=list(drop_duplicate_columns), keep="first").reset_index(drop=True)
+    duplicate_columns = [column for column in fail_duplicate_columns if column in combined.columns]
+    if duplicate_columns and all(column in combined.columns for column in fail_duplicate_required_columns):
+        duplicates = combined.loc[combined.duplicated(subset=duplicate_columns, keep=False), duplicate_columns]
+        if not duplicates.empty:
+            examples = duplicates.head(5).to_dict("records")
+            raise ValueError(
+                f"Aggregating {relative_path} would duplicate observation rows on {duplicate_columns}: {examples}"
+            )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     combined.to_csv(out_path, index=False)
     return out_path
@@ -306,6 +324,13 @@ def _concat_existing_csvs(
 
 def _aggregate_manifest(output_dirs: Sequence[Path]) -> dict[str, Any]:
     manifests = [_read_json(output_dir / "run_manifest.json") for output_dir in output_dirs]
+    missing = [
+        (output_dir / "run_manifest.json").as_posix()
+        for output_dir, manifest in zip(output_dirs, manifests, strict=True)
+        if not manifest
+    ]
+    if missing:
+        raise FileNotFoundError(f"Cannot aggregate OpenNeuro shards without run_manifest.json: {missing}")
     _validate_aggregate_manifest_compatibility(manifests, output_dirs)
     first = next((manifest for manifest in manifests if manifest), {})
     dataset = first.get("dataset", "")
@@ -755,7 +780,13 @@ def aggregate_workflow_outputs(
         drop_duplicate_columns=("dataset_id", "subject", "epochs_path"),
     )
     summary_path = _concat_existing_csvs(source_dirs, "decode/time_decode_summary.csv", decode_dir / "time_decode_summary.csv")
-    observations_path = _concat_existing_csvs(source_dirs, "decode/observations.csv", decode_dir / "observations.csv")
+    observations_path = _concat_existing_csvs(
+        source_dirs,
+        "decode/observations.csv",
+        decode_dir / "observations.csv",
+        fail_duplicate_columns=OBSERVATION_DUPLICATE_COLUMNS,
+        fail_duplicate_required_columns=OBSERVATION_DUPLICATE_REQUIRED_COLUMNS,
+    )
     _concat_existing_csvs(
         source_dirs,
         "decode/alignment_anchor_availability.csv",
@@ -783,6 +814,8 @@ def aggregate_workflow_outputs(
         source_dirs,
         "decode/temporal_smoothing/observations.csv",
         smoothed_dir / "observations.csv",
+        fail_duplicate_columns=OBSERVATION_DUPLICATE_COLUMNS,
+        fail_duplicate_required_columns=OBSERVATION_DUPLICATE_REQUIRED_COLUMNS,
     )
     if smoothed_observations is not None and smoothed_summary is not None:
         write_loso_observation_diagnostics(
@@ -803,6 +836,8 @@ def aggregate_workflow_outputs(
         source_dirs,
         "decode/response_window/observations.csv",
         response_dir / "observations.csv",
+        fail_duplicate_columns=OBSERVATION_DUPLICATE_COLUMNS,
+        fail_duplicate_required_columns=OBSERVATION_DUPLICATE_REQUIRED_COLUMNS,
     )
     if response_observations is not None and response_summary is not None:
         write_loso_observation_diagnostics(

@@ -375,6 +375,21 @@ def _summary_row(real: dict[str, object], shuffle: dict[str, object], fixed_time
     shuffle_n_classes = int(_float(shuffle_quality, "n_classes"))
     if real_n_classes != shuffle_n_classes:
         raise ValueError(f"Real and shuffle artifacts have different class counts: real={real_n_classes}, shuffle={shuffle_n_classes}.")
+    for column in ("chance_accuracy", "top2_chance", "top3_chance"):
+        real_chance = _float(real_quality, column)
+        shuffle_chance = _float(shuffle_quality, column)
+        if not np.isclose(real_chance, shuffle_chance, atol=1e-12, equal_nan=True):
+            raise ValueError(
+                f"Real and shuffle artifacts have different {column}: real={real_chance}, shuffle={shuffle_chance}."
+            )
+    for column in ("top2_interpretation", "top3_interpretation"):
+        real_interpretation = _string(real_quality, column)
+        shuffle_interpretation = _string(shuffle_quality, column)
+        if real_interpretation and shuffle_interpretation and real_interpretation != shuffle_interpretation:
+            raise ValueError(
+                f"Real and shuffle artifacts have different {column}: "
+                f"real={real_interpretation!r}, shuffle={shuffle_interpretation!r}."
+            )
     real_fixed = _float(real_quality, "fixed_balanced_accuracy")
     shuffle_fixed = _float(shuffle_quality, "fixed_balanced_accuracy")
     real_top2 = _float(real_quality, "fixed_top2_accuracy")
