@@ -141,7 +141,7 @@ def test_foldlocal_accepts_strict_source_alignment(tmp_path: Path, monkeypatch):
         alignment_method="procrustes",
         alignment_anchor_mode="class_mean",
         alignment_components=4,
-        alignment_times=(0.005, 0.025),
+        alignment_times="same_decode_window",
         observation_out_path=observations_out,
     )
     observations = pd.read_csv(observations_out)
@@ -194,7 +194,7 @@ def test_foldlocal_accepts_oracle_target_calibrated_alignment(tmp_path: Path, mo
         alignment_method="procrustes",
         alignment_anchor_mode="class_mean",
         alignment_components=4,
-        alignment_times=(0.005, 0.025),
+        alignment_times="same_decode_window",
         alignment_target_projection="oracle_target_calibrated_alignment",
         observation_out_path=observations_out,
     )
@@ -251,7 +251,7 @@ def test_foldlocal_accepts_disjoint_target_calibrated_alignment(tmp_path: Path, 
         alignment_method="procrustes",
         alignment_anchor_mode="class_mean",
         alignment_components=4,
-        alignment_times=(0.005, 0.025),
+        alignment_times="same_decode_window",
         alignment_target_projection="target_calibrated_alignment",
         alignment_target_calibration_per_anchor=1,
         alignment_target_calibration_seed=23,

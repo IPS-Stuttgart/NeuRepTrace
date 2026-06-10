@@ -81,6 +81,10 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
 
     assert "run-name: OpenNeuro MEG LOSO" in workflow
     assert "default: github-hosted" in workflow
+    assert '"ds000117": ("1,2,3", "01,02")' in workflow
+    assert '"ds004276": ("1-3", "all")' in workflow
+    assert '"ds006629": ("1,2,4", "0")' in workflow
+    assert '"ds004330": ("1,2,4", "01,02,03")' in workflow
     assert "GitHub-hosted starts immediately" in workflow
     assert "Cache OpenNeuro raw files on GitHub-hosted runners" in workflow
     assert "Resolve GitHub-hosted OpenNeuro cache keys" in workflow
@@ -161,6 +165,16 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     for dataset_id, config_name in OPENNEURO_DECODE_CONFIGS.items():
         assert f"- {dataset_id}" in workflow
         assert f'"{dataset_id}": "{config_name}"' in workflow
+
+
+def test_openneuro_auxiliary_workflows_use_alignment_valid_smoke_cohorts():
+    safe_cache = (REPO_ROOT / ".github" / "workflows" / "openneuro-meg-loso-safe-cache.yml").read_text(encoding="utf-8")
+    decode_only = (REPO_ROOT / ".github" / "workflows" / "openneuro-meg-decode-only.yml").read_text(encoding="utf-8")
+
+    for workflow in (safe_cache, decode_only):
+        assert '"ds004276":' in workflow
+        assert "1-3" in workflow
+        assert "1,2,4" in workflow
 
 
 def test_expected_relative_files_include_singsing_raw_and_events():

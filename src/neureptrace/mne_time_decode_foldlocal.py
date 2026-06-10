@@ -735,6 +735,7 @@ def run_time_resolved_decode(
         target_calibration_per_anchor=alignment_target_calibration_per_anchor,
         target_calibration_seed=alignment_target_calibration_seed,
     )
+    _base._require_same_decode_window_alignment(alignment_config)
     outer_test_groups_value = _base._normalize_outer_test_groups(outer_test_groups)
     if alignment_config.enabled:
         if group_column is None:

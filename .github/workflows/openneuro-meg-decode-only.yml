@@ -14,7 +14,7 @@ on:
                     - ds004330
                 default: ds004330
             mode:
-                description: "Smoke uses the workflow smoke cohort; full uses all configured subjects unless subjects is set."
+                description: "Smoke uses a three-subject workflow cohort; full uses all configured subjects unless subjects is set."
                 required: true
                 type: choice
                 options:
@@ -180,9 +180,9 @@ jobs:
                       "ds004330": "ds004330_object_drawing.yml",
                   }
                   smoke_defaults = {
-                      "ds004276": "1-2",
-                      "ds006629": "1,2",
-                      "ds004330": "1,2",
+                      "ds004276": "1-3",
+                      "ds006629": "1,2,4",
+                      "ds004330": "1,2,4",
                   }
                   subjects = os.environ.get("SUBJECTS_INPUT") or (smoke_defaults[dataset] if mode == "smoke" else "all")
                   subject_count = len(parse_subjects(spec, subjects))

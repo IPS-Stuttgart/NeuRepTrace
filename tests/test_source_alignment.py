@@ -123,6 +123,15 @@ def test_alignment_times_same_decode_window_metadata():
     assert metadata["alignment_same_decode_window"] is True
 
 
+def test_alignment_defaults_to_same_decode_window_until_fixed_windows_are_implemented():
+    config = source_alignment_config(method="procrustes")
+    metadata = config.static_metadata()
+
+    assert config.same_decode_window is True
+    assert metadata["alignment_times"] == "same_decode_window"
+    assert metadata["alignment_window_mode"] == "same_decode_window"
+
+
 def test_oracle_alignment_requires_target_labels():
     train_features, train_labels, train_subjects = _rotated_subject_features()
     with pytest.raises(ValueError, match="requires held-out target labels"):
@@ -156,6 +165,7 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert result.test_features.shape == (6, 2)
     assert result.metadata["alignment_method"] == method
     assert result.metadata["alignment_target_projection"] == "group_projection"
+    assert result.metadata["alignment_uses_class_labels"] is True
     assert result.metadata["alignment_n_components"] == 2
     assert result.diagnostics["alignment_method"] == method
     assert result.diagnostics["sample_mode"] == "class_mean"
@@ -243,6 +253,7 @@ def test_stimulus_anchor_values_are_distinct_from_decoder_labels(method):
     assert result.metadata["alignment_anchor_mode"] == "stimulus_id_mean"
     assert result.metadata["alignment_anchor_column"] == "stim_file"
     assert result.metadata["alignment_anchor_value_source"] == "metadata"
+    assert result.metadata["alignment_uses_class_labels"] is False
     assert result.metadata["alignment_common_anchor_count"] == 6
     assert result.metadata["alignment_anchor_rows_dropped"] == 0
     assert result.metadata["alignment_target_anchor_values_used"] is False

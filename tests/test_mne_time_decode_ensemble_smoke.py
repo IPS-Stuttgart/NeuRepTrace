@@ -219,7 +219,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
         alignment_anchor_column="stim_file",
         alignment_repetition_cap=12,
         alignment_components=32,
-        alignment_times=(0.088, 0.136, 0.184),
+        alignment_times="same_decode_window",
         alignment_target_projection="group_projection",
         ensemble_source_decoders=("multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"),
         ensemble_source_temperatures=(1.25, 1.0, 0.8),
@@ -243,7 +243,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert all(call["alignment_anchor_column"] == "stim_file" for call in calls)
     assert all(call["alignment_repetition_cap"] == 12 for call in calls)
     assert all(call["alignment_components"] == 32 for call in calls)
-    assert all(call["alignment_times"] == (0.088, 0.136, 0.184) for call in calls)
+    assert all(call["alignment_times"] == "same_decode_window" for call in calls)
     assert all(call["alignment_target_projection"] == "group_projection" for call in calls)
     assert results["class_prior_correction"].unique().tolist() == ["train_uniform"]
     assert results["source_calibration"].unique().tolist() == ["temperature_plus_class_bias"]
@@ -253,7 +253,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert results["alignment_anchor_column"].unique().tolist() == ["stim_file"]
     assert results["alignment_repetition_cap"].unique().tolist() == [12]
     assert results["alignment_components"].unique().tolist() == [32]
-    assert results["alignment_times"].unique().tolist() == ["0.088,0.136,0.184"]
+    assert results["alignment_times"].unique().tolist() == ["same_decode_window"]
     assert results["alignment_target_projection"].unique().tolist() == ["group_projection"]
     assert results["source_decoders"].unique().tolist() == ["multinomial-logistic-weighted|linear_svm|shrinkage_lda"]
     assert results["ensemble_weights"].unique().tolist() == ["0.333333333333|0.333333333333|0.333333333333"]

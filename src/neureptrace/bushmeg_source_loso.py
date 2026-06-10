@@ -2492,6 +2492,7 @@ def run_bushmeg_source_loso(
         times=source_loso.get("alignment_times"),
         target_projection=source_loso.get("alignment_target_projection", "group_projection"),
     )
+    _base._require_same_decode_window_alignment(alignment_config)
     label_shuffle_control = _config_bool(source_loso.get("label_shuffle_control"), default=False)
     label_shuffle_seed = int(source_loso.get("label_shuffle_seed", DEFAULT_RANDOM_SEED))
 

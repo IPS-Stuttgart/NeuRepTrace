@@ -556,8 +556,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--alignment-components", default="64")
     parser.add_argument(
         "--alignment-times",
-        default="0.088,0.136,0.184,0.232,0.280",
-        help="Comma-separated time centers used to build source-only alignment anchors.",
+        default="same_decode_window",
+        help="Alignment time policy. Only same_decode_window is currently implemented by decode paths.",
     )
     parser.add_argument(
         "--alignment-target-projection",

@@ -204,6 +204,34 @@ def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_l
     assert availability["estimated_alignment_rows"].unique().tolist() == [2]
 
 
+def test_run_time_resolved_decode_rejects_fixed_alignment_times_until_implemented(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+
+    with pytest.raises(ValueError, match="same-window projection only"):
+        run_time_resolved_decode(
+            epochs_path=tmp_path / "synthetic-epo.fif",
+            label_column="condition",
+            group_column="group",
+            outer_test_groups=("sub-01",),
+            out_path=tmp_path / "fixed_alignment_times.csv",
+            n_splits=3,
+            window_ms=1,
+            step_ms=4,
+            decoder="logistic",
+            emission_mode="uncalibrated",
+            time_decode_backend="sklearn",
+            alignment_method="procrustes",
+            alignment_times=(0.088, 0.136, 0.184),
+        )
+
+
 def test_run_time_resolved_decode_passes_target_labels_for_oracle_alignment(tmp_path: Path, monkeypatch):
     labels = np.tile(np.array([0, 1, 0, 1]), 3)
     groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)

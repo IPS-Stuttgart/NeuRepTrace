@@ -559,6 +559,14 @@ def _alignment_diagnostic_row(
     return row
 
 
+def _require_same_decode_window_alignment(alignment_config) -> None:
+    if alignment_config.enabled and not alignment_config.same_decode_window:
+        raise ValueError(
+            "source alignment currently implements same-window projection only; "
+            "set alignment_times='same_decode_window' to avoid mislabeling artifacts."
+        )
+
+
 def _write_alignment_diagnostics(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(list(rows), columns=ALIGNMENT_DIAGNOSTIC_COLUMNS).to_csv(path, index=False)
@@ -2036,6 +2044,7 @@ def run_time_resolved_decode(
         target_calibration_per_anchor=alignment_target_calibration_per_anchor,
         target_calibration_seed=alignment_target_calibration_seed,
     )
+    _require_same_decode_window_alignment(alignment_config)
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
@@ -3128,8 +3137,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--alignment-times",
-        default="0.088,0.136,0.184,0.232,0.280",
-        help="Response-window time centers recorded for strict alignment screens.",
+        default="same_decode_window",
+        help="Alignment time policy. Only same_decode_window is currently implemented by decode paths.",
     )
     parser.add_argument(
         "--alignment-target-projection",

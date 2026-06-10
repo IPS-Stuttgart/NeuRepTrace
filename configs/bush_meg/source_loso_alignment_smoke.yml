@@ -55,7 +55,7 @@ source_loso:
     alignment_anchor_mode: class_mean
     alignment_repetition_cap: 16
     alignment_components: 64
-    alignment_times: [0.088, 0.136, 0.184, 0.232, 0.280]
+    alignment_times: same_decode_window
     alignment_target_projection: group_projection
     label_shuffle_control: false
     label_shuffle_seed: 13

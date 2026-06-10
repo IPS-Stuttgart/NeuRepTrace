@@ -203,7 +203,10 @@ class SourceAlignmentConfig:
             "alignment_target_projection": self.target_projection,
             "alignment_strict_source_only": bool(self.enabled and not oracle and not target_calibrated and not unsupervised),
             "alignment_uses_unlabeled_target_data": bool(unsupervised),
-            "alignment_uses_class_labels": bool(self.method in SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS),
+            "alignment_uses_class_labels": bool(
+                self.method in SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS
+                and self.anchor_mode in SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES
+            ),
             "alignment_target_calibrated": bool(target_calibrated),
             "alignment_target_calibration_per_anchor": int(self.target_calibration_per_anchor),
             "alignment_target_calibration_seed": int(self.target_calibration_seed),
@@ -310,11 +313,11 @@ def normalize_source_alignment_target_projection(target_projection: str | None) 
 
 def parse_alignment_times(times: Sequence[float] | str | None) -> tuple[tuple[float, ...], bool]:
     if times is None:
-        return DEFAULT_ALIGNMENT_TIMES, False
+        return (), True
     if isinstance(times, str):
         text = times.strip()
         if not text:
-            return DEFAULT_ALIGNMENT_TIMES, False
+            return (), True
         normalized = text.lower().replace("-", "_").replace(" ", "_")
         if normalized in SAME_DECODE_WINDOW_ALIGNMENT_ALIASES:
             return (), True
