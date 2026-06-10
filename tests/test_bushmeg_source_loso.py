@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics import balanced_accuracy_score
+from sklearn.preprocessing import LabelEncoder
 
 from neureptrace.decoding.source_alignment import source_alignment_config
 from neureptrace.decoding import make_decoder, normalize_decoder_name
@@ -22,6 +25,7 @@ from neureptrace.bushmeg_source_loso import (
     _predict_candidate,
     _preprocessing_normalization_name,
     _prepare_window_train_test_features,
+    run_bushmeg_source_loso,
     _sample_weights_for_training,
     _select_candidate,
     _window_features,
@@ -572,6 +576,66 @@ def test_select_candidate_carries_strict_alignment_metadata():
         "strict_source_loso_nearest_centroid_group_projection"
     ]
     assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection"]
+
+
+def test_run_bushmeg_source_loso_oracle_sidecar_marks_target_labels(tmp_path, monkeypatch):
+    subjects = {}
+    times = np.array([0.10, 0.20])
+    for subject_idx in range(4):
+        labels = np.array([0, 0, 1, 1])
+        data = np.zeros((4, 2, 2), dtype=np.float32)
+        data[:, 0, :] = labels[:, None]
+        data[:, 1, :] = subject_idx * 0.02
+        subjects[str(subject_idx)] = SubjectEpochs(
+            subject=str(subject_idx),
+            data=data,
+            times=times,
+            metadata=pd.DataFrame({"participant": [str(subject_idx)] * 4}),
+            labels=labels,
+        )
+    encoder = LabelEncoder().fit(["face", "scrambled"])
+    monkeypatch.setattr(
+        "neureptrace.bushmeg_source_loso._load_subjects_from_config",
+        lambda *_args, **_kwargs: (subjects, encoder),
+    )
+
+    config_path = tmp_path / "bush.yml"
+    config_path.write_text(
+        """
+preprocessing:
+  window_size: 0.20
+  epoch_normalization: none
+decoding:
+  max_iter: 200
+source_loso:
+  selection_metric: balanced_accuracy
+  alignment_method: procrustes
+  alignment_components: 1
+  alignment_times: same_decode_window
+  alignment_target_projection: oracle_target_calibrated_alignment
+  candidate_grid:
+    decoders: [logistic]
+    emission_modes: [uncalibrated]
+    feature_preprocessors: [none]
+    pca_components: [none]
+    temporal_bins: [1]
+    c_grid: [1.0]
+    window_sets:
+      - name: single
+        centers: [0.15]
+        window_size: 0.20
+""",
+        encoding="utf-8",
+    )
+    out = tmp_path / "summary.csv"
+
+    run_bushmeg_source_loso(config_path, out_path=out)
+
+    sidecar = json.loads((tmp_path / "summary.csv.provenance.json").read_text(encoding="utf-8"))
+    assert sidecar["alignment_target_labels_used"] is True
+    assert sidecar["alignment_target_anchor_values_used"] is False
+    assert sidecar["source_alignment"]["alignment_target_projection"] == "oracle_target_calibrated_alignment"
+    assert sidecar["source_alignment"]["alignment_valid_for_benchmark"] is False
 
 
 def test_subject_class_balanced_sample_weights_equalize_observed_cells():
