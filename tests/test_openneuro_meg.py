@@ -143,6 +143,8 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "OPENNEURO_SHARD_MATRIX_RESULT" in workflow
     assert "OUTER_TEST_GROUP_SHARDS_JSON" in workflow
     assert "shard_aggregation_status.json" in workflow
+    assert 'artifact_name.endswith("-shard-aggregate")' in workflow
+    assert 'artifact_name.endswith(f"-shard-{shard}")' in workflow
     assert "--aggregate-out \"$OPENNEURO_AGGREGATE_OUTPUT_DIR\"" in workflow
     assert "-shard-aggregate" in workflow
     assert "OPENNEURO_CONFIG" in workflow

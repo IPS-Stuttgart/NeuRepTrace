@@ -233,7 +233,6 @@ jobs:
               uses: actions/setup-python@v6
               with:
                   python-version: "3.12"
-                  cache: pip
 
             - name: Resolve GitHub-hosted OpenNeuro cache keys
               id: openneuro_cache_keys
@@ -885,7 +884,6 @@ jobs:
               uses: actions/setup-python@v6
               with:
                   python-version: "3.12"
-                  cache: pip
 
             - name: Install NeuRepTrace
               shell: bash
@@ -905,7 +903,35 @@ jobs:
               shell: bash
               run: |
                   set -euo pipefail
-                  mapfile -t output_dirs < <(find downloaded_openneuro_artifacts -type f -name run_manifest.json -printf '%h\n' | sort -u)
+                  mapfile -t output_dirs < <(python - <<'PY'
+                  from __future__ import annotations
+
+                  import json
+                  import os
+                  from pathlib import Path
+
+                  root = Path("downloaded_openneuro_artifacts")
+                  expected = json.loads(os.environ.get("OUTER_TEST_GROUP_SHARDS_JSON") or '[""]')
+                  expected_shards = {str(shard).strip() for shard in expected if str(shard).strip()}
+                  output_dirs = sorted({path.parent for path in root.rglob("run_manifest.json")})
+                  selected: list[Path] = []
+                  for output_dir in output_dirs:
+                      try:
+                          artifact_name = output_dir.relative_to(root).parts[0]
+                      except (IndexError, ValueError):
+                          continue
+                      if artifact_name.endswith("-shard-aggregate"):
+                          continue
+                      if expected_shards:
+                          if not any(artifact_name.endswith(f"-shard-{shard}") for shard in expected_shards):
+                              continue
+                      elif "-shard-" in artifact_name:
+                          continue
+                      selected.append(output_dir)
+                  for output_dir in selected:
+                      print(output_dir.as_posix())
+                  PY
+                  )
                   if [[ "${#output_dirs[@]}" -eq 0 ]]; then
                     echo "No shard run_manifest.json files were downloaded; cannot aggregate OpenNeuro diagnostics."
                     exit 1
