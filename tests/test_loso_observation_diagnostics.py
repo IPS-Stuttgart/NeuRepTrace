@@ -131,3 +131,36 @@ def test_loso_observation_diagnostics_rejects_fractional_predicted_labels(tmp_pa
 
     with pytest.raises(ValueError, match="predicted_label values must be integer-valued"):
         write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_nonfinite_probabilities(tmp_path: Path):
+    observations = _toy_observations()
+    observations.loc[0, "prob_class_0"] = float("nan")
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="prob_class_\\* values must be finite"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_negative_probabilities(tmp_path: Path):
+    observations = _toy_observations()
+    observations.loc[0, "prob_class_0"] = -0.1
+    observations.loc[0, "prob_class_1"] = 0.3
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="prob_class_\\* values must be non-negative"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_unnormalized_probabilities(tmp_path: Path):
+    observations = _toy_observations()
+    observations.loc[0, "prob_class_0"] = 0.7
+    observations.loc[0, "prob_class_1"] = 0.1
+    observations.loc[0, "prob_class_2"] = 0.1
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="prob_class_\\* rows must sum to 1"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)

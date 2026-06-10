@@ -41,7 +41,15 @@ def _probability_matrix(frame: pd.DataFrame) -> np.ndarray:
     columns = probability_columns(frame)
     if not columns:
         raise ValueError("Observation table must contain prob_class_* columns.")
-    return frame.loc[:, list(columns)].to_numpy(dtype=float)
+    probabilities = frame.loc[:, list(columns)].to_numpy(dtype=float)
+    if not np.isfinite(probabilities).all():
+        raise ValueError("Observation table prob_class_* values must be finite.")
+    if bool((probabilities < 0).any()):
+        raise ValueError("Observation table prob_class_* values must be non-negative.")
+    row_sums = probabilities.sum(axis=1)
+    if not np.isclose(row_sums, 1.0, rtol=0.0, atol=1e-6).all():
+        raise ValueError("Observation table prob_class_* rows must sum to 1.")
+    return probabilities
 
 
 def _integer_array(values: pd.Series, *, name: str) -> np.ndarray:
