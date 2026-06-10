@@ -129,6 +129,21 @@ def test_real_shuffle_report_fallback_fixed_time_keeps_quality_fields(tmp_path: 
     assert summary.loc[0, "n_classes"] == 3
 
 
+def test_real_shuffle_report_rejects_mismatched_resolved_fixed_times(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True, diagnostics_best_time=0.232)
+    shuffle_time_course = shuffle / "decode" / "diagnostics" / "time_course_summary.csv"
+    time_course = pd.read_csv(shuffle_time_course)
+    time_course = time_course.loc[time_course["time"] != 0.184]
+    time_course.to_csv(shuffle_time_course, index=False)
+
+    with pytest.raises(ValueError, match="different fixed diagnostic times"):
+        write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+
 def test_openneuro_real_vs_shuffle_workflow_uses_locked_defaults() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "openneuro-real-vs-shuffle-report.yml").read_text(encoding="utf-8")
 

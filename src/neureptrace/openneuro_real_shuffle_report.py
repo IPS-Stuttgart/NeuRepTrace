@@ -232,6 +232,13 @@ def _summary_row(real: dict[str, object], shuffle: dict[str, object], fixed_time
     merged_subjects = _per_subject_delta(real_per_subject, shuffle_per_subject)
     if merged_subjects.empty:
         raise ValueError("Real and shuffle artifacts have no overlapping subjects to compare.")
+    real_fixed_time = _float(real_quality, "fixed_time")
+    shuffle_fixed_time = _float(shuffle_quality, "fixed_time")
+    if not np.isclose(real_fixed_time, shuffle_fixed_time, atol=1e-9):
+        raise ValueError(
+            "Real and shuffle artifacts resolved to different fixed diagnostic times: "
+            f"real={real_fixed_time}, shuffle={shuffle_fixed_time}."
+        )
     real_n_classes = int(_float(real_quality, "n_classes"))
     shuffle_n_classes = int(_float(shuffle_quality, "n_classes"))
     if real_n_classes != shuffle_n_classes:
@@ -246,8 +253,8 @@ def _summary_row(real: dict[str, object], shuffle: dict[str, object], fixed_time
         [
             {
                 "fixed_time_requested": float(fixed_time),
-                "fixed_time_real": _float(real_quality, "fixed_time"),
-                "fixed_time_shuffle": _float(shuffle_quality, "fixed_time"),
+                "fixed_time_real": real_fixed_time,
+                "fixed_time_shuffle": shuffle_fixed_time,
                 "n_subjects_real": int(_float(real_quality, "n_subjects")),
                 "n_subjects_shuffle": int(_float(shuffle_quality, "n_subjects")),
                 "n_classes": real_n_classes,
