@@ -103,6 +103,27 @@ def _target_subject_values(base: pd.DataFrame, key_columns: list[str]) -> np.nda
     return np.full(len(base), "", dtype=object)
 
 
+def _nonempty_unique_values(frame: pd.DataFrame, column: str) -> list[str]:
+    if column not in frame.columns:
+        return []
+    return sorted(value for value in frame[column].dropna().astype(str).str.strip().unique().tolist() if value)
+
+
+def _check_single_plain_response_source(selected: pd.DataFrame) -> None:
+    decoder_values = _nonempty_unique_values(selected, "decoder")
+    if len(decoder_values) > 1:
+        raise ValueError(
+            "Plain response-window ensembling received multiple decoder values "
+            f"{decoder_values}. Use mode='decoder_source_oof_nonnegative' or filter to one decoder."
+        )
+    emission_values = _nonempty_unique_values(selected, "emission_mode")
+    if len(emission_values) > 1:
+        raise ValueError(
+            "Plain response-window ensembling received multiple emission_mode values "
+            f"{emission_values}. Filter to one emission mode before response-window aggregation."
+        )
+
+
 def _candidate_weights(n_times: int, step: float) -> np.ndarray:
     if n_times < 1:
         raise ValueError("Need at least one response time.")
@@ -248,6 +269,7 @@ def _response_window_rows(
     prob_columns = list(probability_columns(observations))
     times = _nearest_times(pd.to_numeric(observations["time"], errors="coerce").dropna().unique(), requested_times)
     selected = observations.loc[observations["time"].astype(float).isin(times)].copy()
+    _check_single_plain_response_source(selected)
     key_columns = _sequence_key_columns(selected)
     metadata_columns = [
         column

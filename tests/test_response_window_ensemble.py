@@ -122,6 +122,36 @@ def test_response_window_rejects_duplicate_nearest_time_mapping(tmp_path: Path):
         run_response_window_ensemble([csv_path], mode="uniform")
 
 
+def test_plain_response_window_rejects_multiple_decoders(tmp_path: Path):
+    observations = pd.concat(
+        [
+            _toy_observations(),
+            _toy_observations().assign(decoder="other"),
+        ],
+        ignore_index=True,
+    )
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="multiple decoder values"):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
+def test_plain_response_window_rejects_multiple_emission_modes(tmp_path: Path):
+    observations = pd.concat(
+        [
+            _toy_observations(),
+            _toy_observations().assign(emission_mode="uncalibrated"),
+        ],
+        ignore_index=True,
+    )
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="multiple emission_mode values"):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
 def test_response_window_model_hash_depends_on_source_time_hashes(tmp_path: Path):
     observations = _toy_observations()
     observations["preprocessing_hash"] = observations["time"].map(lambda time: f"pre-{time:.3f}")
