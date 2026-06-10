@@ -233,6 +233,103 @@ def test_write_decode_diagnostics_marks_target_calibration_non_benchmark(tmp_pat
     )
 
 
+def test_write_decode_diagnostics_respects_explicit_invalid_alignment_provenance(tmp_path: Path):
+    output_dir = tmp_path / "outputs" / "openneuro_ds000117_debug_alignment"
+    decode_dir = output_dir / "decode"
+    diagnostics_dir = decode_dir / "diagnostics"
+    diagnostics_dir.mkdir(parents=True)
+    (output_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dataset": "ds000117",
+                "mode": "smoke",
+                "artifact_name": "openneuro-meg-ds000117-debug-alignment",
+                "label_shuffle_control": "false",
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "time": [0.184],
+            "balanced_accuracy": [0.66],
+            "accuracy": [0.66],
+            "alignment_method": ["procrustes"],
+            "alignment_anchor_mode": ["class_mean"],
+            "alignment_target_projection": ["group_projection"],
+            "alignment_valid_for_benchmark": [False],
+            "alignment_protocol": ["debug_alignment_probe"],
+            "alignment_protocol_note": ["debug only"],
+        }
+    ).to_csv(decode_dir / "time_decode_summary.csv", index=False)
+    pd.DataFrame(
+        {
+            "n_classes": [3],
+            "fixed_time": [0.184],
+            "fixed_balanced_accuracy": [0.66],
+            "fixed_balanced_minus_chance": [0.66 - 1 / 3],
+            "subjects_fixed_above_chance": [1],
+        }
+    ).to_csv(diagnostics_dir / "quality_summary.csv", index=False)
+
+    write_decode_diagnostics(output_dir)
+
+    quality = pd.read_csv(output_dir / "workflow_quality_summary.csv")
+    assert quality.loc[0, "alignment_target_projection"] == "group_projection"
+    assert bool(quality.loc[0, "alignment_valid_for_benchmark"]) is False
+    assert bool(quality.loc[0, "alignment_strict_source_only"]) is False
+    assert quality.loc[0, "alignment_protocol"] == "debug_alignment_probe"
+    assert quality.loc[0, "alignment_protocol_note"] == "debug only"
+
+
+def test_write_decode_diagnostics_marks_unlabeled_covariance_as_non_strict(tmp_path: Path):
+    output_dir = tmp_path / "outputs" / "openneuro_ds006629_coral"
+    decode_dir = output_dir / "decode"
+    diagnostics_dir = decode_dir / "diagnostics"
+    diagnostics_dir.mkdir(parents=True)
+    (output_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dataset": "ds006629",
+                "mode": "smoke",
+                "artifact_name": "openneuro-meg-ds006629-coral",
+                "label_shuffle_control": "false",
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "time": [0.184],
+            "balanced_accuracy": [0.44],
+            "accuracy": [0.44],
+            "alignment_method": ["coral"],
+            "alignment_anchor_mode": ["class_mean"],
+            "alignment_target_projection": ["group_projection"],
+            "alignment_uses_unlabeled_target_data": [True],
+            "alignment_valid_for_benchmark": [True],
+            "alignment_protocol": ["unlabeled_target_covariance_alignment"],
+        }
+    ).to_csv(decode_dir / "time_decode_summary.csv", index=False)
+    pd.DataFrame(
+        {
+            "n_classes": [3],
+            "fixed_time": [0.184],
+            "fixed_balanced_accuracy": [0.44],
+            "fixed_balanced_minus_chance": [0.44 - 1 / 3],
+            "subjects_fixed_above_chance": [1],
+        }
+    ).to_csv(diagnostics_dir / "quality_summary.csv", index=False)
+
+    write_decode_diagnostics(output_dir)
+
+    quality = pd.read_csv(output_dir / "workflow_quality_summary.csv")
+    assert bool(quality.loc[0, "alignment_uses_unlabeled_target_data"])
+    assert bool(quality.loc[0, "alignment_valid_for_benchmark"])
+    assert bool(quality.loc[0, "alignment_strict_source_only"]) is False
+    assert quality.loc[0, "alignment_protocol"] == "unlabeled_target_covariance_alignment"
+
+
 def test_write_decode_diagnostics_recovers_ensemble_provenance_from_summary(tmp_path: Path):
     output_dir = tmp_path / "outputs" / "openneuro_ds006629_full"
     decode_dir = output_dir / "decode"
@@ -475,6 +572,56 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
     assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(5 / 6)
     assert quality.loc[0, "fixed_balanced_minus_chance"] == pytest.approx(5 / 6 - 1 / 3)
     assert quality.loc[0, "fixed_balanced_minus_chance_pct"] == pytest.approx(50.0)
+
+
+def test_aggregate_workflow_outputs_selects_best_from_observation_diagnostics(tmp_path: Path):
+    source_dirs = []
+    for subject in ("sub-01", "sub-02"):
+        output_dir = tmp_path / f"shard-best-{subject}"
+        decode_dir = output_dir / "decode"
+        decode_dir.mkdir(parents=True)
+        source_dirs.append(output_dir)
+        (output_dir / "run_manifest.json").write_text(
+            json.dumps(
+                {
+                    "dataset": "ds006629",
+                    "mode": "full",
+                    "artifact_name": "openneuro-meg-ds006629-full",
+                    "label_shuffle_control": "false",
+                    "outer_test_groups": subject,
+                    "diagnostics_best_time": "0.184",
+                }
+            ),
+            encoding="utf-8",
+        )
+        pd.DataFrame(
+            {
+                "dataset_id": ["ds006629"],
+                "subject": [subject],
+                "epochs_path": [f"{subject}_epo.fif"],
+                "n_trials": [3],
+                "labels": ["class_0|class_1|class_2"],
+                "runs": ["0"],
+            }
+        ).to_csv(output_dir / "stage_summary.csv", index=False)
+        _toy_observations(subject).to_csv(decode_dir / "observations.csv", index=False)
+        pd.DataFrame(
+            {
+                "time": [0.10, 0.184],
+                "balanced_accuracy": [0.10, 1.0],
+                "accuracy": [0.10, 1.0],
+            }
+        ).to_csv(decode_dir / "time_decode_summary.csv", index=False)
+
+    aggregate_dir = tmp_path / "aggregate-best"
+    diagnostics, best = aggregate_workflow_outputs(source_dirs, out_dir=aggregate_dir)
+
+    assert diagnostics["decode_summary"]["best_metric_source"] == "diagnostics_time_course"
+    best_by_metric = best.set_index("selection_metric")
+    assert best_by_metric.loc["balanced_accuracy", "time"] == pytest.approx(0.10)
+    assert best_by_metric.loc["balanced_accuracy", "selection_value"] == pytest.approx(1.0)
+    quality = pd.read_csv(aggregate_dir / "workflow_quality_summary.csv")
+    assert quality.loc[0, "best_time"] == pytest.approx(0.10)
 
 
 def test_main_strict_reports_missing_decode_summary(tmp_path: Path):

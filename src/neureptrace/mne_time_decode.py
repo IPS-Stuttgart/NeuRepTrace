@@ -1906,7 +1906,7 @@ def _append_decoded_outputs(
             observation = {
                 **common,
                 "split_id": split_id,
-                "seed": 13,
+                "seed": int(label_shuffle_seed),
                 "backend": backend,
                 "sample_index": int(original_indices[filtered_index]),
                 "sequence_id": int(original_indices[filtered_index]),
@@ -2983,7 +2983,7 @@ def run_time_resolved_decode(
             defaults={
                 "backend": time_decode_backend,
                 "split_id": split_id,
-                "seed": 13,
+                "seed": int(label_shuffle_seed),
                 "calibration_fold": "",
                 "preprocessing_hash": preprocessing_hash,
                 "model_hash": default_model_hash,

@@ -26,6 +26,10 @@ SUMMARY_PROVENANCE_COLUMNS = (
     "alignment_target_projection",
     "alignment_target_calibration_per_anchor",
     "alignment_target_calibration_seed",
+    "alignment_uses_unlabeled_target_data",
+    "alignment_valid_for_benchmark",
+    "alignment_protocol",
+    "alignment_protocol_note",
     "source_decoders",
     "ensemble_weights",
     "ensemble_source_temperatures",
@@ -48,6 +52,33 @@ def _as_bool(value: Any) -> bool:
     if pd.isna(value):
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_bool_token(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"Cannot parse boolean provenance value {value!r}.")
+
+
+def _optional_unique_bool(value: Any, *, column: str) -> bool | None:
+    if value in {"", None}:
+        return None
+    tokens = [
+        token.strip()
+        for token in str(value).replace(",", "|").split("|")
+        if token.strip()
+    ]
+    if not tokens:
+        return None
+    parsed = {_parse_bool_token(token) for token in tokens}
+    if len(parsed) != 1:
+        raise ValueError(f"Inconsistent boolean provenance for {column!r}: {tokens}")
+    return parsed.pop()
 
 
 def _as_float(value: Any) -> float | None:
@@ -373,17 +404,45 @@ def _workflow_quality_row(
     alignment_anchor_mode = _provenance_value(manifest, summary_provenance, "alignment_anchor_mode")
     alignment_anchor_column = _provenance_value(manifest, summary_provenance, "alignment_anchor_column")
     alignment_target_projection = _provenance_value(manifest, summary_provenance, "alignment_target_projection")
+    explicit_alignment_valid = _optional_unique_bool(
+        _provenance_value(manifest, summary_provenance, "alignment_valid_for_benchmark"),
+        column="alignment_valid_for_benchmark",
+    )
+    uses_unlabeled_target_data = bool(
+        _optional_unique_bool(
+            _provenance_value(manifest, summary_provenance, "alignment_uses_unlabeled_target_data"),
+            column="alignment_uses_unlabeled_target_data",
+        )
+    )
     alignment_enabled = str(alignment_method).strip().lower() not in {"", "none"}
     normalized_target_projection = str(alignment_target_projection).strip().lower()
     oracle_alignment = normalized_target_projection == "oracle_target_calibrated_alignment"
     target_calibrated_alignment = normalized_target_projection == "target_calibrated_alignment"
+    alignment_valid_for_benchmark = bool(
+        not oracle_alignment
+        and not target_calibrated_alignment
+        and (True if explicit_alignment_valid is None else explicit_alignment_valid)
+    )
+    explicit_alignment_protocol = _provenance_value(manifest, summary_provenance, "alignment_protocol")
     alignment_protocol = (
-        "oracle_target_calibrated_alignment"
+        explicit_alignment_protocol
+        or (
+            "oracle_target_calibrated_alignment"
+            if oracle_alignment
+            else "target_calibrated_alignment"
+            if target_calibrated_alignment
+            else "unlabeled_target_covariance_alignment"
+            if uses_unlabeled_target_data
+            else "strict_source_only"
+            if alignment_enabled
+            else ""
+        )
+    )
+    alignment_protocol_note = _provenance_value(manifest, summary_provenance, "alignment_protocol_note") or (
+        "debug upper bound only; not valid for benchmark"
         if oracle_alignment
-        else "target_calibrated_alignment"
+        else "uses disjoint target calibration rows; not valid for strict source-only benchmark"
         if target_calibrated_alignment
-        else "strict_source_only"
-        if alignment_enabled
         else ""
     )
     quality_decision = _quality_decision(
@@ -434,19 +493,16 @@ def _workflow_quality_row(
             summary_provenance,
             "alignment_target_calibration_seed",
         ),
-        "alignment_strict_source_only": bool(alignment_enabled and not oracle_alignment and not target_calibrated_alignment),
+        "alignment_uses_unlabeled_target_data": uses_unlabeled_target_data,
+        "alignment_strict_source_only": bool(
+            alignment_enabled and alignment_valid_for_benchmark and not uses_unlabeled_target_data
+        ),
         "alignment_target_calibrated": bool(target_calibrated_alignment),
         "alignment_oracle_target_calibrated": bool(oracle_alignment),
         "alignment_debug_upper_bound": bool(oracle_alignment),
-        "alignment_valid_for_benchmark": bool(not oracle_alignment and not target_calibrated_alignment),
+        "alignment_valid_for_benchmark": alignment_valid_for_benchmark,
         "alignment_protocol": alignment_protocol,
-        "alignment_protocol_note": (
-            "debug upper bound only; not valid for benchmark"
-            if oracle_alignment
-            else "uses disjoint target calibration rows; not valid for strict source-only benchmark"
-            if target_calibrated_alignment
-            else ""
-        ),
+        "alignment_protocol_note": alignment_protocol_note,
         "decoder_override": manifest.get("decoder_override", ""),
         "ensemble_weights": _provenance_value(manifest, summary_provenance, "ensemble_weights"),
         "ensemble_source_decoders": _provenance_value(
@@ -532,10 +588,21 @@ def summarize_decode_outputs(output_dir: str | Path) -> tuple[dict[str, Any], pd
         "temporal_smoothing_observations": _csv_shape(decode_dir / "temporal_smoothing" / "observations.csv"),
     }
 
+    diagnostics_time_course_path = decode_dir / "diagnostics" / "time_course_summary.csv"
     if summary_path.is_file():
         summary = pd.read_csv(summary_path)
-        best_rows = best_metric_rows(summary)
+        best_source = (
+            pd.read_csv(diagnostics_time_course_path)
+            if diagnostics_time_course_path.is_file() and diagnostics_time_course_path.stat().st_size > 0
+            else summary
+        )
+        best_rows = best_metric_rows(best_source)
         diagnostics["decode_summary"]["n_times"] = int(pd.to_numeric(summary.get("time", pd.Series(dtype=float)), errors="coerce").nunique()) if "time" in summary.columns else 0
+        diagnostics["decode_summary"]["best_metric_source"] = (
+            "diagnostics_time_course"
+            if diagnostics_time_course_path.is_file() and diagnostics_time_course_path.stat().st_size > 0
+            else "decode_summary"
+        )
     else:
         best_rows = pd.DataFrame(columns=["selection_metric", "selection_value"])
         diagnostics["warning"] = f"Missing decode summary: {summary_path.as_posix()}"

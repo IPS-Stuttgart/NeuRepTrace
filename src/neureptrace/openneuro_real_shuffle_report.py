@@ -20,6 +20,24 @@ PERCENT_METRICS = {
     "top2_chance",
     "top3_chance",
 }
+MATCHED_PROVENANCE_COLUMNS = (
+    "decoder",
+    "backend",
+    "emission_mode",
+    "feature_preprocessor",
+    "pca_components",
+    "normalization",
+    "temporal_mode",
+    "class_prior_correction",
+    "source_calibration",
+    "source_time_selection",
+    "alignment_method",
+    "alignment_anchor_mode",
+    "alignment_anchor_column",
+    "alignment_target_projection",
+    "response_window_combine",
+    "response_window_times",
+)
 
 
 def _artifact_root(path: str | Path) -> Path:
@@ -170,6 +188,22 @@ def _validate_shuffle_provenance(real: dict[str, object], shuffle: dict[str, obj
     }
 
 
+def _validate_matched_provenance(real: dict[str, object], shuffle: dict[str, object]) -> None:
+    mismatches: list[str] = []
+    for column in MATCHED_PROVENANCE_COLUMNS:
+        real_values = _provenance_values(real, column)
+        shuffle_values = _provenance_values(shuffle, column)
+        if not real_values or not shuffle_values:
+            continue
+        if real_values != shuffle_values:
+            mismatches.append(f"{column}: real={real_values}, shuffle={shuffle_values}")
+    if mismatches:
+        raise ValueError(
+            "Real and shuffle artifacts are not matched on decoder/protocol provenance: "
+            + "; ".join(mismatches[:8])
+        )
+
+
 def _fixed_metric_row(quality: pd.DataFrame, time_course: pd.DataFrame, fixed_time: float) -> pd.Series:
     row = _first_row(quality)
     if "fixed_time" in row and np.isclose(_float(row, "fixed_time"), fixed_time):
@@ -232,6 +266,27 @@ def _summary_row(real: dict[str, object], shuffle: dict[str, object], fixed_time
     merged_subjects = _per_subject_delta(real_per_subject, shuffle_per_subject)
     if merged_subjects.empty:
         raise ValueError("Real and shuffle artifacts have no overlapping subjects to compare.")
+    real_subjects = set(real_per_subject["subject"].dropna().astype(str))
+    shuffle_subjects = set(shuffle_per_subject["subject"].dropna().astype(str))
+    if real_subjects != shuffle_subjects:
+        raise ValueError(
+            "Real and shuffle artifacts have different subject sets: "
+            f"real_only={sorted(real_subjects - shuffle_subjects)}, "
+            f"shuffle_only={sorted(shuffle_subjects - real_subjects)}."
+        )
+    for column in ("n_trials", "class_counts"):
+        real_column = f"{column}_real"
+        shuffle_column = f"{column}_shuffle"
+        if real_column not in merged_subjects.columns or shuffle_column not in merged_subjects.columns:
+            continue
+        real_values = merged_subjects[real_column].astype(str)
+        shuffle_values = merged_subjects[shuffle_column].astype(str)
+        mismatched = merged_subjects.loc[real_values.ne(shuffle_values), ["subject", real_column, shuffle_column]]
+        if not mismatched.empty:
+            raise ValueError(
+                f"Real and shuffle artifacts have different per-subject {column}. "
+                f"Mismatch examples: {mismatched.head(5).to_dict('records')}"
+            )
     real_fixed_time = _float(real_quality, "fixed_time")
     shuffle_fixed_time = _float(shuffle_quality, "fixed_time")
     if not np.isclose(real_fixed_time, shuffle_fixed_time, atol=1e-9):
@@ -546,6 +601,7 @@ def write_real_shuffle_report(
     real = _load_run(real_root, fixed_time)
     shuffle = _load_run(shuffle_root, fixed_time)
     shuffle_provenance = _validate_shuffle_provenance(real, shuffle)
+    _validate_matched_provenance(real, shuffle)
     summary = _summary_row(real, shuffle, fixed_time)
     for column, value in shuffle_provenance.items():
         summary[column] = value

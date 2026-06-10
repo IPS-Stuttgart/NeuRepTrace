@@ -170,6 +170,11 @@ def test_stack_probability_observations_records_auto_selected_pooling() -> None:
 
     assert stacked["source_oof_pooling"].unique().tolist() == ["log"]
     assert set(metrics["source_oof_pooling"]) == {"log"}
+    assert {"top2_accuracy", "top3_accuracy", "brier", "ece"}.issubset(metrics.columns)
+    assert metrics["top2_accuracy"].tolist() == [1.0] * len(metrics)
+    assert metrics["top3_accuracy"].tolist() == [1.0] * len(metrics)
+    assert np.all(np.isfinite(metrics["brier"]))
+    assert np.all(np.isfinite(metrics["ece"]))
     assert np.allclose(stacked[["prob_class_0", "prob_class_1", "prob_class_2"]].sum(axis=1), 1.0)
 
 
@@ -197,6 +202,40 @@ def test_stack_probability_observations_rejects_fractional_target_labels() -> No
 
     with pytest.raises(ValueError, match="target true_label values must be integer-valued"):
         stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+
+def test_stack_probability_observations_rejects_source_label_mismatch_with_custom_alignment_keys() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    mask = (source["decoder"] == "strong") & (source["sample_index"] == 1)
+    source.loc[mask, "true_label"] = 0
+    source.loc[mask, "true_class"] = "zero"
+
+    with pytest.raises(ValueError, match="inconsistent 'true_label'"):
+        stack_probability_observations(
+            source,
+            target,
+            alignment_columns=["subject", "sample_index"],
+            weighting="stacked",
+            max_iter=120,
+        )
+
+
+def test_stack_probability_observations_rejects_target_label_mismatch_with_custom_alignment_keys() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    mask = (target["decoder"] == "strong") & (target["sample_index"] == 1)
+    target.loc[mask, "true_label"] = 0
+    target.loc[mask, "true_class"] = "zero"
+
+    with pytest.raises(ValueError, match="inconsistent 'true_label'"):
+        stack_probability_observations(
+            source,
+            target,
+            alignment_columns=["subject", "sample_index"],
+            weighting="stacked",
+            max_iter=120,
+        )
 
 
 def test_summarize_stacked_metrics_rejects_fractional_true_labels() -> None:
@@ -264,3 +303,4 @@ def test_probability_stacking_cli_writes_observations_and_metrics(tmp_path: Path
     assert _weights_from_output(stacked)[1] > 0.80
     assert not metrics.empty
     assert "source_oof_weights" in metrics.columns
+    assert {"top2_accuracy", "top3_accuracy", "brier", "ece"}.issubset(metrics.columns)

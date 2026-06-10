@@ -1184,6 +1184,7 @@ def test_run_time_resolved_decode_label_shuffle_keeps_test_labels_and_marks_outp
     assert results["label_shuffle_seed"].unique().tolist() == [7]
     assert observations["label_shuffle_control"].unique().tolist() == [True]
     assert observations["label_shuffle_seed"].unique().tolist() == [7]
+    assert observations["seed"].unique().tolist() == [7]
     assert observations.sort_values("sample_index")["true_class"].unique().tolist() == ["animate", "inanimate"]
     assert len(RecordingDecoder.fit_labels) == 2
     assert all(sorted(fit_labels.tolist()) == [0, 0, 1, 1] for fit_labels in RecordingDecoder.fit_labels)
