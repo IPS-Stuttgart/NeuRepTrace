@@ -205,7 +205,9 @@ def test_transform_with_alignment_projection_defaults_to_mne_channel_time_order(
         projection_feature_set=alignment,
     )
 
-    # Preserve MNE channel_time flattening: [component0_t0, component0_t1, component1_t0, component1_t1].
+    # Preserve MNE/channel-major layout after replacing channels with aligned
+    # components: [component0_t0, component0_t1, component1_t0, component1_t1].
+    # The old implementation returned time-major [3, 12, 6, 16].
     np.testing.assert_allclose(transformed, np.array([[3.0, 6.0, 12.0, 16.0]]))
 
 

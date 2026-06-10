@@ -184,6 +184,38 @@ def test_pca_initialization_still_allows_different_feature_dimensions():
     assert model.group_projection is None
 
 
+def test_hyperalignment_rejects_fractional_component_counts():
+    with pytest.raises(ValueError, match="integer component count"):
+        fit_hyperalignment(_aligned_subjects(), n_components=1.5)
+
+
+def test_mean_initialization_caps_components_to_grand_mean_rank():
+    # Both subjects have centered rank 2, but their grand mean cancels the second
+    # dimension.  Mean initialization must not create an arbitrary zero-variance
+    # template column for the cancelled dimension.
+    subjects = {
+        "s1": np.array(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [-1.0, -1.0],
+            ]
+        ),
+        "s2": np.array(
+            [
+                [1.0, 0.0],
+                [0.0, -1.0],
+                [-1.0, 1.0],
+            ]
+        ),
+    }
+
+    model = fit_hyperalignment(subjects, n_components=2, initialization="mean", n_iterations=1)
+
+    assert model.n_components == 1
+    assert model.template.shape == (3, 1)
+
+
 def test_mean_initialization_requires_matching_feature_dimensions():
     rng = np.random.default_rng(2)
 

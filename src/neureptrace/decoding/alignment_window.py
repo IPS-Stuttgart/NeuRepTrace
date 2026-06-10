@@ -320,7 +320,12 @@ def _apply_channel_projection(matrix: np.ndarray, feature_set: WindowedFeatureSe
         return (matrix - channel_mean) @ channel_projection
     trial_channel = _features_to_time_channel(matrix, feature_set)
     transformed = (trial_channel - channel_mean[None, None, :]) @ channel_projection
-    # Preserve the flattened feature-order convention advertised by feature_set.
     if _feature_order(feature_set) == "channel_time":
+        # Preserve the input flattening convention.  `_features_to_time_channel`
+        # converts both supported layouts to (trial, time, channel) for the
+        # linear algebra above.  MNE-style flattened features are channel-major,
+        # so the aligned component axis must be moved back in front of time
+        # before flattening.  Otherwise same-window and cross-window aligned
+        # features silently use different feature orders.
         return transformed.transpose(0, 2, 1).reshape(matrix.shape[0], -1)
     return transformed.reshape(matrix.shape[0], -1)
