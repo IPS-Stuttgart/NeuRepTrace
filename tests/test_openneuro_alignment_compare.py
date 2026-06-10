@@ -150,6 +150,10 @@ def test_alignment_compare_writes_variant_and_debug_decision_tables(tmp_path: Pa
         "source_group_projection",
         "source_group_projection",
     ]
+    validity = dict(zip(variants["artifact_name"], variants["alignment_valid_for_benchmark"], strict=True))
+    assert bool(validity["class-repetition-oracle"]) is False
+    assert bool(validity["class-repetition-target-calibrated"]) is False
+    assert bool(validity["class-repetition-strict"]) is True
 
     raw = pd.read_csv(written["raw_comparison"])
     assert raw.loc[0, "decision"] == "alignment_improves_raw"

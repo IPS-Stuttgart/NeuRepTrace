@@ -263,7 +263,7 @@ def test_foldlocal_accepts_disjoint_target_calibrated_alignment(tmp_path: Path, 
     assert results["alignment_target_calibrated"].unique().tolist() == [True]
     assert results["alignment_oracle_target_calibrated"].unique().tolist() == [False]
     assert results["alignment_debug_upper_bound"].unique().tolist() == [False]
-    assert results["alignment_valid_for_benchmark"].unique().tolist() == [True]
+    assert results["alignment_valid_for_benchmark"].unique().tolist() == [False]
     assert results["n_test"].unique().tolist() == [4]
     assert len(observations) == 4 * len(results)
     diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")

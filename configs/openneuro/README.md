@@ -158,10 +158,12 @@ This reserves calibration rows from each held-out target subject by class,
 stimulus, or event-code anchor and scores only the remaining disjoint rows.
 Artifacts should report `alignment_target_calibrated=true`,
 `alignment_debug_upper_bound=false`, and
-`alignment_protocol_note=uses disjoint target calibration rows; not strict
-source-only`. If this helps while strict source-only does not, the publishable
-question becomes whether a small target-calibration protocol is acceptable for
-the benchmark, not whether the alignment implementation can work.
+`alignment_valid_for_benchmark=false`, with
+`alignment_protocol_note=uses disjoint target calibration rows; not valid for
+strict source-only benchmark`. If this helps while strict source-only does not,
+the publishable question becomes whether a small target-calibration protocol is
+acceptable as a separate benchmark, not whether the alignment implementation can
+work.
 
 Recommended first ds006629 six-subject oracle run:
 

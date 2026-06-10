@@ -318,7 +318,7 @@ def test_run_time_resolved_decode_target_calibration_excludes_scored_rows(tmp_pa
                 "alignment_target_calibrated": True,
                 "alignment_oracle_target_calibrated": False,
                 "alignment_debug_upper_bound": False,
-                "alignment_valid_for_benchmark": True,
+                "alignment_valid_for_benchmark": False,
                 "alignment_target_alignment_rows": 2,
                 "alignment_target_labels_used": True,
                 "alignment_target_calibration_per_anchor": 1,
@@ -375,7 +375,7 @@ def test_run_time_resolved_decode_target_calibration_excludes_scored_rows(tmp_pa
         assert set(scored[:, 0]).isdisjoint(set(calibrated[:, 0]))
     assert set(results["alignment_target_projection"]) == {"target_calibrated_alignment"}
     assert set(results["alignment_target_calibrated"]) == {True}
-    assert set(results["alignment_valid_for_benchmark"]) == {True}
+    assert set(results["alignment_valid_for_benchmark"]) == {False}
     assert set(results["n_test"]) == {4}
     assert len(observations) == 4 * len(results)
     diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")

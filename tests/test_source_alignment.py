@@ -407,12 +407,12 @@ def test_target_calibrated_alignment_uses_separate_calibration_rows(method, targ
     assert target_calibrated.metadata["alignment_target_calibrated"] is True
     assert target_calibrated.metadata["alignment_oracle_target_calibrated"] is False
     assert target_calibrated.metadata["alignment_debug_upper_bound"] is False
-    assert target_calibrated.metadata["alignment_valid_for_benchmark"] is True
+    assert target_calibrated.metadata["alignment_valid_for_benchmark"] is False
     assert target_calibrated.metadata["alignment_target_alignment_rows"] == 3
     assert target_calibrated.metadata["alignment_target_labels_used"] is True
     assert target_calibrated.metadata["alignment_protocol"] == TARGET_CALIBRATED_ALIGNMENT
     assert target_calibrated.metadata["alignment_protocol_note"] == (
-        "uses disjoint target calibration rows; not strict source-only"
+        "uses disjoint target calibration rows; not valid for strict source-only benchmark"
     )
     assert target_calibrated.diagnostics["target_transform_type"] == target_transform_type
 

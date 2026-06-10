@@ -212,7 +212,7 @@ class SourceAlignmentConfig:
             "alignment_target_calibration_seed": int(self.target_calibration_seed),
             "alignment_oracle_target_calibrated": bool(oracle),
             "alignment_debug_upper_bound": bool(oracle),
-            "alignment_valid_for_benchmark": bool(not oracle),
+            "alignment_valid_for_benchmark": bool(not oracle and not target_calibrated),
             "alignment_protocol": (
                 ORACLE_TARGET_CALIBRATED_ALIGNMENT
                 if oracle
@@ -225,7 +225,7 @@ class SourceAlignmentConfig:
             "alignment_protocol_note": (
                 "debug upper bound only; not valid for benchmark"
                 if oracle
-                else "uses disjoint target calibration rows; not strict source-only"
+                else "uses disjoint target calibration rows; not valid for strict source-only benchmark"
                 if target_calibrated
                 else ""
             ),

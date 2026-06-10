@@ -184,6 +184,55 @@ def test_write_decode_diagnostics_writes_best_metric_table(tmp_path: Path):
     assert quality.loc[0, "best_selection_value"] == pytest.approx(0.75)
 
 
+def test_write_decode_diagnostics_marks_target_calibration_non_benchmark(tmp_path: Path):
+    output_dir = tmp_path / "outputs" / "openneuro_ds000117_target_calibrated"
+    decode_dir = output_dir / "decode"
+    decode_dir.mkdir(parents=True)
+    (output_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "dataset": "ds000117",
+                "mode": "smoke",
+                "artifact_name": "openneuro-meg-ds000117-target-calibrated",
+                "label_shuffle_control": "false",
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "dataset_id": ["ds000117"],
+            "subject": ["sub-01"],
+            "epochs_path": ["sub-01_epo.fif"],
+            "n_trials": [12],
+            "labels": ["face|scrambled"],
+            "runs": ["01,02"],
+        }
+    ).to_csv(output_dir / "stage_summary.csv", index=False)
+    pd.DataFrame(
+        {
+            "time": [0.184],
+            "balanced_accuracy": [0.75],
+            "accuracy": [0.75],
+            "alignment_method": ["mcca"],
+            "alignment_anchor_mode": ["event_code_mean"],
+            "alignment_target_projection": ["target_calibrated_alignment"],
+            "alignment_target_calibration_per_anchor": [1],
+            "alignment_target_calibration_seed": [13],
+        }
+    ).to_csv(decode_dir / "time_decode_summary.csv", index=False)
+
+    write_decode_diagnostics(output_dir)
+
+    quality = pd.read_csv(output_dir / "workflow_quality_summary.csv")
+    assert quality.loc[0, "alignment_target_projection"] == "target_calibrated_alignment"
+    assert bool(quality.loc[0, "alignment_target_calibrated"]) is True
+    assert bool(quality.loc[0, "alignment_valid_for_benchmark"]) is False
+    assert quality.loc[0, "alignment_protocol_note"] == (
+        "uses disjoint target calibration rows; not valid for strict source-only benchmark"
+    )
+
+
 def test_write_decode_diagnostics_recovers_ensemble_provenance_from_summary(tmp_path: Path):
     output_dir = tmp_path / "outputs" / "openneuro_ds006629_full"
     decode_dir = output_dir / "decode"

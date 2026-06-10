@@ -3146,7 +3146,7 @@ def main() -> None:
         default="group_projection",
         help=(
             "Held-out target projection mode. group_projection is the benchmark-valid strict source-only mode; "
-            "target_calibrated_alignment uses disjoint target calibration rows; "
+            "target_calibrated_alignment uses disjoint target calibration rows and is non-strict; "
             "oracle_target_calibrated_alignment uses scored held-out labels and is a debug upper bound only."
         ),
     )

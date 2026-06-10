@@ -438,12 +438,12 @@ def _workflow_quality_row(
         "alignment_target_calibrated": bool(target_calibrated_alignment),
         "alignment_oracle_target_calibrated": bool(oracle_alignment),
         "alignment_debug_upper_bound": bool(oracle_alignment),
-        "alignment_valid_for_benchmark": bool(not oracle_alignment),
+        "alignment_valid_for_benchmark": bool(not oracle_alignment and not target_calibrated_alignment),
         "alignment_protocol": alignment_protocol,
         "alignment_protocol_note": (
             "debug upper bound only; not valid for benchmark"
             if oracle_alignment
-            else "uses disjoint target calibration rows; not strict source-only"
+            else "uses disjoint target calibration rows; not valid for strict source-only benchmark"
             if target_calibrated_alignment
             else ""
         ),

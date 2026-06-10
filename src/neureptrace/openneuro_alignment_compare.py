@@ -258,7 +258,7 @@ def summarize_alignment_variant(
         "alignment_target_projection": target_projection,
         "alignment_target_calibrated": target_calibrated,
         "alignment_oracle_target_calibrated": oracle,
-        "alignment_valid_for_benchmark": bool(not oracle),
+        "alignment_valid_for_benchmark": bool(not oracle and not target_calibrated),
         "identity_anchor": anchor_mode in IDENTITY_ANCHOR_MODES,
         "class_repetition_anchor": anchor_mode == CLASS_REPETITION_ANCHOR,
         "time_decode_summary_rows": int(len(summary)),
