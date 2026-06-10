@@ -29,12 +29,35 @@ HYBRID_SMOOTHING_EMISSION_SUFFIX = "response_window_poststimulus_forward"
 EPSILON = 1e-12
 TARGET_GROUP_COLUMNS = ("subject", "group", "outer_test_groups", "session", "fold")
 SOURCE_HASH_COLUMNS = ("preprocessing_hash", "model_hash")
+ROW_IDENTITY_COLUMNS = ("true_label", "true_class")
 METRIC_PROVENANCE_COLUMNS = (
     "label_shuffle_control",
     "label_shuffle_seed",
     "class_prior_correction",
     "source_calibration",
     "source_time_selection",
+)
+SOURCE_PROTOCOL_COLUMNS = (
+    *METRIC_PROVENANCE_COLUMNS,
+    "alignment_method",
+    "alignment_anchor_mode",
+    "alignment_anchor_column",
+    "alignment_repetition_cap",
+    "alignment_components",
+    "alignment_times",
+    "alignment_window_mode",
+    "alignment_same_decode_window",
+    "alignment_target_projection",
+    "alignment_strict_source_only",
+    "alignment_uses_unlabeled_target_data",
+    "alignment_uses_class_labels",
+    "alignment_target_calibrated",
+    "alignment_target_calibration_per_anchor",
+    "alignment_target_calibration_seed",
+    "alignment_oracle_target_calibrated",
+    "alignment_debug_upper_bound",
+    "alignment_valid_for_benchmark",
+    "alignment_protocol",
 )
 
 
@@ -139,6 +162,58 @@ def _check_unique_response_keys(frame: pd.DataFrame, key_columns: Sequence[str],
             f"Response-window observations contain {duplicate_count} duplicate rows for {context}. "
             f"Key columns: {list(key_columns)}. Examples: {examples}"
         )
+
+
+def _class_columns_for_probabilities(frame: pd.DataFrame, prob_columns: Sequence[str]) -> tuple[str, ...]:
+    suffixes = tuple(column.removeprefix("prob_class_") for column in prob_columns)
+    return tuple(column for column in (f"class_{suffix}" for suffix in suffixes) if column in frame.columns)
+
+
+def _row_identity_columns(frame: pd.DataFrame, prob_columns: Sequence[str]) -> tuple[str, ...]:
+    return tuple(column for column in (*ROW_IDENTITY_COLUMNS, *_class_columns_for_probabilities(frame, prob_columns)) if column in frame.columns)
+
+
+def _source_protocol_columns(frame: pd.DataFrame) -> tuple[str, ...]:
+    return tuple(column for column in SOURCE_PROTOCOL_COLUMNS if column in frame.columns)
+
+
+def _normalized_identity_values(values: Sequence[object] | np.ndarray | pd.Series, *, column: str) -> pd.Series:
+    series = pd.Series(values).reset_index(drop=True)
+    if column == "true_label":
+        numeric = pd.to_numeric(series, errors="coerce")
+        if numeric.isna().any():
+            raise ValueError("Response-window true_label values must be numeric and non-missing.")
+        values_float = numeric.to_numpy(dtype=float)
+        rounded = np.rint(values_float)
+        if not bool(np.isclose(values_float, rounded, rtol=0.0, atol=1.0e-12).all()):
+            raise ValueError("Response-window true_label values must be integer-valued.")
+        return pd.Series([str(int(value)) for value in rounded], dtype=object)
+    return series.where(~series.isna(), "").astype(str).str.strip()
+
+
+def _check_row_identity_consistency(
+    reference: pd.DataFrame,
+    candidate: pd.DataFrame,
+    *,
+    columns: Sequence[str],
+    context: str,
+) -> None:
+    for column in columns:
+        if column not in reference.columns or column not in candidate.columns:
+            continue
+        reference_values = _normalized_identity_values(reference[column], column=column)
+        candidate_values = _normalized_identity_values(candidate[column], column=column)
+        mismatch = reference_values != candidate_values
+        if bool(mismatch.any()):
+            examples = [
+                {
+                    "row": int(index),
+                    "reference": reference_values.iloc[index],
+                    context: candidate_values.iloc[index],
+                }
+                for index in np.flatnonzero(mismatch.to_numpy())[:5]
+            ]
+            raise ValueError(f"Response-window observations have inconsistent {column!r} values for {context}. Examples: {examples}")
 
 
 def _candidate_weights(n_times: int, step: float) -> np.ndarray:
@@ -301,11 +376,15 @@ def _response_window_rows(
 
     wide_probabilities = {}
     wide_provenance = {}
+    wide_frames = {}
+    identity_columns = _row_identity_columns(selected, prob_columns)
+    protocol_columns = _source_protocol_columns(selected)
     for time in times:
         time_frame = selected.loc[selected["time"].astype(float) == float(time)].copy()
         _check_unique_response_keys(time_frame, key_columns, context=f"time {time}")
         time_frame = time_frame.sort_values(key_columns).drop_duplicates(key_columns, keep="first")
         indexed = time_frame.set_index(key_columns)
+        wide_frames[time] = indexed
         wide_probabilities[time] = indexed[prob_columns]
         provenance_columns = [column for column in SOURCE_HASH_COLUMNS if column in indexed.columns]
         wide_provenance[time] = indexed.loc[:, provenance_columns] if provenance_columns else pd.DataFrame(index=indexed.index)
@@ -315,7 +394,23 @@ def _response_window_rows(
     if common_index is None or len(common_index) == 0:
         raise ValueError("No observations contain all requested response-window times.")
 
-    base = selected.sort_values(key_columns).drop_duplicates(key_columns, keep="first").set_index(key_columns).loc[common_index]
+    reference_time = times[0]
+    base = wide_frames[reference_time].loc[common_index].copy()
+    reference_identity = base.loc[:, [column for column in identity_columns if column in base.columns]]
+    reference_protocol = base.loc[:, [column for column in protocol_columns if column in base.columns]]
+    for time in times[1:]:
+        _check_row_identity_consistency(
+            reference_identity,
+            wide_frames[time].loc[common_index],
+            columns=identity_columns,
+            context=f"time {time}",
+        )
+        _check_row_identity_consistency(
+            reference_protocol,
+            wide_frames[time].loc[common_index],
+            columns=protocol_columns,
+            context=f"time {time}",
+        )
     labels = pd.to_numeric(base["true_label"], errors="raise").to_numpy(dtype=int)
     probability_cube = np.stack(
         [_normalize_rows(wide_probabilities[time].loc[common_index].to_numpy(dtype=float)) for time in times],
@@ -452,6 +547,9 @@ def _decoder_source_oof_response_window_rows(
 
     wide_probabilities = {}
     wide_provenance = {}
+    wide_frames = {}
+    identity_columns = _row_identity_columns(selected, prob_columns)
+    protocol_columns = _source_protocol_columns(selected)
     base_frame = None
     common_index = None
     for decoder in decoders:
@@ -467,6 +565,7 @@ def _decoder_source_oof_response_window_rows(
             if base_frame is None:
                 base_frame = time_frame
             indexed = time_frame.set_index(key_columns)
+            wide_frames[(decoder, time)] = indexed
             wide_probabilities[(decoder, time)] = indexed[prob_columns]
             provenance_columns = [column for column in SOURCE_HASH_COLUMNS if column in indexed.columns]
             wide_provenance[(decoder, time)] = (
@@ -477,6 +576,26 @@ def _decoder_source_oof_response_window_rows(
         raise ValueError("No observations contain all requested decoder/time response-window combinations.")
 
     base = base_frame.sort_values(key_columns).drop_duplicates(key_columns, keep="first").set_index(key_columns).loc[common_index]
+    reference_key = (decoders[0], times[0])
+    reference_identity = wide_frames[reference_key].loc[common_index, [column for column in identity_columns if column in wide_frames[reference_key].columns]]
+    reference_protocol = wide_frames[reference_key].loc[common_index, [column for column in protocol_columns if column in wide_frames[reference_key].columns]]
+    for decoder in decoders:
+        for time in times:
+            key = (decoder, time)
+            if key == reference_key:
+                continue
+            _check_row_identity_consistency(
+                reference_identity,
+                wide_frames[key].loc[common_index],
+                columns=identity_columns,
+                context=f"decoder {decoder!r} time {time}",
+            )
+            _check_row_identity_consistency(
+                reference_protocol,
+                wide_frames[key].loc[common_index],
+                columns=protocol_columns,
+                context=f"decoder {decoder!r} time {time}",
+            )
     labels = pd.to_numeric(base["true_label"], errors="raise").to_numpy(dtype=int)
     decoder_probabilities = []
     for decoder in decoders:
