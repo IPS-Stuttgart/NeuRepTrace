@@ -346,6 +346,9 @@ def parse_alignment_times(times: Sequence[float] | str | None) -> tuple[tuple[fl
             return (), True
         if text.startswith("[") and text.endswith("]"):
             text = text[1:-1]
+        # static metadata serializes fixed alignment times with "|"; accepting
+        # it here lets provenance/config override values round-trip cleanly.
+        text = text.replace("|", ",").replace(";", ",")
         parts = [part.strip() for chunk in text.split(",") for part in chunk.split() if part.strip()]
         values = tuple(float(part) for part in parts)
     else:
@@ -809,7 +812,11 @@ def align_train_test_features(
         "source_inner_aligned_balanced_accuracy": _finite_or_blank(source_inner_aligned_ba),
         "source_inner_aligned_minus_raw": _finite_or_blank(source_inner_gain),
         "source_inner_validation_type": (
-            "strict_source_loso_nearest_centroid_group_projection" if compute_source_inner_diagnostics else ""
+            "strict_source_loso_nearest_centroid_target_centered_group_projection"
+            if compute_source_inner_diagnostics and config.target_centered_group_projection
+            else "strict_source_loso_nearest_centroid_group_projection"
+            if compute_source_inner_diagnostics
+            else ""
         ),
         "uses_unlabeled_target_data": bool(config.target_centered_group_projection),
         "covariance_alignment_estimator": "",
@@ -1307,9 +1314,22 @@ def _anchor_vector(values: Sequence[Any] | np.ndarray | None, *, expected_length
     vector = np.asarray(values, dtype=object).reshape(-1)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must have the same row count as the corresponding feature matrix.")
-    if any(value is None or (isinstance(value, float) and np.isnan(value)) for value in vector):
+    if any(_is_missing_anchor_value(value) for value in vector):
         raise ValueError(f"{name} contains missing values.")
     return vector
+
+
+def _is_missing_anchor_value(value: Any) -> bool:
+    """Return whether an anchor-like metadata value is missing."""
+
+    if value is None:
+        return True
+    if value.__class__.__name__ in {"NAType", "NaTType"}:
+        return True
+    try:
+        return bool(np.isnan(value))
+    except (TypeError, ValueError):
+        return False
 
 
 def _component_label(value: int | float) -> int | str:
@@ -1460,7 +1480,12 @@ def _source_inner_strict_loso_scores(
                 external_anchor_mode=external_anchor_mode,
             )
             aligned_train_features = np.vstack([inner_fit.transformed_by_subject[subject_id] for subject_id in train_subjects])
-            aligned_test_features = inner_fit.model.transform_group(test_features)
+            target_feature_mean = (
+                np.mean(test_features, axis=0)
+                if config.target_centered_group_projection
+                else None
+            )
+            aligned_test_features = inner_fit.model.transform_group(test_features, feature_mean=target_feature_mean)
         except (ValueError, np.linalg.LinAlgError):
             continue
         predicted_aligned = _nearest_centroid_predict(aligned_train_features, train_labels, aligned_test_features)
