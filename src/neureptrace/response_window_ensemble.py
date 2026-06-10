@@ -124,6 +124,16 @@ def _check_single_plain_response_source(selected: pd.DataFrame) -> None:
         )
 
 
+def _check_unique_response_keys(frame: pd.DataFrame, key_columns: Sequence[str], *, context: str) -> None:
+    duplicate_count = int(frame.duplicated(list(key_columns), keep=False).sum())
+    if duplicate_count:
+        examples = frame.loc[frame.duplicated(list(key_columns), keep=False), list(key_columns)].head(5).to_dict("records")
+        raise ValueError(
+            f"Response-window observations contain {duplicate_count} duplicate rows for {context}. "
+            f"Key columns: {list(key_columns)}. Examples: {examples}"
+        )
+
+
 def _candidate_weights(n_times: int, step: float) -> np.ndarray:
     if n_times < 1:
         raise ValueError("Need at least one response time.")
@@ -286,6 +296,7 @@ def _response_window_rows(
     wide_provenance = {}
     for time in times:
         time_frame = selected.loc[selected["time"].astype(float) == float(time)].copy()
+        _check_unique_response_keys(time_frame, key_columns, context=f"time {time}")
         time_frame = time_frame.sort_values(key_columns).drop_duplicates(key_columns, keep="first")
         indexed = time_frame.set_index(key_columns)
         wide_probabilities[time] = indexed[prob_columns]
@@ -442,9 +453,10 @@ def _decoder_source_oof_response_window_rows(
                 (selected["decoder"].astype(str) == decoder)
                 & (selected["time"].astype(float) == float(time))
             ].copy()
-            time_frame = time_frame.sort_values(key_columns).drop_duplicates(key_columns, keep="first")
             if time_frame.empty:
                 raise ValueError(f"Missing observations for decoder {decoder!r} at response time {time}.")
+            _check_unique_response_keys(time_frame, key_columns, context=f"decoder {decoder!r} time {time}")
+            time_frame = time_frame.sort_values(key_columns).drop_duplicates(key_columns, keep="first")
             if base_frame is None:
                 base_frame = time_frame
             indexed = time_frame.set_index(key_columns)

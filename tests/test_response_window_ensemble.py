@@ -152,6 +152,17 @@ def test_plain_response_window_rejects_multiple_emission_modes(tmp_path: Path):
         run_response_window_ensemble([csv_path], mode="uniform")
 
 
+def test_plain_response_window_rejects_duplicate_trial_time_rows(tmp_path: Path):
+    observations = _toy_observations()
+    duplicate = observations.iloc[[0]].copy()
+    observations = pd.concat([observations, duplicate], ignore_index=True)
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="duplicate rows"):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
 def test_response_window_model_hash_depends_on_source_time_hashes(tmp_path: Path):
     observations = _toy_observations()
     observations["preprocessing_hash"] = observations["time"].map(lambda time: f"pre-{time:.3f}")
@@ -330,6 +341,21 @@ def test_decoder_response_window_model_hash_depends_on_source_hashes(tmp_path: P
 
     assert changed_ensembled["model_hash"].tolist() != ensembled["model_hash"].tolist()
     assert changed_ensembled["preprocessing_hash"].tolist() == ensembled["preprocessing_hash"].tolist()
+
+
+def test_decoder_response_window_rejects_duplicate_trial_time_rows(tmp_path: Path):
+    observations = _toy_decoder_observations()
+    duplicate = observations.iloc[[0]].copy()
+    observations = pd.concat([observations, duplicate], ignore_index=True)
+    csv_path = tmp_path / "decoder_observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="duplicate rows"):
+        run_response_window_ensemble(
+            [csv_path],
+            response_times=(0.088, 0.136),
+            mode="decoder_source_oof_nonnegative",
+        )
 
 
 def test_response_window_uses_outer_test_group_when_subject_is_empty(tmp_path: Path):
