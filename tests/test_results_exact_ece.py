@@ -67,6 +67,38 @@ def test_aggregate_time_decode_results_rejects_observation_count_mismatch():
         raise AssertionError("Expected incomplete observation rows to fail")
 
 
+def test_aggregate_time_decode_results_rejects_fractional_observation_labels():
+    results = pd.DataFrame(
+        {
+            "subject": ["s1"],
+            "fold": [0],
+            "time": [0.1],
+            "accuracy": [1.0],
+            "log_loss": [0.4],
+            "brier": [0.3],
+            "ece": [0.39],
+            "n_test": [1],
+        }
+    )
+    observations = pd.DataFrame(
+        {
+            "subject": ["s1"],
+            "fold": [0],
+            "time": [0.1],
+            "true_label": [0.5],
+            "prob_class_0": [0.61],
+            "prob_class_1": [0.39],
+        }
+    )
+
+    try:
+        aggregate_time_decode_results(results, observations=observations)
+    except ValueError as exc:
+        assert "true_label values must be integer-valued" in str(exc)
+    else:
+        raise AssertionError("Expected fractional observation labels to fail")
+
+
 def test_aggregate_time_decode_results_requires_observations_to_match_result_groups():
     results = pd.DataFrame(
         {
