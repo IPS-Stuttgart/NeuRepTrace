@@ -10,7 +10,7 @@ across the decoding window samples.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, Protocol, Sequence
 
 import numpy as np
 
@@ -104,6 +104,7 @@ def transform_with_alignment_projection(
     projection_feature_mean: np.ndarray,
     projection_feature_set: WindowedFeatureSet,
     feature_mean: np.ndarray | None = None,
+    projection_template_mean: Sequence[float] | np.ndarray | None = None,
     feature_mean_set: WindowedFeatureSet | None = None,
 ) -> np.ndarray:
     """Apply an alignment projection to features from a possibly different window.
@@ -114,6 +115,11 @@ def transform_with_alignment_projection(
     centering vector are collapsed to channel space by averaging across the
     alignment-window samples, then applied independently to each decoding-window
     sample.
+
+    ``projection_template_mean`` shifts projected rows into a learned template
+    coordinate system after direct or cross-window projection. When the decoding
+    output contains multiple time samples, the template mean is expanded using the
+    decoding feature order.
     """
 
     matrix = _feature_matrix(features, name="features")
@@ -139,11 +145,21 @@ def transform_with_alignment_projection(
     ):
         if mean.shape[0] != matrix.shape[1]:
             raise ValueError(f"feature_mean length must match features columns: {mean.shape[0]} != {matrix.shape[1]}.")
-        return (matrix - mean) @ projection
+        transformed = (matrix - mean) @ projection
+        return _add_template_mean(
+            transformed,
+            projection_template_mean,
+            output_feature_set=decode_feature_set,
+        )
 
     channel_projection = _projection_to_channel_space(projection, projection_feature_set)
     channel_mean = _feature_mean_to_channel_space(mean, mean_set)
-    return _apply_channel_projection(matrix, decode_feature_set, channel_projection, channel_mean)
+    transformed = _apply_channel_projection(matrix, decode_feature_set, channel_projection, channel_mean)
+    return _add_template_mean(
+        transformed,
+        projection_template_mean,
+        output_feature_set=decode_feature_set,
+    )
 
 
 def _resolve_feature_mean_set(
@@ -340,3 +356,41 @@ def _apply_channel_projection(matrix: np.ndarray, feature_set: WindowedFeatureSe
         # features silently use different feature orders.
         return transformed.transpose(0, 2, 1).reshape(matrix.shape[0], -1)
     return transformed.reshape(matrix.shape[0], -1)
+
+
+def _add_template_mean(
+    transformed: np.ndarray,
+    template_mean: Sequence[float] | np.ndarray | None,
+    *,
+    output_feature_set: WindowedFeatureSet | None = None,
+) -> np.ndarray:
+    """Add a common-space template mean to projected rows, expanding if needed."""
+
+    if template_mean is None:
+        return transformed
+    matrix = _feature_matrix(transformed, name="transformed")
+    mean = np.asarray(template_mean, dtype=float).ravel()
+    if mean.size == 0:
+        raise ValueError("projection_template_mean must contain at least one value.")
+    if not np.all(np.isfinite(mean)):
+        raise ValueError("projection_template_mean contains non-finite values.")
+    if matrix.shape[1] == mean.shape[0]:
+        return matrix + mean
+
+    expanded_mean: np.ndarray | None = None
+    if output_feature_set is not None:
+        n_window_samples = int(output_feature_set.n_window_samples)
+        if n_window_samples > 0 and matrix.shape[1] == mean.shape[0] * n_window_samples:
+            if _feature_order(output_feature_set) == "channel_time":
+                expanded_mean = np.repeat(mean, n_window_samples)
+            else:
+                expanded_mean = np.tile(mean, n_window_samples)
+    if expanded_mean is None and matrix.shape[1] % mean.shape[0] == 0:
+        expanded_mean = np.tile(mean, matrix.shape[1] // mean.shape[0])
+    if expanded_mean is not None:
+        return matrix + expanded_mean
+
+    raise ValueError(
+        "transformed column count must match or be a multiple of projection_template_mean length: "
+        f"{matrix.shape[1]} vs {mean.shape[0]}."
+    )
