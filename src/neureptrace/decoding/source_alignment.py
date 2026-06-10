@@ -21,6 +21,7 @@ from neureptrace.decoding.hyperalignment_initialization import fit_class_hyperal
 from neureptrace.decoding.hyperalignment_initialization import fit_projection_to_hyperalignment
 from neureptrace.decoding.hyperalignment_initialization import transform_with_projection
 from neureptrace.decoding.mcca import fit_class_mcca
+from neureptrace.decoding.mcca_target import fit_target_mcca_projection
 from neureptrace.decoding.sampling import DEFAULT_CLASS_LIMIT_SEED, DEFAULT_CLASS_LIMIT_SELECTION, select_class_limited_indices
 
 SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS = ("procrustes", "hyperalignment", "mcca")
@@ -41,8 +42,10 @@ SOURCE_ALIGNMENT_STIMULUS_ANCHOR_MODES = (
 SOURCE_ALIGNMENT_ANCHOR_MODES = (*SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES, *SOURCE_ALIGNMENT_STIMULUS_ANCHOR_MODES)
 TARGET_CALIBRATED_ALIGNMENT = "target_calibrated_alignment"
 ORACLE_TARGET_CALIBRATED_ALIGNMENT = "oracle_target_calibrated_alignment"
+GROUP_PROJECTION_TARGET_CENTERED = "group_projection_target_centered"
 SOURCE_ALIGNMENT_TARGET_PROJECTIONS = (
     "group_projection",
+    GROUP_PROJECTION_TARGET_CENTERED,
     TARGET_CALIBRATED_ALIGNMENT,
     ORACLE_TARGET_CALIBRATED_ALIGNMENT,
 )
@@ -183,10 +186,15 @@ class SourceAlignmentConfig:
     def fits_target_projection(self) -> bool:
         return self.oracle_target_calibrated or self.target_calibrated
 
+    @property
+    def target_centered_group_projection(self) -> bool:
+        return self.enabled and self.target_projection == GROUP_PROJECTION_TARGET_CENTERED
+
     def static_metadata(self) -> dict[str, Any]:
         oracle = self.oracle_target_calibrated
         target_calibrated = self.target_calibrated
         unsupervised = _uses_unlabeled_covariance_alignment(self.method)
+        target_centered = self.target_centered_group_projection
         return {
             "alignment_method": self.method,
             "alignment_anchor_mode": self.anchor_mode,
@@ -201,8 +209,10 @@ class SourceAlignmentConfig:
             "alignment_window_mode": SAME_DECODE_WINDOW_ALIGNMENT if self.same_decode_window else "fixed_centers",
             "alignment_same_decode_window": bool(self.same_decode_window),
             "alignment_target_projection": self.target_projection,
-            "alignment_strict_source_only": bool(self.enabled and not oracle and not target_calibrated and not unsupervised),
-            "alignment_uses_unlabeled_target_data": bool(unsupervised),
+            "alignment_strict_source_only": bool(
+                self.enabled and not oracle and not target_calibrated and not unsupervised and not target_centered
+            ),
+            "alignment_uses_unlabeled_target_data": bool(unsupervised or target_centered),
             "alignment_uses_class_labels": bool(
                 self.method in SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS
                 and self.anchor_mode in SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES
@@ -220,6 +230,8 @@ class SourceAlignmentConfig:
                 if target_calibrated
                 else "unlabeled_target_covariance_alignment"
                 if unsupervised
+                else GROUP_PROJECTION_TARGET_CENTERED
+                if target_centered
                 else "strict_source_only"
             ),
             "alignment_protocol_note": (
@@ -227,6 +239,8 @@ class SourceAlignmentConfig:
                 if oracle
                 else "uses disjoint target calibration rows; not valid for strict source-only benchmark"
                 if target_calibrated
+                else "uses unlabeled target feature mean; report separately from strict source-only alignment"
+                if target_centered
                 else ""
             ),
         }
@@ -299,6 +313,15 @@ def normalize_source_alignment_anchor_mode(anchor_mode: str | None) -> str:
 
 def normalize_source_alignment_target_projection(target_projection: str | None) -> str:
     normalized = "group_projection" if target_projection is None else str(target_projection).strip().lower().replace("-", "_")
+    if normalized in {
+        "target_centered_group_projection",
+        "target_centered_group",
+        "group_target_centered",
+        "group_projection_target_mean",
+        "target_mean_group_projection",
+        "unlabeled_target_centered_group_projection",
+    }:
+        normalized = GROUP_PROJECTION_TARGET_CENTERED
     if normalized in {"target", "target_calibrated", "target_calibration", "calibrated_target"}:
         normalized = TARGET_CALIBRATED_ALIGNMENT
     if normalized in {"oracle", "oracle_target", "oracle_target_calibrated"}:
@@ -428,8 +451,13 @@ def source_alignment_config(
         raise ValueError("alignment hyperalignment_iterations must be positive.")
     if config.mcca_regularization < 0 or not np.isfinite(config.mcca_regularization):
         raise ValueError("alignment mcca_regularization must be finite and non-negative.")
-    if _uses_unlabeled_covariance_alignment(config.method) and config.fits_target_projection:
-        raise ValueError("Unsupervised covariance alignment uses unlabeled target data and does not support target-calibrated projections.")
+    if _uses_unlabeled_covariance_alignment(config.method) and (
+        config.fits_target_projection or config.target_centered_group_projection
+    ):
+        raise ValueError(
+            "Unsupervised covariance alignment uses unlabeled target data and does not support "
+            "target-calibrated projections or target-centered projections."
+        )
     return config
 
 
@@ -592,11 +620,14 @@ def align_train_test_features(
     anchors_by_subject = {subject_id: train_anchor_vector[subject_vector == subject_id] for subject_id in subject_ids}
     sample_mode = _alignment_sample_mode(config.anchor_mode)
     if unsupervised_alignment:
-        train_aligned, test_aligned, covariance_metadata = _transform_unsupervised_covariance_alignment(
+        train_aligned_by_subject, test_aligned, covariance_metadata = _transform_unsupervised_covariance_alignment_by_subject(
             features_by_subject,
             test_matrix,
             method=config.method,
         )
+        train_aligned = np.empty((train_matrix.shape[0], test_aligned.shape[1]), dtype=float)
+        for subject_id in subject_ids:
+            train_aligned[subject_vector == subject_id] = train_aligned_by_subject[subject_id]
         source_inner_raw_ba = float("nan")
         source_inner_aligned_ba = float("nan")
         if compute_source_inner_diagnostics:
@@ -697,15 +728,21 @@ def align_train_test_features(
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
+                selected_offsets_by_class=alignment.selected_offsets_by_class,
             )
             target_projection = fit_projection_to_hyperalignment(target_anchors, template=model.template)
             transformed_test = transform_with_projection(test_matrix, target_projection)
             target_alignment_rows = int(target_projection.n_alignment_rows)
             target_projection_fit = "target_calibrated_template_procrustes" if config.target_calibrated else "template_procrustes"
         else:
-            transformed_test = model.transform_group(test_matrix)
+            target_feature_mean = np.mean(test_matrix, axis=0) if config.target_centered_group_projection else None
+            transformed_test = model.transform_group(test_matrix, feature_mean=target_feature_mean)
             target_alignment_rows = ""
-            target_projection_fit = "source_group_projection"
+            target_projection_fit = (
+                "source_group_projection_target_centered"
+                if config.target_centered_group_projection
+                else "source_group_projection"
+            )
     elif config.method == "mcca":
         if config.fits_target_projection:
             projection_features = target_calibration_matrix if config.target_calibrated else test_matrix
@@ -716,23 +753,29 @@ def align_train_test_features(
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
+                selected_offsets_by_class=alignment.selected_offsets_by_class,
             )
-            target_mean, target_projection = _fit_target_projection_to_template(
+            target_projection = fit_target_mcca_projection(
                 target_anchors,
-                model.component_scores,
+                model,
                 regularization=config.mcca_regularization,
             )
-            transformed_test = (test_matrix - target_mean) @ target_projection
-            target_alignment_rows = int(target_anchors.shape[0])
+            transformed_test = target_projection.transform(test_matrix)
+            target_alignment_rows = int(target_projection.n_alignment_rows)
             target_projection_fit = (
                 "target_calibrated_template_ridge_least_squares"
                 if config.target_calibrated
                 else "template_ridge_least_squares"
             )
         else:
-            transformed_test = model.transform_group(test_matrix)
+            target_feature_mean = np.mean(test_matrix, axis=0) if config.target_centered_group_projection else None
+            transformed_test = model.transform_group(test_matrix, feature_mean=target_feature_mean)
             target_alignment_rows = ""
-            target_projection_fit = "source_group_projection"
+            target_projection_fit = (
+                "source_group_projection_target_centered"
+                if config.target_centered_group_projection
+                else "source_group_projection"
+            )
     else:  # pragma: no cover - guarded by normalization
         raise ValueError(f"Unsupported source alignment method: {config.method}")
     n_alignment_rows = int(next(iter(fit.anchor_before.values())).shape[0])
@@ -764,7 +807,7 @@ def align_train_test_features(
         "source_inner_validation_type": (
             "strict_source_loso_nearest_centroid_group_projection" if compute_source_inner_diagnostics else ""
         ),
-        "uses_unlabeled_target_data": False,
+        "uses_unlabeled_target_data": bool(config.target_centered_group_projection),
         "covariance_alignment_estimator": "",
         "target_transform_type": target_projection_fit,
     }
@@ -932,6 +975,7 @@ def _target_alignment_matrix(
     classes: np.ndarray,
     config: SourceAlignmentConfig,
     n_repetitions_per_class: int | None,
+    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None = None,
 ) -> np.ndarray:
     if labels is None:  # guarded earlier, but this keeps type-checkers honest
         raise ValueError("oracle_target_calibrated_alignment requires target labels or anchor values.")
@@ -946,58 +990,64 @@ def _target_alignment_matrix(
 
     if n_repetitions_per_class is None:
         raise ValueError("class_repetition oracle target alignment requires a repetition count.")
+    repetitions = int(n_repetitions_per_class)
+    selected_offsets = _normalize_target_repetition_offsets(
+        selected_offsets_by_class,
+        labels=labels,
+        classes=classes,
+        n_repetitions_per_class=repetitions,
+    )
     rows = []
     for class_position, class_label in enumerate(classes):
         class_features = features[labels == class_label]
-        if class_features.shape[0] < n_repetitions_per_class:
+        if class_features.shape[0] < repetitions:
             raise ValueError(
                 f"Target class {class_label!r} has only {class_features.shape[0]} repetitions, "
-                f"need {n_repetitions_per_class}."
+                f"need {repetitions}."
             )
-        selected = select_class_limited_indices(
-            np.zeros(class_features.shape[0], dtype=int),
-            int(n_repetitions_per_class),
-            selection=DEFAULT_CLASS_LIMIT_SELECTION,
-            seed=DEFAULT_CLASS_LIMIT_SEED,
-            seed_context=class_position,
-        )
+        if selected_offsets is None:
+            selected = select_class_limited_indices(
+                np.zeros(class_features.shape[0], dtype=int),
+                repetitions,
+                selection=DEFAULT_CLASS_LIMIT_SELECTION,
+                seed=DEFAULT_CLASS_LIMIT_SEED,
+                seed_context=class_position,
+            )
+        else:
+            selected = selected_offsets[class_position]
         rows.extend(class_features[selected])
     return np.vstack(rows)
 
 
-def _fit_target_projection_to_template(
-    features: np.ndarray,
-    template: np.ndarray,
+def _normalize_target_repetition_offsets(
+    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None,
     *,
-    regularization: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Fit a target-subject linear projection to an existing common template.
-
-    This intentionally uses target labels/anchors and is therefore only suitable
-    for the oracle debug upper bound.
-    """
-
-    matrix = _feature_matrix(features, name="target_alignment_features")
-    template_matrix = _feature_matrix(template, name="target_alignment_template")
-    if matrix.shape[0] != template_matrix.shape[0]:
-        raise ValueError(
-            "target alignment features and template must have the same row count: "
-            f"{matrix.shape[0]} != {template_matrix.shape[0]}."
-        )
-    mean = np.mean(matrix, axis=0)
-    centered = matrix - mean
-    ridge = float(regularization)
-    if ridge < 0 or not np.isfinite(ridge):
-        raise ValueError("target projection regularization must be finite and non-negative.")
-    dual = centered @ centered.T
-    if ridge > 0:
-        dual = dual + ridge * np.eye(dual.shape[0])
-    try:
-        coefficients = np.linalg.solve(dual, template_matrix)
-    except np.linalg.LinAlgError:
-        coefficients = np.linalg.pinv(dual) @ template_matrix
-    projection = centered.T @ coefficients
-    return mean, projection
+    labels: np.ndarray,
+    classes: np.ndarray,
+    n_repetitions_per_class: int,
+) -> dict[int, np.ndarray] | None:
+    if selected_offsets_by_class is None:
+        return None
+    normalized: dict[int, np.ndarray] = {}
+    for class_position, class_label in enumerate(classes):
+        try:
+            offsets = np.asarray(selected_offsets_by_class[class_position], dtype=int)
+        except KeyError as exc:
+            raise ValueError(f"selected_offsets_by_class is missing class position {class_position}.") from exc
+        if offsets.ndim != 1:
+            raise ValueError("selected_offsets_by_class entries must be one-dimensional.")
+        if offsets.size != n_repetitions_per_class:
+            raise ValueError(
+                "selected_offsets_by_class entries must match n_repetitions_per_class: "
+                f"{offsets.size} != {n_repetitions_per_class}."
+            )
+        class_count = int(np.sum(labels == class_label))
+        if offsets.size and (int(np.min(offsets)) < 0 or int(np.max(offsets)) >= class_count):
+            raise ValueError(
+                f"selected offsets for class {class_label!r} are outside the target subject's available repetitions."
+            )
+        normalized[class_position] = offsets
+    return normalized
 
 
 def _fit_source_alignment_model(
@@ -1060,39 +1110,57 @@ def _transform_unsupervised_covariance_alignment(
     *,
     method: str,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    transformed_by_subject, transformed_test, metadata = _transform_unsupervised_covariance_alignment_by_subject(
+        features_by_subject,
+        test_features,
+        method=method,
+    )
+    subject_ids = tuple(features_by_subject)
+    return np.vstack([transformed_by_subject[subject_id] for subject_id in subject_ids]), transformed_test, metadata
+
+
+def _transform_unsupervised_covariance_alignment_by_subject(
+    features_by_subject: Mapping[Hashable, np.ndarray],
+    test_features: np.ndarray,
+    *,
+    method: str,
+) -> tuple[dict[Hashable, np.ndarray], np.ndarray, dict[str, Any]]:
     subject_ids = tuple(features_by_subject)
     target_stats = _covariance_stats(test_features)
     pooled_source = np.vstack([features_by_subject[subject_id] for subject_id in subject_ids])
     source_stats = _covariance_stats(pooled_source)
     estimators = {target_stats.estimator, source_stats.estimator}
-    transformed_by_subject: list[np.ndarray] = []
+    transformed_by_subject: dict[Hashable, np.ndarray] = {}
 
     if method in {"euclidean", "subject_sensor_covariance"}:
         for subject_id in subject_ids:
             stats = _covariance_stats(features_by_subject[subject_id])
             estimators.add(stats.estimator)
-            transformed_by_subject.append(_covariance_whiten(features_by_subject[subject_id], stats))
+            transformed_by_subject[subject_id] = _covariance_whiten(features_by_subject[subject_id], stats)
         transformed_test = _covariance_whiten(test_features, target_stats)
         target_transform_type = "unlabeled_target_covariance_whitening"
     elif method == "coral":
         for subject_id in subject_ids:
             stats = _covariance_stats(features_by_subject[subject_id])
             estimators.add(stats.estimator)
-            transformed_by_subject.append(_covariance_recolor(_covariance_whiten(features_by_subject[subject_id], stats), target_stats))
+            transformed_by_subject[subject_id] = _covariance_recolor(
+                _covariance_whiten(features_by_subject[subject_id], stats),
+                target_stats,
+            )
         transformed_test = np.asarray(test_features, dtype=float)
         target_transform_type = "unlabeled_target_covariance_recoloring"
     elif method == "target_baseline_covariance":
-        transformed_by_subject = [
-            _covariance_recolor(_covariance_whiten(features_by_subject[subject_id], source_stats), target_stats)
+        transformed_by_subject = {
+            subject_id: _covariance_recolor(_covariance_whiten(features_by_subject[subject_id], source_stats), target_stats)
             for subject_id in subject_ids
-        ]
+        }
         transformed_test = np.asarray(test_features, dtype=float)
         target_transform_type = "unlabeled_target_pooled_source_to_target_covariance"
     else:  # pragma: no cover - guarded by normalization
         raise ValueError(f"Unsupported unsupervised covariance alignment method: {method}.")
 
     return (
-        np.vstack(transformed_by_subject),
+        transformed_by_subject,
         transformed_test,
         {
             "alignment_uses_unlabeled_target_data": True,
@@ -1492,6 +1560,7 @@ __all__ = [
     "DEFAULT_ALIGNMENT_COMPONENTS",
     "DEFAULT_ALIGNMENT_REPETITION_CAP",
     "DEFAULT_ALIGNMENT_TIMES",
+    "GROUP_PROJECTION_TARGET_CENTERED",
     "ORACLE_TARGET_CALIBRATED_ALIGNMENT",
     "SAME_DECODE_WINDOW_ALIGNMENT",
     "SOURCE_ALIGNMENT_ANCHOR_MODES",

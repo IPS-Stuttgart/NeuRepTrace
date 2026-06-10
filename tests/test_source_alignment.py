@@ -1,9 +1,14 @@
 import numpy as np
 import pytest
 
+from neureptrace.decoding.mcca import fit_class_mcca
+from neureptrace.decoding.mcca_target import class_alignment_matrix, fit_target_mcca_projection
 from neureptrace.decoding.source_alignment import (
+    GROUP_PROJECTION_TARGET_CENTERED,
     ORACLE_TARGET_CALIBRATED_ALIGNMENT,
     TARGET_CALIBRATED_ALIGNMENT,
+    _target_alignment_matrix,
+    _transform_unsupervised_covariance_alignment_by_subject,
     align_train_test_features,
     normalize_source_alignment_method,
     source_alignment_anchor_availability,
@@ -190,6 +195,40 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert aligned_distance < raw_distance
 
 
+@pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
+def test_target_centered_group_projection_uses_unlabeled_target_mean(method):
+    features, labels, subjects = _rotated_subject_features(seed=53)
+    source_mask = subjects != "s2"
+    target_mask = subjects == "s2"
+    shifted_target = features[target_mask] + np.array([25.0, -10.0, 5.0, 3.0])
+    base_kwargs = {
+        "train_features": features[source_mask],
+        "train_labels": labels[source_mask],
+        "train_subject_ids": subjects[source_mask],
+        "test_features": shifted_target,
+    }
+
+    strict = align_train_test_features(
+        **base_kwargs,
+        config=source_alignment_config(method=method, components=2),
+    )
+    centered = align_train_test_features(
+        **base_kwargs,
+        config=source_alignment_config(
+            method=method,
+            components=2,
+            target_projection=GROUP_PROJECTION_TARGET_CENTERED,
+        ),
+    )
+
+    assert centered.metadata["alignment_target_projection"] == GROUP_PROJECTION_TARGET_CENTERED
+    assert centered.metadata["alignment_strict_source_only"] is False
+    assert centered.metadata["alignment_uses_unlabeled_target_data"] is True
+    assert centered.diagnostics["uses_unlabeled_target_data"] is True
+    assert centered.diagnostics["target_transform_type"] == "source_group_projection_target_centered"
+    assert not np.allclose(strict.test_features, centered.test_features)
+
+
 @pytest.mark.parametrize(
     ("method", "target_transform_type"),
     [
@@ -222,6 +261,38 @@ def test_unsupervised_covariance_alignment_uses_no_class_anchors(method, target_
     assert result.diagnostics["target_transform_type"] == target_transform_type
     assert result.diagnostics["covariance_alignment_estimator"] == "full"
     assert np.isfinite(result.diagnostics["source_inner_raw_balanced_accuracy"])
+
+
+def test_unsupervised_covariance_alignment_preserves_interleaved_train_row_order():
+    train_features, train_labels, train_subjects = _rotated_subject_features(seed=31)
+    subject_ids = tuple(dict.fromkeys(train_subjects.tolist()))
+    per_subject_positions = [np.flatnonzero(train_subjects == subject_id) for subject_id in subject_ids]
+    interleaved_order = np.ravel(np.column_stack(per_subject_positions))
+    train_features = train_features[interleaved_order]
+    train_subjects = train_subjects[interleaved_order]
+    test_features = train_features[:5]
+
+    result = align_train_test_features(
+        train_features=train_features,
+        train_labels=train_labels[interleaved_order],
+        train_subject_ids=train_subjects,
+        test_features=test_features,
+        config=source_alignment_config(method="euclidean"),
+    )
+
+    features_by_subject = {subject_id: train_features[train_subjects == subject_id] for subject_id in subject_ids}
+    transformed_by_subject, _test_transformed, _metadata = _transform_unsupervised_covariance_alignment_by_subject(
+        features_by_subject,
+        test_features,
+        method="euclidean",
+    )
+    expected = np.empty_like(result.train_features)
+    for subject_id in subject_ids:
+        expected[train_subjects == subject_id] = transformed_by_subject[subject_id]
+
+    np.testing.assert_allclose(result.train_features, expected)
+    grouped = np.vstack([transformed_by_subject[subject_id] for subject_id in subject_ids])
+    assert not np.allclose(result.train_features, grouped)
 
 
 def test_unsupervised_covariance_alignment_rejects_oracle_target_projection():
@@ -371,6 +442,51 @@ def test_oracle_target_calibrated_alignment_accepts_target_anchor_values():
     assert oracle.metadata["alignment_valid_for_benchmark"] is False
 
 
+def test_target_class_repetition_alignment_reuses_source_offsets():
+    features = np.array(
+        [
+            [10.0],
+            [11.0],
+            [12.0],
+            [13.0],
+            [100.0],
+            [101.0],
+            [102.0],
+            [103.0],
+        ]
+    )
+    labels = np.array([0, 0, 0, 0, 1, 1, 1, 1])
+    selected_offsets = {0: np.array([1, 3]), 1: np.array([0, 2])}
+
+    aligned = _target_alignment_matrix(
+        features,
+        labels,
+        classes=np.array([0, 1]),
+        config=source_alignment_config(
+            method="mcca",
+            anchor_mode="class_repetition",
+            target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+        ),
+        n_repetitions_per_class=2,
+        selected_offsets_by_class=selected_offsets,
+    )
+
+    np.testing.assert_allclose(aligned, [[11.0], [13.0], [100.0], [102.0]])
+    with pytest.raises(ValueError, match="outside"):
+        _target_alignment_matrix(
+            features,
+            labels,
+            classes=np.array([0, 1]),
+            config=source_alignment_config(
+                method="mcca",
+                anchor_mode="class_repetition",
+                target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+            ),
+            n_repetitions_per_class=2,
+            selected_offsets_by_class={0: np.array([1, 9]), 1: np.array([0, 2])},
+        )
+
+
 @pytest.mark.parametrize(
     ("method", "target_transform_type"),
     [
@@ -415,6 +531,45 @@ def test_target_calibrated_alignment_uses_separate_calibration_rows(method, targ
         "uses disjoint target calibration rows; not valid for strict source-only benchmark"
     )
     assert target_calibrated.diagnostics["target_transform_type"] == target_transform_type
+
+
+def test_target_calibrated_mcca_uses_public_target_projection_helper():
+    features, labels, subjects = _rotated_subject_features(seed=53)
+    source_mask = subjects != "s2"
+    target_positions = np.flatnonzero(subjects == "s2")
+    calibration_positions = np.asarray([target_positions[labels[target_positions] == label][0] for label in np.unique(labels)])
+    evaluation_positions = np.asarray([index for index in target_positions if index not in set(calibration_positions.tolist())])
+    source_subjects = tuple(dict.fromkeys(subjects[source_mask].tolist()))
+    features_by_subject = {subject: features[source_mask][subjects[source_mask] == subject] for subject in source_subjects}
+    labels_by_subject = {subject: labels[source_mask][subjects[source_mask] == subject] for subject in source_subjects}
+
+    model, alignment = fit_class_mcca(
+        features_by_subject,
+        labels_by_subject,
+        sample_mode="class_mean",
+        n_components=2,
+        regularization=1e-6,
+    )
+    target_anchors = class_alignment_matrix(
+        features[calibration_positions],
+        labels[calibration_positions],
+        classes=alignment.classes,
+        sample_mode="class_mean",
+    )
+    projection = fit_target_mcca_projection(target_anchors, model, regularization=1e-6)
+    expected = projection.transform(features[evaluation_positions])
+
+    target_calibrated = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        test_features=features[evaluation_positions],
+        target_calibration_features=features[calibration_positions],
+        target_calibration_labels=labels[calibration_positions],
+        config=source_alignment_config(method="mcca", components=2, target_projection=TARGET_CALIBRATED_ALIGNMENT),
+    )
+
+    np.testing.assert_allclose(target_calibrated.test_features, expected)
 
 
 def test_class_repetition_cap_is_capped_by_available_counts():
