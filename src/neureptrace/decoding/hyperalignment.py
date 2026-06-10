@@ -538,7 +538,7 @@ def _normalize_sample_mode(sample_mode: str) -> str:
 def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
     matrix = np.asarray(features, dtype=float)
     if matrix.ndim != 2:
-        raise ValueError(f"{name} must be a two-dimensional feature matrix.")
+        raise ValueError(f"{name} must be a two-dimensional matrix.")
     if matrix.shape[0] == 0 or matrix.shape[1] == 0:
         raise ValueError(f"{name} must have at least one row and one column.")
     if not np.all(np.isfinite(matrix)):
