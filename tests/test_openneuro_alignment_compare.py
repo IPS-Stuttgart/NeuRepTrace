@@ -6,7 +6,13 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from neureptrace.openneuro_alignment_compare import discover_output_dirs, run_alignment_comparison
+from neureptrace.openneuro_alignment_compare import (
+    build_oracle_comparison,
+    build_target_calibrated_comparison,
+    build_variant_summary,
+    discover_output_dirs,
+    run_alignment_comparison,
+)
 
 
 def _write_alignment_artifact(
@@ -280,3 +286,42 @@ def test_alignment_compare_respects_explicit_invalid_benchmark_flag(tmp_path: Pa
     variants = pd.read_csv(written["variant_summary"])
     assert variants["alignment_target_projection"].unique().tolist() == ["group_projection"]
     assert variants["alignment_valid_for_benchmark"].unique().tolist() == [False]
+
+
+def test_alignment_compare_ignores_invalid_strict_rows_for_debug_baselines(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    invalid_strict = _write_alignment_artifact(
+        artifacts_root,
+        "invalid-strict-looking",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.80,
+    )
+    summary_path = invalid_strict / "decode" / "time_decode_summary.csv"
+    summary = pd.read_csv(summary_path)
+    summary["alignment_valid_for_benchmark"] = False
+    summary.to_csv(summary_path, index=False)
+    oracle = _write_alignment_artifact(
+        artifacts_root,
+        "oracle-debug",
+        anchor_mode="class_repetition",
+        target_projection="oracle_target_calibrated_alignment",
+        fixed_value=0.90,
+    )
+    target_calibrated = _write_alignment_artifact(
+        artifacts_root,
+        "target-calibrated-debug",
+        anchor_mode="class_repetition",
+        target_projection="target_calibrated_alignment",
+        fixed_value=0.85,
+    )
+
+    variants = build_variant_summary(
+        [invalid_strict, oracle, target_calibrated],
+        fixed_time=0.184,
+    )
+
+    assert build_oracle_comparison(variants).empty
+    target_comparison = build_target_calibrated_comparison(variants)
+    assert target_comparison.loc[0, "decision"] == "target_calibrated_without_strict_pair"
+    assert target_comparison.loc[0, "strict_artifact"] == ""

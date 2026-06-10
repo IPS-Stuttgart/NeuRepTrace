@@ -317,6 +317,13 @@ def _best_row(frame: pd.DataFrame) -> pd.Series:
     return frame.sort_values(["selection_score", "selection_value"], ascending=[False, False]).iloc[0]
 
 
+def _valid_strict_rows(group: pd.DataFrame) -> pd.DataFrame:
+    return group[
+        (group["alignment_target_projection"] == STRICT_TARGET_PROJECTION)
+        & (group["alignment_valid_for_benchmark"].map(_as_bool))
+    ]
+
+
 def build_anchor_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
     """Compare true identity anchors against class_repetition within matched groups."""
 
@@ -368,7 +375,7 @@ def build_oracle_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -
     group_columns = ["dataset", "alignment_method", "alignment_anchor_mode", "selection_metric"]
     for group_values, group in variants.groupby(group_columns, dropna=False):
         group_map = dict(zip(group_columns, group_values, strict=False))
-        strict_rows = group[group["alignment_target_projection"] == STRICT_TARGET_PROJECTION]
+        strict_rows = _valid_strict_rows(group)
         oracle_rows = group[group["alignment_target_projection"] == ORACLE_TARGET_PROJECTION]
         if strict_rows.empty or oracle_rows.empty:
             continue
@@ -419,7 +426,7 @@ def build_target_calibrated_comparison(variants: pd.DataFrame, *, min_delta: flo
         target_rows = group[group["alignment_target_projection"] == TARGET_CALIBRATED_TARGET_PROJECTION]
         if target_rows.empty:
             continue
-        strict_rows = group[group["alignment_target_projection"] == STRICT_TARGET_PROJECTION]
+        strict_rows = _valid_strict_rows(group)
         raw_rows = raw_groups.get((group_map["dataset"], group_map["selection_metric"]), pd.DataFrame())
         target_row = _best_row(target_rows)
         strict_row = _best_row(strict_rows) if not strict_rows.empty else None
