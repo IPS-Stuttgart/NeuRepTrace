@@ -38,12 +38,96 @@ SUMMARY_PROVENANCE_COLUMNS = (
     "ensemble_baseline_window_start",
     "ensemble_baseline_window_stop",
 )
+MANIFEST_COMPATIBILITY_COLUMNS = (
+    "dataset",
+    "mode",
+    "runs",
+    "n_runs",
+    "config",
+    "config_overrides",
+    "max_events_per_label",
+    "stage_seed",
+    "run_decode",
+    "skip_failed_subjects",
+    "min_successful_subjects",
+    "decoder_override",
+    "diagnostics_best_time",
+    "temporal_smoothing",
+    "temporal_smoothing_fit_window",
+    "temporal_smoothing_mode",
+    "temporal_smoothing_stay_grid_size",
+    "response_window_ensemble",
+    "response_window_mode",
+    "response_window_combine",
+    "response_window_times",
+    "ensemble_weights",
+    "ensemble_source_decoders",
+    "ensemble_source_temperatures",
+    "ensemble_baseline_window",
+    "ensemble_min_probability",
+    "time_decode_backend",
+    "class_prior_correction",
+    "source_calibration",
+    "label_shuffle_control",
+    "label_shuffle_seed",
+    "alignment_method",
+    "alignment_anchor_mode",
+    "alignment_anchor_column",
+    "alignment_repetition_cap",
+    "alignment_components",
+    "alignment_times",
+    "alignment_target_projection",
+    "alignment_target_calibration_per_anchor",
+    "alignment_target_calibration_seed",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _manifest_value_token(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, dict | list | tuple):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    text = str(value).strip()
+    lowered = text.lower()
+    if lowered in {"true", "false", "yes", "no", "on", "off"}:
+        return lowered
+    return text
+
+
+def _validate_aggregate_manifest_compatibility(
+    manifests: Sequence[dict[str, Any]],
+    output_dirs: Sequence[Path],
+) -> None:
+    for column in MANIFEST_COMPATIBILITY_COLUMNS:
+        declared = [
+            (
+                output_dirs[index],
+                _manifest_value_token(manifest.get(column)),
+                manifest.get("artifact_name", ""),
+            )
+            for index, manifest in enumerate(manifests)
+            if column in manifest
+        ]
+        if len(declared) < 2:
+            continue
+        values = {value for _path, value, _artifact in declared}
+        if len(values) <= 1:
+            continue
+        details = ", ".join(
+            f"{artifact or path.name}={value!r}"
+            for path, value, artifact in declared
+        )
+        raise ValueError(f"Incompatible shard manifests for {column!r}: {details}")
 
 
 def _as_bool(value: Any) -> bool:
@@ -222,6 +306,7 @@ def _concat_existing_csvs(
 
 def _aggregate_manifest(output_dirs: Sequence[Path]) -> dict[str, Any]:
     manifests = [_read_json(output_dir / "run_manifest.json") for output_dir in output_dirs]
+    _validate_aggregate_manifest_compatibility(manifests, output_dirs)
     first = next((manifest for manifest in manifests if manifest), {})
     dataset = first.get("dataset", "")
     mode = first.get("mode", "")
