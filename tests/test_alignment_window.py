@@ -219,6 +219,55 @@ def test_transform_with_alignment_projection_collapses_distinct_same_width_sets_
     np.testing.assert_allclose(transformed, np.array([[4.0, 6.0, 12.0, 15.0]]))
 
 
+def test_transform_with_alignment_projection_rejects_ambiguous_explicit_cross_window_mean() -> None:
+    decode = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.10,
+        window_stop_s=0.20,
+    )
+    alignment = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.00,
+        window_stop_s=0.10,
+    )
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+        ]
+    )
+
+    with pytest.raises(ValueError, match="feature_mean_set"):
+        transform_with_alignment_projection(
+            np.array([[4.0, 5.0, 7.0, 8.0]]),
+            decode_feature_set=decode,
+            projection=projection,
+            projection_feature_mean=np.array([1.0, 3.0, 2.0, 4.0]),
+            projection_feature_set=alignment,
+            feature_mean=np.array([1.0, 2.0, 3.0, 4.0]),
+        )
+
+    transformed = transform_with_alignment_projection(
+        np.array([[4.0, 5.0, 7.0, 8.0]]),
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=np.array([1.0, 3.0, 2.0, 4.0]),
+        projection_feature_set=alignment,
+        feature_mean=np.array([1.0, 2.0, 3.0, 4.0]),
+        feature_mean_set=decode,
+    )
+
+    np.testing.assert_allclose(transformed, np.array([[5.0, 7.0, 10.5, 13.5]]))
+
+
 def test_transform_with_alignment_projection_supports_explicit_time_channel_order() -> None:
     decode = DummyFeatureSet(
         np.zeros((1, 4)),
@@ -351,6 +400,21 @@ def test_transform_with_alignment_projection_rejects_incompatible_projection_wid
             np.zeros((1, 4)),
             decode_feature_set=decode,
             projection=np.zeros((5, 2)),
+            projection_feature_mean=np.zeros(6),
+            projection_feature_set=alignment,
+        )
+
+
+def test_transform_with_alignment_projection_rejects_channel_projection_mismatch() -> None:
+    alignment = DummyFeatureSet(np.zeros((1, 6)), np.array([1]), n_channels=2, n_window_samples=3)
+    projection = np.ones((6, 2))
+    bad_decode = DummyFeatureSet(np.zeros((1, 9)), np.array([1]), n_channels=3, n_window_samples=3)
+
+    with pytest.raises(ValueError, match="projection rows"):
+        transform_with_alignment_projection(
+            np.zeros((1, 9)),
+            decode_feature_set=bad_decode,
+            projection=projection,
             projection_feature_mean=np.zeros(6),
             projection_feature_set=alignment,
         )
