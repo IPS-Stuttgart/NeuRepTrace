@@ -362,11 +362,13 @@ def test_candidate_metrics_report_multiclass_topk():
     labels = np.array([0, 1, 2])
 
     metrics = _candidate_metrics(probabilities, labels, n_classes=3)
+    tied = _candidate_metrics(np.full((3, 3), 1.0 / 3.0), labels, n_classes=3)
 
     assert metrics["accuracy"] == 2 / 3
     assert metrics["balanced_accuracy"] == 2 / 3
-    assert metrics["top2_accuracy"] == 1.0
+    assert metrics["top2_accuracy"] == 2 / 3
     assert metrics["top3_accuracy"] == 1.0
+    assert tied["top2_accuracy"] == 2 / 3
 
 
 def test_log_probability_window_combine_uses_geometric_mean():

@@ -1951,10 +1951,17 @@ def _xdawn_train_test_features(
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
     probabilities = np.asarray(probabilities, dtype=float)
     labels = np.asarray(labels, dtype=int).reshape(-1)
+    if probabilities.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional array.")
+    if probabilities.shape[0] != labels.shape[0]:
+        raise ValueError("probabilities and labels must contain the same number of rows.")
+    if probabilities.shape[1] == 0:
+        raise ValueError("probabilities must contain at least one class column.")
+    if k < 1:
+        raise ValueError("k must be at least one.")
     effective_k = min(int(k), probabilities.shape[1])
-    kth_scores = np.partition(probabilities, -effective_k, axis=1)[:, -effective_k]
-    label_scores = probabilities[np.arange(labels.size), labels]
-    return float(np.mean(label_scores >= kth_scores))
+    top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
+    return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
 
 
 def _effective_pca_components(candidate: CandidateSpec, n_features: int | None, n_samples: int | None) -> int | float | None:
