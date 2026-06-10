@@ -486,14 +486,27 @@ def _average_projection(projections, *, matrices=None):
     mean = np.mean(np.stack([projection.feature_mean for projection in projections.values()], axis=0), axis=0)
     matrix = np.mean(np.stack([projection.projection for projection in projections.values()], axis=0), axis=0)
     if matrices is not None:
-        matrix = _rescale_group_projection(matrix, mean, matrices)
+        matrix = _rescale_group_projection(matrix, projections, matrices)
     return mean, matrix
 
 
-def _rescale_group_projection(matrix: np.ndarray, mean: np.ndarray, matrices) -> np.ndarray:
+def _rescale_group_projection(matrix: np.ndarray, projections, matrices) -> np.ndarray:
+    """Scale the source-average fallback projection on subject-centered data.
+
+    The group projection is a calibration-free fallback for unseen subjects, but
+    its scale is estimated from fitted source subjects.  Source subjects must be
+    centered with their own fitted alignment means when estimating this scale.
+    Centering every source matrix with the across-source average mean introduces
+    between-subject offsets into the variance estimate; with large MEG baseline
+    offsets this can shrink the fallback projection and make source-only M-CCA
+    look worse than it is.
+    """
     transformed = np.vstack(
         [
-            (_feature_matrix(matrices[subject_id], name=f"matrices[{subject_id!r}]") - mean)
+            (
+                _feature_matrix(matrices[subject_id], name=f"matrices[{subject_id!r}]")
+                - projections[subject_id].feature_mean
+            )
             @ matrix
             for subject_id in matrices
         ]
