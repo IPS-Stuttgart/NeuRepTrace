@@ -17,6 +17,28 @@ MAXIMIZE_METRICS = {"accuracy", "balanced_accuracy", "top2_accuracy", "top3_accu
 MINIMIZE_METRICS = {"log_loss", "brier", "ece"}
 SELECTION_METRICS = tuple(sorted(MAXIMIZE_METRICS | MINIMIZE_METRICS))
 DEFAULT_SELECTIVE_COVERAGES = (1.0, 0.9, 0.8, 0.7)
+SINGLE_PROTOCOL_COLUMNS = (
+    "decoder",
+    "backend",
+    "emission_mode",
+    "feature_preprocessor",
+    "pca_components",
+    "normalization",
+    "temporal_mode",
+    "class_prior_correction",
+    "source_calibration",
+    "source_time_selection",
+    "alignment_method",
+    "alignment_anchor_mode",
+    "alignment_anchor_column",
+    "alignment_target_projection",
+    "alignment_valid_for_benchmark",
+    "response_window_combine",
+    "response_window_requested_times",
+    "response_window_actual_times",
+    "label_shuffle_control",
+    "label_shuffle_seed",
+)
 
 
 def _sem(values: pd.Series) -> float:
@@ -35,6 +57,33 @@ def _subject_column(frame: pd.DataFrame, requested: str | None = None) -> str:
         if column in frame.columns and not frame[column].isna().all():
             return column
     raise ValueError("Observation table must contain group, outer_group, or subject.")
+
+
+def _protocol_token(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    lowered = text.lower()
+    if lowered in {"true", "false", "yes", "no", "on", "off"}:
+        return lowered
+    return text
+
+
+def _validate_single_protocol_observations(frame: pd.DataFrame) -> None:
+    for column in SINGLE_PROTOCOL_COLUMNS:
+        if column not in frame.columns:
+            continue
+        values = sorted(
+            {
+                token
+                for token in (_protocol_token(value) for value in frame[column].drop_duplicates().tolist())
+                if token
+            }
+        )
+        if len(values) > 1:
+            raise ValueError(f"Observation table mixes {column!r} provenance values: {values}")
 
 
 def _probability_matrix(frame: pd.DataFrame) -> np.ndarray:
@@ -431,6 +480,7 @@ def write_loso_observation_diagnostics(
     observations = pd.read_csv(observations_csv)
     if observations.empty:
         raise ValueError("Observation table is empty.")
+    _validate_single_protocol_observations(observations)
     subject_column_name = _subject_column(observations, subject_column)
     time_summary = time_course_summary(observations)
     requested_time = best_time

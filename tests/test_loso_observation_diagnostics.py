@@ -164,3 +164,25 @@ def test_loso_observation_diagnostics_rejects_unnormalized_probabilities(tmp_pat
 
     with pytest.raises(ValueError, match="prob_class_\\* rows must sum to 1"):
         write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_mixed_decoder_provenance(tmp_path: Path):
+    observations = _toy_observations()
+    observations["decoder"] = "multinomial-logistic"
+    observations.loc[0, "decoder"] = "linear-svm"
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="mixes 'decoder' provenance"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_mixed_shuffle_provenance(tmp_path: Path):
+    observations = _toy_observations()
+    observations["label_shuffle_control"] = False
+    observations.loc[0, "label_shuffle_control"] = True
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="mixes 'label_shuffle_control' provenance"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
