@@ -29,6 +29,13 @@ HYBRID_SMOOTHING_EMISSION_SUFFIX = "response_window_poststimulus_forward"
 EPSILON = 1e-12
 TARGET_GROUP_COLUMNS = ("subject", "group", "outer_test_groups", "session", "fold")
 SOURCE_HASH_COLUMNS = ("preprocessing_hash", "model_hash")
+METRIC_PROVENANCE_COLUMNS = (
+    "label_shuffle_control",
+    "label_shuffle_seed",
+    "class_prior_correction",
+    "source_calibration",
+    "source_time_selection",
+)
 
 
 def _normalize_rows(probabilities: np.ndarray) -> np.ndarray:
@@ -637,7 +644,7 @@ def _attach_response_window_provenance(metrics: pd.DataFrame, observations: pd.D
     enriched = metrics.copy()
     prefixes = ("alignment_", "response_window_")
     for column in observations.columns:
-        if not column.startswith(prefixes):
+        if not column.startswith(prefixes) and column not in METRIC_PROVENANCE_COLUMNS:
             continue
         values = observations[column].drop_duplicates()
         if len(values) == 1:

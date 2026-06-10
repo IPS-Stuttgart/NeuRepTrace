@@ -206,6 +206,8 @@ def test_response_window_metrics_preserve_constant_alignment_provenance(tmp_path
     observations["alignment_oracle_target_calibrated"] = True
     observations["alignment_debug_upper_bound"] = True
     observations["alignment_valid_for_benchmark"] = False
+    observations["label_shuffle_control"] = True
+    observations["label_shuffle_seed"] = 13
     csv_path = tmp_path / "observations.csv"
     observations.to_csv(csv_path, index=False)
 
@@ -218,6 +220,8 @@ def test_response_window_metrics_preserve_constant_alignment_provenance(tmp_path
     assert metrics["alignment_oracle_target_calibrated"].unique().tolist() == [True]
     assert metrics["alignment_debug_upper_bound"].unique().tolist() == [True]
     assert metrics["alignment_valid_for_benchmark"].unique().tolist() == [False]
+    assert metrics["label_shuffle_control"].unique().tolist() == [True]
+    assert metrics["label_shuffle_seed"].unique().tolist() == [13]
 
 
 def test_response_window_uniform_probability_mean_uses_arithmetic_average(tmp_path: Path):
