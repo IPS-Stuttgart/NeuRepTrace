@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Mapping, Sequence
 from itertools import product
 from pathlib import Path
 
@@ -27,6 +28,7 @@ HYBRID_SMOOTHING_STAY_GRID_SIZE = 200
 HYBRID_SMOOTHING_EMISSION_SUFFIX = "response_window_poststimulus_forward"
 EPSILON = 1e-12
 TARGET_GROUP_COLUMNS = ("subject", "group", "outer_test_groups", "session", "fold")
+SOURCE_HASH_COLUMNS = ("preprocessing_hash", "model_hash")
 
 
 def _normalize_rows(probabilities: np.ndarray) -> np.ndarray:
@@ -138,6 +140,81 @@ def _score_weights(probability_cube: np.ndarray, labels: np.ndarray, weights: np
     return float(balanced_accuracy_score(labels, probabilities.argmax(axis=1)))
 
 
+def _source_hash_value(frame: pd.DataFrame, index_key: object, column: str) -> str:
+    if column not in frame.columns:
+        return ""
+    value = frame.loc[index_key, column]
+    if isinstance(value, pd.Series):
+        values = value.drop_duplicates()
+        if len(values) != 1:
+            raise ValueError(f"Source provenance column {column!r} is not unique for response-window key {index_key!r}.")
+        value = values.iloc[0]
+    return "" if pd.isna(value) else str(value)
+
+
+def _source_hash_records(
+    wide_provenance: Mapping[object, pd.DataFrame],
+    source_keys: Sequence[object],
+    row_index: pd.Index,
+    *,
+    column: str,
+    labeler: Callable[[object], str],
+) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    for index_key in row_index:
+        records.append(
+            {
+                labeler(source_key): _source_hash_value(wide_provenance[source_key], index_key, column)
+                for source_key in source_keys
+            }
+        )
+    return records
+
+
+def _has_nonempty_source_hash(records: Sequence[dict[str, str]]) -> bool:
+    return any(any(value for value in record.values()) for record in records)
+
+
+def _format_source_hash_record(record: Mapping[str, str]) -> str:
+    return "|".join(f"{source}:{value}" for source, value in record.items())
+
+
+def _apply_response_window_hashes(
+    target_base: pd.DataFrame,
+    *,
+    source_preprocessing_records: Sequence[dict[str, str]],
+    source_model_records: Sequence[dict[str, str]],
+    model_payload: Mapping[str, object],
+) -> None:
+    has_source_preprocessing = _has_nonempty_source_hash(source_preprocessing_records)
+    has_source_models = _has_nonempty_source_hash(source_model_records)
+    if has_source_preprocessing:
+        target_base["response_window_source_preprocessing_hashes"] = [
+            _format_source_hash_record(record) for record in source_preprocessing_records
+        ]
+        target_base["preprocessing_hash"] = [
+            stable_hash({"decoder": OUTPUT_DECODER, "response_window_source_preprocessing_hashes": record})
+            for record in source_preprocessing_records
+        ]
+    if has_source_models:
+        target_base["response_window_source_model_hashes"] = [
+            _format_source_hash_record(record) for record in source_model_records
+        ]
+    if has_source_preprocessing or has_source_models:
+        target_base["model_hash"] = [
+            stable_hash(
+                {
+                    **dict(model_payload),
+                    "response_window_source_preprocessing_hashes": source_preprocessing_records[row_index],
+                    "response_window_source_model_hashes": source_model_records[row_index],
+                }
+            )
+            for row_index in range(len(target_base))
+        ]
+    else:
+        target_base["model_hash"] = stable_hash(dict(model_payload))
+
+
 def _learn_weights(
     probability_cube: np.ndarray,
     labels: np.ndarray,
@@ -184,10 +261,14 @@ def _response_window_rows(
     output_rows: list[pd.DataFrame] = []
 
     wide_probabilities = {}
+    wide_provenance = {}
     for time in times:
         time_frame = selected.loc[selected["time"].astype(float) == float(time)].copy()
         time_frame = time_frame.sort_values(key_columns).drop_duplicates(key_columns, keep="first")
-        wide_probabilities[time] = time_frame.set_index(key_columns)[prob_columns]
+        indexed = time_frame.set_index(key_columns)
+        wide_probabilities[time] = indexed[prob_columns]
+        provenance_columns = [column for column in SOURCE_HASH_COLUMNS if column in indexed.columns]
+        wide_provenance[time] = indexed.loc[:, provenance_columns] if provenance_columns else pd.DataFrame(index=indexed.index)
     common_index = None
     for frame in wide_probabilities.values():
         common_index = frame.index if common_index is None else common_index.intersection(frame.index)
@@ -223,6 +304,7 @@ def _response_window_rows(
                 )
 
         probabilities = _combine_probabilities(probability_cube[target_mask], weights, combine=combine)
+        target_index = common_index[target_mask]
         target_base = base.iloc[np.flatnonzero(target_mask)].reset_index()
         target_base = target_base[[column for column in metadata_columns if column in target_base.columns]].copy()
         predictions = probabilities.argmax(axis=1)
@@ -254,8 +336,23 @@ def _response_window_rows(
         target_base["response_window_weights"] = "|".join(f"{float(weight):.12g}" for weight in weights)
         target_base["response_window_combine"] = combine
         target_base["response_window_source_score"] = "" if not np.isfinite(source_score) else float(source_score)
-        target_base["model_hash"] = stable_hash(
-            {
+        _apply_response_window_hashes(
+            target_base,
+            source_preprocessing_records=_source_hash_records(
+                wide_provenance,
+                times,
+                target_index,
+                column="preprocessing_hash",
+                labeler=lambda source_time: _time_label(float(source_time)),
+            ),
+            source_model_records=_source_hash_records(
+                wide_provenance,
+                times,
+                target_index,
+                column="model_hash",
+                labeler=lambda source_time: _time_label(float(source_time)),
+            ),
+            model_payload={
                 "decoder": OUTPUT_DECODER,
                 "mode": mode,
                 "combine": combine,
@@ -263,7 +360,7 @@ def _response_window_rows(
                 "actual_times": times,
                 "weights": tuple(float(weight) for weight in weights),
                 "target_subject": target_subject,
-            }
+            },
         )
         output_rows.append(target_base)
 
@@ -314,6 +411,7 @@ def _decoder_source_oof_response_window_rows(
     decoder_weight_candidates = _candidate_weights(len(decoders), weight_grid_step)
 
     wide_probabilities = {}
+    wide_provenance = {}
     base_frame = None
     common_index = None
     for decoder in decoders:
@@ -327,8 +425,12 @@ def _decoder_source_oof_response_window_rows(
                 raise ValueError(f"Missing observations for decoder {decoder!r} at response time {time}.")
             if base_frame is None:
                 base_frame = time_frame
-            indexed = time_frame.set_index(key_columns)[prob_columns]
-            wide_probabilities[(decoder, time)] = indexed
+            indexed = time_frame.set_index(key_columns)
+            wide_probabilities[(decoder, time)] = indexed[prob_columns]
+            provenance_columns = [column for column in SOURCE_HASH_COLUMNS if column in indexed.columns]
+            wide_provenance[(decoder, time)] = (
+                indexed.loc[:, provenance_columns] if provenance_columns else pd.DataFrame(index=indexed.index)
+            )
             common_index = indexed.index if common_index is None else common_index.intersection(indexed.index)
     if base_frame is None or common_index is None or len(common_index) == 0:
         raise ValueError("No observations contain all requested decoder/time response-window combinations.")
@@ -366,6 +468,7 @@ def _decoder_source_oof_response_window_rows(
             )
 
         probabilities = _combine_probabilities(probability_cube[target_mask], decoder_weights, combine=combine)
+        target_index = common_index[target_mask]
         target_base = base.iloc[np.flatnonzero(target_mask)].reset_index()
         target_base = target_base[[column for column in metadata_columns if column in target_base.columns]].copy()
         predictions = probabilities.argmax(axis=1)
@@ -399,8 +502,24 @@ def _decoder_source_oof_response_window_rows(
         target_base["response_window_source_score"] = "" if not np.isfinite(source_score) else float(source_score)
         target_base["response_window_decoder_candidates"] = "|".join(decoders)
         target_base["response_window_decoder_weights"] = "|".join(f"{float(weight):.12g}" for weight in decoder_weights)
-        target_base["model_hash"] = stable_hash(
-            {
+        source_keys = tuple((decoder, time) for decoder in decoders for time in times)
+        _apply_response_window_hashes(
+            target_base,
+            source_preprocessing_records=_source_hash_records(
+                wide_provenance,
+                source_keys,
+                target_index,
+                column="preprocessing_hash",
+                labeler=lambda source_key: f"{source_key[0]}@{_time_label(float(source_key[1]))}",
+            ),
+            source_model_records=_source_hash_records(
+                wide_provenance,
+                source_keys,
+                target_index,
+                column="model_hash",
+                labeler=lambda source_key: f"{source_key[0]}@{_time_label(float(source_key[1]))}",
+            ),
+            model_payload={
                 "decoder": OUTPUT_DECODER,
                 "mode": "decoder_source_oof_nonnegative",
                 "combine": combine,
@@ -410,7 +529,7 @@ def _decoder_source_oof_response_window_rows(
                 "decoder_candidates": decoders,
                 "decoder_weights": tuple(float(weight) for weight in decoder_weights),
                 "target_subject": target_subject,
-            }
+            },
         )
         output_rows.append(target_base)
 

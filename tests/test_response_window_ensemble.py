@@ -122,6 +122,40 @@ def test_response_window_rejects_duplicate_nearest_time_mapping(tmp_path: Path):
         run_response_window_ensemble([csv_path], mode="uniform")
 
 
+def test_response_window_model_hash_depends_on_source_time_hashes(tmp_path: Path):
+    observations = _toy_observations()
+    observations["preprocessing_hash"] = observations["time"].map(lambda time: f"pre-{time:.3f}")
+    observations["model_hash"] = observations["time"].map(lambda time: f"model-{time:.3f}")
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    ensembled, metrics = run_response_window_ensemble(
+        [csv_path],
+        response_times=(0.088, 0.184),
+        mode="uniform",
+    )
+
+    assert "response_window_source_model_hashes" in ensembled.columns
+    assert ensembled["response_window_source_model_hashes"].str.contains("0.088:model-0.088").all()
+    assert ensembled["response_window_source_model_hashes"].str.contains("0.184:model-0.184").all()
+    assert metrics["response_window_source_model_hashes"].unique().tolist() == [
+        "0.088:model-0.088|0.184:model-0.184"
+    ]
+
+    changed = observations.copy()
+    changed.loc[changed["time"] == 0.184, "model_hash"] = "model-0.184-changed"
+    changed_path = tmp_path / "observations_changed.csv"
+    changed.to_csv(changed_path, index=False)
+    changed_ensembled, _ = run_response_window_ensemble(
+        [changed_path],
+        response_times=(0.088, 0.184),
+        mode="uniform",
+    )
+
+    assert changed_ensembled["model_hash"].tolist() != ensembled["model_hash"].tolist()
+    assert changed_ensembled["preprocessing_hash"].tolist() == ensembled["preprocessing_hash"].tolist()
+
+
 def test_response_window_metrics_preserve_constant_alignment_provenance(tmp_path: Path):
     observations = _toy_observations()
     observations["alignment_method"] = "mcca"
@@ -228,6 +262,44 @@ def test_response_window_can_learn_decoder_family_weights_from_source_subjects(t
     assert all(weight >= 0.5 for weight in strong_weights)
     assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
     assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
+
+
+def test_decoder_response_window_model_hash_depends_on_source_hashes(tmp_path: Path):
+    observations = _toy_decoder_observations()
+    observations["preprocessing_hash"] = observations["decoder"].map(lambda decoder: f"pre-{decoder}")
+    observations["model_hash"] = observations.apply(
+        lambda row: f"model-{row['decoder']}-{row['time']:.3f}",
+        axis=1,
+    )
+    csv_path = tmp_path / "decoder_observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    ensembled, _metrics = run_response_window_ensemble(
+        [csv_path],
+        response_times=(0.088, 0.136),
+        mode="decoder_source_oof_nonnegative",
+        weight_grid_step=0.5,
+    )
+
+    assert ensembled["response_window_source_model_hashes"].str.contains("weak@0.088:model-weak-0.088").all()
+    assert ensembled["response_window_source_model_hashes"].str.contains("strong@0.136:model-strong-0.136").all()
+
+    changed = observations.copy()
+    changed.loc[
+        (changed["decoder"] == "strong") & (changed["time"] == 0.136),
+        "model_hash",
+    ] = "model-strong-0.136-changed"
+    changed_path = tmp_path / "decoder_observations_changed.csv"
+    changed.to_csv(changed_path, index=False)
+    changed_ensembled, _ = run_response_window_ensemble(
+        [changed_path],
+        response_times=(0.088, 0.136),
+        mode="decoder_source_oof_nonnegative",
+        weight_grid_step=0.5,
+    )
+
+    assert changed_ensembled["model_hash"].tolist() != ensembled["model_hash"].tolist()
+    assert changed_ensembled["preprocessing_hash"].tolist() == ensembled["preprocessing_hash"].tolist()
 
 
 def test_response_window_uses_outer_test_group_when_subject_is_empty(tmp_path: Path):
