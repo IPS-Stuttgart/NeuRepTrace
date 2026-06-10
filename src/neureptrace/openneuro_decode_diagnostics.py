@@ -586,6 +586,8 @@ def summarize_decode_outputs(output_dir: str | Path) -> tuple[dict[str, Any], pd
         "alignment_diagnostics": _csv_shape(alignment_diagnostics_path),
         "temporal_smoothing_summary": _csv_shape(decode_dir / "temporal_smoothing" / "time_decode_summary.csv"),
         "temporal_smoothing_observations": _csv_shape(decode_dir / "temporal_smoothing" / "observations.csv"),
+        "response_window_summary": _csv_shape(decode_dir / "response_window" / "time_decode_summary.csv"),
+        "response_window_observations": _csv_shape(decode_dir / "response_window" / "observations.csv"),
     }
 
     diagnostics_time_course_path = decode_dir / "diagnostics" / "time_course_summary.csv"
@@ -702,6 +704,26 @@ def aggregate_workflow_outputs(
             smoothed_observations,
             out_dir=smoothed_dir / "diagnostics",
             summary_csv=smoothed_summary,
+            stage_summary_csv=stage_summary_path,
+            best_time=best_time,
+        )
+
+    response_dir = decode_dir / "response_window"
+    response_summary = _concat_existing_csvs(
+        source_dirs,
+        "decode/response_window/time_decode_summary.csv",
+        response_dir / "time_decode_summary.csv",
+    )
+    response_observations = _concat_existing_csvs(
+        source_dirs,
+        "decode/response_window/observations.csv",
+        response_dir / "observations.csv",
+    )
+    if response_observations is not None and response_summary is not None:
+        write_loso_observation_diagnostics(
+            response_observations,
+            out_dir=response_dir / "diagnostics",
+            summary_csv=response_summary,
             stage_summary_csv=stage_summary_path,
             best_time=best_time,
         )
