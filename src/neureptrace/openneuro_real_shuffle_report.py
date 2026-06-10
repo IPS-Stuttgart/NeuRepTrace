@@ -123,6 +123,53 @@ def _string(row: pd.Series, column: str, default: str = "") -> str:
     return str(row[column])
 
 
+def _as_bool_token(value: object) -> bool:
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"Cannot parse boolean provenance value {value!r}.")
+
+
+def _provenance_values(run: dict[str, object], column: str) -> list[str]:
+    values: list[str] = []
+    for table_name in ("observations", "quality"):
+        table = run.get(table_name)
+        if not isinstance(table, pd.DataFrame) or column not in table.columns:
+            continue
+        values.extend(
+            value
+            for value in table[column].dropna().astype(str).str.strip().drop_duplicates().tolist()
+            if value
+        )
+    return sorted(set(values))
+
+
+def _single_provenance_value(run: dict[str, object], column: str, *, label: str) -> str:
+    values = _provenance_values(run, column)
+    if not values:
+        raise ValueError(f"{label} artifact is missing required {column!r} provenance.")
+    if len(values) != 1:
+        raise ValueError(f"{label} artifact has inconsistent {column!r} provenance values: {values}")
+    return values[0]
+
+
+def _validate_shuffle_provenance(real: dict[str, object], shuffle: dict[str, object]) -> dict[str, object]:
+    real_control = _as_bool_token(_single_provenance_value(real, "label_shuffle_control", label="real"))
+    shuffle_control = _as_bool_token(_single_provenance_value(shuffle, "label_shuffle_control", label="shuffle"))
+    if real_control:
+        raise ValueError("real artifact is marked label_shuffle_control=true; pass the non-shuffled artifact as --real-dir.")
+    if not shuffle_control:
+        raise ValueError("shuffle artifact is not marked label_shuffle_control=true; pass a train-label-shuffle artifact as --shuffle-dir.")
+    return {
+        "real_label_shuffle_control": real_control,
+        "shuffle_label_shuffle_control": shuffle_control,
+        "real_label_shuffle_seed": ",".join(_provenance_values(real, "label_shuffle_seed")),
+        "shuffle_label_shuffle_seed": ",".join(_provenance_values(shuffle, "label_shuffle_seed")),
+    }
+
+
 def _fixed_metric_row(quality: pd.DataFrame, time_course: pd.DataFrame, fixed_time: float) -> pd.Series:
     row = _first_row(quality)
     if "fixed_time" in row and np.isclose(_float(row, "fixed_time"), fixed_time):
@@ -140,7 +187,10 @@ def _fixed_metric_row(quality: pd.DataFrame, time_course: pd.DataFrame, fixed_ti
             "time": "fixed_time",
         }
     )
-    return mapped
+    combined = row.copy()
+    for column, value in mapped.items():
+        combined[column] = value
+    return combined
 
 
 def _load_run(root: Path, fixed_time: float) -> dict[str, pd.DataFrame | pd.Series | Path]:
@@ -180,6 +230,19 @@ def _summary_row(real: dict[str, object], shuffle: dict[str, object], fixed_time
     assert isinstance(real_per_subject, pd.DataFrame)
     assert isinstance(shuffle_per_subject, pd.DataFrame)
     merged_subjects = _per_subject_delta(real_per_subject, shuffle_per_subject)
+    if merged_subjects.empty:
+        raise ValueError("Real and shuffle artifacts have no overlapping subjects to compare.")
+    real_fixed_time = _float(real_quality, "fixed_time")
+    shuffle_fixed_time = _float(shuffle_quality, "fixed_time")
+    if not np.isclose(real_fixed_time, shuffle_fixed_time, atol=1e-9):
+        raise ValueError(
+            "Real and shuffle artifacts resolved to different fixed diagnostic times: "
+            f"real={real_fixed_time}, shuffle={shuffle_fixed_time}."
+        )
+    real_n_classes = int(_float(real_quality, "n_classes"))
+    shuffle_n_classes = int(_float(shuffle_quality, "n_classes"))
+    if real_n_classes != shuffle_n_classes:
+        raise ValueError(f"Real and shuffle artifacts have different class counts: real={real_n_classes}, shuffle={shuffle_n_classes}.")
     real_fixed = _float(real_quality, "fixed_balanced_accuracy")
     shuffle_fixed = _float(shuffle_quality, "fixed_balanced_accuracy")
     real_top2 = _float(real_quality, "fixed_top2_accuracy")
@@ -190,11 +253,11 @@ def _summary_row(real: dict[str, object], shuffle: dict[str, object], fixed_time
         [
             {
                 "fixed_time_requested": float(fixed_time),
-                "fixed_time_real": _float(real_quality, "fixed_time"),
-                "fixed_time_shuffle": _float(shuffle_quality, "fixed_time"),
+                "fixed_time_real": real_fixed_time,
+                "fixed_time_shuffle": shuffle_fixed_time,
                 "n_subjects_real": int(_float(real_quality, "n_subjects")),
                 "n_subjects_shuffle": int(_float(shuffle_quality, "n_subjects")),
-                "n_classes": int(_float(real_quality, "n_classes")),
+                "n_classes": real_n_classes,
                 "chance_accuracy": _float(real_quality, "chance_accuracy"),
                 "top2_chance": _float(real_quality, "top2_chance"),
                 "top3_chance": _float(real_quality, "top3_chance"),
@@ -482,7 +545,10 @@ def write_real_shuffle_report(
     shuffle_root = _artifact_root(shuffle_dir)
     real = _load_run(real_root, fixed_time)
     shuffle = _load_run(shuffle_root, fixed_time)
+    shuffle_provenance = _validate_shuffle_provenance(real, shuffle)
     summary = _summary_row(real, shuffle, fixed_time)
+    for column, value in shuffle_provenance.items():
+        summary[column] = value
     real_per_subject = real["per_subject"]
     shuffle_per_subject = shuffle["per_subject"]
     assert isinstance(real_per_subject, pd.DataFrame)
