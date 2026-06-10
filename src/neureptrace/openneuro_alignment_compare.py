@@ -324,6 +324,13 @@ def _valid_strict_rows(group: pd.DataFrame) -> pd.DataFrame:
     ]
 
 
+def _valid_raw_rows(group: pd.DataFrame) -> pd.DataFrame:
+    return group[
+        group["alignment_method"].isin(["", "none"])
+        & (group["alignment_valid_for_benchmark"].map(_as_bool))
+    ]
+
+
 def build_anchor_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
     """Compare true identity anchors against class_repetition within matched groups."""
 
@@ -331,7 +338,8 @@ def build_anchor_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -
         return pd.DataFrame()
     rows: list[dict[str, Any]] = []
     group_columns = ["dataset", "alignment_method", "alignment_target_projection", "selection_metric"]
-    for group_values, group in variants.groupby(group_columns, dropna=False):
+    benchmark_variants = _valid_strict_rows(variants)
+    for group_values, group in benchmark_variants.groupby(group_columns, dropna=False):
         group_map = dict(zip(group_columns, group_values, strict=False))
         class_rows = group[group["alignment_anchor_mode"] == CLASS_REPETITION_ANCHOR]
         identity_rows = group[group["alignment_anchor_mode"].isin(IDENTITY_ANCHOR_MODES)]
@@ -415,7 +423,7 @@ def build_target_calibrated_comparison(variants: pd.DataFrame, *, min_delta: flo
     rows: list[dict[str, Any]] = []
     raw_groups = {
         group_values: group
-        for group_values, group in variants[variants["alignment_method"].isin(["", "none"])].groupby(
+        for group_values, group in _valid_raw_rows(variants).groupby(
             ["dataset", "selection_metric"],
             dropna=False,
         )
@@ -477,7 +485,7 @@ def build_raw_alignment_comparison(variants: pd.DataFrame, *, min_delta: float =
     group_columns = ["dataset", "selection_metric"]
     for group_values, group in variants.groupby(group_columns, dropna=False):
         group_map = dict(zip(group_columns, group_values, strict=False))
-        raw_rows = group[group["alignment_method"].isin(["", "none"])]
+        raw_rows = _valid_raw_rows(group)
         aligned_rows = group[
             (~group["alignment_method"].isin(["", "none"]))
             & (group["alignment_valid_for_benchmark"].map(_as_bool))

@@ -7,7 +7,9 @@ import pandas as pd
 import pytest
 
 from neureptrace.openneuro_alignment_compare import (
+    build_anchor_comparison,
     build_oracle_comparison,
+    build_raw_alignment_comparison,
     build_target_calibrated_comparison,
     build_variant_summary,
     discover_output_dirs,
@@ -325,3 +327,57 @@ def test_alignment_compare_ignores_invalid_strict_rows_for_debug_baselines(tmp_p
     target_comparison = build_target_calibrated_comparison(variants)
     assert target_comparison.loc[0, "decision"] == "target_calibrated_without_strict_pair"
     assert target_comparison.loc[0, "strict_artifact"] == ""
+
+
+def test_alignment_compare_ignores_invalid_anchor_semantics_rows(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    class_row = _write_alignment_artifact(
+        artifacts_root,
+        "invalid-class-repetition",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.50,
+    )
+    identity_row = _write_alignment_artifact(
+        artifacts_root,
+        "invalid-stimulus-id",
+        anchor_mode="stimulus_id_mean",
+        target_projection="group_projection",
+        fixed_value=0.70,
+    )
+    for output in (class_row, identity_row):
+        summary_path = output / "decode" / "time_decode_summary.csv"
+        summary = pd.read_csv(summary_path)
+        summary["alignment_valid_for_benchmark"] = False
+        summary.to_csv(summary_path, index=False)
+
+    variants = build_variant_summary([class_row, identity_row], fixed_time=0.184)
+
+    assert build_anchor_comparison(variants).empty
+
+
+def test_alignment_compare_ignores_invalid_raw_baseline(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    raw = _write_alignment_artifact(
+        artifacts_root,
+        "invalid-raw",
+        method="none",
+        anchor_mode="class_mean",
+        target_projection="group_projection",
+        fixed_value=0.40,
+    )
+    raw_summary_path = raw / "decode" / "time_decode_summary.csv"
+    raw_summary = pd.read_csv(raw_summary_path)
+    raw_summary["alignment_valid_for_benchmark"] = False
+    raw_summary.to_csv(raw_summary_path, index=False)
+    aligned = _write_alignment_artifact(
+        artifacts_root,
+        "strict-aligned",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.60,
+    )
+
+    variants = build_variant_summary([raw, aligned], fixed_time=0.184)
+
+    assert build_raw_alignment_comparison(variants).empty
