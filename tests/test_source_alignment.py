@@ -590,3 +590,38 @@ def test_class_repetition_cap_is_capped_by_available_counts():
 
     assert result.metadata["alignment_anchor_mode"] == "class_repetition"
     assert result.metadata["alignment_repetitions_per_class"] == 8
+
+
+@pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
+def test_target_calibrated_class_repetition_respects_calibration_cap(method):
+    features, labels, subjects = _rotated_subject_features(seed=59)
+    source_mask = subjects != "s2"
+    target_positions = np.flatnonzero(subjects == "s2")
+    calibration_positions = np.asarray(
+        [target_positions[labels[target_positions] == label][0] for label in np.unique(labels)]
+    )
+    evaluation_positions = np.asarray(
+        [index for index in target_positions if index not in set(calibration_positions.tolist())]
+    )
+
+    result = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        test_features=features[evaluation_positions],
+        target_calibration_features=features[calibration_positions],
+        target_calibration_labels=labels[calibration_positions],
+        config=source_alignment_config(
+            method=method,
+            anchor_mode="class_repetition",
+            repetition_cap=8,
+            components=2,
+            target_projection=TARGET_CALIBRATED_ALIGNMENT,
+            target_calibration_per_anchor=1,
+            target_calibration_seed=23,
+        ),
+    )
+
+    assert result.metadata["alignment_repetitions_per_class"] == 1
+    assert result.metadata["alignment_target_alignment_rows"] == 3
+    assert result.test_features.shape[0] == evaluation_positions.size

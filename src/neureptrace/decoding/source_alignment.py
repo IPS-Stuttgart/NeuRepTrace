@@ -728,7 +728,9 @@ def align_train_test_features(
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
-                selected_offsets_by_class=alignment.selected_offsets_by_class,
+                selected_offsets_by_class=None
+                if config.target_calibrated
+                else alignment.selected_offsets_by_class,
             )
             target_projection = fit_projection_to_hyperalignment(target_anchors, template=model.template)
             transformed_test = transform_with_projection(test_matrix, target_projection)
@@ -753,7 +755,9 @@ def align_train_test_features(
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
-                selected_offsets_by_class=alignment.selected_offsets_by_class,
+                selected_offsets_by_class=None
+                if config.target_calibrated
+                else alignment.selected_offsets_by_class,
             )
             target_projection = fit_target_mcca_projection(
                 target_anchors,
@@ -1010,7 +1014,9 @@ def _target_alignment_matrix(
                 np.zeros(class_features.shape[0], dtype=int),
                 repetitions,
                 selection=DEFAULT_CLASS_LIMIT_SELECTION,
-                seed=DEFAULT_CLASS_LIMIT_SEED,
+                seed=config.target_calibration_seed
+                if config.target_calibrated
+                else DEFAULT_CLASS_LIMIT_SEED,
                 seed_context=class_position,
             )
         else:
@@ -1224,9 +1230,9 @@ def _effective_repetitions_per_class(
     available = min(counts)
     if available < 1:
         raise ValueError("Every source subject must have at least one sample per alignment class.")
-    if config.repetition_cap is None:
-        return int(available)
-    return int(min(available, int(config.repetition_cap)))
+    repetition_cap = available if config.repetition_cap is None else int(config.repetition_cap)
+    calibration_cap = int(config.target_calibration_per_anchor) if config.target_calibrated else available
+    return int(min(available, repetition_cap, calibration_cap))
 
 
 def _source_alignment_fit_inputs(
