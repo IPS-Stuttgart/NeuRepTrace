@@ -651,6 +651,17 @@ def test_aggregate_workflow_outputs_rejects_mixed_alignment_and_response_configs
         aggregate_workflow_outputs([mcca_dir, procrustes_dir], out_dir=tmp_path / "aggregate")
 
 
+def test_aggregate_workflow_outputs_rejects_shard_without_manifest(tmp_path: Path):
+    valid_dir = tmp_path / "valid-shard"
+    missing_dir = tmp_path / "missing-manifest-shard"
+    _write_shard_manifest(valid_dir, outer_test_groups="sub-01")
+    (missing_dir / "decode").mkdir(parents=True)
+    _toy_observations("sub-02").to_csv(missing_dir / "decode" / "observations.csv", index=False)
+
+    with pytest.raises(FileNotFoundError, match="run_manifest.json"):
+        aggregate_workflow_outputs([valid_dir, missing_dir], out_dir=tmp_path / "aggregate")
+
+
 def test_aggregate_workflow_outputs_selects_best_from_observation_diagnostics(tmp_path: Path):
     source_dirs = []
     for subject in ("sub-01", "sub-02"):

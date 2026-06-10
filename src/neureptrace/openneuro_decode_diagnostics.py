@@ -306,6 +306,13 @@ def _concat_existing_csvs(
 
 def _aggregate_manifest(output_dirs: Sequence[Path]) -> dict[str, Any]:
     manifests = [_read_json(output_dir / "run_manifest.json") for output_dir in output_dirs]
+    missing = [
+        (output_dir / "run_manifest.json").as_posix()
+        for output_dir, manifest in zip(output_dirs, manifests, strict=True)
+        if not manifest
+    ]
+    if missing:
+        raise FileNotFoundError(f"Cannot aggregate OpenNeuro shards without run_manifest.json: {missing}")
     _validate_aggregate_manifest_compatibility(manifests, output_dirs)
     first = next((manifest for manifest in manifests if manifest), {})
     dataset = first.get("dataset", "")
