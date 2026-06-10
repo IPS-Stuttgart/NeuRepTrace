@@ -198,3 +198,12 @@ def test_loso_observation_diagnostics_rejects_missing_seed_mixed_with_seed(tmp_p
 
     with pytest.raises(ValueError, match="missing 'label_shuffle_seed' provenance"):
         write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_duplicate_observation_rows(tmp_path: Path):
+    observations = pd.concat([_toy_observations(), _toy_observations().iloc[[0]]], ignore_index=True)
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="duplicate rows"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)

@@ -83,6 +83,16 @@ def _validate_single_protocol_observations(frame: pd.DataFrame) -> None:
             raise ValueError(f"Observation table has missing {column!r} provenance mixed with {values[0]!r}.")
 
 
+def _validate_unique_observation_rows(frame: pd.DataFrame, *, subject_column: str) -> None:
+    if "time" not in frame.columns or "sample_index" not in frame.columns:
+        return
+    key_columns = [subject_column, "time", "sample_index"]
+    duplicates = frame.loc[frame.duplicated(subset=key_columns, keep=False), key_columns]
+    if not duplicates.empty:
+        examples = duplicates.head(5).to_dict("records")
+        raise ValueError(f"Observation table contains duplicate rows for {key_columns}: {examples}")
+
+
 def _probability_matrix(frame: pd.DataFrame) -> np.ndarray:
     columns = probability_columns(frame)
     if not columns:
@@ -479,6 +489,7 @@ def write_loso_observation_diagnostics(
         raise ValueError("Observation table is empty.")
     _validate_single_protocol_observations(observations)
     subject_column_name = _subject_column(observations, subject_column)
+    _validate_unique_observation_rows(observations, subject_column=subject_column_name)
     time_summary = time_course_summary(observations)
     requested_time = best_time
     if requested_time is None and summary_csv is not None:
