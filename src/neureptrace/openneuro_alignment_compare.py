@@ -242,13 +242,19 @@ def summarize_alignment_variant(
     decode_dir = output / "decode"
     summary_path = decode_dir / "time_decode_summary.csv"
     diagnostics_path = decode_dir / "alignment_diagnostics.csv"
+    diagnostics_time_course_path = decode_dir / "diagnostics" / "time_course_summary.csv"
     if not summary_path.is_file():
         raise FileNotFoundError(f"Missing decode summary: {summary_path}")
 
     manifest = _read_json(output / "run_manifest.json")
     summary = pd.read_csv(summary_path)
+    metric_summary = (
+        pd.read_csv(diagnostics_time_course_path)
+        if diagnostics_time_course_path.is_file() and diagnostics_time_course_path.stat().st_size > 0
+        else summary
+    )
     diagnostics = pd.read_csv(diagnostics_path) if diagnostics_path.is_file() and diagnostics_path.stat().st_size > 0 else pd.DataFrame()
-    selection = _select_metric(summary, metric=metric, fixed_time=fixed_time)
+    selection = _select_metric(metric_summary, metric=metric, fixed_time=fixed_time)
     artifact_name = manifest.get("artifact_name", output.name)
     method = _first_nonempty(_single_unique(summary, "alignment_method", artifact=artifact_name), manifest.get("alignment_method", ""))
     anchor_mode = _first_nonempty(
@@ -287,6 +293,7 @@ def summarize_alignment_variant(
         "identity_anchor": anchor_mode in IDENTITY_ANCHOR_MODES,
         "class_repetition_anchor": anchor_mode == CLASS_REPETITION_ANCHOR,
         "time_decode_summary_rows": int(len(summary)),
+        "selection_source": "diagnostics_time_course" if metric_summary is not summary else "time_decode_summary",
         **selection,
         **_alignment_diagnostic_summary(diagnostics),
     }

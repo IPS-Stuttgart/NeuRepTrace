@@ -29,6 +29,12 @@ def _observation_rows(*, shuffle: bool, subjects: tuple[str, ...] = ("sub-01", "
                         "group": subject,
                         "time": time,
                         "sample_index": f"{subject}-{time}-{sample_index}",
+                        "decoder": "multinomial-logistic",
+                        "backend": "sklearn",
+                        "emission_mode": "calibrated",
+                        "feature_preprocessor": "none",
+                        "temporal_mode": "same_time",
+                        "class_prior_correction": "none",
                         "true_label": true_label,
                         "true_class": f"class_{true_label}",
                         "predicted_label": predicted,
@@ -111,6 +117,47 @@ def test_real_shuffle_report_rejects_nonoverlapping_subjects(tmp_path: Path) -> 
     _write_artifact(shuffle, shuffle=True, subjects=("sub-03", "sub-04"))
 
     with pytest.raises(ValueError, match="no overlapping subjects"):
+        write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+
+def test_real_shuffle_report_rejects_partial_subject_mismatch(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False, subjects=("sub-01", "sub-02"))
+    _write_artifact(shuffle, shuffle=True, subjects=("sub-01", "sub-03"))
+
+    with pytest.raises(ValueError, match="different subject sets"):
+        write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+
+def test_real_shuffle_report_rejects_mismatched_per_subject_support(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True)
+    per_subject_path = shuffle / "decode" / "diagnostics" / "per_subject.csv"
+    per_subject = pd.read_csv(per_subject_path)
+    per_subject.loc[per_subject["subject"] == "sub-02", "class_counts"] = '{"class_0":3,"class_1":3}'
+    per_subject.to_csv(per_subject_path, index=False)
+
+    with pytest.raises(ValueError, match="per-subject class_counts"):
+        write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+
+def test_real_shuffle_report_rejects_decoder_protocol_mismatch(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True)
+    observations_path = shuffle / "decode" / "observations.csv"
+    observations = pd.read_csv(observations_path)
+    observations["decoder"] = "linear-svm"
+    observations.to_csv(observations_path, index=False)
+
+    with pytest.raises(ValueError, match="not matched on decoder/protocol provenance"):
         write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
 
 

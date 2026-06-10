@@ -216,6 +216,33 @@ def test_alignment_compare_tolerates_older_artifacts_without_alignment_diagnosti
     assert "Artifacts with alignment diagnostics: `0/2`" in note
 
 
+def test_alignment_compare_selects_metric_from_observation_diagnostics_when_present(tmp_path: Path):
+    artifacts_root = tmp_path / "artifacts"
+    output = _write_alignment_artifact(
+        artifacts_root,
+        "aggregate-strict",
+        anchor_mode="class_repetition",
+        target_projection="group_projection",
+        fixed_value=0.90,
+    )
+    diagnostics_dir = output / "decode" / "diagnostics"
+    diagnostics_dir.mkdir(parents=True)
+    pd.DataFrame(
+        {
+            "time": [0.136, 0.184],
+            "balanced_accuracy": [0.62, 0.48],
+            "accuracy": [0.62, 0.48],
+        }
+    ).to_csv(diagnostics_dir / "time_course_summary.csv", index=False)
+
+    written = run_alignment_comparison([artifacts_root], out_dir=tmp_path / "comparison", fixed_time=None)
+
+    variants = pd.read_csv(written["variant_summary"])
+    assert variants.loc[0, "selection_source"] == "diagnostics_time_course"
+    assert variants.loc[0, "selection_time"] == pytest.approx(0.136)
+    assert variants.loc[0, "selection_value"] == pytest.approx(0.62)
+
+
 def test_alignment_compare_rejects_mixed_alignment_metadata(tmp_path: Path):
     artifacts_root = tmp_path / "artifacts"
     output = _write_alignment_artifact(
