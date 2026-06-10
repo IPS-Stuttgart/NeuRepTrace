@@ -111,6 +111,38 @@ def test_ensemble_probability_observations_accepts_hyphenated_decoder_aliases() 
     assert np.allclose(ensemble[["prob_class_0", "prob_class_1"]].sum(axis=1), 1.0)
 
 
+def test_ensemble_model_hash_depends_on_aligned_source_hashes() -> None:
+    observations = _source_observations()
+    observations["preprocessing_hash"] = observations["decoder"].map(
+        {
+            "logistic": "pre-logistic",
+            "linear_svm": "pre-linear",
+        }
+    )
+    observations["model_hash"] = observations.apply(
+        lambda row: f"model-{row['decoder']}-{row['time']}",
+        axis=1,
+    )
+    ensemble = ensemble_probability_observations(observations, baseline_window=(-0.25, -0.15))
+
+    assert "source_model_hashes" in ensemble.columns
+    assert "source_preprocessing_hashes" in ensemble.columns
+    assert ensemble.groupby("time")["model_hash"].nunique().tolist() == [1, 1]
+    assert ensemble.groupby("time")["preprocessing_hash"].nunique().tolist() == [1, 1]
+    assert ensemble["model_hash"].nunique() == 2
+    assert ensemble["source_model_hashes"].str.contains("logistic:model-logistic").all()
+    assert ensemble["source_model_hashes"].str.contains("linear_svm:model-linear_svm").all()
+
+    changed = observations.copy()
+    changed.loc[changed["decoder"] == "linear_svm", "model_hash"] = (
+        changed.loc[changed["decoder"] == "linear_svm", "model_hash"].astype(str) + "-changed"
+    )
+    changed_ensemble = ensemble_probability_observations(changed, baseline_window=(-0.25, -0.15))
+
+    assert changed_ensemble["model_hash"].tolist() != ensemble["model_hash"].tolist()
+    assert changed_ensemble["preprocessing_hash"].tolist() == ensemble["preprocessing_hash"].tolist()
+
+
 def test_ensemble_probability_observations_accepts_integer_like_float_labels() -> None:
     observations = _source_observations()
     observations["true_label"] = observations["true_label"].astype(float)

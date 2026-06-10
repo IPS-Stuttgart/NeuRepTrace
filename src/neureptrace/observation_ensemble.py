@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +44,7 @@ _BASE_ALIGNMENT_COLUMNS = (
     "class_prior_correction",
 )
 _METRIC_GROUP_COLUMNS = ("subject", "fold", "decoder", "emission_mode", "time", "window_start", "window_stop")
+_SOURCE_PROVENANCE_COLUMNS = ("preprocessing_hash", "model_hash")
 _METRIC_PROVENANCE_COLUMNS = (
     "class_prior_correction",
     "source_calibration",
@@ -52,6 +53,8 @@ _METRIC_PROVENANCE_COLUMNS = (
     "source_time_selection_selected_time",
     "label_shuffle_control",
     "label_shuffle_seed",
+    "source_preprocessing_hashes",
+    "source_model_hashes",
     "alignment_method",
     "alignment_anchor_mode",
     "alignment_anchor_column",
@@ -221,7 +224,7 @@ def _align_probability_matrices(
     *,
     prob_columns: Sequence[str],
     alignment_columns: Sequence[str],
-) -> tuple[pd.DataFrame, list[np.ndarray]]:
+) -> tuple[pd.DataFrame, list[np.ndarray], pd.DataFrame]:
     decoders = list(sources)
     base = sources[decoders[0]].copy().reset_index(drop=True)
     _check_unique_alignment(base, alignment_columns, decoders[0])
@@ -241,7 +244,10 @@ def _align_probability_matrices(
             examples = overlap.loc[overlap["_merge"] != "both", [*alignment_columns, "_merge"]].head(5).to_dict("records")
             raise ValueError(f"Decoder {decoder!r} does not align one-to-one with decoder {decoders[0]!r}. Examples: {examples}")
 
-        renamed = subset.loc[:, [*alignment_columns, *prob_columns]].rename(columns={column: f"{column}__{decoder}" for column in prob_columns})
+        provenance_columns = [column for column in _SOURCE_PROVENANCE_COLUMNS if column in subset.columns]
+        renamed = subset.loc[:, [*alignment_columns, *prob_columns, *provenance_columns]].rename(
+            columns={column: f"{column}__{decoder}" for column in (*prob_columns, *provenance_columns)}
+        )
         aligned = aligned.merge(renamed, on=list(alignment_columns), how="left", validate="one_to_one")
         decoder_prob_columns = [f"{column}__{decoder}" for column in prob_columns]
         if aligned.loc[:, decoder_prob_columns].isna().any().any():
@@ -250,7 +256,27 @@ def _align_probability_matrices(
         if not np.isfinite(probabilities).all():
             raise ValueError(f"Probability values for decoder {decoder!r} must be finite.")
         matrices.append(probabilities)
-    return base, matrices
+    return base, matrices, aligned
+
+
+def _source_provenance_records(aligned: pd.DataFrame, *, decoders: Sequence[str], column: str) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    for _, row in aligned.iterrows():
+        record: dict[str, str] = {}
+        for decoder in decoders:
+            source_column = f"{column}__{decoder}"
+            value = "" if source_column not in aligned.columns else row[source_column]
+            record[str(decoder)] = "" if pd.isna(value) else str(value)
+        records.append(record)
+    return records
+
+
+def _has_nonempty_provenance(records: Sequence[dict[str, str]]) -> bool:
+    return any(any(value for value in record.values()) for record in records)
+
+
+def _format_source_provenance(record: Mapping[str, str]) -> str:
+    return "|".join(f"{decoder}:{value}" for decoder, value in record.items())
 
 
 def _baseline_offsets(
@@ -397,7 +423,11 @@ def ensemble_probability_observations(
     temperatures = _source_temperatures(source_temperatures, len(decoders))
     sources = _source_frames(observations, decoders=decoders, source_emission_mode=source_emission_mode)
     alignment_columns = _alignment_columns(observations, prob_columns)
-    base, probability_matrices = _align_probability_matrices(sources, prob_columns=prob_columns, alignment_columns=alignment_columns)
+    base, probability_matrices, aligned_source_rows = _align_probability_matrices(
+        sources,
+        prob_columns=prob_columns,
+        alignment_columns=alignment_columns,
+    )
 
     log_scores = np.zeros_like(probability_matrices[0], dtype=float)
     probability_scores = np.zeros_like(probability_matrices[0], dtype=float)
@@ -502,20 +532,48 @@ def ensemble_probability_observations(
     output["baseline_window_stop"] = "" if baseline_window is None else float(baseline_window[1])
     output["baseline_group_columns"] = "|".join(column for column in baseline_group_columns if column in output.columns)
     output["n_baseline_observations"] = n_baseline
-    output["model_hash"] = stable_hash(
-        {
-            "backend": "ensemble",
-            "decoders": list(decoders),
-            "weights": [float(weight) for weight in normalized_weights],
-            "source_temperatures": [float(temperature) for temperature in temperatures],
-            "score_mode": score_mode_name,
-            "source_baseline_debiasing": bool(source_baseline_debiasing),
-            "source_emission_mode": source_emission_mode,
-            "baseline_window": baseline_window,
-            "baseline_group_columns": [column for column in baseline_group_columns if column in observations.columns],
-            "min_probability": min_probability,
-        }
+    source_preprocessing_records = _source_provenance_records(
+        aligned_source_rows,
+        decoders=decoders,
+        column="preprocessing_hash",
     )
+    source_model_records = _source_provenance_records(aligned_source_rows, decoders=decoders, column="model_hash")
+    has_source_preprocessing = _has_nonempty_provenance(source_preprocessing_records)
+    has_source_models = _has_nonempty_provenance(source_model_records)
+    if has_source_preprocessing:
+        output["source_preprocessing_hashes"] = [_format_source_provenance(record) for record in source_preprocessing_records]
+        output["preprocessing_hash"] = [
+            stable_hash({"backend": "ensemble", "source_preprocessing_hashes": record})
+            for record in source_preprocessing_records
+        ]
+    if has_source_models:
+        output["source_model_hashes"] = [_format_source_provenance(record) for record in source_model_records]
+
+    model_payload = {
+        "backend": "ensemble",
+        "decoders": list(decoders),
+        "weights": [float(weight) for weight in normalized_weights],
+        "source_temperatures": [float(temperature) for temperature in temperatures],
+        "score_mode": score_mode_name,
+        "source_baseline_debiasing": bool(source_baseline_debiasing),
+        "source_emission_mode": source_emission_mode,
+        "baseline_window": baseline_window,
+        "baseline_group_columns": [column for column in baseline_group_columns if column in observations.columns],
+        "min_probability": min_probability,
+    }
+    if has_source_models or has_source_preprocessing:
+        output["model_hash"] = [
+            stable_hash(
+                {
+                    **model_payload,
+                    "source_preprocessing_hashes": source_preprocessing_records[row_index],
+                    "source_model_hashes": source_model_records[row_index],
+                }
+            )
+            for row_index in range(len(output))
+        ]
+    else:
+        output["model_hash"] = stable_hash(model_payload)
     return ProbabilityObservationTable(output).standardized(defaults={"backend": "ensemble", "decoder": output_decoder, "emission_mode": output_emission_mode}).frame
 
 
