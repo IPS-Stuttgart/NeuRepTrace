@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 
+from neureptrace.metrics import brier_score_multiclass, expected_calibration_error
 from neureptrace.observations import ProbabilityObservationTable, probability_columns, stable_hash
 
 DEFAULT_CANDIDATE_COLUMN = "decoder"
@@ -53,6 +54,7 @@ _BASE_ALIGNMENT_COLUMNS = (
     "group",
 )
 _METRIC_GROUP_COLUMNS = ("subject", "fold", "decoder", "emission_mode", "time", "window_start", "window_stop")
+_ROW_IDENTITY_COLUMNS = ("true_label", "true_class")
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +166,47 @@ def _check_unique_alignment(subset: pd.DataFrame, keys: Sequence[str], candidate
         raise ValueError(f"Candidate {candidate!r} has {duplicate_count} duplicate rows for the alignment keys. Examples: {examples}")
 
 
+def _row_identity_columns(frame: pd.DataFrame, prob_columns: Sequence[str]) -> tuple[str, ...]:
+    return tuple(column for column in (*_ROW_IDENTITY_COLUMNS, *_class_columns_for_probabilities(frame, prob_columns)) if column in frame.columns)
+
+
+def _normalized_identity_values(values: Sequence[object] | np.ndarray | pd.Series, *, column: str) -> pd.Series:
+    series = pd.Series(values).reset_index(drop=True)
+    if column == "true_label":
+        normalized = pd.Series(np.full(len(series), "", dtype=object))
+        present = _label_present_mask(series)
+        if bool(present.any()):
+            labels = _integer_label_array(series.loc[present], name=column)
+            normalized.iloc[np.flatnonzero(present.to_numpy())] = [str(int(label)) for label in labels]
+        return normalized
+    return series.where(~series.isna(), "").astype(str).str.strip()
+
+
+def _raise_identity_mismatch(
+    *,
+    column: str,
+    reference_values: pd.Series,
+    candidate_values: pd.Series,
+    candidate: str,
+    reference_candidate: str,
+) -> None:
+    mismatched = reference_values != candidate_values
+    if not bool(mismatched.any()):
+        return
+    examples = [
+        {
+            "row": int(index),
+            reference_candidate: reference_values.iloc[index],
+            candidate: candidate_values.iloc[index],
+        }
+        for index in np.flatnonzero(mismatched.to_numpy())[:5]
+    ]
+    raise ValueError(
+        f"Candidate {candidate!r} has inconsistent {column!r} values relative to "
+        f"{reference_candidate!r}. Examples: {examples}"
+    )
+
+
 def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = DEFAULT_MIN_PROBABILITY) -> np.ndarray:
     probabilities = np.asarray(values, dtype=float)
     if probabilities.ndim != 2:
@@ -177,6 +220,14 @@ def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = D
     if np.any(row_sums <= 0.0) or not np.isfinite(row_sums).all():
         raise ValueError("Probability rows must have positive finite sums.")
     return probabilities / row_sums
+
+
+def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
+    if len(labels) == 0:
+        return float("nan")
+    effective_k = min(int(k), probabilities.shape[1])
+    top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
+    return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
 
 
 def _normalize_pooling(pooling: str, *, allow_auto: bool = True) -> str:
@@ -239,24 +290,43 @@ def align_probability_cube(
         subsets[candidate] = subset
 
     reference = subsets[candidates[0]].copy().reset_index(drop=True)
+    identity_columns = _row_identity_columns(observations, prob_columns)
     matrices: list[np.ndarray] = []
     if keys:
         aligned = reference.loc[:, list(keys)].copy()
         for candidate in candidates:
             subset = subsets[candidate]
-            renamed_columns = {column: f"{column}__{candidate}" for column in prob_columns}
-            renamed = subset.loc[:, [*keys, *prob_columns]].rename(columns=renamed_columns)
+            checked_identity_columns = tuple(column for column in identity_columns if column not in keys and column in subset.columns and column in reference.columns)
+            renamed_columns = {column: f"{column}__{candidate}" for column in (*prob_columns, *checked_identity_columns)}
+            renamed = subset.loc[:, [*keys, *prob_columns, *checked_identity_columns]].rename(columns=renamed_columns)
             aligned_candidate = aligned.merge(renamed, on=list(keys), how="left", validate="one_to_one")
             candidate_prob_columns = [renamed_columns[column] for column in prob_columns]
             if aligned_candidate.loc[:, candidate_prob_columns].isna().any().any():
                 examples = aligned_candidate.loc[aligned_candidate.loc[:, candidate_prob_columns].isna().any(axis=1), list(keys)].head(5).to_dict("records")
                 raise ValueError(f"Candidate {candidate!r} does not align one-to-one with {candidates[0]!r}. Examples: {examples}")
+            for column in checked_identity_columns:
+                _raise_identity_mismatch(
+                    column=column,
+                    reference_values=_normalized_identity_values(reference[column], column=column),
+                    candidate_values=_normalized_identity_values(aligned_candidate[renamed_columns[column]], column=column),
+                    candidate=candidate,
+                    reference_candidate=candidates[0],
+                )
             matrices.append(_renormalize_probabilities(aligned_candidate.loc[:, candidate_prob_columns].to_numpy(dtype=float), min_probability=min_probability))
     else:
         n_rows = len(reference)
         for candidate, subset in subsets.items():
             if len(subset) != n_rows:
                 raise ValueError("Cannot align candidates by row order because they have different row counts and no alignment columns were inferred.")
+            for column in identity_columns:
+                if column in reference.columns and column in subset.columns:
+                    _raise_identity_mismatch(
+                        column=column,
+                        reference_values=_normalized_identity_values(reference[column], column=column),
+                        candidate_values=_normalized_identity_values(subset[column], column=column),
+                        candidate=candidate,
+                        reference_candidate=candidates[0],
+                    )
             matrices.append(_renormalize_probabilities(subset.loc[:, list(prob_columns)].to_numpy(dtype=float), min_probability=min_probability))
 
     label_values = _label_values(prob_columns)
@@ -657,7 +727,11 @@ def summarize_stacked_metrics(observations: pd.DataFrame) -> pd.DataFrame:
             {
                 "accuracy": float(accuracy_score(true_label_values, predicted_label_values)),
                 "balanced_accuracy": float(balanced_accuracy_score(true_label_values, predicted_label_values)),
+                "top2_accuracy": _top_k_accuracy(probabilities, true_label_values, k=2),
+                "top3_accuracy": _top_k_accuracy(probabilities, true_label_values, k=3),
                 "log_loss": float(log_loss(true_label_values, probabilities, labels=list(label_values))),
+                "brier": float(brier_score_multiclass(probabilities, true_label_values)),
+                "ece": float(expected_calibration_error(probabilities, true_label_values)),
                 "n_test": int(len(group)),
                 "n_classes": int(len(prob_columns)),
                 "source_oof_candidates": str(group.iloc[0].get("source_oof_candidates", "")),
