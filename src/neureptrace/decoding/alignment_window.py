@@ -174,6 +174,17 @@ def _resolve_feature_mean_set(
     decode_widths = _compatible_feature_mean_widths(decode_feature_set)
     projection_compatible = mean_width in projection_widths
     decode_compatible = mean_width in decode_widths
+    projection_channel_width = int(projection_feature_set.n_channels)
+    decode_channel_width = int(decode_feature_set.n_channels)
+    if mean_width == projection_channel_width == decode_channel_width:
+        # A channel-space centering vector is already independent of the time
+        # window.  Cross-window alignment collapses both full-window means and
+        # projections to channel space before scoring, so requiring callers to
+        # provide ``feature_mean_set`` for an explicit channel mean creates a
+        # false ambiguity and can block otherwise valid target-calibrated
+        # alignment adapters.
+        return projection_feature_set
+
     if (
         feature_mean_was_explicit
         and projection_compatible
