@@ -197,6 +197,9 @@ def _feature_order(feature_set: WindowedFeatureSet) -> FeatureOrder:
 def _feature_windows_match(left: WindowedFeatureSet, right: WindowedFeatureSet) -> bool:
     """Return whether two flattened feature sets refer to the same time window."""
 
+    if left is right:
+        return True
+
     if int(left.n_channels) != int(right.n_channels) or int(left.n_window_samples) != int(
         right.n_window_samples
     ):
@@ -204,25 +207,39 @@ def _feature_windows_match(left: WindowedFeatureSet, right: WindowedFeatureSet) 
     if _feature_order(left) != _feature_order(right):
         return False
 
-    for attr in (
-        "window_center",
-        "window_center_s",
-        "window_size",
-        "window_size_s",
-        "window_start",
-        "window_start_s",
-        "window_stop",
-        "window_stop_s",
-    ):
-        left_value = getattr(left, attr, None)
-        right_value = getattr(right, attr, None)
-        if left_value is None and right_value is None:
-            continue
-        if left_value is None or right_value is None:
-            return False
-        if not np.isclose(float(left_value), float(right_value)):
-            return False
-    return True
+    left_window = _feature_window_bounds(left)
+    right_window = _feature_window_bounds(right)
+    if left_window is None or right_window is None:
+        return False
+    return np.allclose(left_window, right_window)
+
+
+def _feature_window_bounds(feature_set: WindowedFeatureSet) -> tuple[float, float] | None:
+    """Return normalized ``(start, stop)`` timing metadata when present."""
+
+    start = _first_present_float(feature_set, ("window_start_s", "window_start"))
+    stop = _first_present_float(feature_set, ("window_stop_s", "window_stop"))
+    if start is not None or stop is not None:
+        if start is None or stop is None:
+            return None
+        return (start, stop)
+
+    center = _first_present_float(feature_set, ("window_center_s", "window_center"))
+    size = _first_present_float(feature_set, ("window_size_s", "window_size"))
+    if center is not None or size is not None:
+        if center is None or size is None:
+            return None
+        return (center - size / 2.0, center + size / 2.0)
+
+    return None
+
+
+def _first_present_float(feature_set: WindowedFeatureSet, attrs: tuple[str, ...]) -> float | None:
+    for attr in attrs:
+        value = getattr(feature_set, attr, None)
+        if value is not None:
+            return float(value)
+    return None
 
 
 def _projection_to_channel_space(projection: np.ndarray, feature_set: WindowedFeatureSet) -> np.ndarray:

@@ -85,6 +85,37 @@ def test_transform_with_alignment_projection_uses_direct_projection_when_widths_
     np.testing.assert_allclose(transformed, (features - mean) @ projection)
 
 
+def test_transform_with_alignment_projection_keeps_direct_projection_for_same_window_metadata() -> None:
+    feature_set = DummyFeatureSet(
+        np.zeros((2, 4)),
+        np.array([1, 2]),
+        n_channels=2,
+        n_window_samples=2,
+        window_start_s=0.10,
+        window_stop_s=0.20,
+    )
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+        ]
+    )
+    projection_mean = np.array([1.0, 3.0, 2.0, 4.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=feature_set,
+        projection=projection,
+        projection_feature_mean=projection_mean,
+        projection_feature_set=feature_set,
+    )
+
+    np.testing.assert_allclose(transformed, (features - projection_mean) @ projection)
+
+
 def test_transform_with_alignment_projection_defaults_to_mne_channel_time_order() -> None:
     decode = DummyFeatureSet(np.zeros((1, 4)), np.array([1]), n_channels=2, n_window_samples=2)
     alignment = DummyFeatureSet(np.zeros((1, 6)), np.array([1]), n_channels=2, n_window_samples=3)
@@ -130,6 +161,41 @@ def test_transform_with_alignment_projection_collapses_same_width_different_wind
         n_window_samples=2,
         window_start_s=0.00,
         window_stop_s=0.10,
+    )
+    features = np.array([[4.0, 5.0, 7.0, 8.0]])
+    projection = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 2.0],
+            [0.0, 4.0],
+        ]
+    )
+    projection_mean = np.array([1.0, 3.0, 2.0, 4.0])
+
+    transformed = transform_with_alignment_projection(
+        features,
+        decode_feature_set=decode,
+        projection=projection,
+        projection_feature_mean=projection_mean,
+        projection_feature_set=alignment,
+    )
+
+    np.testing.assert_allclose(transformed, np.array([[4.0, 6.0, 12.0, 15.0]]))
+
+
+def test_transform_with_alignment_projection_collapses_distinct_same_width_sets_without_timing() -> None:
+    decode = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
+    )
+    alignment = DummyFeatureSet(
+        np.zeros((1, 4)),
+        np.array([1]),
+        n_channels=2,
+        n_window_samples=2,
     )
     features = np.array([[4.0, 5.0, 7.0, 8.0]])
     projection = np.array(
