@@ -894,12 +894,17 @@ def _nearest_candidate_windows(windows: Sequence[TimeWindow], requested_times: S
         raise ValueError("No decode windows are available for source-time selection.")
     centers = np.asarray([window[2] for window in windows], dtype=float)
     selected: list[TimeWindow] = []
-    seen: set[TimeWindow] = set()
     for requested_time in requested_times:
-        window = windows[int(np.argmin(np.abs(centers - float(requested_time))))]
-        if window not in seen:
-            selected.append(window)
-            seen.add(window)
+        selected.append(windows[int(np.argmin(np.abs(centers - float(requested_time))))])
+    selected_centers = [float(window[2]) for window in selected]
+    center_labels = [f"{center:.12g}" for center in selected_centers]
+    if len(set(center_labels)) != len(center_labels):
+        requested_labels = "|".join(f"{float(time):.12g}" for time in requested_times)
+        available_labels = "|".join(f"{float(center):.12g}" for center in centers)
+        raise ValueError(
+            "Requested source-time-selection centers collapse to duplicate decode windows. "
+            f"requested={requested_labels}; available={available_labels}; selected={'|'.join(center_labels)}"
+        )
     if not selected:
         raise ValueError("No source-time-selection candidate windows were selected.")
     return selected

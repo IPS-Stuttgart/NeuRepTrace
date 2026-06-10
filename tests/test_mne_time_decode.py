@@ -11,6 +11,7 @@ from neureptrace.mne_time_decode import (
     _align_probability_columns,
     _alignment_anchor_values,
     _filter_splits_for_outer_test_groups,
+    _nearest_candidate_windows,
     _shuffle_training_labels,
     apply_source_probability_calibration,
     fit_source_probability_calibrator,
@@ -102,6 +103,13 @@ def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     np.testing.assert_array_equal(shuffled_a, shuffled_b)
     assert sorted(shuffled_a.tolist()) == sorted(labels.tolist())
     assert not np.array_equal(shuffled_a, shuffled_c)
+
+
+def test_source_time_selection_rejects_duplicate_nearest_windows():
+    windows = [(0, 2, 0.10), (1, 3, 0.20)]
+
+    with pytest.raises(ValueError, match="collapse to duplicate decode windows"):
+        _nearest_candidate_windows(windows, (0.09, 0.11))
 
 
 def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_labels(tmp_path: Path, monkeypatch):
