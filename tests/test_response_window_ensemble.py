@@ -179,6 +179,21 @@ def test_plain_response_window_rejects_label_mismatch_across_times(tmp_path: Pat
         run_response_window_ensemble([csv_path], mode="uniform")
 
 
+def test_plain_response_window_rejects_fractional_true_labels_for_single_time(tmp_path: Path):
+    observations = _toy_observations()
+    observations["true_label"] = observations["true_label"].astype(float)
+    observations.loc[0, "true_label"] = 0.5
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="true_label values must be integer-valued"):
+        run_response_window_ensemble(
+            [csv_path],
+            mode="uniform",
+            response_times=(0.088,),
+        )
+
+
 def test_plain_response_window_rejects_mixed_shuffle_provenance_across_times(tmp_path: Path):
     observations = _toy_observations()
     observations["label_shuffle_control"] = False

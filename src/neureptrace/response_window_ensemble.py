@@ -177,17 +177,24 @@ def _source_protocol_columns(frame: pd.DataFrame) -> tuple[str, ...]:
     return tuple(column for column in SOURCE_PROTOCOL_COLUMNS if column in frame.columns)
 
 
+def _integer_label_values(values: Sequence[object] | np.ndarray | pd.Series, *, n_classes: int | None = None) -> np.ndarray:
+    numeric = pd.to_numeric(pd.Series(values), errors="coerce")
+    if numeric.isna().any():
+        raise ValueError("Response-window true_label values must be numeric and non-missing.")
+    label_values = numeric.to_numpy(dtype=float)
+    rounded = np.rint(label_values)
+    if not bool(np.isclose(label_values, rounded, rtol=0.0, atol=1.0e-12).all()):
+        raise ValueError("Response-window true_label values must be integer-valued.")
+    labels = rounded.astype(int)
+    if n_classes is not None and bool(((labels < 0) | (labels >= int(n_classes))).any()):
+        raise ValueError("Response-window true_label values must index prob_class_* columns.")
+    return labels
+
+
 def _normalized_identity_values(values: Sequence[object] | np.ndarray | pd.Series, *, column: str) -> pd.Series:
     series = pd.Series(values).reset_index(drop=True)
     if column == "true_label":
-        numeric = pd.to_numeric(series, errors="coerce")
-        if numeric.isna().any():
-            raise ValueError("Response-window true_label values must be numeric and non-missing.")
-        values_float = numeric.to_numpy(dtype=float)
-        rounded = np.rint(values_float)
-        if not bool(np.isclose(values_float, rounded, rtol=0.0, atol=1.0e-12).all()):
-            raise ValueError("Response-window true_label values must be integer-valued.")
-        return pd.Series([str(int(value)) for value in rounded], dtype=object)
+        return pd.Series([str(int(value)) for value in _integer_label_values(series)], dtype=object)
     return series.where(~series.isna(), "").astype(str).str.strip()
 
 
@@ -411,7 +418,7 @@ def _response_window_rows(
             columns=protocol_columns,
             context=f"time {time}",
         )
-    labels = pd.to_numeric(base["true_label"], errors="raise").to_numpy(dtype=int)
+    labels = _integer_label_values(base["true_label"], n_classes=len(prob_columns))
     probability_cube = np.stack(
         [_normalize_rows(wide_probabilities[time].loc[common_index].to_numpy(dtype=float)) for time in times],
         axis=1,
@@ -452,7 +459,7 @@ def _response_window_rows(
                 class_names.append(str(target_base[class_column].dropna().iloc[0]))
             else:
                 class_names.append(str(class_index))
-        true_labels = pd.to_numeric(target_base["true_label"], errors="raise").to_numpy(dtype=int)
+        true_labels = _integer_label_values(target_base["true_label"], n_classes=len(prob_columns))
         target_base["predicted_label"] = predictions.astype(int)
         target_base["predicted_class"] = [class_names[int(label)] for label in predictions]
         target_base["probability_true_class"] = probabilities[np.arange(len(probabilities)), true_labels]
@@ -596,7 +603,7 @@ def _decoder_source_oof_response_window_rows(
                 columns=protocol_columns,
                 context=f"decoder {decoder!r} time {time}",
             )
-    labels = pd.to_numeric(base["true_label"], errors="raise").to_numpy(dtype=int)
+    labels = _integer_label_values(base["true_label"], n_classes=len(prob_columns))
     decoder_probabilities = []
     for decoder in decoders:
         time_cube = np.stack(
@@ -641,7 +648,7 @@ def _decoder_source_oof_response_window_rows(
                 class_names.append(str(target_base[class_column].dropna().iloc[0]))
             else:
                 class_names.append(str(class_index))
-        true_labels = pd.to_numeric(target_base["true_label"], errors="raise").to_numpy(dtype=int)
+        true_labels = _integer_label_values(target_base["true_label"], n_classes=len(prob_columns))
         target_base["predicted_label"] = predictions.astype(int)
         target_base["predicted_class"] = [class_names[int(label)] for label in predictions]
         target_base["probability_true_class"] = probabilities[np.arange(len(probabilities)), true_labels]
