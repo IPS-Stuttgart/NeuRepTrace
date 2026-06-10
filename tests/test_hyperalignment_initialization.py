@@ -3,12 +3,14 @@ import pytest
 
 from neureptrace.decoding.hyperalignment_initialization import (
     HYPERALIGNMENT_INITIALIZATION_MODES,
+    class_alignment_matrix,
     class_alignment_matrices,
     fit_class_hyperalignment,
     fit_hyperalignment,
     fit_projection_to_hyperalignment,
     transform_with_projection,
 )
+from neureptrace.decoding.mcca_target import class_alignment_matrix as target_class_alignment_matrix
 
 
 def _aligned_subjects():
@@ -111,6 +113,21 @@ def test_target_hyperalignment_projection_preserves_nonzero_template_mean() -> N
         template - np.mean(template, axis=0, keepdims=True),
         atol=1e-10,
     )
+
+
+def test_target_hyperalignment_projection_accepts_model_template() -> None:
+    aligned = _aligned_subjects()
+    model = fit_hyperalignment(aligned, n_components=3, n_iterations=2)
+
+    projection = fit_projection_to_hyperalignment(aligned["s1"], template=model)
+    transformed = transform_with_projection(aligned["s1"], projection)
+
+    assert transformed.shape == model.template.shape
+    np.testing.assert_allclose(np.mean(transformed, axis=0), np.mean(model.template, axis=0), atol=1e-10)
+
+
+def test_target_hyperalignment_exports_target_class_alignment_matrix() -> None:
+    assert class_alignment_matrix is target_class_alignment_matrix
 
 
 def test_hyperalignment_caps_components_to_common_centered_rank():

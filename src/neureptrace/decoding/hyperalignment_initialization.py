@@ -29,6 +29,7 @@ from neureptrace.decoding.hyperalignment import (
     fit_projection_to_hyperalignment,
     transform_with_projection,
 )
+from neureptrace.decoding.mcca_target import class_alignment_matrix
 from neureptrace.decoding.sampling import DEFAULT_CLASS_LIMIT_SEED, DEFAULT_CLASS_LIMIT_SELECTION
 
 HYPERALIGNMENT_INITIALIZATION_MODES = ("pca", "mean")
@@ -191,6 +192,7 @@ __all__ = [
     "ClassAlignment",
     "HyperalignmentModel",
     "SubjectHyperalignmentProjection",
+    "class_alignment_matrix",
     "class_alignment_matrices",
     "fit_class_hyperalignment",
     "fit_hyperalignment",

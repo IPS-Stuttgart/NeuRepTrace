@@ -185,12 +185,21 @@ def fit_hyperalignment(
 def fit_projection_to_hyperalignment(
     features: Sequence[Sequence[float]] | np.ndarray,
     *,
-    template: Sequence[Sequence[float]] | np.ndarray,
+    template: HyperalignmentModel | Sequence[Sequence[float]] | np.ndarray,
 ) -> SubjectHyperalignmentProjection:
-    """Fit one subject projection to an existing template from labeled anchors."""
+    """Fit one subject projection to an existing template from labeled anchors.
+
+    ``template`` may be either a fitted :class:`HyperalignmentModel` or an
+    explicit row-aligned template matrix.  Accepting the fitted model mirrors the
+    M-CCA target-calibration helper and avoids callers accidentally passing a
+    source projection matrix or rebuilding a template with inconsistent rows.
+    """
 
     matrix = _feature_matrix(features, name="features")
-    template_matrix = _feature_matrix(template, name="template")
+    if isinstance(template, HyperalignmentModel):
+        template_matrix = _feature_matrix(template.template, name="template.template")
+    else:
+        template_matrix = _feature_matrix(template, name="template")
     if matrix.shape[0] != template_matrix.shape[0]:
         raise ValueError(f"features and template need the same row count: {matrix.shape[0]} != {template_matrix.shape[0]}.")
     mean = np.mean(matrix, axis=0)
