@@ -12,7 +12,7 @@ from neureptrace.observations import stable_hash
 from neureptrace.temporal_model import probability_columns, read_probability_observations
 from neureptrace.temporal_smoothing import metrics_from_probability_observations, smooth_probability_observations
 
-DEFAULT_RESPONSE_TIMES = (0.088, 0.136, 0.184, 0.232)
+DEFAULT_RESPONSE_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
 ENSEMBLE_MODE_CHOICES = (
     "uniform",
     "source_oof_nonnegative",
@@ -51,6 +51,14 @@ def _nearest_times(available_times: np.ndarray, requested_times: tuple[float, ..
     selected = []
     for requested in requested_times:
         selected.append(float(available_times[np.argmin(np.abs(available_times - requested))]))
+    selected_labels = [_time_label(time) for time in selected]
+    if len(set(selected_labels)) != len(selected_labels):
+        requested_labels = "|".join(_time_label(time) for time in requested_times)
+        available_labels = "|".join(_time_label(time) for time in np.sort(available_times))
+        raise ValueError(
+            "Requested response-window times collapse to duplicate decoded time centers. "
+            f"requested={requested_labels}; available={available_labels}; selected={'|'.join(selected_labels)}"
+        )
     return tuple(selected)
 
 

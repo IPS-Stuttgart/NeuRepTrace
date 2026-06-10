@@ -136,6 +136,7 @@ def test_openneuro_workflow_exposes_every_configured_dataset():
     assert "decoding.source_time_selection=source_oof_classwise_time_weighted_logits" in workflow
     assert "decoding.source_time_selection=source_oof_logit_stacker" in workflow
     assert "decoding.source_time_selection_times=[$RESPONSE_WINDOW_TIMES]" in workflow
+    assert "0.088,0.136,0.184,0.232,0.280" in workflow
     assert "$response_window_mode is produced inside each outer decode fold" in workflow
     assert "resolve-matrix" in workflow
     assert "workflow.outer_test_group_shards_json" in workflow

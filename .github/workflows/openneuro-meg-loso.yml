@@ -389,7 +389,7 @@ jobs:
                   )
                   response_window_times = (
                       override_value("workflow.response_window_times", "response_window.times")
-                      or "0.088,0.136,0.184,0.232"
+                      or "0.088,0.136,0.184,0.232,0.280"
                   )
                   if max_events <= 0:
                       max_events_arg = ""
@@ -1008,7 +1008,7 @@ jobs:
                   response_window_enabled="false"
                   response_window_mode="uniform"
                   response_window_combine="log_probability_mean"
-                  response_window_times="0.088,0.136,0.184,0.232"
+                  response_window_times="0.088,0.136,0.184,0.232,0.280"
                   if [[ -n "$CONFIG_OVERRIDES_INPUT" ]]; then
                     while IFS= read -r override; do
                       override="${override#"${override%%[![:space:]]*}"}"
