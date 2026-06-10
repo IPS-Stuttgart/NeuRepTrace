@@ -93,9 +93,23 @@ def requested_component_count(n_components: int | float) -> int:
 
     if n_components == float("inf"):
         return int(np.iinfo(np.int32).max)
-    requested = int(n_components)
+
+    try:
+        value = float(n_components)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_components must be a positive integer component count or infinity.") from exc
+
+    if not np.isfinite(value):
+        raise ValueError("n_components must be a positive integer component count or infinity.")
+    if not value.is_integer():
+        raise ValueError(
+            "n_components must be an integer component count or infinity; "
+            "fractional variance-ratio requests are not supported for alignment components."
+        )
+
+    requested = int(value)
     if requested < 1:
-        raise ValueError("n_components must be positive or infinity.")
+        raise ValueError("n_components must be a positive integer component count or infinity.")
     return requested
 
 

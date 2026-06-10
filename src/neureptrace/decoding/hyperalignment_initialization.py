@@ -142,14 +142,18 @@ def _fit_mean_initialized_hyperalignment(
 
     means = {subject_id: np.mean(matrix, axis=0) for subject_id, matrix in matrices.items()}
     centered = {subject_id: matrices[subject_id] - means[subject_id] for subject_id in subject_ids}
+    mean_centered = np.mean(np.stack([centered[subject_id] for subject_id in subject_ids], axis=0), axis=0)
 
     requested = _requested_component_count(n_components)
     common_rank = _common_centered_rank(centered, rank_tolerance=rank_tolerance)
-    actual = min(requested, common_rank)
+    mean_rank = _common_centered_rank({"grand_mean": mean_centered}, rank_tolerance=rank_tolerance)
+    actual = min(requested, common_rank, mean_rank)
     if actual < 1:
-        raise ValueError("No hyperalignment components are available after centering.")
+        raise ValueError(
+            "No mean-initialized hyperalignment components are available after centering. "
+            "The grand-mean anchor template is rank deficient; use PCA initialization or richer anchors."
+        )
 
-    mean_centered = np.mean(np.stack([centered[subject_id] for subject_id in subject_ids], axis=0), axis=0)
     mean_projection = _initial_projection(mean_centered, actual)
     template = _normalize_template(mean_centered @ mean_projection)
     projections = {subject_id: _orthogonal_procrustes_projection(centered[subject_id], template) for subject_id in subject_ids}

@@ -87,3 +87,5 @@ def test_requested_component_count_validates_positive_values():
     assert requested_component_count(float("inf")) > 1_000_000
     with pytest.raises(ValueError, match="positive"):
         requested_component_count(0)
+    with pytest.raises(ValueError, match="integer component count"):
+        requested_component_count(0.95)

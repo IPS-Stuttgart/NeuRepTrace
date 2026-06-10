@@ -278,6 +278,16 @@ def test_fit_mcca_caps_components_to_centered_shared_rank():
     assert all(projection.projection.shape[1] == 2 for projection in model.projections.values())
 
 
+def test_fit_mcca_rejects_fractional_component_counts():
+    features = {
+        "a": np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
+        "b": np.array([[0.0, 0.0], [0.9, 0.1], [0.1, 1.0]]),
+    }
+
+    with pytest.raises(ValueError, match="integer component count"):
+        fit_mcca(features, n_components=0.95)
+
+
 def test_fit_mcca_group_projection_keeps_normalized_scale_after_averaging():
     rng = np.random.default_rng(123)
     latent = rng.normal(size=(18, 4))
