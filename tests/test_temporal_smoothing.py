@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
-from neureptrace.temporal_smoothing import smooth_probability_observations
+from neureptrace.temporal_smoothing import metrics_from_probability_observations, smooth_probability_observations
 
 
 def _noisy_observation_frame() -> pd.DataFrame:
@@ -56,7 +57,12 @@ def test_temporal_smoothing_exports_posteriors_and_metrics(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     out_observations = tmp_path / "smoothed_observations.csv"
     out_metrics = tmp_path / "smoothed_metrics.csv"
-    _noisy_observation_frame().to_csv(csv_path, index=False)
+    observations = _noisy_observation_frame()
+    observations["label_shuffle_control"] = True
+    observations["label_shuffle_seed"] = 13
+    observations["alignment_method"] = "mcca"
+    observations["alignment_valid_for_benchmark"] = False
+    observations.to_csv(csv_path, index=False)
 
     smoothed, metrics = smooth_probability_observations(
         [csv_path],
@@ -85,7 +91,20 @@ def test_temporal_smoothing_exports_posteriors_and_metrics(tmp_path: Path):
     assert metric_row["feature_preprocessor"] == "pca_whiten"
     assert str(metric_row["tuned_hyperparameters"]).lower() == "true"
     assert metric_row["temporal_mode"] == "same_time"
+    assert str(metric_row["label_shuffle_control"]).lower() == "true"
+    assert str(metric_row["label_shuffle_seed"]) == "13"
+    assert metric_row["alignment_method"] == "mcca"
+    assert str(metric_row["alignment_valid_for_benchmark"]).lower() == "false"
     assert "temporal_smoothing_stay_probability" in metrics.columns
+
+
+def test_temporal_smoothing_metrics_reject_fractional_true_labels() -> None:
+    observations = _noisy_observation_frame()
+    observations["true_label"] = observations["true_label"].astype(float)
+    observations.loc[0, "true_label"] = 0.5
+
+    with pytest.raises(ValueError, match="true_label values must be integer-valued"):
+        metrics_from_probability_observations(observations)
 
 
 def test_poststimulus_forward_smoothing_does_not_change_prestimulus_rows(tmp_path: Path):

@@ -341,6 +341,11 @@ def _probability_ece_by_group(observations: pd.DataFrame, group_columns: list[st
     if working[prob_columns].isna().any().any():
         raise ValueError("Probability-observation columns must be numeric and non-missing.")
 
+    label_values = working["true_label"].to_numpy(dtype=float)
+    rounded_labels = np.rint(label_values)
+    if not bool(np.isclose(label_values, rounded_labels, rtol=0.0, atol=1.0e-12).all()):
+        raise ValueError("Probability-observation true_label values must be integer-valued.")
+    working["true_label"] = rounded_labels.astype(int)
     labels = working["true_label"].to_numpy(dtype=int)
     if bool(((labels < 0) | (labels >= len(prob_columns))).any()):
         raise ValueError("Probability-observation true_label values must index prob_class_* columns.")

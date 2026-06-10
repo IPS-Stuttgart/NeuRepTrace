@@ -163,6 +163,49 @@ def test_plain_response_window_rejects_duplicate_trial_time_rows(tmp_path: Path)
         run_response_window_ensemble([csv_path], mode="uniform")
 
 
+def test_plain_response_window_rejects_label_mismatch_across_times(tmp_path: Path):
+    observations = _toy_observations()
+    mask = (
+        (observations["subject"] == "sub-01")
+        & (observations["sample_index"] == 1)
+        & (observations["time"] == 0.184)
+    )
+    observations.loc[mask, "true_label"] = 0
+    observations.loc[mask, "true_class"] = "class-0"
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="inconsistent 'true_label'"):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
+def test_plain_response_window_rejects_fractional_true_labels_for_single_time(tmp_path: Path):
+    observations = _toy_observations()
+    observations["true_label"] = observations["true_label"].astype(float)
+    observations.loc[0, "true_label"] = 0.5
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="true_label values must be integer-valued"):
+        run_response_window_ensemble(
+            [csv_path],
+            mode="uniform",
+            response_times=(0.088,),
+        )
+
+
+def test_plain_response_window_rejects_mixed_shuffle_provenance_across_times(tmp_path: Path):
+    observations = _toy_observations()
+    observations["label_shuffle_control"] = False
+    observations["label_shuffle_seed"] = 13
+    observations.loc[observations["time"] == 0.184, "label_shuffle_control"] = True
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="inconsistent 'label_shuffle_control'"):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
 def test_response_window_model_hash_depends_on_source_time_hashes(tmp_path: Path):
     observations = _toy_observations()
     observations["preprocessing_hash"] = observations["time"].map(lambda time: f"pre-{time:.3f}")
@@ -355,6 +398,45 @@ def test_decoder_response_window_rejects_duplicate_trial_time_rows(tmp_path: Pat
     observations.to_csv(csv_path, index=False)
 
     with pytest.raises(ValueError, match="duplicate rows"):
+        run_response_window_ensemble(
+            [csv_path],
+            response_times=(0.088, 0.136),
+            mode="decoder_source_oof_nonnegative",
+        )
+
+
+def test_decoder_response_window_rejects_label_mismatch_across_decoder_time_rows(tmp_path: Path):
+    observations = _toy_decoder_observations()
+    mask = (
+        (observations["subject"] == "sub-01")
+        & (observations["sample_index"] == 1)
+        & (observations["decoder"] == "strong")
+        & (observations["time"] == 0.136)
+    )
+    observations.loc[mask, "true_label"] = 0
+    observations.loc[mask, "true_class"] = "class-0"
+    csv_path = tmp_path / "decoder_observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="inconsistent 'true_label'"):
+        run_response_window_ensemble(
+            [csv_path],
+            response_times=(0.088, 0.136),
+            mode="decoder_source_oof_nonnegative",
+        )
+
+
+def test_decoder_response_window_rejects_mixed_alignment_method_across_decoder_time_rows(tmp_path: Path):
+    observations = _toy_decoder_observations()
+    observations["alignment_method"] = "none"
+    observations.loc[
+        (observations["decoder"] == "strong") & (observations["time"] == 0.136),
+        "alignment_method",
+    ] = "mcca"
+    csv_path = tmp_path / "decoder_observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="inconsistent 'alignment_method'"):
         run_response_window_ensemble(
             [csv_path],
             response_times=(0.088, 0.136),

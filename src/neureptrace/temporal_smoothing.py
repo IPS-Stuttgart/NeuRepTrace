@@ -63,6 +63,32 @@ METRIC_PROVENANCE_COLUMNS = (
     "backend",
     "preprocessing_hash",
     "model_hash",
+    "label_shuffle_control",
+    "label_shuffle_seed",
+    "class_prior_correction",
+    "source_calibration",
+    "source_time_selection",
+    "source_time_selection_candidate_times",
+    "source_time_selection_selected_time",
+    "alignment_method",
+    "alignment_anchor_mode",
+    "alignment_anchor_column",
+    "alignment_repetition_cap",
+    "alignment_components",
+    "alignment_times",
+    "alignment_window_mode",
+    "alignment_same_decode_window",
+    "alignment_target_projection",
+    "alignment_strict_source_only",
+    "alignment_uses_unlabeled_target_data",
+    "alignment_uses_class_labels",
+    "alignment_target_calibrated",
+    "alignment_target_calibration_per_anchor",
+    "alignment_target_calibration_seed",
+    "alignment_oracle_target_calibrated",
+    "alignment_debug_upper_bound",
+    "alignment_valid_for_benchmark",
+    "alignment_protocol",
     "base_emission_mode",
     "best_params",
     "best_score",
@@ -109,7 +135,11 @@ def _numeric_labels(frame: pd.DataFrame, n_classes: int) -> np.ndarray:
     labels = pd.to_numeric(frame["true_label"], errors="coerce")
     if labels.isna().any():
         raise ValueError("true_label must be numeric and non-missing.")
-    labels_array = labels.to_numpy(dtype=int)
+    label_values = labels.to_numpy(dtype=float)
+    rounded = np.rint(label_values)
+    if not bool(np.isclose(label_values, rounded, rtol=0.0, atol=1.0e-12).all()):
+        raise ValueError("true_label values must be integer-valued.")
+    labels_array = rounded.astype(int)
     if bool(((labels_array < 0) | (labels_array >= n_classes)).any()):
         raise ValueError("true_label values must index prob_class_* columns.")
     return labels_array

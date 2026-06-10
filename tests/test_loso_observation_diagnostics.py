@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.loso_observation_diagnostics import write_loso_observation_diagnostics
 
@@ -108,3 +109,25 @@ def test_loso_observation_diagnostics_tolerates_missing_stage_summary(tmp_path: 
     per_subject = pd.read_csv(paths["per_subject"])
     assert per_subject["subject"].tolist() == ["sub-01", "sub-02"]
     assert per_subject["staged_n_trials"].isna().all()
+
+
+def test_loso_observation_diagnostics_rejects_fractional_true_labels(tmp_path: Path):
+    observations = _toy_observations()
+    observations["true_label"] = observations["true_label"].astype(float)
+    observations.loc[0, "true_label"] = 0.5
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="true_label values must be integer-valued"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_fractional_predicted_labels(tmp_path: Path):
+    observations = _toy_observations()
+    observations["predicted_label"] = observations["predicted_label"].astype(float)
+    observations.loc[0, "predicted_label"] = 0.5
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="predicted_label values must be integer-valued"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)

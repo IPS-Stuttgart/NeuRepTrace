@@ -44,15 +44,26 @@ def _probability_matrix(frame: pd.DataFrame) -> np.ndarray:
     return frame.loc[:, list(columns)].to_numpy(dtype=float)
 
 
+def _integer_array(values: pd.Series, *, name: str) -> np.ndarray:
+    numeric = pd.to_numeric(values, errors="coerce")
+    if numeric.isna().any():
+        raise ValueError(f"Observation table {name} values must be numeric and non-missing.")
+    value_array = numeric.to_numpy(dtype=float)
+    rounded = np.rint(value_array)
+    if not bool(np.isclose(value_array, rounded, rtol=0.0, atol=1.0e-12).all()):
+        raise ValueError(f"Observation table {name} values must be integer-valued.")
+    return rounded.astype(int)
+
+
 def _label_array(frame: pd.DataFrame) -> np.ndarray:
     if "true_label" not in frame.columns:
         raise ValueError("Observation table must contain true_label.")
-    return frame["true_label"].astype(int).to_numpy()
+    return _integer_array(frame["true_label"], name="true_label")
 
 
 def _predicted_array(frame: pd.DataFrame) -> np.ndarray:
     if "predicted_label" in frame.columns:
-        return frame["predicted_label"].astype(int).to_numpy()
+        return _integer_array(frame["predicted_label"], name="predicted_label")
     return _probability_matrix(frame).argmax(axis=1)
 
 
@@ -77,6 +88,10 @@ def _metrics_for_rows(frame: pd.DataFrame) -> dict[str, float | int | str]:
     labels = _label_array(frame)
     predictions = _predicted_array(frame)
     n_classes = probabilities.shape[1]
+    if bool(((labels < 0) | (labels >= n_classes)).any()):
+        raise ValueError("Observation table true_label values must index prob_class_* columns.")
+    if bool(((predictions < 0) | (predictions >= n_classes)).any()):
+        raise ValueError("Observation table predicted_label values must index prob_class_* columns.")
     if len(frame) == 0:
         return {
             "n_observations": 0,
