@@ -221,6 +221,7 @@ def fit_mcca(
     for subject_id in subject_ids:
         mean, prewhitener, whitened = _fit_subject_prewhitener(
             matrices[subject_id],
+            subject_id=subject_id,
             regularization=regularization,
             subject_pca_components=subject_pca_components,
             rank_tolerance=rank_tolerance,
@@ -396,6 +397,7 @@ def fit_class_mcca(
 def _fit_subject_prewhitener(
     matrix: np.ndarray,
     *,
+    subject_id: Hashable | None = None,
     regularization: float,
     subject_pca_components: int | float | None,
     rank_tolerance: float,
@@ -415,7 +417,11 @@ def _fit_subject_prewhitener(
     else:
         keep_indices = np.flatnonzero(keep)
     if keep_indices.size == 0:
-        keep_indices = np.array([0])
+        context = "" if subject_id is None else f" for subject {subject_id!r}"
+        raise ValueError(
+            f"Subject alignment matrix{context} has no retained centered components. "
+            "The alignment anchors are rank deficient after centering; use richer anchors or lower rank_tolerance."
+        )
     components = vt[keep_indices].T
     scales = 1.0 / np.sqrt(eigenvalues[keep_indices] + regularization)
     prewhitener = components * scales[None, :]

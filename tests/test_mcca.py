@@ -247,7 +247,19 @@ def test_fit_mcca_rejects_alignment_with_no_shared_rank():
         "b": np.ones((3, 4)) * 2.0,
     }
 
-    with pytest.raises(ValueError, match="shared-space SVD"):
+    with pytest.raises(ValueError, match="no retained centered components"):
+        fit_mcca(subjects, n_components=4, regularization=1e-6)
+
+
+def test_fit_mcca_rejects_one_degenerate_subject_anchor_set():
+    rng = np.random.default_rng(7)
+    subjects = {
+        "flat": np.ones((5, 4)),
+        "structured_a": rng.normal(size=(5, 4)),
+        "structured_b": rng.normal(size=(5, 4)),
+    }
+
+    with pytest.raises(ValueError, match="subject 'flat'.*no retained centered components"):
         fit_mcca(subjects, n_components=4, regularization=1e-6)
 
 
