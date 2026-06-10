@@ -109,7 +109,11 @@ def _numeric_labels(frame: pd.DataFrame, n_classes: int) -> np.ndarray:
     labels = pd.to_numeric(frame["true_label"], errors="coerce")
     if labels.isna().any():
         raise ValueError("true_label must be numeric and non-missing.")
-    labels_array = labels.to_numpy(dtype=int)
+    label_values = labels.to_numpy(dtype=float)
+    rounded = np.rint(label_values)
+    if not bool(np.isclose(label_values, rounded, rtol=0.0, atol=1.0e-12).all()):
+        raise ValueError("true_label values must be integer-valued.")
+    labels_array = rounded.astype(int)
     if bool(((labels_array < 0) | (labels_array >= n_classes)).any()):
         raise ValueError("true_label values must index prob_class_* columns.")
     return labels_array
