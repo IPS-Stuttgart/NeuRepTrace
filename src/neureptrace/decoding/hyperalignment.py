@@ -227,70 +227,6 @@ def transform_with_projection(
     return transformed
 
 
-def class_alignment_matrix(
-    features: Sequence[Sequence[float]] | np.ndarray,
-    labels: Sequence | np.ndarray,
-    *,
-    classes: Sequence | np.ndarray | None = None,
-    sample_mode: str = "class_mean",
-    n_repetitions_per_class: int | None = None,
-    repetition_selection: str = DEFAULT_CLASS_LIMIT_SELECTION,
-    repetition_seed: int | str | None = DEFAULT_CLASS_LIMIT_SEED,
-    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None = None,
-) -> np.ndarray:
-    """Build one subject's class-aligned hyperalignment calibration matrix.
-
-    ``classes`` fixes the row order.  This is intended for held-out-target
-    calibration where target rows must match a fitted source hyperalignment
-    template.  For ``class_repetition``, passing ``selected_offsets_by_class``
-    from the source :class:`ClassAlignment` is safer than relying only on the
-    same random seed: when the target subject has a different number of trials,
-    random sampling over the target's larger/smaller repetition set can select
-    different within-class offsets from the source template.
-    """
-
-    sample_mode = _normalize_sample_mode(sample_mode)
-    matrix = _feature_matrix(features, name="features")
-    vector = _label_vector(labels, expected_length=matrix.shape[0], name="labels")
-    if classes is None:
-        class_order = np.unique(vector)
-    else:
-        class_order = np.asarray(classes).ravel()
-    _check_requested_classes(vector, class_order)
-
-    if sample_mode == "class_mean":
-        return _class_mean_matrix(matrix, vector, class_order)
-
-    selected_offsets: dict[int, np.ndarray] | None = None
-    if selected_offsets_by_class is not None:
-        selected_offsets, selected_repetitions = _normalize_selected_offsets_by_class(
-            selected_offsets_by_class,
-            labels=vector,
-            classes=class_order,
-        )
-        if n_repetitions_per_class is None:
-            n_repetitions_per_class = selected_repetitions
-        elif int(n_repetitions_per_class) != selected_repetitions:
-            raise ValueError(
-                "n_repetitions_per_class must match selected_offsets_by_class length: "
-                f"{n_repetitions_per_class} != {selected_repetitions}."
-            )
-    elif n_repetitions_per_class is None:
-        n_repetitions_per_class = _minimum_class_count(vector, class_order)
-    repetitions = int(n_repetitions_per_class)
-    if repetitions < 1:
-        raise ValueError("n_repetitions_per_class must be positive or None.")
-    return _class_repetition_matrix(
-        matrix,
-        vector,
-        class_order,
-        repetitions,
-        selection=repetition_selection,
-        seed=repetition_seed,
-        selected_offsets_by_class=selected_offsets,
-    )
-
-
 def _add_template_mean(
     transformed: Sequence[Sequence[float]] | np.ndarray,
     template_mean: Sequence[float] | np.ndarray,
@@ -532,51 +468,6 @@ def _common_repetition_offsets(
             seed_context=class_position,
         )
     return offsets
-
-
-def _normalize_selected_offsets_by_class(
-    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray],
-    *,
-    labels: np.ndarray,
-    classes: np.ndarray,
-) -> tuple[dict[int, np.ndarray], int]:
-    """Validate source-template repetition offsets for a target subject."""
-
-    normalized: dict[int, np.ndarray] = {}
-    sizes: list[int] = []
-    for class_position, class_label in enumerate(classes):
-        try:
-            offsets = np.asarray(selected_offsets_by_class[class_position], dtype=int)
-        except KeyError as exc:
-            raise ValueError(f"selected_offsets_by_class is missing class position {class_position}.") from exc
-        if offsets.ndim != 1:
-            raise ValueError("selected_offsets_by_class entries must be one-dimensional.")
-        if offsets.size < 1:
-            raise ValueError("selected_offsets_by_class entries must not be empty.")
-        class_count = int(np.sum(labels == class_label))
-        if int(np.min(offsets)) < 0 or int(np.max(offsets)) >= class_count:
-            raise ValueError(
-                f"selected offsets for class {class_label!r} are outside the target subject's "
-                f"available repetitions: max offset {int(np.max(offsets))}, count {class_count}."
-            )
-        normalized[class_position] = offsets
-        sizes.append(int(offsets.size))
-    unique_sizes = set(sizes)
-    if len(unique_sizes) != 1:
-        raise ValueError(f"selected_offsets_by_class entries must have equal lengths, got {sizes}.")
-    return normalized, int(sizes[0])
-
-
-def _check_requested_classes(labels: np.ndarray, classes: np.ndarray) -> None:
-    if classes.size == 0:
-        raise ValueError("classes must contain at least one label.")
-    missing = [label for label in classes if not np.any(labels == label)]
-    if missing:
-        raise ValueError(f"classes include labels absent from labels: {missing!r}.")
-
-
-def _minimum_class_count(labels: np.ndarray, classes: np.ndarray) -> int:
-    return min(int(np.sum(labels == class_label)) for class_label in classes)
 
 
 def _common_classes(labels_by_subject: Mapping[Hashable, np.ndarray]) -> np.ndarray:
