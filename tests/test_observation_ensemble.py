@@ -386,6 +386,28 @@ def test_summarize_ensemble_metrics_returns_time_resolved_rows() -> None:
     assert metrics["class_names"].tolist() == ["zero|one", "zero|one"]
 
 
+def test_summarize_ensemble_metrics_preserves_alignment_provenance() -> None:
+    observations = _source_observations()
+    observations["alignment_method"] = "procrustes"
+    observations["alignment_times"] = "same_decode_window"
+    observations["alignment_target_projection"] = "oracle_target_calibrated_alignment"
+    observations["alignment_oracle_target_calibrated"] = True
+    observations["alignment_debug_upper_bound"] = True
+    observations["alignment_valid_for_benchmark"] = False
+    observations["alignment_protocol_note"] = "debug upper bound only; not valid for benchmark"
+    ensemble = ensemble_probability_observations(observations, baseline_window=(-0.25, -0.15))
+
+    metrics = summarize_ensemble_metrics(ensemble)
+
+    assert metrics["alignment_method"].unique().tolist() == ["procrustes"]
+    assert metrics["alignment_times"].unique().tolist() == ["same_decode_window"]
+    assert metrics["alignment_target_projection"].unique().tolist() == ["oracle_target_calibrated_alignment"]
+    assert metrics["alignment_oracle_target_calibrated"].unique().tolist() == [True]
+    assert metrics["alignment_debug_upper_bound"].unique().tolist() == [True]
+    assert metrics["alignment_valid_for_benchmark"].unique().tolist() == [False]
+    assert metrics["alignment_protocol_note"].unique().tolist() == ["debug upper bound only; not valid for benchmark"]
+
+
 def test_summarize_ensemble_metrics_rejects_fractional_true_labels() -> None:
     ensemble = ensemble_probability_observations(
         _source_observations(),

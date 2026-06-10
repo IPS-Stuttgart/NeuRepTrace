@@ -44,6 +44,35 @@ _BASE_ALIGNMENT_COLUMNS = (
     "class_prior_correction",
 )
 _METRIC_GROUP_COLUMNS = ("subject", "fold", "decoder", "emission_mode", "time", "window_start", "window_stop")
+_METRIC_PROVENANCE_COLUMNS = (
+    "class_prior_correction",
+    "source_calibration",
+    "source_time_selection",
+    "source_time_selection_candidate_times",
+    "source_time_selection_selected_time",
+    "label_shuffle_control",
+    "label_shuffle_seed",
+    "alignment_method",
+    "alignment_anchor_mode",
+    "alignment_anchor_column",
+    "alignment_repetition_cap",
+    "alignment_components",
+    "alignment_times",
+    "alignment_window_mode",
+    "alignment_same_decode_window",
+    "alignment_target_projection",
+    "alignment_strict_source_only",
+    "alignment_uses_unlabeled_target_data",
+    "alignment_uses_class_labels",
+    "alignment_target_calibrated",
+    "alignment_target_calibration_per_anchor",
+    "alignment_target_calibration_seed",
+    "alignment_oracle_target_calibrated",
+    "alignment_debug_upper_bound",
+    "alignment_valid_for_benchmark",
+    "alignment_protocol",
+    "alignment_protocol_note",
+)
 
 
 def _normalize_weights(weights: Sequence[float], n_decoders: int) -> np.ndarray:
@@ -551,6 +580,12 @@ def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10
                 "class_names": "|".join(str(group.iloc[0].get(f"class_{label}", label)) for label in label_values),
             }
         )
+        for column in _METRIC_PROVENANCE_COLUMNS:
+            if column not in group.columns:
+                continue
+            values = group[column].drop_duplicates()
+            if len(values) == 1:
+                row[column] = values.iloc[0]
         rows.append(row)
     return pd.DataFrame(rows)
 

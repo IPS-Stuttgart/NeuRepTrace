@@ -254,6 +254,8 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert results["alignment_repetition_cap"].unique().tolist() == [12]
     assert results["alignment_components"].unique().tolist() == [32]
     assert results["alignment_times"].unique().tolist() == ["same_decode_window"]
+    assert results["alignment_window_mode"].unique().tolist() == ["same_decode_window"]
+    assert results["alignment_valid_for_benchmark"].unique().tolist() == [True]
     assert results["alignment_target_projection"].unique().tolist() == ["group_projection"]
     assert results["source_decoders"].unique().tolist() == ["multinomial-logistic-weighted|linear_svm|shrinkage_lda"]
     assert results["ensemble_weights"].unique().tolist() == ["0.333333333333|0.333333333333|0.333333333333"]
@@ -273,3 +275,76 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
     assert availability["prefit_status"].unique().tolist() == ["ok"]
     source_observations = pd.read_csv(tmp_path / "ensemble_source_observations.csv")
     assert set(source_observations["decoder"]) == {"multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"}
+
+
+def test_logistic_svm_ensemble_marks_oracle_alignment_nonbenchmark(tmp_path, monkeypatch):
+    def fake_source_decode(**kwargs):
+        decoder = kwargs["decoder"]
+        rows = [
+            {
+                "subject": "sub-01",
+                "fold": 0,
+                "decoder": decoder,
+                "emission_mode": "calibrated",
+                "time": 0.184,
+                "window_start": 0.134,
+                "window_stop": 0.234,
+                "sample_index": index,
+                "sequence_id": index,
+                "true_label": label,
+                "true_class": f"class-{label}",
+                "predicted_label": label,
+                "predicted_class": f"class-{label}",
+                "probability_true_class": 0.8,
+                "confidence": 0.8,
+                "class_0": "class-0",
+                "class_1": "class-1",
+                "prob_class_0": 0.8 if label == 0 else 0.2,
+                "prob_class_1": 0.2 if label == 0 else 0.8,
+            }
+            for index, label in enumerate((0, 1))
+        ]
+        kwargs["observation_out_path"].parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(kwargs["observation_out_path"], index=False)
+        frame = pd.DataFrame(
+            [
+                {
+                    "fold": 0,
+                    "decoder": decoder,
+                    "emission_mode": "calibrated",
+                    "time": 0.184,
+                    "window_start": 0.134,
+                    "window_stop": 0.234,
+                    "accuracy": 1.0,
+                    "balanced_accuracy": 1.0,
+                    "top2_accuracy": 1.0,
+                    "top3_accuracy": 1.0,
+                    "log_loss": 0.2,
+                    "brier": 0.1,
+                    "ece": 0.0,
+                    "n_test": 2,
+                }
+            ]
+        )
+        kwargs["out_path"].parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(kwargs["out_path"], index=False)
+        return frame
+
+    monkeypatch.setattr("neureptrace.mne_time_decode_ensemble._run_time_resolved_decode", fake_source_decode)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "dummy-epo.fif",
+        label_column="condition",
+        out_path=tmp_path / "ensemble.csv",
+        decoder="logistic-svm-ensemble",
+        emission_mode="calibrated",
+        alignment_method="procrustes",
+        alignment_target_projection="oracle_target_calibrated_alignment",
+        ensemble_baseline_window=None,
+    )
+
+    assert results["alignment_target_projection"].unique().tolist() == ["oracle_target_calibrated_alignment"]
+    assert results["alignment_oracle_target_calibrated"].unique().tolist() == [True]
+    assert results["alignment_debug_upper_bound"].unique().tolist() == [True]
+    assert results["alignment_valid_for_benchmark"].unique().tolist() == [False]
+    assert results["alignment_protocol_note"].unique().tolist() == ["debug upper bound only; not valid for benchmark"]
