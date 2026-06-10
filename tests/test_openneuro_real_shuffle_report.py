@@ -161,6 +161,43 @@ def test_real_shuffle_report_rejects_decoder_protocol_mismatch(tmp_path: Path) -
         write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
 
 
+def test_real_shuffle_report_rejects_alignment_validity_mismatch(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True)
+    for root, valid in ((real, True), (shuffle, False)):
+        observations_path = root / "decode" / "observations.csv"
+        observations = pd.read_csv(observations_path)
+        observations["alignment_method"] = "mcca"
+        observations["alignment_target_projection"] = "group_projection"
+        observations["alignment_valid_for_benchmark"] = valid
+        observations["alignment_debug_upper_bound"] = not valid
+        observations.to_csv(observations_path, index=False)
+
+    with pytest.raises(ValueError, match="alignment_valid_for_benchmark"):
+        write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+
+def test_real_shuffle_report_rejects_response_window_time_mismatch(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True)
+    for root, actual_times in ((real, "0.088|0.184"), (shuffle, "0.088|0.232")):
+        observations_path = root / "decode" / "observations.csv"
+        observations = pd.read_csv(observations_path)
+        observations["response_window_combine"] = "log_probability_mean"
+        observations["response_window_requested_times"] = "0.088|0.184"
+        observations["response_window_actual_times"] = actual_times
+        observations.to_csv(observations_path, index=False)
+
+    with pytest.raises(ValueError, match="response_window_actual_times"):
+        write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
+
+
 def test_real_shuffle_report_fallback_fixed_time_keeps_quality_fields(tmp_path: Path) -> None:
     real = tmp_path / "real"
     shuffle = tmp_path / "shuffle"

@@ -31,12 +31,38 @@ MATCHED_PROVENANCE_COLUMNS = (
     "class_prior_correction",
     "source_calibration",
     "source_time_selection",
+    "source_time_selection_candidate_times",
+    "source_time_selection_selected_time",
     "alignment_method",
     "alignment_anchor_mode",
     "alignment_anchor_column",
+    "alignment_repetition_cap",
+    "alignment_components",
+    "alignment_times",
+    "alignment_window_mode",
+    "alignment_same_decode_window",
     "alignment_target_projection",
+    "alignment_strict_source_only",
+    "alignment_uses_unlabeled_target_data",
+    "alignment_uses_class_labels",
+    "alignment_target_calibrated",
+    "alignment_target_calibration_per_anchor",
+    "alignment_target_calibration_seed",
+    "alignment_oracle_target_calibrated",
+    "alignment_debug_upper_bound",
+    "alignment_valid_for_benchmark",
+    "alignment_protocol",
     "response_window_combine",
+    "response_window_mode",
     "response_window_times",
+    "response_window_requested_times",
+    "response_window_actual_times",
+    "temporal_smoothing_method",
+    "temporal_smoothing_stay_probability",
+    "temporal_smoothing_fit_window_start",
+    "temporal_smoothing_fit_window_stop",
+    "temporal_smoothing_apply_window_start",
+    "temporal_smoothing_apply_window_stop",
 )
 
 
@@ -150,6 +176,18 @@ def _as_bool_token(value: object) -> bool:
     raise ValueError(f"Cannot parse boolean provenance value {value!r}.")
 
 
+def _provenance_value_token(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    lowered = text.lower()
+    if lowered in {"true", "false", "yes", "no", "on", "off"}:
+        return lowered
+    return text
+
+
 def _provenance_values(run: dict[str, object], column: str) -> list[str]:
     values: list[str] = []
     for table_name in ("observations", "quality"):
@@ -157,9 +195,9 @@ def _provenance_values(run: dict[str, object], column: str) -> list[str]:
         if not isinstance(table, pd.DataFrame) or column not in table.columns:
             continue
         values.extend(
-            value
-            for value in table[column].dropna().astype(str).str.strip().drop_duplicates().tolist()
-            if value
+            token
+            for token in (_provenance_value_token(value) for value in table[column].drop_duplicates().tolist())
+            if token
         )
     return sorted(set(values))
 
