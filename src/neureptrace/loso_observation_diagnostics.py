@@ -75,15 +75,12 @@ def _validate_single_protocol_observations(frame: pd.DataFrame) -> None:
     for column in SINGLE_PROTOCOL_COLUMNS:
         if column not in frame.columns:
             continue
-        values = sorted(
-            {
-                token
-                for token in (_protocol_token(value) for value in frame[column].drop_duplicates().tolist())
-                if token
-            }
-        )
+        tokens = [_protocol_token(value) for value in frame[column].drop_duplicates().tolist()]
+        values = sorted({token for token in tokens if token})
         if len(values) > 1:
             raise ValueError(f"Observation table mixes {column!r} provenance values: {values}")
+        if values and any(not token for token in tokens):
+            raise ValueError(f"Observation table has missing {column!r} provenance mixed with {values[0]!r}.")
 
 
 def _probability_matrix(frame: pd.DataFrame) -> np.ndarray:

@@ -186,3 +186,15 @@ def test_loso_observation_diagnostics_rejects_mixed_shuffle_provenance(tmp_path:
 
     with pytest.raises(ValueError, match="mixes 'label_shuffle_control' provenance"):
         write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_missing_seed_mixed_with_seed(tmp_path: Path):
+    observations = _toy_observations()
+    observations["label_shuffle_control"] = True
+    observations["label_shuffle_seed"] = "13"
+    observations.loc[0, "label_shuffle_seed"] = ""
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="missing 'label_shuffle_seed' provenance"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
