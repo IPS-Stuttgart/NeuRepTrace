@@ -227,6 +227,12 @@ def _summary_row(real: dict[str, object], shuffle: dict[str, object], fixed_time
     assert isinstance(real_per_subject, pd.DataFrame)
     assert isinstance(shuffle_per_subject, pd.DataFrame)
     merged_subjects = _per_subject_delta(real_per_subject, shuffle_per_subject)
+    if merged_subjects.empty:
+        raise ValueError("Real and shuffle artifacts have no overlapping subjects to compare.")
+    real_n_classes = int(_float(real_quality, "n_classes"))
+    shuffle_n_classes = int(_float(shuffle_quality, "n_classes"))
+    if real_n_classes != shuffle_n_classes:
+        raise ValueError(f"Real and shuffle artifacts have different class counts: real={real_n_classes}, shuffle={shuffle_n_classes}.")
     real_fixed = _float(real_quality, "fixed_balanced_accuracy")
     shuffle_fixed = _float(shuffle_quality, "fixed_balanced_accuracy")
     real_top2 = _float(real_quality, "fixed_top2_accuracy")
@@ -241,7 +247,7 @@ def _summary_row(real: dict[str, object], shuffle: dict[str, object], fixed_time
                 "fixed_time_shuffle": _float(shuffle_quality, "fixed_time"),
                 "n_subjects_real": int(_float(real_quality, "n_subjects")),
                 "n_subjects_shuffle": int(_float(shuffle_quality, "n_subjects")),
-                "n_classes": int(_float(real_quality, "n_classes")),
+                "n_classes": real_n_classes,
                 "chance_accuracy": _float(real_quality, "chance_accuracy"),
                 "top2_chance": _float(real_quality, "top2_chance"),
                 "top3_chance": _float(real_quality, "top3_chance"),

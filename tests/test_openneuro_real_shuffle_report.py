@@ -11,9 +11,9 @@ from neureptrace.openneuro_real_shuffle_report import write_real_shuffle_report
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _observation_rows(*, shuffle: bool) -> pd.DataFrame:
+def _observation_rows(*, shuffle: bool, subjects: tuple[str, ...] = ("sub-01", "sub-02")) -> pd.DataFrame:
     rows = []
-    for subject in ("sub-01", "sub-02"):
+    for subject in subjects:
         for time in (-0.056, 0.184, 0.232):
             for sample_index, true_label in enumerate((0, 1, 2)):
                 if shuffle:
@@ -43,11 +43,11 @@ def _observation_rows(*, shuffle: bool) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _write_artifact(root: Path, *, shuffle: bool) -> None:
+def _write_artifact(root: Path, *, shuffle: bool, subjects: tuple[str, ...] = ("sub-01", "sub-02")) -> None:
     decode = root / "decode"
     decode.mkdir(parents=True)
     observations = decode / "observations.csv"
-    _observation_rows(shuffle=shuffle).to_csv(observations, index=False)
+    _observation_rows(shuffle=shuffle, subjects=subjects).to_csv(observations, index=False)
     write_loso_observation_diagnostics(
         observations,
         out_dir=decode / "diagnostics",
@@ -95,6 +95,17 @@ def test_real_shuffle_report_rejects_swapped_artifacts(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="real artifact is marked label_shuffle_control=true"):
         write_real_shuffle_report(real_dir=shuffle, shuffle_dir=real, out_dir=out, fixed_time=0.184)
+
+
+def test_real_shuffle_report_rejects_nonoverlapping_subjects(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False, subjects=("sub-01", "sub-02"))
+    _write_artifact(shuffle, shuffle=True, subjects=("sub-03", "sub-04"))
+
+    with pytest.raises(ValueError, match="no overlapping subjects"):
+        write_real_shuffle_report(real_dir=real, shuffle_dir=shuffle, out_dir=out, fixed_time=0.184)
 
 
 def test_openneuro_real_vs_shuffle_workflow_uses_locked_defaults() -> None:
