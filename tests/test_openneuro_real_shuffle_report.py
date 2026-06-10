@@ -67,6 +67,30 @@ def _write_artifact(
     )
 
 
+def _write_response_window_variant(
+    root: Path,
+    *,
+    shuffle: bool,
+    subjects: tuple[str, ...] = ("sub-01", "sub-02"),
+    diagnostics_best_time: float = 0.184,
+) -> None:
+    response = root / "decode" / "response_window"
+    response.mkdir(parents=True, exist_ok=True)
+    observations = response / "observations.csv"
+    _observation_rows(shuffle=shuffle, subjects=subjects).assign(
+        decoder="poststimulus_response_window_logit_ensemble",
+        emission_mode="response_window_logit_ensemble_uniform",
+        response_window_combine="log_probability_mean",
+        response_window_requested_times="0.088|0.136|0.184|0.232|0.28",
+        response_window_actual_times="0.088|0.136|0.184|0.232|0.28",
+    ).to_csv(observations, index=False)
+    write_loso_observation_diagnostics(
+        observations,
+        out_dir=response / "diagnostics",
+        best_time=diagnostics_best_time,
+    )
+
+
 def test_real_shuffle_report_writes_auditable_outputs(tmp_path: Path) -> None:
     real = tmp_path / "real"
     shuffle = tmp_path / "shuffle"
@@ -96,6 +120,48 @@ def test_real_shuffle_report_writes_auditable_outputs(tmp_path: Path) -> None:
     assert "## Classwise Balanced Recalls" in markdown
     assert "Top-2 is informative" in markdown
     assert "Top-3 is automatic ceiling" in markdown
+
+
+def test_real_shuffle_report_can_compare_response_window_variant(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True)
+    _write_response_window_variant(real, shuffle=False)
+    _write_response_window_variant(shuffle, shuffle=True)
+
+    paths = write_real_shuffle_report(
+        real_dir=real,
+        shuffle_dir=shuffle,
+        out_dir=out,
+        fixed_time=0.184,
+        output_prefix="response_window_real_vs_shuffle",
+        variant="response_window",
+    )
+
+    summary = pd.read_csv(paths["summary"])
+    markdown = paths["markdown"].read_text(encoding="utf-8")
+    assert summary.loc[0, "result_variant"] == "response_window"
+    assert summary.loc[0, "fixed_balanced_accuracy_real"] > summary.loc[0, "fixed_balanced_accuracy_shuffle"]
+    assert "Result variant: response_window." in markdown
+
+
+def test_real_shuffle_report_missing_variant_does_not_fall_back_to_raw(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    shuffle = tmp_path / "shuffle"
+    out = tmp_path / "report"
+    _write_artifact(real, shuffle=False)
+    _write_artifact(shuffle, shuffle=True)
+
+    with pytest.raises(FileNotFoundError, match="response_window"):
+        write_real_shuffle_report(
+            real_dir=real,
+            shuffle_dir=shuffle,
+            out_dir=out,
+            fixed_time=0.184,
+            variant="response_window",
+        )
 
 
 def test_real_shuffle_report_rejects_swapped_artifacts(tmp_path: Path) -> None:
@@ -238,6 +304,8 @@ def test_openneuro_real_vs_shuffle_workflow_uses_locked_defaults() -> None:
     assert "ds006629_real_vs_shuffle_summary.csv" in workflow
     assert "ds006629_real_vs_shuffle_per_subject.csv" in workflow
     assert "ds006629_real_vs_shuffle.md" in workflow
+    assert "result_variant:" in workflow
+    assert '--variant "$RESULT_VARIANT"' in workflow
     assert "gh run download" in workflow
     assert "python -m neureptrace.openneuro_real_shuffle_report" in workflow
     assert "$GITHUB_STEP_SUMMARY" in workflow
