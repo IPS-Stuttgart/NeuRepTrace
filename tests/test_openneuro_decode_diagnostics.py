@@ -35,6 +35,21 @@ def _toy_observations(subject: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _write_shard_manifest(output_dir: Path, **overrides: object) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    subject = str(overrides.pop("outer_test_groups", output_dir.name))
+    manifest = {
+        "dataset": "ds006629",
+        "mode": "full",
+        "artifact_name": f"openneuro-meg-ds006629-full-{subject}",
+        "label_shuffle_control": "false",
+        "outer_test_groups": subject,
+        "diagnostics_best_time": "0.184",
+    }
+    manifest.update(overrides)
+    (output_dir / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
 def test_best_metric_rows_selects_maximized_and_minimized_metrics():
     summary = pd.DataFrame(
         {
@@ -490,6 +505,23 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
                 "accuracy": [1.0, 1.0 if subject == "sub-01" else 2 / 3],
             }
         ).to_csv(decode_dir / "time_decode_summary.csv", index=False)
+        response_dir = decode_dir / "response_window"
+        response_dir.mkdir()
+        _toy_observations(subject).assign(
+            decoder="poststimulus_response_window_logit_ensemble",
+            emission_mode="response_window_logit_ensemble_uniform",
+            response_window_mode="uniform",
+            response_window_combine="log_probability_mean",
+        ).to_csv(response_dir / "observations.csv", index=False)
+        pd.DataFrame(
+            {
+                "time": [0.184],
+                "balanced_accuracy": [1.0 if subject == "sub-01" else 2 / 3],
+                "accuracy": [1.0 if subject == "sub-01" else 2 / 3],
+                "response_window_mode": ["uniform"],
+                "response_window_combine": ["log_probability_mean"],
+            }
+        ).to_csv(response_dir / "time_decode_summary.csv", index=False)
         pd.DataFrame(
             {
                 "dataset": ["openneuro_ds006629_singsing"],
@@ -546,6 +578,8 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
 
     assert diagnostics["decode_summary"]["exists"] is True
     assert diagnostics["decode_summary"]["rows"] == 4
+    assert diagnostics["response_window_summary"]["exists"] is True
+    assert diagnostics["response_window_summary"]["rows"] == 2
     assert diagnostics["alignment_anchor_availability"]["exists"] is True
     assert diagnostics["alignment_anchor_availability"]["rows"] == 2
     assert diagnostics["alignment_diagnostics"]["exists"] is True
@@ -553,6 +587,8 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
     assert best.set_index("selection_metric").loc["balanced_accuracy", "selection_value"] == pytest.approx(1.0)
     assert pd.read_csv(aggregate_dir / "stage_summary.csv")["subject"].tolist() == ["sub-01", "sub-02"]
     assert len(pd.read_csv(aggregate_dir / "decode" / "observations.csv")) == 12
+    assert len(pd.read_csv(aggregate_dir / "decode" / "response_window" / "observations.csv")) == 12
+    assert (aggregate_dir / "decode" / "response_window" / "diagnostics" / "quality_summary.csv").is_file()
     alignment = pd.read_csv(aggregate_dir / "decode" / "alignment_diagnostics.csv")
     assert alignment["test_subject"].tolist() == ["sub-01", "sub-02"]
     assert alignment["actual_components"].tolist() == [2, 2]
@@ -565,6 +601,7 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
     assert manifest["artifact_name"] == "openneuro-meg-ds006629-full-shard-aggregate"
     assert manifest["outer_test_groups"] == "sub-01|sub-02"
     quality = pd.read_csv(aggregate_dir / "workflow_quality_summary.csv")
+    assert quality["result_variant"].tolist() == ["raw", "response_window"]
     assert quality.loc[0, "shard_count"] == 2
     assert quality.loc[0, "aggregate_outer_test_groups"] == "sub-01|sub-02"
     assert quality.loc[0, "source_artifacts"] == "openneuro-meg-ds006629-full|openneuro-meg-ds006629-full"
@@ -572,6 +609,46 @@ def test_aggregate_workflow_outputs_combines_sharded_loso_artifacts(tmp_path: Pa
     assert quality.loc[0, "fixed_balanced_accuracy"] == pytest.approx(5 / 6)
     assert quality.loc[0, "fixed_balanced_minus_chance"] == pytest.approx(5 / 6 - 1 / 3)
     assert quality.loc[0, "fixed_balanced_minus_chance_pct"] == pytest.approx(50.0)
+
+
+def test_aggregate_workflow_outputs_rejects_mixed_real_and_shuffle_manifests(tmp_path: Path):
+    real_dir = tmp_path / "real-shard"
+    shuffle_dir = tmp_path / "shuffle-shard"
+    _write_shard_manifest(real_dir, outer_test_groups="sub-01", label_shuffle_control="false")
+    _write_shard_manifest(
+        shuffle_dir,
+        outer_test_groups="sub-02",
+        artifact_name="openneuro-meg-ds006629-full-label-shuffle-seed-13",
+        label_shuffle_control="true",
+        label_shuffle_seed="13",
+    )
+
+    with pytest.raises(ValueError, match="Incompatible shard manifests for 'label_shuffle_control'"):
+        aggregate_workflow_outputs([real_dir, shuffle_dir], out_dir=tmp_path / "aggregate")
+
+
+def test_aggregate_workflow_outputs_rejects_mixed_alignment_and_response_configs(tmp_path: Path):
+    mcca_dir = tmp_path / "mcca-shard"
+    procrustes_dir = tmp_path / "procrustes-shard"
+    _write_shard_manifest(
+        mcca_dir,
+        outer_test_groups="sub-01",
+        config_overrides="workflow.response_window_ensemble=true;decoding.alignment_method=mcca",
+        response_window_ensemble="true",
+        response_window_times="0.088,0.136,0.184,0.232,0.280",
+        alignment_method="mcca",
+    )
+    _write_shard_manifest(
+        procrustes_dir,
+        outer_test_groups="sub-02",
+        config_overrides="workflow.response_window_ensemble=true;decoding.alignment_method=procrustes",
+        response_window_ensemble="true",
+        response_window_times="0.088,0.136,0.184,0.232,0.280",
+        alignment_method="procrustes",
+    )
+
+    with pytest.raises(ValueError, match="Incompatible shard manifests for 'config_overrides'"):
+        aggregate_workflow_outputs([mcca_dir, procrustes_dir], out_dir=tmp_path / "aggregate")
 
 
 def test_aggregate_workflow_outputs_selects_best_from_observation_diagnostics(tmp_path: Path):

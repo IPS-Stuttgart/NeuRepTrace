@@ -20,6 +20,24 @@ PERCENT_METRICS = {
     "top2_chance",
     "top3_chance",
 }
+VARIANT_CHOICES = ("raw", "temporal_smoothing", "response_window")
+VARIANT_PATHS = {
+    "raw": {
+        "diagnostics": Path("decode/diagnostics"),
+        "summary": Path("decode/time_decode_summary.csv"),
+        "observations": Path("decode/observations.csv"),
+    },
+    "temporal_smoothing": {
+        "diagnostics": Path("decode/temporal_smoothing/diagnostics"),
+        "summary": Path("decode/temporal_smoothing/time_decode_summary.csv"),
+        "observations": Path("decode/temporal_smoothing/observations.csv"),
+    },
+    "response_window": {
+        "diagnostics": Path("decode/response_window/diagnostics"),
+        "summary": Path("decode/response_window/time_decode_summary.csv"),
+        "observations": Path("decode/response_window/observations.csv"),
+    },
+}
 MATCHED_PROVENANCE_COLUMNS = (
     "decoder",
     "backend",
@@ -31,28 +49,66 @@ MATCHED_PROVENANCE_COLUMNS = (
     "class_prior_correction",
     "source_calibration",
     "source_time_selection",
+    "source_time_selection_candidate_times",
+    "source_time_selection_selected_time",
     "alignment_method",
     "alignment_anchor_mode",
     "alignment_anchor_column",
+    "alignment_repetition_cap",
+    "alignment_components",
+    "alignment_times",
+    "alignment_window_mode",
+    "alignment_same_decode_window",
     "alignment_target_projection",
+    "alignment_strict_source_only",
+    "alignment_uses_unlabeled_target_data",
+    "alignment_uses_class_labels",
+    "alignment_target_calibrated",
+    "alignment_target_calibration_per_anchor",
+    "alignment_target_calibration_seed",
+    "alignment_oracle_target_calibrated",
+    "alignment_debug_upper_bound",
+    "alignment_valid_for_benchmark",
+    "alignment_protocol",
     "response_window_combine",
+    "response_window_mode",
     "response_window_times",
+    "response_window_requested_times",
+    "response_window_actual_times",
+    "temporal_smoothing_method",
+    "temporal_smoothing_stay_probability",
+    "temporal_smoothing_fit_window_start",
+    "temporal_smoothing_fit_window_stop",
+    "temporal_smoothing_apply_window_start",
+    "temporal_smoothing_apply_window_stop",
 )
+
+
+def _root_from_quality_path(path: Path) -> Path:
+    for parent in path.parents:
+        if parent.name == "decode":
+            return parent.parent
+    return path.parents[2]
 
 
 def _artifact_root(path: str | Path) -> Path:
     """Return the OpenNeuro aggregate root inside a downloaded artifact directory."""
 
     candidate = Path(path)
-    if (candidate / "decode" / "diagnostics" / "quality_summary.csv").is_file():
+    if (candidate / "decode").is_dir():
         return candidate
-    matches = sorted(candidate.rglob("decode/diagnostics/quality_summary.csv"))
+    patterns = [
+        "decode/diagnostics/quality_summary.csv",
+        "decode/temporal_smoothing/diagnostics/quality_summary.csv",
+        "decode/response_window/diagnostics/quality_summary.csv",
+    ]
+    matches = sorted(match for pattern in patterns for match in candidate.rglob(pattern))
     if matches:
-        return matches[0].parents[2]
+        return _root_from_quality_path(matches[0])
     manifests = sorted(candidate.rglob("run_manifest.json"))
     for manifest in manifests:
         root = manifest.parent
-        if (root / "decode" / "observations.csv").is_file():
+        if any((root / paths["observations"]).is_file() for paths in VARIANT_PATHS.values()):
             return root
     raise FileNotFoundError(f"Could not find an OpenNeuro aggregate artifact root below {candidate}.")
 
@@ -64,8 +120,15 @@ def _read_csv(root: Path, relative_path: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def _ensure_diagnostics(root: Path, fixed_time: float) -> None:
-    diagnostics_dir = root / "decode" / "diagnostics"
+def _variant_paths(variant: str) -> dict[str, Path]:
+    if variant not in VARIANT_PATHS:
+        raise ValueError(f"Unknown OpenNeuro result variant {variant!r}; expected one of {VARIANT_CHOICES}.")
+    return VARIANT_PATHS[variant]
+
+
+def _ensure_diagnostics(root: Path, fixed_time: float, *, variant: str) -> None:
+    paths = _variant_paths(variant)
+    diagnostics_dir = root / paths["diagnostics"]
     required = [
         diagnostics_dir / "quality_summary.csv",
         diagnostics_dir / "per_subject.csv",
@@ -74,8 +137,8 @@ def _ensure_diagnostics(root: Path, fixed_time: float) -> None:
     ]
     if all(path.is_file() for path in required):
         return
-    observations = root / "decode" / "observations.csv"
-    summary = root / "decode" / "time_decode_summary.csv"
+    observations = root / paths["observations"]
+    summary = root / paths["summary"]
     stage_summary = root / "stage_summary.csv"
     write_loso_observation_diagnostics(
         observations,
@@ -150,6 +213,18 @@ def _as_bool_token(value: object) -> bool:
     raise ValueError(f"Cannot parse boolean provenance value {value!r}.")
 
 
+def _provenance_value_token(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    lowered = text.lower()
+    if lowered in {"true", "false", "yes", "no", "on", "off"}:
+        return lowered
+    return text
+
+
 def _provenance_values(run: dict[str, object], column: str) -> list[str]:
     values: list[str] = []
     for table_name in ("observations", "quality"):
@@ -157,9 +232,9 @@ def _provenance_values(run: dict[str, object], column: str) -> list[str]:
         if not isinstance(table, pd.DataFrame) or column not in table.columns:
             continue
         values.extend(
-            value
-            for value in table[column].dropna().astype(str).str.strip().drop_duplicates().tolist()
-            if value
+            token
+            for token in (_provenance_value_token(value) for value in table[column].drop_duplicates().tolist())
+            if token
         )
     return sorted(set(values))
 
@@ -227,16 +302,18 @@ def _fixed_metric_row(quality: pd.DataFrame, time_course: pd.DataFrame, fixed_ti
     return combined
 
 
-def _load_run(root: Path, fixed_time: float) -> dict[str, pd.DataFrame | pd.Series | Path]:
-    _ensure_diagnostics(root, fixed_time)
-    quality = _read_csv(root, "decode/diagnostics/quality_summary.csv")
-    per_subject = _read_csv(root, "decode/diagnostics/per_subject.csv")
-    time_course = _read_csv(root, "decode/diagnostics/time_course_summary.csv")
-    observations = _read_csv(root, "decode/observations.csv")
+def _load_run(root: Path, fixed_time: float, *, variant: str) -> dict[str, pd.DataFrame | pd.Series | Path | str]:
+    paths = _variant_paths(variant)
+    _ensure_diagnostics(root, fixed_time, variant=variant)
+    quality = _read_csv(root, str(paths["diagnostics"] / "quality_summary.csv"))
+    per_subject = _read_csv(root, str(paths["diagnostics"] / "per_subject.csv"))
+    time_course = _read_csv(root, str(paths["diagnostics"] / "time_course_summary.csv"))
+    observations = _read_csv(root, str(paths["observations"]))
     fixed_quality = _fixed_metric_row(quality, time_course, fixed_time)
     fixed_confusion = confusion_matrix(observations, time=fixed_time)
     return {
         "root": root,
+        "variant": variant,
         "quality": quality,
         "fixed_quality": fixed_quality,
         "per_subject": per_subject,
@@ -308,6 +385,7 @@ def _summary_row(real: dict[str, object], shuffle: dict[str, object], fixed_time
         [
             {
                 "fixed_time_requested": float(fixed_time),
+                "result_variant": str(real.get("variant", "")),
                 "fixed_time_real": real_fixed_time,
                 "fixed_time_shuffle": shuffle_fixed_time,
                 "n_subjects_real": int(_float(real_quality, "n_subjects")),
@@ -465,6 +543,7 @@ def _write_markdown(
     lines = [
         f"# {report_label} Real vs Label-Shuffle LOSO Report",
         "",
+        f"Result variant: {summary_row.get('result_variant', 'raw')}.",
         f"Fixed diagnostic time: {_format_value(summary_row['fixed_time_real'])} s real, {_format_value(summary_row['fixed_time_shuffle'])} s shuffle.",
         f"Subjects compared: {int(summary_row['subjects_compared'])}; classes: {int(summary_row['n_classes'])}.",
         "",
@@ -593,13 +672,16 @@ def write_real_shuffle_report(
     out_dir: str | Path,
     fixed_time: float,
     output_prefix: str = "ds006629_real_vs_shuffle",
+    variant: str = "raw",
 ) -> dict[str, Path]:
     """Write CSV and Markdown reports comparing a real-label run to its matched shuffle null."""
 
+    variant = str(variant).strip().lower()
+    _variant_paths(variant)
     real_root = _artifact_root(real_dir)
     shuffle_root = _artifact_root(shuffle_dir)
-    real = _load_run(real_root, fixed_time)
-    shuffle = _load_run(shuffle_root, fixed_time)
+    real = _load_run(real_root, fixed_time, variant=variant)
+    shuffle = _load_run(shuffle_root, fixed_time, variant=variant)
     shuffle_provenance = _validate_shuffle_provenance(real, shuffle)
     _validate_matched_provenance(real, shuffle)
     summary = _summary_row(real, shuffle, fixed_time)
@@ -631,6 +713,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out-dir", type=Path, required=True, help="Output directory for report files.")
     parser.add_argument("--fixed-time", type=float, required=True, help="Primary fixed diagnostic time in seconds.")
     parser.add_argument("--output-prefix", default="ds006629_real_vs_shuffle", help="Filename prefix for report outputs.")
+    parser.add_argument(
+        "--variant",
+        choices=VARIANT_CHOICES,
+        default="raw",
+        help="Result variant to compare.",
+    )
     args = parser.parse_args(argv)
 
     paths = write_real_shuffle_report(
@@ -639,6 +727,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         out_dir=args.out_dir,
         fixed_time=args.fixed_time,
         output_prefix=args.output_prefix,
+        variant=args.variant,
     )
     for label, path in paths.items():
         print(f"Wrote {label}: {path}")

@@ -25,6 +25,10 @@ on:
                 description: "Primary fixed diagnostic time in seconds"
                 required: true
                 default: "0.184"
+            result_variant:
+                description: "Result variant to compare: raw, temporal_smoothing, or response_window"
+                required: true
+                default: "raw"
 
 permissions:
     actions: read
@@ -74,12 +78,14 @@ jobs:
               shell: bash
               env:
                   FIXED_TIME: ${{ inputs.fixed_time }}
+                  RESULT_VARIANT: ${{ inputs.result_variant }}
               run: |
                   set -euo pipefail
                   python -m neureptrace.openneuro_real_shuffle_report \
                     --real-dir downloaded_openneuro_compare/real \
                     --shuffle-dir downloaded_openneuro_compare/shuffle \
                     --fixed-time "$FIXED_TIME" \
+                    --variant "$RESULT_VARIANT" \
                     --out-dir reports/ds006629_real_vs_shuffle \
                     --output-prefix ds006629_real_vs_shuffle
                   test -f reports/ds006629_real_vs_shuffle/ds006629_real_vs_shuffle_summary.csv
