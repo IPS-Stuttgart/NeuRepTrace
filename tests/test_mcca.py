@@ -131,6 +131,15 @@ def test_class_alignment_matrix_uses_explicit_class_order():
         class_alignment_matrix(features, labels, classes=np.array([1, 3]), sample_mode="class_mean")
 
 
+def test_target_class_alignment_matrix_preserves_mixed_label_order():
+    features = np.array([[1.0, 0.0], [0.0, 2.0], [3.0, 0.0], [0.0, 4.0]])
+    labels = np.array([1, "stim-b", 1, "stim-b"], dtype=object)
+
+    aligned = class_alignment_matrix(features, labels, sample_mode="class_mean")
+
+    np.testing.assert_allclose(aligned, [[2.0, 0.0], [0.0, 3.0]])
+
+
 def test_class_alignment_matrices_class_repetition_defaults_to_seeded_random():
     features = {
         "a": np.array([[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]]),

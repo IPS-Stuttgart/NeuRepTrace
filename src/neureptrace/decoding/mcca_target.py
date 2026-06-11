@@ -18,9 +18,11 @@ from neureptrace.decoding.mcca import (
     MCCAModel,
     _class_mean_matrix,
     _class_repetition_matrix,
+    _contains_label,
     _feature_matrix,
     _label_vector,
     _normalize_sample_mode,
+    _ordered_unique_labels,
 )
 from neureptrace.decoding.sampling import DEFAULT_CLASS_LIMIT_SEED, DEFAULT_CLASS_LIMIT_SELECTION
 
@@ -92,7 +94,7 @@ def class_alignment_matrix(
     matrix = _feature_matrix(features, name="features")
     vector = _label_vector(labels, expected_length=matrix.shape[0], name="labels")
     if classes is None:
-        class_order = np.unique(vector)
+        class_order = _ordered_unique_labels(vector)
     else:
         class_order = np.asarray(classes).ravel()
     _check_requested_classes(vector, class_order)
@@ -149,7 +151,7 @@ def _normalize_selected_offsets_by_class(
             raise ValueError("selected_offsets_by_class entries must be one-dimensional.")
         if offsets.size < 1:
             raise ValueError("selected_offsets_by_class entries must not be empty.")
-        class_count = int(np.sum(labels == class_label))
+        class_count = _count_label(labels, class_label)
         if int(np.min(offsets)) < 0 or int(np.max(offsets)) >= class_count:
             raise ValueError(
                 f"selected offsets for class {class_label!r} are outside the target subject's "
@@ -227,13 +229,23 @@ def fit_target_mcca_projection(
 def _check_requested_classes(labels: np.ndarray, classes: np.ndarray) -> None:
     if classes.size == 0:
         raise ValueError("classes must contain at least one label.")
-    missing = [label for label in classes if not np.any(labels == label)]
+    missing = [label for label in classes if not _contains_label(labels, label)]
     if missing:
         raise ValueError(f"classes include labels absent from labels: {missing!r}.")
 
 
 def _minimum_class_count(labels: np.ndarray, classes: np.ndarray) -> int:
-    return min(int(np.sum(labels == class_label)) for class_label in classes)
+    return min(_count_label(labels, class_label) for class_label in classes)
+
+
+def _count_label(labels: Sequence | np.ndarray, class_label: object) -> int:
+    """Count labels using the same robust equality semantics as class lookup."""
+
+    return sum(
+        1
+        for label in np.asarray(labels, dtype=object).reshape(-1)
+        if _contains_label([label], class_label)
+    )
 
 
 def _add_template_mean(transformed: Sequence[Sequence[float]] | np.ndarray, template_mean: Sequence[float] | np.ndarray, *, strict: bool) -> np.ndarray:

@@ -116,6 +116,43 @@ def test_metadata_anchor_values_accept_mixed_hashable_types():
     assert result.metadata["alignment_anchor_rows_dropped"] == 0
 
 
+def test_stimulus_repetition_alignment_accepts_mixed_hashable_anchor_types():
+    train_features = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [1.1, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 1.1, 0.0],
+            [1.2, 0.0, 0.0],
+            [1.3, 0.0, 0.0],
+            [0.0, 1.2, 0.0],
+            [0.0, 1.3, 0.0],
+            [0.9, 0.1, 0.0],
+            [1.0, 0.1, 0.0],
+            [0.1, 0.9, 0.0],
+            [0.1, 1.0, 0.0],
+        ]
+    )
+    train_labels = np.array([0, 0, 1, 1] * 3)
+    train_subjects = np.array(["s0"] * 4 + ["s1"] * 4 + ["s2"] * 4, dtype=object)
+    train_anchors = np.array([1, 1, "stim-b", "stim-b"] * 3, dtype=object)
+
+    result = align_train_test_features(
+        train_features=train_features,
+        train_labels=train_labels,
+        train_subject_ids=train_subjects,
+        train_anchor_values=train_anchors,
+        test_features=train_features[:4],
+        config=source_alignment_config(method="mcca", anchor_mode="stimulus_id_repetition", components=1),
+        compute_source_inner_diagnostics=True,
+    )
+
+    assert result.train_features.shape == (12, 1)
+    assert result.metadata["alignment_common_anchor_count"] == 2
+    assert result.metadata["alignment_repetitions_per_class"] == 2
+    assert np.isfinite(result.diagnostics["source_inner_raw_balanced_accuracy"])
+
+
 def test_strict_alignment_rejects_target_labels():
     with pytest.raises(ValueError, match="target labels"):
         align_train_test_features(
@@ -275,6 +312,9 @@ def test_target_centered_group_projection_uses_unlabeled_target_mean(method):
     assert centered.metadata["alignment_target_projection"] == GROUP_PROJECTION_TARGET_CENTERED
     assert centered.metadata["alignment_strict_source_only"] is False
     assert centered.metadata["alignment_uses_unlabeled_target_data"] is True
+    assert centered.metadata["alignment_valid_for_benchmark"] is False
+    assert centered.metadata["alignment_valid_for_strict_source_only"] is False
+    assert "unlabeled target feature mean" in centered.metadata["alignment_protocol_note"]
     assert centered.diagnostics["uses_unlabeled_target_data"] is True
     assert centered.diagnostics["target_transform_type"] == "source_group_projection_target_centered"
     assert (
@@ -327,6 +367,9 @@ def test_unsupervised_covariance_alignment_uses_no_class_anchors(method, target_
     assert result.metadata["alignment_anchor_value_source"] == "unlabeled_covariance"
     assert result.metadata["alignment_uses_unlabeled_target_data"] is True
     assert result.metadata["alignment_uses_class_labels"] is False
+    assert result.metadata["alignment_valid_for_benchmark"] is False
+    assert result.metadata["alignment_valid_for_strict_source_only"] is False
+    assert "unlabeled target covariance" in result.metadata["alignment_protocol_note"]
     assert result.metadata["alignment_target_labels_used"] is False
     assert result.diagnostics["sample_mode"] == "unlabeled_covariance"
     assert result.diagnostics["uses_unlabeled_target_data"] is True
