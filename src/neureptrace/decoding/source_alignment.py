@@ -63,6 +63,19 @@ DEFAULT_ALIGNMENT_REPETITION_CAP = 16
 DEFAULT_ALIGNMENT_COMPONENTS = 64
 MAX_FULL_COVARIANCE_FEATURES = 256
 MIN_COVARIANCE_EIGENVALUE = 1e-6
+MISSING_ANCHOR_TEXT_VALUES = frozenset(
+    {
+        "",
+        "<na>",
+        "<nat>",
+        "na",
+        "n/a",
+        "nan",
+        "nat",
+        "none",
+        "null",
+    }
+)
 ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "dataset",
     "test_subject",
@@ -147,6 +160,7 @@ ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS = (
     "target_calibration_missing_common_anchor_values_preview",
     "prefit_status",
     "prefit_failure_reason",
+    "prefit_failure_detail",
     "alignment_window_center",
     "alignment_window_size",
     "decode_window_center",
@@ -923,11 +937,18 @@ def source_alignment_anchor_availability(
         row["prefit_failure_reason"] = ";".join(failures)
         return row
 
-    train_anchor_vector = _anchor_vector(
-        train_anchor_values,
-        expected_length=train_vector.shape[0],
-        name="train_anchor_values",
-    )
+    try:
+        train_anchor_vector = _anchor_vector(
+            train_anchor_values,
+            expected_length=train_vector.shape[0],
+            name="train_anchor_values",
+        )
+    except ValueError as exc:
+        failures.append("invalid_train_anchor_values")
+        row["prefit_status"] = "likely_fit_failure"
+        row["prefit_failure_reason"] = ";".join(dict.fromkeys(failures))
+        row["prefit_failure_detail"] = str(exc)
+        return row
     if len(subject_ids) < 2:
         failures.append("strict_source_alignment_requires_at_least_two_source_subjects")
     anchors_by_subject = {subject_id: train_anchor_vector[subject_vector == subject_id] for subject_id in subject_ids}
@@ -1414,6 +1435,8 @@ def _is_missing_anchor_value(value: Any) -> bool:
 
     if value is None:
         return True
+    if isinstance(value, str):
+        return value.strip().lower() in MISSING_ANCHOR_TEXT_VALUES
     if value.__class__.__name__ in {"NAType", "NaTType"}:
         return True
     try:
@@ -1488,7 +1511,11 @@ def _update_projection_anchor_availability(
         return
     vector = np.asarray(projection_anchors, dtype=object).reshape(-1)
     row[rows_key] = int(vector.shape[0])
-    available = _ordered_unique_anchor_values(vector)
+    missing_mask = np.asarray([_is_missing_anchor_value(value) for value in vector], dtype=bool)
+    if np.any(missing_mask):
+        failures.append(f"{prefix}_projection_contains_missing_anchor_values")
+    valid_vector = vector[~missing_mask]
+    available = _ordered_unique_anchor_values(valid_vector)
     row[values_key] = int(available.size)
     missing = np.asarray([anchor for anchor in common_anchors if not _contains_anchor_value(available, anchor)], dtype=object)
     row[missing_count_key] = int(missing.size)
