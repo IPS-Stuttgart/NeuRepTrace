@@ -270,9 +270,21 @@ def run_time_resolved_decode(
         source_metric_frames: list[pd.DataFrame] = []
         alignment_diagnostic_frames: list[pd.DataFrame] = []
         alignment_anchor_availability_frames: list[pd.DataFrame] = []
-        for source_decoder in source_decoder_requests:
-            source_out = tmp_dir / f"{normalize_decoder_name(source_decoder)}_time_decode.csv"
-            source_observations = tmp_dir / f"{normalize_decoder_name(source_decoder)}_observations.csv"
+        for source_index, source_decoder in enumerate(source_decoder_requests):
+            normalized_source_decoder = normalize_decoder_name(source_decoder)
+
+            # Keep each source decoder's sidecar files isolated.  The underlying
+            # fold-local decoder writes alignment diagnostics to ``out_path.parent``
+            # using fixed names such as ``alignment_diagnostics.csv``.  Reusing the
+            # same temporary directory for every source decoder can therefore make a
+            # later decoder pick up stale alignment sidecars from an earlier decoder
+            # when a sidecar is missing or not rewritten.  Isolating by decoder keeps
+            # alignment diagnostics and anchor-availability rows one-to-one with the
+            # source decoder that produced them.
+            source_dir = tmp_dir / f"{source_index:02d}_{normalized_source_decoder}"
+            source_dir.mkdir(parents=True, exist_ok=False)
+            source_out = source_dir / f"{normalized_source_decoder}_time_decode.csv"
+            source_observations = source_dir / f"{normalized_source_decoder}_observations.csv"
             source_metric_frames.append(
                 _run_time_resolved_decode(
                     epochs_path=epochs_path,
@@ -325,10 +337,10 @@ def run_time_resolved_decode(
                     label_shuffle_seed=label_shuffle_seed,
                 )
             )
-            alignment_diagnostics = tmp_dir / "alignment_diagnostics.csv"
+            alignment_diagnostics = source_dir / "alignment_diagnostics.csv"
             if alignment_enabled and alignment_diagnostics.exists():
                 alignment_diagnostic_frames.append(pd.read_csv(alignment_diagnostics))
-            alignment_anchor_availability = tmp_dir / "alignment_anchor_availability.csv"
+            alignment_anchor_availability = source_dir / "alignment_anchor_availability.csv"
             if alignment_enabled and alignment_anchor_availability.exists():
                 alignment_anchor_availability_frames.append(pd.read_csv(alignment_anchor_availability))
             source_observation_paths.append(source_observations)

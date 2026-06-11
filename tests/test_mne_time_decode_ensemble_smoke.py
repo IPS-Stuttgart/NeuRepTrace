@@ -348,3 +348,115 @@ def test_logistic_svm_ensemble_marks_oracle_alignment_nonbenchmark(tmp_path, mon
     assert results["alignment_debug_upper_bound"].unique().tolist() == [True]
     assert results["alignment_valid_for_benchmark"].unique().tolist() == [False]
     assert results["alignment_protocol_note"].unique().tolist() == ["debug upper bound only; not valid for benchmark"]
+
+
+def test_logistic_svm_ensemble_does_not_reuse_stale_alignment_sidecars(tmp_path, monkeypatch):
+    """Alignment diagnostics from one source decoder must not leak to another.
+
+    The ensemble wrapper asks the fold-local decoder to run once per source
+    decoder.  Fold-local alignment diagnostics are written to fixed sidecar file
+    names relative to the source decoder's ``out_path.parent``.  This regression
+    test intentionally writes sidecars only for the first source decoder.  The
+    final ensemble diagnostics should contain exactly that first source decoder's
+    rows; stale files from a shared temporary directory must not be read for the
+    later source decoders.
+    """
+
+    def fake_source_decode(**kwargs):
+        decoder = kwargs["decoder"]
+        rows = [
+            {
+                "subject": "sub-01",
+                "fold": 0,
+                "decoder": decoder,
+                "emission_mode": "calibrated",
+                "time": 0.184,
+                "window_start": 0.134,
+                "window_stop": 0.234,
+                "sample_index": index,
+                "sequence_id": index,
+                "true_label": label,
+                "true_class": f"class-{label}",
+                "predicted_label": label,
+                "predicted_class": f"class-{label}",
+                "probability_true_class": 0.8,
+                "confidence": 0.8,
+                "class_0": "class-0",
+                "class_1": "class-1",
+                "prob_class_0": 0.8 if label == 0 else 0.2,
+                "prob_class_1": 0.2 if label == 0 else 0.8,
+            }
+            for index, label in enumerate((0, 1))
+        ]
+        kwargs["observation_out_path"].parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(kwargs["observation_out_path"], index=False)
+
+        frame = pd.DataFrame(
+            [
+                {
+                    "fold": 0,
+                    "decoder": decoder,
+                    "emission_mode": "calibrated",
+                    "time": 0.184,
+                    "window_start": 0.134,
+                    "window_stop": 0.234,
+                    "accuracy": 1.0,
+                    "balanced_accuracy": 1.0,
+                    "top2_accuracy": 1.0,
+                    "top3_accuracy": 1.0,
+                    "log_loss": 0.2,
+                    "brier": 0.1,
+                    "ece": 0.0,
+                    "n_test": 2,
+                }
+            ]
+        )
+        kwargs["out_path"].parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(kwargs["out_path"], index=False)
+
+        if decoder == "multinomial-logistic-weighted":
+            pd.DataFrame(
+                [
+                    {
+                        "dataset": "stale-sidecar-demo",
+                        "test_subject": decoder,
+                        "alignment_method": kwargs["alignment_method"],
+                        "sample_mode": kwargs["alignment_anchor_mode"],
+                        "n_source_subjects": 2,
+                        "n_classes": 2,
+                        "n_alignment_rows": 4,
+                        "requested_components": kwargs["alignment_components"],
+                        "actual_components": 4,
+                        "feature_dim": 8,
+                        "decode_feature_dim": 4,
+                        "uses_channel_projection_collapse": False,
+                        "alignment_dimensionality_reduction": True,
+                        "source_inner_raw_balanced_accuracy": 0.5,
+                        "source_inner_aligned_balanced_accuracy": 0.7,
+                        "source_inner_aligned_minus_raw": 0.2,
+                        "source_inner_validation_type": "strict_source_loso_nearest_centroid_group_projection",
+                        "target_transform_type": "source_group_projection",
+                    }
+                ]
+            ).to_csv(kwargs["out_path"].parent / "alignment_diagnostics.csv", index=False)
+
+        return frame
+
+    monkeypatch.setattr("neureptrace.mne_time_decode_ensemble._run_time_resolved_decode", fake_source_decode)
+
+    run_time_resolved_decode(
+        epochs_path=tmp_path / "dummy-epo.fif",
+        dataset_name="stale-sidecar-demo",
+        label_column="condition",
+        out_path=tmp_path / "ensemble.csv",
+        observation_out_path=tmp_path / "observations.csv",
+        decoder="logistic-svm-ensemble",
+        emission_mode="calibrated",
+        alignment_method="mcca",
+        alignment_anchor_mode="class_repetition",
+        ensemble_source_decoders=("multinomial-logistic-weighted", "linear_svm", "shrinkage_lda"),
+        ensemble_baseline_window=None,
+    )
+
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["test_subject"].tolist() == ["multinomial-logistic-weighted"]

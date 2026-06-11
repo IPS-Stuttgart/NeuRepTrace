@@ -517,7 +517,7 @@ def _rescale_group_projection(matrix: np.ndarray, projections, matrices) -> np.n
 
 
 def _class_mean_matrix(features: np.ndarray, labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
-    return np.vstack([np.mean(features[labels == class_label], axis=0) for class_label in classes])
+    return np.vstack([np.mean(features[_label_mask(labels, class_label)], axis=0) for class_label in classes])
 
 
 def _class_repetition_matrix(
@@ -532,7 +532,7 @@ def _class_repetition_matrix(
 ) -> np.ndarray:
     rows = []
     for class_position, class_label in enumerate(classes):
-        class_features = features[labels == class_label]
+        class_features = features[_label_mask(labels, class_label)]
         if class_features.shape[0] < repetitions:
             raise ValueError(f"Class {class_label!r} has only {class_features.shape[0]} repetitions, need {repetitions}.")
         if selected_offsets_by_class is None:
@@ -567,7 +567,7 @@ def _common_repetition_offsets(
 
     offsets = {}
     for class_position, class_label in enumerate(classes):
-        available = min(int(np.sum(labels == class_label)) for labels in labels_by_subject.values())
+        available = min(_count_label(labels, class_label) for labels in labels_by_subject.values())
         if available < repetitions:
             raise ValueError(f"Class {class_label!r} has only {available} common repetitions, need {repetitions}.")
         offsets[class_position] = select_class_limited_indices(
@@ -615,6 +615,14 @@ def _contains_label(values: Sequence | np.ndarray, target: object) -> bool:
     return any(_labels_equal(value, target) for value in values)
 
 
+def _label_mask(labels: Sequence | np.ndarray, target: object) -> np.ndarray:
+    return np.asarray([_labels_equal(label, target) for label in np.asarray(labels, dtype=object).reshape(-1)], dtype=bool)
+
+
+def _count_label(labels: Sequence | np.ndarray, target: object) -> int:
+    return int(np.sum(_label_mask(labels, target)))
+
+
 def _labels_equal(left: object, right: object) -> bool:
     try:
         equal = left == right
@@ -630,7 +638,7 @@ def _common_repetition_count(labels_by_subject: Mapping[Hashable, np.ndarray], c
     counts = []
     for subject_id, labels in labels_by_subject.items():
         for class_label in classes:
-            count = int(np.sum(labels == class_label))
+            count = _count_label(labels, class_label)
             if count < 1:
                 raise ValueError(f"Subject {subject_id!r} has no samples for class {class_label!r}.")
             counts.append(count)
