@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from neureptrace.decoding.hyperalignment_initialization import fit_class_hyperalignment
 from neureptrace.decoding.mcca import fit_class_mcca
 from neureptrace.decoding.mcca_target import class_alignment_matrix, fit_target_mcca_projection
 from neureptrace.decoding.source_alignment import (
@@ -195,6 +196,8 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert result.diagnostics["decode_feature_dim"] == 2
     assert result.diagnostics["uses_channel_projection_collapse"] is False
     assert result.diagnostics["alignment_dimensionality_reduction"] is True
+    assert "class_mean" in result.diagnostics["alignment_low_rank_warning"]
+    assert result.metadata["alignment_low_rank_warning"] == result.diagnostics["alignment_low_rank_warning"]
     assert np.isfinite(result.diagnostics["anchor_row_correlation_before"])
     assert np.isfinite(result.diagnostics["anchor_row_correlation_after"])
     assert np.isfinite(result.diagnostics["source_inner_decoding_before_alignment"])
@@ -240,7 +243,7 @@ def test_target_centered_group_projection_uses_unlabeled_target_mean(method):
     assert centered.diagnostics["target_transform_type"] == "source_group_projection_target_centered"
     assert (
         centered.diagnostics["source_inner_validation_type"]
-        == "strict_source_loso_nearest_centroid_target_centered_group_projection"
+        == "strict_source_loso_nearest_centroid_group_projection_target_centered"
     )
     assert not np.allclose(strict.test_features, centered.test_features)
 
@@ -518,6 +521,71 @@ def test_target_class_repetition_alignment_reuses_source_offsets():
             n_repetitions_per_class=2,
             selected_offsets_by_class={0: np.array([1, 9]), 1: np.array([0, 2])},
         )
+
+
+def test_class_repetition_alignment_uses_shared_common_offsets_for_unequal_counts():
+    def make_subject(counts):
+        rows = []
+        labels = []
+        for class_label, count in enumerate(counts):
+            for repetition in range(count):
+                rows.append([100.0 * class_label + repetition, 10.0 * class_label + repetition])
+                labels.append(class_label)
+        return np.asarray(rows, dtype=float), np.asarray(labels)
+
+    features_by_subject = {}
+    labels_by_subject = {}
+    for subject, counts in {"s0": (5, 6), "s1": (7, 5), "s2": (6, 8)}.items():
+        features_by_subject[subject], labels_by_subject[subject] = make_subject(counts)
+
+    for fitter in (fit_class_mcca, fit_class_hyperalignment):
+        _model, alignment = fitter(
+            features_by_subject,
+            labels_by_subject,
+            sample_mode="class_repetition",
+            n_repetitions_per_class=3,
+            repetition_seed=7,
+            n_components=1,
+        )
+        offsets_by_class = alignment.selected_offsets_by_class
+        assert offsets_by_class is not None
+
+        for subject_id, features in features_by_subject.items():
+            labels = labels_by_subject[subject_id]
+            expected = []
+            for class_position, class_label in enumerate(alignment.classes):
+                class_features = features[labels == class_label]
+                offsets = offsets_by_class[class_position]
+                assert int(np.max(offsets)) < min(
+                    int(np.sum(subject_labels == class_label))
+                    for subject_labels in labels_by_subject.values()
+                )
+                expected.extend(class_features[offsets])
+            np.testing.assert_allclose(alignment.aligned_by_subject[subject_id], np.vstack(expected))
+
+
+def test_oracle_class_repetition_alignment_runs_end_to_end_with_shared_offsets():
+    features, labels, subjects = _rotated_subject_features(seed=61)
+    source_mask = subjects != "s2"
+    target_mask = subjects == "s2"
+
+    result = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        test_features=features[target_mask],
+        target_labels=labels[target_mask],
+        config=source_alignment_config(
+            method="mcca",
+            anchor_mode="class_repetition",
+            repetition_cap=2,
+            components=2,
+            target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+        ),
+    )
+
+    assert result.metadata["alignment_target_alignment_rows"] == 6
+    assert result.test_features.shape[0] == int(np.sum(target_mask))
 
 
 @pytest.mark.parametrize(

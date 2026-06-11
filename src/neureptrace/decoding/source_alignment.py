@@ -82,6 +82,7 @@ ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "decode_window_size",
     "uses_channel_projection_collapse",
     "alignment_dimensionality_reduction",
+    "alignment_low_rank_warning",
     "anchor_row_correlation_before",
     "anchor_row_correlation_after",
     "source_inner_decoding_before_alignment",
@@ -608,6 +609,7 @@ def align_train_test_features(
                 "alignment_repetitions_per_class": "",
                 "alignment_target_alignment_rows": "",
                 "alignment_target_projection_fit": "",
+                "alignment_low_rank_warning": "",
                 "alignment_target_labels_used": False,
                 "alignment_target_anchor_values_used": False,
             },
@@ -657,6 +659,7 @@ def align_train_test_features(
             "decode_feature_dim": int(test_aligned.shape[1]),
             "uses_channel_projection_collapse": False,
             "alignment_dimensionality_reduction": bool(test_aligned.shape[1] < train_matrix.shape[1]),
+            "alignment_low_rank_warning": "",
             "anchor_row_correlation_before": "",
             "anchor_row_correlation_after": "",
             "source_inner_decoding_before_alignment": _finite_or_blank(source_inner_raw_ba),
@@ -689,6 +692,7 @@ def align_train_test_features(
                 "alignment_repetitions_per_class": "",
                 "alignment_target_alignment_rows": int(test_matrix.shape[0]),
                 "alignment_target_projection_fit": covariance_metadata["target_transform_type"],
+                "alignment_low_rank_warning": "",
                 "alignment_target_labels_used": False,
                 "alignment_target_anchor_values_used": False,
                 **covariance_metadata,
@@ -791,6 +795,7 @@ def align_train_test_features(
         if np.isfinite(source_inner_aligned_ba) and np.isfinite(source_inner_raw_ba)
         else float("nan")
     )
+    low_rank_warning = _alignment_low_rank_warning(alignment)
     diagnostics = {
         "alignment_method": config.method,
         "sample_mode": sample_mode,
@@ -804,6 +809,7 @@ def align_train_test_features(
         "decode_feature_dim": int(transformed_test.shape[1]),
         "uses_channel_projection_collapse": False,
         "alignment_dimensionality_reduction": bool(transformed_test.shape[1] < train_matrix.shape[1]),
+        "alignment_low_rank_warning": low_rank_warning,
         "anchor_row_correlation_before": _finite_or_blank(_mean_pairwise_anchor_row_correlation(fit.anchor_before)),
         "anchor_row_correlation_after": _finite_or_blank(_mean_pairwise_anchor_row_correlation(fit.anchor_after)),
         "source_inner_decoding_before_alignment": _finite_or_blank(source_inner_raw_ba),
@@ -812,7 +818,7 @@ def align_train_test_features(
         "source_inner_aligned_balanced_accuracy": _finite_or_blank(source_inner_aligned_ba),
         "source_inner_aligned_minus_raw": _finite_or_blank(source_inner_gain),
         "source_inner_validation_type": (
-            "strict_source_loso_nearest_centroid_target_centered_group_projection"
+            "strict_source_loso_nearest_centroid_group_projection_target_centered"
             if compute_source_inner_diagnostics and config.target_centered_group_projection
             else "strict_source_loso_nearest_centroid_group_projection"
             if compute_source_inner_diagnostics
@@ -838,6 +844,7 @@ def align_train_test_features(
             "alignment_repetitions_per_class": "" if alignment.n_repetitions_per_class is None else int(alignment.n_repetitions_per_class),
             "alignment_target_alignment_rows": target_alignment_rows,
             "alignment_target_projection_fit": target_projection_fit,
+            "alignment_low_rank_warning": low_rank_warning,
             "alignment_target_labels_used": bool(
                 (config.oracle_target_calibrated and target_labels is not None)
                 or (config.target_calibrated and target_calibration_labels is not None)
@@ -1306,6 +1313,27 @@ def _alignment_sample_mode(anchor_mode: str) -> str:
     if anchor_mode in {"class_repetition", "stimulus_id_repetition"}:
         return "class_repetition"
     return "class_mean"
+
+
+def _alignment_low_rank_warning(alignment: Any) -> str:
+    """Return a human-readable warning for alignment fits with weak row rank."""
+
+    warning = getattr(alignment, "low_rank_warning", None)
+    if warning:
+        return str(warning)
+    sample_mode = str(getattr(alignment, "sample_mode", ""))
+    classes = np.asarray(getattr(alignment, "classes", []), dtype=object).reshape(-1)
+    try:
+        n_rows = int(getattr(alignment, "n_alignment_rows", classes.size))
+    except (TypeError, ValueError):
+        n_rows = int(classes.size)
+    if sample_mode == "class_mean" and classes.size <= 3:
+        return (
+            f"class_mean alignment has only {classes.size} anchors; after centering, "
+            f"at most {max(n_rows - 1, 0)} common-space components are identifiable. "
+            "Use richer anchors before concluding alignment is ineffective."
+        )
+    return ""
 
 
 def _anchor_vector(values: Sequence[Any] | np.ndarray | None, *, expected_length: int, name: str) -> np.ndarray:
