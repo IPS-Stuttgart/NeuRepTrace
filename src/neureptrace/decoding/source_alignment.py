@@ -105,6 +105,7 @@ ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "alignment_oracle_target_calibrated",
     "alignment_debug_upper_bound",
     "alignment_valid_for_benchmark",
+    "alignment_valid_for_strict_source_only",
     "alignment_protocol",
     "alignment_protocol_note",
 )
@@ -196,6 +197,8 @@ class SourceAlignmentConfig:
         target_calibrated = self.target_calibrated
         unsupervised = _uses_unlabeled_covariance_alignment(self.method)
         target_centered = self.target_centered_group_projection
+        uses_unlabeled_target = bool(unsupervised or target_centered)
+        valid_for_strict_source_only = bool(not oracle and not target_calibrated and not uses_unlabeled_target)
         return {
             "alignment_method": self.method,
             "alignment_anchor_mode": self.anchor_mode,
@@ -213,7 +216,7 @@ class SourceAlignmentConfig:
             "alignment_strict_source_only": bool(
                 self.enabled and not oracle and not target_calibrated and not unsupervised and not target_centered
             ),
-            "alignment_uses_unlabeled_target_data": bool(unsupervised or target_centered),
+            "alignment_uses_unlabeled_target_data": uses_unlabeled_target,
             "alignment_uses_class_labels": bool(
                 self.method in SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS
                 and self.anchor_mode in SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES
@@ -223,7 +226,8 @@ class SourceAlignmentConfig:
             "alignment_target_calibration_seed": int(self.target_calibration_seed),
             "alignment_oracle_target_calibrated": bool(oracle),
             "alignment_debug_upper_bound": bool(oracle),
-            "alignment_valid_for_benchmark": bool(not oracle and not target_calibrated),
+            "alignment_valid_for_benchmark": valid_for_strict_source_only,
+            "alignment_valid_for_strict_source_only": valid_for_strict_source_only,
             "alignment_protocol": (
                 ORACLE_TARGET_CALIBRATED_ALIGNMENT
                 if oracle
@@ -240,6 +244,8 @@ class SourceAlignmentConfig:
                 if oracle
                 else "uses disjoint target calibration rows; not valid for strict source-only benchmark"
                 if target_calibrated
+                else "uses unlabeled target covariance; report separately from strict source-only alignment"
+                if unsupervised
                 else "uses unlabeled target feature mean; report separately from strict source-only alignment"
                 if target_centered
                 else ""
@@ -995,11 +1001,11 @@ def _target_alignment_matrix(
     labels = np.asarray(labels).reshape(-1)
     if labels.shape[0] != features.shape[0]:
         raise ValueError("target alignment anchors must have the same row count as target features.")
-    missing = [class_label for class_label in classes if not np.any(labels == class_label)]
+    missing = [class_label for class_label in classes if not np.any(_anchor_mask(labels, class_label))]
     if missing:
         raise ValueError(f"Target subject is missing alignment anchors: {missing!r}.")
     if _alignment_sample_mode(config.anchor_mode) == "class_mean":
-        return np.vstack([np.mean(features[labels == class_label], axis=0) for class_label in classes])
+        return np.vstack([np.mean(features[_anchor_mask(labels, class_label)], axis=0) for class_label in classes])
 
     if n_repetitions_per_class is None:
         raise ValueError("class_repetition oracle target alignment requires a repetition count.")
@@ -1012,7 +1018,7 @@ def _target_alignment_matrix(
     )
     rows = []
     for class_position, class_label in enumerate(classes):
-        class_features = features[labels == class_label]
+        class_features = features[_anchor_mask(labels, class_label)]
         if class_features.shape[0] < repetitions:
             raise ValueError(
                 f"Target class {class_label!r} has only {class_features.shape[0]} repetitions, "
@@ -1056,7 +1062,7 @@ def _normalize_target_repetition_offsets(
                 "selected_offsets_by_class entries must match n_repetitions_per_class: "
                 f"{offsets.size} != {n_repetitions_per_class}."
             )
-        class_count = int(np.sum(labels == class_label))
+        class_count = _count_anchor_value(labels, class_label)
         if offsets.size and (int(np.min(offsets)) < 0 or int(np.max(offsets)) >= class_count):
             raise ValueError(
                 f"selected offsets for class {class_label!r} are outside the target subject's available repetitions."
@@ -1232,13 +1238,13 @@ def _effective_repetitions_per_class(
     if sample_mode != "class_repetition":
         return None
     subject_ids = tuple(labels_by_subject)
-    first_classes = np.unique(labels_by_subject[subject_ids[0]])
+    first_classes = _ordered_unique_anchor_values(labels_by_subject[subject_ids[0]])
     counts = []
     for subject_id in subject_ids:
-        classes = np.unique(labels_by_subject[subject_id])
-        if not np.array_equal(first_classes, classes):
+        classes = _ordered_unique_anchor_values(labels_by_subject[subject_id])
+        if not _same_anchor_value_set(first_classes, classes):
             raise ValueError(f"Subject {subject_id!r} does not contain the common alignment classes.")
-        counts.extend(int(np.sum(labels_by_subject[subject_id] == class_label)) for class_label in first_classes)
+        counts.extend(_count_anchor_value(labels_by_subject[subject_id], class_label) for class_label in first_classes)
     available = min(counts)
     if available < 1:
         raise ValueError("Every source subject must have at least one sample per alignment class.")
@@ -1323,6 +1329,27 @@ def _ordered_unique_anchor_values(values: Sequence[Any] | np.ndarray) -> np.ndar
 
 def _contains_anchor_value(values: Sequence[Any] | np.ndarray, target: object) -> bool:
     return any(_anchor_values_equal(value, target) for value in values)
+
+
+def _anchor_mask(values: Sequence[Any] | np.ndarray, target: object) -> np.ndarray:
+    return np.asarray(
+        [_anchor_values_equal(value, target) for value in np.asarray(values, dtype=object).reshape(-1)],
+        dtype=bool,
+    )
+
+
+def _count_anchor_value(values: Sequence[Any] | np.ndarray, target: object) -> int:
+    return int(np.sum(_anchor_mask(values, target)))
+
+
+def _same_anchor_value_set(left: Sequence[Any] | np.ndarray, right: Sequence[Any] | np.ndarray) -> bool:
+    left_values = np.asarray(left, dtype=object).reshape(-1)
+    right_values = np.asarray(right, dtype=object).reshape(-1)
+    if left_values.size != right_values.size:
+        return False
+    return all(_contains_anchor_value(right_values, value) for value in left_values) and all(
+        _contains_anchor_value(left_values, value) for value in right_values
+    )
 
 
 def _anchor_values_equal(left: object, right: object) -> bool:
@@ -1618,21 +1645,21 @@ def _source_inner_unsupervised_loso_scores(
 
 def _nearest_centroid_predict(train_features: np.ndarray, train_labels: np.ndarray, test_features: np.ndarray) -> np.ndarray:
     labels = np.asarray(train_labels).reshape(-1)
-    classes = np.unique(labels)
+    classes = _ordered_unique_anchor_values(labels)
     if len(classes) < 2:
         return np.asarray([], dtype=object)
-    centroids = np.vstack([np.mean(train_features[labels == class_label], axis=0) for class_label in classes])
+    centroids = np.vstack([np.mean(train_features[_anchor_mask(labels, class_label)], axis=0) for class_label in classes])
     distances = np.sum((test_features[:, None, :] - centroids[None, :, :]) ** 2, axis=2)
     return np.asarray(classes, dtype=object)[distances.argmin(axis=1)]
 
 
 def _balanced_accuracy(labels: np.ndarray, predictions: np.ndarray) -> float:
     recalls: list[float] = []
-    for class_label in np.unique(labels):
-        mask = labels == class_label
+    for class_label in _ordered_unique_anchor_values(labels):
+        mask = _anchor_mask(labels, class_label)
         if not np.any(mask):
             continue
-        recalls.append(float(np.mean(predictions[mask] == class_label)))
+        recalls.append(float(np.mean(_anchor_mask(predictions[mask], class_label))))
     return float(np.mean(recalls)) if recalls else float("nan")
 
 
