@@ -598,7 +598,9 @@ def _ordered_unique_labels(labels: Sequence | np.ndarray) -> np.ndarray:
     for value in values:
         if not _contains_label(unique, value):
             unique.append(value)
-    return np.asarray(unique, dtype=object)
+    out = np.empty(len(unique), dtype=object)
+    out[:] = unique
+    return out
 
 
 def _same_label_set(left: Sequence | np.ndarray, right: Sequence | np.ndarray) -> bool:
