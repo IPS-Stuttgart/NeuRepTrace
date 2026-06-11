@@ -14,6 +14,60 @@ from neureptrace.mne_time_decode_ensemble import (
 from neureptrace.observation_ensemble import ensemble_probability_observations
 
 
+def _write_calibrated_source_decode_outputs(kwargs):
+    decoder = kwargs["decoder"]
+    rows = [
+        {
+            "subject": "sub-01",
+            "fold": 0,
+            "decoder": decoder,
+            "emission_mode": "calibrated",
+            "time": 0.184,
+            "window_start": 0.134,
+            "window_stop": 0.234,
+            "sample_index": index,
+            "sequence_id": index,
+            "true_label": label,
+            "true_class": f"class-{label}",
+            "predicted_label": label,
+            "predicted_class": f"class-{label}",
+            "probability_true_class": 0.8,
+            "confidence": 0.8,
+            "class_0": "class-0",
+            "class_1": "class-1",
+            "prob_class_0": 0.8 if label == 0 else 0.2,
+            "prob_class_1": 0.2 if label == 0 else 0.8,
+        }
+        for index, label in enumerate((0, 1))
+    ]
+    kwargs["observation_out_path"].parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(kwargs["observation_out_path"], index=False)
+
+    frame = pd.DataFrame(
+        [
+            {
+                "fold": 0,
+                "decoder": decoder,
+                "emission_mode": "calibrated",
+                "time": 0.184,
+                "window_start": 0.134,
+                "window_stop": 0.234,
+                "accuracy": 1.0,
+                "balanced_accuracy": 1.0,
+                "top2_accuracy": 1.0,
+                "top3_accuracy": 1.0,
+                "log_loss": 0.2,
+                "brier": 0.1,
+                "ece": 0.0,
+                "n_test": 2,
+            }
+        ]
+    )
+    kwargs["out_path"].parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(kwargs["out_path"], index=False)
+    return frame
+
+
 def test_logistic_svm_ensemble_aliases_are_exposed():
     assert "logistic-svm-ensemble" in ENSEMBLE_DECODER_CLI_CHOICES
     assert normalize_time_decode_decoder_name("calibrated-logistic-linear-svm-ensemble") == ENSEMBLE_DECODER
@@ -279,56 +333,7 @@ def test_logistic_svm_ensemble_passes_window_controls_to_source_decoders(tmp_pat
 
 def test_logistic_svm_ensemble_marks_oracle_alignment_nonbenchmark(tmp_path, monkeypatch):
     def fake_source_decode(**kwargs):
-        decoder = kwargs["decoder"]
-        rows = [
-            {
-                "subject": "sub-01",
-                "fold": 0,
-                "decoder": decoder,
-                "emission_mode": "calibrated",
-                "time": 0.184,
-                "window_start": 0.134,
-                "window_stop": 0.234,
-                "sample_index": index,
-                "sequence_id": index,
-                "true_label": label,
-                "true_class": f"class-{label}",
-                "predicted_label": label,
-                "predicted_class": f"class-{label}",
-                "probability_true_class": 0.8,
-                "confidence": 0.8,
-                "class_0": "class-0",
-                "class_1": "class-1",
-                "prob_class_0": 0.8 if label == 0 else 0.2,
-                "prob_class_1": 0.2 if label == 0 else 0.8,
-            }
-            for index, label in enumerate((0, 1))
-        ]
-        kwargs["observation_out_path"].parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(rows).to_csv(kwargs["observation_out_path"], index=False)
-        frame = pd.DataFrame(
-            [
-                {
-                    "fold": 0,
-                    "decoder": decoder,
-                    "emission_mode": "calibrated",
-                    "time": 0.184,
-                    "window_start": 0.134,
-                    "window_stop": 0.234,
-                    "accuracy": 1.0,
-                    "balanced_accuracy": 1.0,
-                    "top2_accuracy": 1.0,
-                    "top3_accuracy": 1.0,
-                    "log_loss": 0.2,
-                    "brier": 0.1,
-                    "ece": 0.0,
-                    "n_test": 2,
-                }
-            ]
-        )
-        kwargs["out_path"].parent.mkdir(parents=True, exist_ok=True)
-        frame.to_csv(kwargs["out_path"], index=False)
-        return frame
+        return _write_calibrated_source_decode_outputs(kwargs)
 
     monkeypatch.setattr("neureptrace.mne_time_decode_ensemble._run_time_resolved_decode", fake_source_decode)
 
@@ -364,55 +369,7 @@ def test_logistic_svm_ensemble_does_not_reuse_stale_alignment_sidecars(tmp_path,
 
     def fake_source_decode(**kwargs):
         decoder = kwargs["decoder"]
-        rows = [
-            {
-                "subject": "sub-01",
-                "fold": 0,
-                "decoder": decoder,
-                "emission_mode": "calibrated",
-                "time": 0.184,
-                "window_start": 0.134,
-                "window_stop": 0.234,
-                "sample_index": index,
-                "sequence_id": index,
-                "true_label": label,
-                "true_class": f"class-{label}",
-                "predicted_label": label,
-                "predicted_class": f"class-{label}",
-                "probability_true_class": 0.8,
-                "confidence": 0.8,
-                "class_0": "class-0",
-                "class_1": "class-1",
-                "prob_class_0": 0.8 if label == 0 else 0.2,
-                "prob_class_1": 0.2 if label == 0 else 0.8,
-            }
-            for index, label in enumerate((0, 1))
-        ]
-        kwargs["observation_out_path"].parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(rows).to_csv(kwargs["observation_out_path"], index=False)
-
-        frame = pd.DataFrame(
-            [
-                {
-                    "fold": 0,
-                    "decoder": decoder,
-                    "emission_mode": "calibrated",
-                    "time": 0.184,
-                    "window_start": 0.134,
-                    "window_stop": 0.234,
-                    "accuracy": 1.0,
-                    "balanced_accuracy": 1.0,
-                    "top2_accuracy": 1.0,
-                    "top3_accuracy": 1.0,
-                    "log_loss": 0.2,
-                    "brier": 0.1,
-                    "ece": 0.0,
-                    "n_test": 2,
-                }
-            ]
-        )
-        kwargs["out_path"].parent.mkdir(parents=True, exist_ok=True)
-        frame.to_csv(kwargs["out_path"], index=False)
+        frame = _write_calibrated_source_decode_outputs(kwargs)
 
         if decoder == "multinomial-logistic-weighted":
             pd.DataFrame(
