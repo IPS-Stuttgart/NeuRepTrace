@@ -409,7 +409,7 @@ def _numerical_matrix_rank(matrix: np.ndarray, *, rank_tolerance: float) -> int:
 
 
 def _class_mean_matrix(features: np.ndarray, labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
-    return np.vstack([np.mean(features[labels == class_label], axis=0) for class_label in classes])
+    return np.vstack([np.mean(features[_label_mask(labels, class_label)], axis=0) for class_label in classes])
 
 
 def _class_repetition_matrix(
@@ -424,7 +424,7 @@ def _class_repetition_matrix(
 ) -> np.ndarray:
     rows = []
     for class_position, class_label in enumerate(classes):
-        class_features = features[labels == class_label]
+        class_features = features[_label_mask(labels, class_label)]
         if class_features.shape[0] < repetitions:
             raise ValueError(f"Class {class_label!r} has only {class_features.shape[0]} repetitions, need {repetitions}.")
         if selected_offsets_by_class is None:
@@ -459,7 +459,7 @@ def _common_repetition_offsets(
 
     offsets = {}
     for class_position, class_label in enumerate(classes):
-        available = min(int(np.sum(labels == class_label)) for labels in labels_by_subject.values())
+        available = min(_count_label(labels, class_label) for labels in labels_by_subject.values())
         if available < repetitions:
             raise ValueError(f"Class {class_label!r} has only {available} common repetitions, need {repetitions}.")
         offsets[class_position] = select_class_limited_indices(
@@ -490,7 +490,9 @@ def _ordered_unique_labels(labels: Sequence | np.ndarray) -> np.ndarray:
     for value in values:
         if not _contains_label(unique, value):
             unique.append(value)
-    return np.asarray(unique, dtype=object)
+    out = np.empty(len(unique), dtype=object)
+    out[:] = unique
+    return out
 
 
 def _same_label_set(left: Sequence | np.ndarray, right: Sequence | np.ndarray) -> bool:
@@ -507,6 +509,14 @@ def _contains_label(values: Sequence | np.ndarray, target: object) -> bool:
     return any(_labels_equal(value, target) for value in values)
 
 
+def _label_mask(labels: Sequence | np.ndarray, target: object) -> np.ndarray:
+    return np.asarray([_labels_equal(label, target) for label in np.asarray(labels, dtype=object).reshape(-1)], dtype=bool)
+
+
+def _count_label(labels: Sequence | np.ndarray, target: object) -> int:
+    return int(np.sum(_label_mask(labels, target)))
+
+
 def _labels_equal(left: object, right: object) -> bool:
     try:
         equal = left == right
@@ -519,7 +529,7 @@ def _labels_equal(left: object, right: object) -> bool:
 
 
 def _common_repetition_count(labels_by_subject: Mapping[Hashable, np.ndarray], classes: np.ndarray, *, requested: int | None) -> int:
-    counts = [int(np.sum(labels == class_label)) for labels in labels_by_subject.values() for class_label in classes]
+    counts = [_count_label(labels, class_label) for labels in labels_by_subject.values() for class_label in classes]
     available = min(counts)
     if available < 1:
         raise ValueError("Every subject must have at least one sample for every class.")

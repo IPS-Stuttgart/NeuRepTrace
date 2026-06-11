@@ -24,6 +24,12 @@ def _aligned_subjects():
     }
 
 
+def _object_label_vector(values):
+    vector = np.empty(len(values), dtype=object)
+    vector[:] = list(values)
+    return vector
+
+
 def _assert_orthonormal_columns(matrix: np.ndarray) -> None:
     np.testing.assert_allclose(matrix.T @ matrix, np.eye(matrix.shape[1]), atol=1e-10)
 
@@ -99,6 +105,37 @@ def test_class_hyperalignment_accepts_mean_initialization():
     assert alignment.repetition_seed == 0
     assert model.template.shape == (6, 3)
     _assert_orthonormal_columns(model.group_projection)
+
+
+def test_hyperalignment_class_alignment_accepts_tuple_object_anchor_labels():
+    features = {
+        "a": np.array([[1.0], [3.0], [10.0], [30.0]]),
+        "b": np.array([[101.0], [103.0], [110.0], [130.0]]),
+    }
+    labels = {
+        "a": _object_label_vector(
+            [
+                ("face", "famous"),
+                ("face", "famous"),
+                ("face", "scrambled"),
+                ("face", "scrambled"),
+            ]
+        ),
+        "b": _object_label_vector(
+            [
+                ("face", "famous"),
+                ("face", "famous"),
+                ("face", "scrambled"),
+                ("face", "scrambled"),
+            ]
+        ),
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_mean")
+
+    assert alignment.classes.tolist() == [("face", "famous"), ("face", "scrambled")]
+    np.testing.assert_allclose(alignment.aligned_by_subject["a"], [[2.0], [20.0]])
+    np.testing.assert_allclose(alignment.aligned_by_subject["b"], [[102.0], [120.0]])
 
 
 def test_hyperalignment_class_repetition_uses_common_offsets_when_counts_differ():
