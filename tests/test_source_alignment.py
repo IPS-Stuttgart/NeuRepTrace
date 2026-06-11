@@ -341,6 +341,55 @@ def test_metadata_anchor_values_reject_numpy_missing_values():
         )
 
 
+@pytest.mark.parametrize("missing_anchor", ["", "   ", "NA", "nan", "<NA>", "None", "null", "NaT"])
+def test_metadata_anchor_values_reject_text_missing_values(missing_anchor):
+    train_features = np.arange(12, dtype=float).reshape(6, 2)
+    train_labels = np.array([0, 1, 2, 0, 1, 2])
+    train_subjects = np.array(["s0", "s0", "s0", "s1", "s1", "s1"], dtype=object)
+    train_anchors = np.array(["a", "b", "c", "a", missing_anchor, "c"], dtype=object)
+
+    with pytest.raises(ValueError, match="missing values"):
+        align_train_test_features(
+            train_features=train_features,
+            train_labels=train_labels,
+            train_subject_ids=train_subjects,
+            train_anchor_values=train_anchors,
+            test_features=train_features[:3],
+            config=source_alignment_config(method="mcca", anchor_mode="stimulus_id_mean"),
+        )
+
+
+def test_anchor_availability_reports_missing_train_anchor_values_without_raising():
+    row = source_alignment_anchor_availability(
+        train_labels=np.array([0, 1, 0, 1]),
+        train_subject_ids=np.array(["s0", "s0", "s1", "s1"]),
+        train_anchor_values=np.array(["stim-a", "", "stim-a", "stim-b"], dtype=object),
+        config=source_alignment_config(method="mcca", anchor_mode="stimulus_id_mean"),
+    )
+
+    assert row["prefit_status"] == "likely_fit_failure"
+    assert "invalid_train_anchor_values" in row["prefit_failure_reason"]
+    assert "missing values" in row["prefit_failure_detail"]
+
+
+def test_anchor_availability_flags_missing_oracle_target_anchor_values():
+    row = source_alignment_anchor_availability(
+        train_labels=np.array([0, 1, 0, 1, 0, 1]),
+        train_subject_ids=np.array(["s0", "s0", "s0", "s1", "s1", "s1"]),
+        train_anchor_values=np.array(["stim-a", "stim-b", "stim-c", "stim-a", "stim-b", "stim-c"], dtype=object),
+        target_anchor_values=np.array(["stim-a", "", "stim-c"], dtype=object),
+        config=source_alignment_config(
+            method="mcca",
+            anchor_mode="stimulus_id_mean",
+            target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+        ),
+    )
+
+    assert row["prefit_status"] == "likely_fit_failure"
+    assert "target_projection_contains_missing_anchor_values" in row["prefit_failure_reason"]
+    assert row["target_missing_common_anchor_count"] == 1
+
+
 @pytest.mark.parametrize(
     ("method", "target_transform_type"),
     [

@@ -161,6 +161,8 @@ def fit_hyperalignment(
         if delta < template_tolerance:
             break
 
+    projections = {sid: _orthogonal_procrustes_projection(centered[sid], template) for sid in subject_ids}
+
     projection_objects = {
         sid: SubjectHyperalignmentProjection(
             subject_id=sid,
