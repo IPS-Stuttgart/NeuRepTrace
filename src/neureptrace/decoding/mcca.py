@@ -582,12 +582,48 @@ def _common_repetition_offsets(
 
 def _common_classes(labels_by_subject: Mapping[Hashable, np.ndarray]) -> np.ndarray:
     subject_ids = tuple(labels_by_subject.keys())
-    first_classes = np.unique(labels_by_subject[subject_ids[0]])
+    first_classes = _ordered_unique_labels(labels_by_subject[subject_ids[0]])
     for subject_id in subject_ids[1:]:
-        classes = np.unique(labels_by_subject[subject_id])
-        if not np.array_equal(first_classes, classes):
+        classes = _ordered_unique_labels(labels_by_subject[subject_id])
+        if not _same_label_set(first_classes, classes):
             raise ValueError(f"Subject {subject_id!r} has classes {classes.tolist()}, expected {first_classes.tolist()}.")
     return first_classes
+
+
+def _ordered_unique_labels(labels: Sequence | np.ndarray) -> np.ndarray:
+    """Return unique labels in first-observed order without sorting."""
+
+    values = np.asarray(labels, dtype=object).reshape(-1)
+    unique: list[object] = []
+    for value in values:
+        if not _contains_label(unique, value):
+            unique.append(value)
+    return np.asarray(unique, dtype=object)
+
+
+def _same_label_set(left: Sequence | np.ndarray, right: Sequence | np.ndarray) -> bool:
+    left_values = np.asarray(left, dtype=object).reshape(-1)
+    right_values = np.asarray(right, dtype=object).reshape(-1)
+    if left_values.size != right_values.size:
+        return False
+    return all(_contains_label(right_values, value) for value in left_values) and all(
+        _contains_label(left_values, value) for value in right_values
+    )
+
+
+def _contains_label(values: Sequence | np.ndarray, target: object) -> bool:
+    return any(_labels_equal(value, target) for value in values)
+
+
+def _labels_equal(left: object, right: object) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
 
 
 def _common_repetition_count(labels_by_subject: Mapping[Hashable, np.ndarray], classes: np.ndarray, *, requested: int | None) -> int:

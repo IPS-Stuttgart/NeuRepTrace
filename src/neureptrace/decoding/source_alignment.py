@@ -735,9 +735,7 @@ def align_train_test_features(
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
-                selected_offsets_by_class=None
-                if config.target_calibrated
-                else alignment.selected_offsets_by_class,
+                selected_offsets_by_class=alignment.selected_offsets_by_class,
             )
             target_projection = fit_projection_to_hyperalignment(target_anchors, template=model.template)
             transformed_test = transform_with_projection(test_matrix, target_projection)
@@ -762,9 +760,7 @@ def align_train_test_features(
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
-                selected_offsets_by_class=None
-                if config.target_calibrated
-                else alignment.selected_offsets_by_class,
+                selected_offsets_by_class=alignment.selected_offsets_by_class,
             )
             target_projection = fit_target_mcca_projection(
                 target_anchors,
@@ -929,18 +925,17 @@ def source_alignment_anchor_availability(
     if len(subject_ids) < 2:
         failures.append("strict_source_alignment_requires_at_least_two_source_subjects")
     anchors_by_subject = {subject_id: train_anchor_vector[subject_vector == subject_id] for subject_id in subject_ids}
-    unique_counts = [int(np.unique(anchors).size) for anchors in anchors_by_subject.values()]
+    unique_counts = [int(_ordered_unique_anchor_values(anchors).size) for anchors in anchors_by_subject.values()]
     common_anchors = _common_anchor_values(anchors_by_subject) if subject_ids else np.asarray([], dtype=object)
-    common_set = set(common_anchors.tolist())
     common_counts = [
-        int(np.sum(np.asarray([anchor in common_set for anchor in anchors], dtype=bool)))
+        int(np.sum(np.asarray([_contains_anchor_value(common_anchors, anchor) for anchor in anchors], dtype=bool)))
         for anchors in anchors_by_subject.values()
     ]
     retained_rows = int(sum(common_counts))
     total_rows = int(train_anchor_vector.shape[0])
     row.update(
         {
-            "n_source_anchor_values": int(np.unique(train_anchor_vector).size),
+            "n_source_anchor_values": int(_ordered_unique_anchor_values(train_anchor_vector).size),
             "n_common_source_anchors": int(common_anchors.size),
             "common_source_anchor_values_preview": _preview_values(common_anchors),
             "source_anchor_rows_total": total_rows,
@@ -964,8 +959,8 @@ def source_alignment_anchor_availability(
     )
     row["estimated_alignment_rows"] = estimated_rows
     row["estimated_repetitions_per_anchor"] = estimated_repetitions
-    if config.method == "mcca" and estimated_rows != "" and int(estimated_rows) < 2:
-        failures.append("mcca_requires_at_least_two_aligned_rows")
+    if config.method in SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS and estimated_rows != "" and int(estimated_rows) < 2:
+        failures.append(f"{config.method}_requires_at_least_two_aligned_rows")
 
     if config.fits_target_projection:
         projection_labels = target_calibration_labels if config.target_calibrated else target_labels
@@ -1085,6 +1080,7 @@ def _fit_source_alignment_model(
         external_anchor_mode=external_anchor_mode,
     )
     n_repetitions = _effective_repetitions_per_class(fit_anchors_by_subject, sample_mode, config)
+    repetition_selection = _source_alignment_repetition_selection(config, sample_mode)
 
     if config.method in {"procrustes", "hyperalignment"}:
         iterations = 1 if config.method == "procrustes" else config.hyperalignment_iterations
@@ -1093,6 +1089,7 @@ def _fit_source_alignment_model(
             fit_anchors_by_subject,
             sample_mode=sample_mode,
             n_repetitions_per_class=n_repetitions,
+            repetition_selection=repetition_selection,
             n_components=config.components,
             n_iterations=iterations,
             initialization="mean" if config.method == "procrustes" else "pca",
@@ -1103,6 +1100,7 @@ def _fit_source_alignment_model(
             fit_anchors_by_subject,
             sample_mode=sample_mode,
             n_repetitions_per_class=n_repetitions,
+            repetition_selection=repetition_selection,
             n_components=config.components,
             regularization=config.mcca_regularization,
             subject_pca_components=config.mcca_subject_pca_components,
@@ -1249,6 +1247,14 @@ def _effective_repetitions_per_class(
     return int(min(available, repetition_cap, calibration_cap))
 
 
+def _source_alignment_repetition_selection(config: SourceAlignmentConfig, sample_mode: str) -> str:
+    """Return source-anchor repetition selection for class-repetition alignment."""
+
+    if sample_mode == "class_repetition" and config.target_calibrated:
+        return "first"
+    return DEFAULT_CLASS_LIMIT_SELECTION
+
+
 def _source_alignment_fit_inputs(
     features_by_subject: Mapping[Hashable, np.ndarray],
     anchors_by_subject: Mapping[Hashable, np.ndarray],
@@ -1269,12 +1275,11 @@ def _source_alignment_fit_inputs(
     common_anchors = _common_anchor_values(anchors_by_subject)
     if len(common_anchors) < 1:
         raise ValueError("No common source alignment anchors are shared by every source subject.")
-    common = set(common_anchors.tolist())
     fit_features: dict[Hashable, np.ndarray] = {}
     fit_anchors: dict[Hashable, np.ndarray] = {}
     used_rows = 0
     for subject_id, anchors in anchors_by_subject.items():
-        mask = np.asarray([anchor in common for anchor in anchors], dtype=bool)
+        mask = np.asarray([_contains_anchor_value(common_anchors, anchor) for anchor in anchors], dtype=bool)
         if not np.any(mask):
             raise ValueError(f"Subject {subject_id!r} has no rows after common alignment-anchor filtering.")
         fit_features[subject_id] = features_by_subject[subject_id][mask]
@@ -1294,11 +1299,41 @@ def _common_anchor_values(anchors_by_subject: Mapping[Hashable, np.ndarray]) -> 
     subject_ids = tuple(anchors_by_subject)
     if not subject_ids:
         raise ValueError("At least one source subject is required for anchor intersection.")
-    first = np.unique(anchors_by_subject[subject_ids[0]])
-    common = set(first.tolist())
-    for subject_id in subject_ids[1:]:
-        common &= set(np.unique(anchors_by_subject[subject_id]).tolist())
-    return np.asarray([anchor for anchor in first if anchor in common], dtype=object)
+    first = _ordered_unique_anchor_values(anchors_by_subject[subject_ids[0]])
+    other_unique = {
+        subject_id: _ordered_unique_anchor_values(anchors_by_subject[subject_id])
+        for subject_id in subject_ids[1:]
+    }
+    return np.asarray(
+        [anchor for anchor in first if all(_contains_anchor_value(values, anchor) for values in other_unique.values())],
+        dtype=object,
+    )
+
+
+def _ordered_unique_anchor_values(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    """Return unique anchor values in first-observed order without sorting."""
+
+    vector = np.asarray(values, dtype=object).reshape(-1)
+    unique: list[object] = []
+    for value in vector:
+        if not _contains_anchor_value(unique, value):
+            unique.append(value)
+    return np.asarray(unique, dtype=object)
+
+
+def _contains_anchor_value(values: Sequence[Any] | np.ndarray, target: object) -> bool:
+    return any(_anchor_values_equal(value, target) for value in values)
+
+
+def _anchor_values_equal(left: object, right: object) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
 
 
 def _uses_decoder_label_anchors(anchor_mode: str) -> bool:
@@ -1394,9 +1429,8 @@ def _estimate_alignment_rows(
         return 0, ""
     if sample_mode != "class_repetition":
         return int(common_anchors.size), ""
-    common_set = set(common_anchors.tolist())
     filtered = {
-        subject_id: np.asarray([anchor for anchor in anchors if anchor in common_set], dtype=object)
+        subject_id: np.asarray([anchor for anchor in anchors if _contains_anchor_value(common_anchors, anchor)], dtype=object)
         for subject_id, anchors in anchors_by_subject.items()
     }
     try:
@@ -1427,9 +1461,9 @@ def _update_projection_anchor_availability(
         return
     vector = np.asarray(projection_anchors, dtype=object).reshape(-1)
     row[rows_key] = int(vector.shape[0])
-    row[values_key] = int(np.unique(vector).size)
-    available = set(np.unique(vector).tolist())
-    missing = np.asarray([anchor for anchor in common_anchors if anchor not in available], dtype=object)
+    available = _ordered_unique_anchor_values(vector)
+    row[values_key] = int(available.size)
+    missing = np.asarray([anchor for anchor in common_anchors if not _contains_anchor_value(available, anchor)], dtype=object)
     row[missing_count_key] = int(missing.size)
     row[missing_preview_key] = _preview_values(missing)
     if missing.size:
