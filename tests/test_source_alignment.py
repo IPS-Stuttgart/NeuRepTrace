@@ -80,6 +80,42 @@ def test_none_alignment_reproduces_raw_features():
     assert result.metadata["alignment_method"] == "none"
 
 
+def test_metadata_anchor_values_accept_mixed_hashable_types():
+    train_features = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.1, 0.0, 0.0],
+            [0.0, 1.1, 0.0],
+            [0.9, 0.1, 0.0],
+            [0.1, 0.9, 0.0],
+        ]
+    )
+    train_labels = np.array([0, 1, 0, 1, 0, 1])
+    train_subjects = np.array(["s0", "s0", "s1", "s1", "s2", "s2"], dtype=object)
+    train_anchors = np.array([1, "stim-b", 1, "stim-b", 1, "stim-b"], dtype=object)
+
+    result = align_train_test_features(
+        train_features=train_features,
+        train_labels=train_labels,
+        train_subject_ids=train_subjects,
+        train_anchor_values=train_anchors,
+        test_features=train_features[:2],
+        config=source_alignment_config(
+            method="mcca",
+            anchor_mode="stimulus_id_mean",
+            components=1,
+        ),
+        compute_source_inner_diagnostics=False,
+    )
+
+    assert result.train_features.shape == (6, 1)
+    assert result.test_features.shape == (2, 1)
+    assert result.metadata["alignment_anchor_value_source"] == "metadata"
+    assert result.metadata["alignment_common_anchor_count"] == 2
+    assert result.metadata["alignment_anchor_rows_dropped"] == 0
+
+
 def test_strict_alignment_rejects_target_labels():
     with pytest.raises(ValueError, match="target labels"):
         align_train_test_features(
@@ -382,6 +418,20 @@ def test_anchor_availability_flags_no_common_stimulus_anchors():
     assert row["estimated_alignment_rows"] == 0
 
 
+@pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
+def test_anchor_availability_flags_too_few_alignment_rows_for_all_class_methods(method):
+    row = source_alignment_anchor_availability(
+        train_labels=np.array([0, 1, 0, 1]),
+        train_subject_ids=np.array(["s0", "s0", "s1", "s1"]),
+        train_anchor_values=np.array(["shared", "left-only", "shared", "right-only"], dtype=object),
+        config=source_alignment_config(method=method, anchor_mode="stimulus_id_mean"),
+    )
+
+    assert row["estimated_alignment_rows"] == 1
+    assert row["prefit_status"] == "likely_fit_failure"
+    assert f"{method}_requires_at_least_two_aligned_rows" in row["prefit_failure_reason"]
+
+
 def test_anchor_availability_flags_missing_oracle_target_anchors():
     row = source_alignment_anchor_availability(
         train_labels=np.array([0, 1, 0, 1, 0, 1]),
@@ -668,6 +718,71 @@ def test_target_calibrated_mcca_uses_public_target_projection_helper():
         target_calibration_features=features[calibration_positions],
         target_calibration_labels=labels[calibration_positions],
         config=source_alignment_config(method="mcca", components=2, target_projection=TARGET_CALIBRATED_ALIGNMENT),
+    )
+
+    np.testing.assert_allclose(target_calibrated.test_features, expected)
+
+
+def test_target_calibrated_class_repetition_mcca_reuses_source_offsets() -> None:
+    features, labels, subjects = _rotated_subject_features(seed=61)
+    source_mask = subjects != "s2"
+    target_positions = np.flatnonzero(subjects == "s2")
+    classes = np.unique(labels)
+    calibration_positions = np.concatenate(
+        [target_positions[labels[target_positions] == class_label][:2] for class_label in classes]
+    )
+    evaluation_positions = np.asarray(
+        [index for index in target_positions if index not in set(calibration_positions.tolist())]
+    )
+    source_subjects = tuple(dict.fromkeys(subjects[source_mask].tolist()))
+    features_by_subject = {
+        subject: features[source_mask][subjects[source_mask] == subject]
+        for subject in source_subjects
+    }
+    labels_by_subject = {
+        subject: labels[source_mask][subjects[source_mask] == subject]
+        for subject in source_subjects
+    }
+
+    model, alignment = fit_class_mcca(
+        features_by_subject,
+        labels_by_subject,
+        sample_mode="class_repetition",
+        n_repetitions_per_class=2,
+        repetition_selection="first",
+        n_components=2,
+        regularization=1e-6,
+    )
+    assert alignment.selected_offsets_by_class is not None
+    for offsets in alignment.selected_offsets_by_class.values():
+        np.testing.assert_array_equal(offsets, np.array([0, 1]))
+
+    target_anchors = class_alignment_matrix(
+        features[calibration_positions],
+        labels[calibration_positions],
+        classes=alignment.classes,
+        sample_mode="class_repetition",
+        n_repetitions_per_class=alignment.n_repetitions_per_class,
+        selected_offsets_by_class=alignment.selected_offsets_by_class,
+    )
+    projection = fit_target_mcca_projection(target_anchors, model, regularization=1e-6)
+    expected = projection.transform(features[evaluation_positions])
+
+    target_calibrated = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        test_features=features[evaluation_positions],
+        target_calibration_features=features[calibration_positions],
+        target_calibration_labels=labels[calibration_positions],
+        config=source_alignment_config(
+            method="mcca",
+            anchor_mode="class_repetition",
+            components=2,
+            repetition_cap=8,
+            target_projection=TARGET_CALIBRATED_ALIGNMENT,
+            target_calibration_per_anchor=2,
+        ),
     )
 
     np.testing.assert_allclose(target_calibrated.test_features, expected)
