@@ -6,16 +6,27 @@ still flattens rectangular tuple sequences into individual tuple elements, so a
 valid one-anchor-per-trial vector can look twice as long as the feature matrix.
 The core M-CCA / hyperalignment helpers already preserve such labels; this patch
 brings the source-alignment guardrail and diagnostics path in line with them.
+
+The patch is installed lazily.  Importing ``neureptrace`` should not import the
+heavy decoding/source-alignment stack eagerly; instead, a small import hook waits
+for ``neureptrace.decoding.source_alignment`` to load and then patches its helper
+functions in place.
 """
 
 from __future__ import annotations
 
+import importlib.abc
+import importlib.machinery
+import sys
 from collections.abc import Sequence
+from types import ModuleType
 from typing import Any
 
 import numpy as np
 
+_TARGET_MODULE = "neureptrace.decoding.source_alignment"
 _PATCH_MARKER = "_neureptrace_source_alignment_anchor_patch_installed"
+_FINDER_MARKER = "_neureptrace_source_alignment_anchor_finder"
 
 
 def _object_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
@@ -36,11 +47,7 @@ def _object_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
     return vector
 
 
-def install() -> None:
-    """Install composite-anchor preservation for source-alignment helpers."""
-
-    from neureptrace.decoding import source_alignment
-
+def _patch_source_alignment(source_alignment: ModuleType) -> None:
     if getattr(source_alignment, _PATCH_MARKER, False):
         return
 
@@ -108,3 +115,51 @@ def install() -> None:
     source_alignment._anchor_vector = _anchor_vector
     source_alignment._update_projection_anchor_availability = _update_projection_anchor_availability
     setattr(source_alignment, _PATCH_MARKER, True)
+
+
+class _SourceAlignmentPatchLoader(importlib.abc.Loader):
+    def __init__(self, wrapped_loader: importlib.abc.Loader) -> None:
+        self.wrapped_loader = wrapped_loader
+
+    def create_module(self, spec):  # type: ignore[override]
+        create_module = getattr(self.wrapped_loader, "create_module", None)
+        if create_module is None:
+            return None
+        return create_module(spec)
+
+    def exec_module(self, module: ModuleType) -> None:
+        self.wrapped_loader.exec_module(module)
+        _patch_source_alignment(module)
+
+
+class _SourceAlignmentPatchFinder(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname: str, path, target=None):  # type: ignore[override]
+        if fullname != _TARGET_MODULE:
+            return None
+
+        try:
+            sys.meta_path.remove(self)
+            spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        finally:
+            if self not in sys.meta_path:
+                sys.meta_path.insert(0, self)
+
+        if spec is None or spec.loader is None or isinstance(spec.loader, _SourceAlignmentPatchLoader):
+            return spec
+        spec.loader = _SourceAlignmentPatchLoader(spec.loader)
+        return spec
+
+
+def install() -> None:
+    """Install composite-anchor preservation for source-alignment helpers."""
+
+    loaded = sys.modules.get(_TARGET_MODULE)
+    if loaded is not None:
+        _patch_source_alignment(loaded)
+        return
+
+    if any(getattr(finder, _FINDER_MARKER, False) for finder in sys.meta_path):
+        return
+    finder = _SourceAlignmentPatchFinder()
+    setattr(finder, _FINDER_MARKER, True)
+    sys.meta_path.insert(0, finder)
