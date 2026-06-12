@@ -985,6 +985,9 @@ def source_alignment_anchor_availability(
     row["estimated_repetitions_per_anchor"] = estimated_repetitions
     if config.method in SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS and estimated_rows != "" and int(estimated_rows) < 2:
         failures.append(f"{config.method}_requires_at_least_two_aligned_rows")
+    required_projection_repetitions = (
+        int(estimated_repetitions) if isinstance(estimated_repetitions, (int, np.integer)) else None
+    )
 
     if config.fits_target_projection:
         projection_labels = target_calibration_labels if config.target_calibrated else target_labels
@@ -998,6 +1001,7 @@ def source_alignment_anchor_availability(
             projection_anchors=projection_anchors,
             common_anchors=common_anchors,
             failures=failures,
+            required_repetitions_per_anchor=required_projection_repetitions,
         )
 
     row["prefit_status"] = "likely_fit_failure" if failures else "ok"
@@ -1496,6 +1500,7 @@ def _update_projection_anchor_availability(
     projection_anchors: Sequence[Any] | np.ndarray | None,
     common_anchors: np.ndarray,
     failures: list[str],
+    required_repetitions_per_anchor: int | None = None,
 ) -> None:
     used_key = f"{prefix}_anchor_values_used"
     rows_key = f"n_{prefix}_rows"
@@ -1519,6 +1524,22 @@ def _update_projection_anchor_availability(
     row[missing_preview_key] = _preview_values(missing)
     if missing.size:
         failures.append(f"{prefix}_subject_missing_alignment_anchors")
+    if required_repetitions_per_anchor is not None and required_repetitions_per_anchor > 1:
+        insufficient = np.asarray(
+            [
+                anchor
+                for anchor in common_anchors
+                if _count_anchor_value(valid_vector, anchor) < int(required_repetitions_per_anchor)
+            ],
+            dtype=object,
+        )
+        if insufficient.size:
+            failures.append(f"{prefix}_subject_insufficient_alignment_anchor_repetitions")
+            detail = (
+                f"{prefix} anchors require at least {int(required_repetitions_per_anchor)} repetition(s) "
+                f"per common anchor; insufficient anchors: {_preview_values(insufficient)}"
+            )
+            row["prefit_failure_detail"] = detail
 
 
 def _mean_pairwise_anchor_row_correlation(matrices: Mapping[Hashable, np.ndarray]) -> float:

@@ -576,6 +576,27 @@ def test_anchor_availability_flags_missing_oracle_target_anchors():
     assert row["target_missing_common_anchor_values_preview"] == "stim-c"
 
 
+def test_anchor_availability_flags_insufficient_target_calibration_repetitions():
+    row = source_alignment_anchor_availability(
+        train_labels=np.array([0, 0, 1, 1, 0, 0, 1, 1]),
+        train_subject_ids=np.array(["s0", "s0", "s0", "s0", "s1", "s1", "s1", "s1"]),
+        target_calibration_labels=np.array([0, 1]),
+        config=source_alignment_config(
+            method="mcca",
+            anchor_mode="class_repetition",
+            repetition_cap=2,
+            target_projection=TARGET_CALIBRATED_ALIGNMENT,
+            target_calibration_per_anchor=2,
+        ),
+    )
+
+    assert row["estimated_alignment_rows"] == 4
+    assert row["estimated_repetitions_per_anchor"] == 2
+    assert row["prefit_status"] == "likely_fit_failure"
+    assert "target_calibration_subject_insufficient_alignment_anchor_repetitions" in row["prefit_failure_reason"]
+    assert "require at least 2" in row["prefit_failure_detail"]
+
+
 @pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
 def test_oracle_target_calibrated_alignment_is_debug_upper_bound(method):
     features, labels, subjects = _rotated_subject_features(seed=41)
