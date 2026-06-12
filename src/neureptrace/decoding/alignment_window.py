@@ -124,9 +124,9 @@ def transform_with_alignment_projection(
 
     matrix = _feature_matrix(features, name="features")
     projection = _feature_matrix(projection, name="projection")
-    projection_mean = np.asarray(projection_feature_mean, dtype=float).ravel()
+    projection_mean = _feature_vector(projection_feature_mean, name="projection_feature_mean")
     feature_mean_was_explicit = feature_mean is not None
-    mean = projection_mean if not feature_mean_was_explicit else np.asarray(feature_mean, dtype=float).ravel()
+    mean = projection_mean if not feature_mean_was_explicit else _feature_vector(feature_mean, name="feature_mean")
     mean_set = _resolve_feature_mean_set(
         mean,
         decode_feature_set=decode_feature_set,
@@ -230,7 +230,20 @@ def _feature_matrix(value: np.ndarray, *, name: str) -> np.ndarray:
     matrix = np.asarray(value, dtype=float)
     if matrix.ndim != 2:
         raise ValueError(f"{name} must be a 2D matrix.")
+    if matrix.shape[0] == 0 or matrix.shape[1] == 0:
+        raise ValueError(f"{name} must have at least one row and one column.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(f"{name} contains non-finite values.")
     return matrix
+
+
+def _feature_vector(value: np.ndarray, *, name: str) -> np.ndarray:
+    vector = np.asarray(value, dtype=float).ravel()
+    if vector.size == 0:
+        raise ValueError(f"{name} must contain at least one value.")
+    if not np.all(np.isfinite(vector)):
+        raise ValueError(f"{name} contains non-finite values.")
+    return vector
 
 
 def _feature_order(feature_set: WindowedFeatureSet) -> FeatureOrder:
@@ -289,7 +302,10 @@ def _first_present_float(feature_set: WindowedFeatureSet, attrs: tuple[str, ...]
     for attr in attrs:
         value = getattr(feature_set, attr, None)
         if value is not None:
-            return float(value)
+            parsed = float(value)
+            if not np.isfinite(parsed):
+                return None
+            return parsed
     return None
 
 
@@ -369,11 +385,7 @@ def _add_template_mean(
     if template_mean is None:
         return transformed
     matrix = _feature_matrix(transformed, name="transformed")
-    mean = np.asarray(template_mean, dtype=float).ravel()
-    if mean.size == 0:
-        raise ValueError("projection_template_mean must contain at least one value.")
-    if not np.all(np.isfinite(mean)):
-        raise ValueError("projection_template_mean contains non-finite values.")
+    mean = _feature_vector(template_mean, name="projection_template_mean")
     if matrix.shape[1] == mean.shape[0]:
         return matrix + mean
 
