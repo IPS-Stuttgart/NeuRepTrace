@@ -17,7 +17,7 @@ from neureptrace.decoding.source_alignment import (
 )
 
 
-def _rotated_subject_features(seed=13):
+def _rotated_subject_features(seed=13, n_subjects=3):
     rng = np.random.default_rng(seed)
     labels_one_subject = np.repeat(np.arange(3), 8)
     prototypes = np.array(
@@ -30,7 +30,7 @@ def _rotated_subject_features(seed=13):
     features = []
     labels = []
     subjects = []
-    for subject in range(3):
+    for subject in range(n_subjects):
         q, _r = np.linalg.qr(rng.normal(size=(4, 4)))
         subject_features = prototypes[labels_one_subject] @ q + 0.02 * rng.normal(size=(labels_one_subject.size, 4))
         features.append(subject_features)
@@ -618,6 +618,31 @@ def test_oracle_target_calibrated_alignment_accepts_target_anchor_values():
     assert oracle.metadata["alignment_target_labels_used"] is False
     assert oracle.metadata["alignment_target_anchor_values_used"] is True
     assert oracle.metadata["alignment_valid_for_benchmark"] is False
+
+
+@pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
+def test_source_inner_diagnostics_follow_target_projection_for_oracle_alignment(method):
+    features, labels, subjects = _rotated_subject_features(seed=71, n_subjects=4)
+    source_mask = subjects != "s3"
+    target_mask = subjects == "s3"
+
+    oracle = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        test_features=features[target_mask],
+        target_labels=labels[target_mask],
+        config=source_alignment_config(
+            method=method,
+            components=2,
+            target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+        ),
+        compute_source_inner_diagnostics=True,
+    )
+
+    assert oracle.diagnostics["source_inner_validation_type"] == "source_loso_nearest_centroid_target_projection"
+    assert np.isfinite(oracle.diagnostics["source_inner_raw_balanced_accuracy"])
+    assert np.isfinite(oracle.diagnostics["source_inner_aligned_balanced_accuracy"])
 
 
 def test_target_class_repetition_alignment_reuses_source_offsets():

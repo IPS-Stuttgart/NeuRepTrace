@@ -833,12 +833,9 @@ def align_train_test_features(
         "source_inner_raw_balanced_accuracy": _finite_or_blank(source_inner_raw_ba),
         "source_inner_aligned_balanced_accuracy": _finite_or_blank(source_inner_aligned_ba),
         "source_inner_aligned_minus_raw": _finite_or_blank(source_inner_gain),
-        "source_inner_validation_type": (
-            "strict_source_loso_nearest_centroid_group_projection_target_centered"
-            if compute_source_inner_diagnostics and config.target_centered_group_projection
-            else "strict_source_loso_nearest_centroid_group_projection"
-            if compute_source_inner_diagnostics
-            else ""
+        "source_inner_validation_type": _source_inner_validation_type(
+            config,
+            compute_source_inner_diagnostics=compute_source_inner_diagnostics,
         ),
         "uses_unlabeled_target_data": bool(config.target_centered_group_projection),
         "covariance_alignment_estimator": "",
@@ -1550,6 +1547,54 @@ def _mean_pairwise_anchor_row_correlation(matrices: Mapping[Hashable, np.ndarray
     return float(np.mean(values)) if values else float("nan")
 
 
+def _source_inner_validation_type(
+    config: SourceAlignmentConfig,
+    *,
+    compute_source_inner_diagnostics: bool,
+) -> str:
+    if not compute_source_inner_diagnostics:
+        return ""
+    if config.fits_target_projection:
+        return "source_loso_nearest_centroid_target_projection"
+    if config.target_centered_group_projection:
+        return "strict_source_loso_nearest_centroid_group_projection_target_centered"
+    return "strict_source_loso_nearest_centroid_group_projection"
+
+
+def _transform_inner_heldout_subject(
+    *,
+    test_features: np.ndarray,
+    test_anchors: np.ndarray,
+    fit: _SourceAlignmentFit,
+    config: SourceAlignmentConfig,
+) -> np.ndarray:
+    """Transform a source-inner held-out subject with the configured target path."""
+
+    if not config.fits_target_projection:
+        target_feature_mean = np.mean(test_features, axis=0) if config.target_centered_group_projection else None
+        return fit.model.transform_group(test_features, feature_mean=target_feature_mean)
+
+    target_anchors = _target_alignment_matrix(
+        test_features,
+        test_anchors,
+        classes=fit.alignment.classes,
+        config=config,
+        n_repetitions_per_class=fit.alignment.n_repetitions_per_class,
+        selected_offsets_by_class=fit.alignment.selected_offsets_by_class,
+    )
+    if config.method in {"procrustes", "hyperalignment"}:
+        target_projection = fit_projection_to_hyperalignment(target_anchors, template=fit.model.template)
+        return transform_with_projection(test_features, target_projection)
+    if config.method == "mcca":
+        target_projection = fit_target_mcca_projection(
+            target_anchors,
+            fit.model,
+            regularization=config.mcca_regularization,
+        )
+        return target_projection.transform(test_features)
+    raise ValueError(f"Unsupported source alignment method: {config.method}")
+
+
 def _source_inner_strict_loso_scores(
     *,
     features_by_subject: Mapping[Hashable, np.ndarray],
@@ -1561,9 +1606,10 @@ def _source_inner_strict_loso_scores(
 ) -> tuple[float, float]:
     """Compare raw vs aligned source-inner held-out-subject decoding.
 
-    The aligned side treats each source subject as target-like: the alignment
+    The aligned side treats each source subject as target-like.  The alignment
     model is fit from the remaining source subjects and the held-out source is
-    transformed only with the source-fitted group projection.
+    transformed with the same target-projection family requested by the outer
+    configuration.
     """
 
     subject_ids = tuple(features_by_subject)
@@ -1596,12 +1642,12 @@ def _source_inner_strict_loso_scores(
                 external_anchor_mode=external_anchor_mode,
             )
             aligned_train_features = np.vstack([inner_fit.transformed_by_subject[subject_id] for subject_id in train_subjects])
-            target_feature_mean = (
-                np.mean(test_features, axis=0)
-                if config.target_centered_group_projection
-                else None
+            aligned_test_features = _transform_inner_heldout_subject(
+                test_features=test_features,
+                test_anchors=anchors_by_subject[test_subject],
+                fit=inner_fit,
+                config=config,
             )
-            aligned_test_features = inner_fit.model.transform_group(test_features, feature_mean=target_feature_mean)
         except (ValueError, np.linalg.LinAlgError):
             continue
         predicted_aligned = _nearest_centroid_predict(aligned_train_features, train_labels, aligned_test_features)
