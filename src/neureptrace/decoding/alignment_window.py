@@ -85,10 +85,24 @@ def validate_paired_feature_sets(decode_set: WindowedFeatureSet, alignment_set: 
     same row count, labels, and number of channels.
     """
 
-    if decode_set.features.shape[0] != alignment_set.features.shape[0]:
+    decode_rows = int(decode_set.features.shape[0])
+    alignment_rows = int(alignment_set.features.shape[0])
+    if decode_rows != alignment_rows:
         context = "" if participant is None else f" for participant {participant}"
         raise ValueError(f"Decoding and alignment feature rows differ{context}.")
-    if not np.array_equal(np.asarray(decode_set.labels), np.asarray(alignment_set.labels)):
+    decode_labels = _label_vector(
+        decode_set.labels,
+        expected_length=decode_rows,
+        name="Decoding labels",
+        participant=participant,
+    )
+    alignment_labels = _label_vector(
+        alignment_set.labels,
+        expected_length=alignment_rows,
+        name="Alignment labels",
+        participant=participant,
+    )
+    if not np.array_equal(decode_labels, alignment_labels):
         context = "" if participant is None else f" for participant {participant}"
         raise ValueError(f"Decoding and alignment labels differ{context}.")
     if int(decode_set.n_channels) != int(alignment_set.n_channels):
@@ -243,6 +257,41 @@ def _feature_vector(value: np.ndarray, *, name: str) -> np.ndarray:
         raise ValueError(f"{name} must contain at least one value.")
     if not np.all(np.isfinite(vector)):
         raise ValueError(f"{name} contains non-finite values.")
+    return vector
+
+
+def _label_vector(
+    values: Sequence[object] | np.ndarray,
+    *,
+    expected_length: int,
+    name: str,
+    participant: int | None,
+) -> np.ndarray:
+    """Return a 1D object label vector while preserving tuple-like labels.
+
+    Alignment-window feature sets are often built from metadata anchors.  Plain
+    Python sequences of tuple labels such as ``[(run, stimulus), ...]`` should be
+    treated as one label per trial row; converting them with ``np.asarray`` can
+    make a rectangular 2D object array and silently decouple label count from the
+    feature-row count.  Build the object vector via assignment from ``list`` so
+    each row label stays atomic.
+    """
+
+    if isinstance(values, np.ndarray) and values.ndim == 1:
+        vector = values.astype(object, copy=False).reshape(-1)
+    else:
+        try:
+            items = list(values)
+        except TypeError:
+            items = [values]
+        vector = np.empty(len(items), dtype=object)
+        vector[:] = items
+    if vector.shape[0] != int(expected_length):
+        context = "" if participant is None else f" for participant {participant}"
+        raise ValueError(
+            f"{name} row count differs from feature rows{context}: "
+            f"{vector.shape[0]} != {int(expected_length)}."
+        )
     return vector
 
 
