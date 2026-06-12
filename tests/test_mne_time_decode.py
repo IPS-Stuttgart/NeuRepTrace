@@ -93,6 +93,25 @@ class RecordingFeatureDecoder:
         return probabilities
 
 
+class PseudoLabelRecordingDecoder:
+    fit_labels: list[np.ndarray] = []
+
+    def fit(self, features: np.ndarray, labels: np.ndarray):
+        self.classes_ = np.unique(labels)
+        self.fit_labels.append(np.asarray(labels, dtype=int).copy())
+        return self
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probabilities = np.full((features.shape[0], len(self.classes_)), 0.005)
+        dominant = np.zeros(features.shape[0], dtype=int)
+        if len(self.classes_) > 1:
+            dominant = (features[:, 0] >= 0.5).astype(int)
+        class_to_column = {int(class_label): index for index, class_label in enumerate(self.classes_)}
+        for row_index, class_label in enumerate(dominant):
+            probabilities[row_index, class_to_column[int(class_label)]] = 0.99
+        return probabilities / probabilities.sum(axis=1, keepdims=True)
+
+
 def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     labels = np.array([0, 0, 0, 1, 1, 2, 2, 2])
 
@@ -103,6 +122,55 @@ def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     np.testing.assert_array_equal(shuffled_a, shuffled_b)
     assert sorted(shuffled_a.tolist()) == sorted(labels.tolist())
     assert not np.array_equal(shuffled_a, shuffled_c)
+
+
+def test_run_time_resolved_decode_pseudo_label_self_training_uses_predictions_not_target_labels(
+    tmp_path: Path,
+    monkeypatch,
+):
+    labels = np.array([0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1])
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    data[:8, 0, :] = labels[:8].reshape(-1, 1)
+    data[8:, 0, :] = 0.0
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    PseudoLabelRecordingDecoder.fit_labels = []
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: PseudoLabelRecordingDecoder())
+
+    observations_out = tmp_path / "pseudo_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-03_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-03",),
+        out_path=tmp_path / "pseudo_summary.csv",
+        observation_out_path=observations_out,
+        n_splits=3,
+        window_ms=1,
+        step_ms=1,
+        decode_window=(0.184, 0.184),
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        pseudo_label_self_training=True,
+        pseudo_label_confidence_threshold=0.9,
+        pseudo_label_max_iterations=3,
+    )
+
+    augmented_fits = [fit_labels for fit_labels in PseudoLabelRecordingDecoder.fit_labels if len(fit_labels) > 8]
+    assert augmented_fits, "Expected at least one augmented refit with pseudo-labeled target rows."
+    np.testing.assert_array_equal(augmented_fits[0][-4:], np.zeros(4, dtype=int))
+    assert set(results["pseudo_label_uses_target_labels"].unique()) == {False}
+    assert results["pseudo_label_n_selected"].tolist() == [4]
+    assert results["pseudo_label_iterations"].tolist() == [1]
+    assert results["pseudo_label_stop_reason"].tolist() == ["selection_unchanged"]
+
+    observations = pd.read_csv(observations_out)
+    assert observations["pseudo_label_protocol"].unique().tolist() == ["unlabeled_transductive_self_training"]
+    assert observations["pseudo_label_n_selected"].unique().tolist() == [4]
 
 
 def test_source_time_selection_rejects_duplicate_nearest_windows():

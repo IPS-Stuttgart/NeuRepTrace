@@ -109,6 +109,7 @@ SOURCE_CALIBRATION_RUN_CHOICES = (
 SOURCE_CALIBRATION_TEMPERATURE_GRID = (0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0)
 SOURCE_CALIBRATION_BIAS_SCALE_GRID = (0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0)
 SOURCE_CALIBRATION_L2_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
+PSEUDO_LABEL_SELF_TRAINING_PROTOCOL = "unlabeled_transductive_self_training"
 DEFAULT_BASELINE_WINDOW = (-0.35, -0.05)
 BASELINE_WHITENING_SHRINKAGE = 0.1
 BASELINE_WHITENING_EIGENVALUE_FLOOR = 1e-6
@@ -162,6 +163,13 @@ class SourceProbabilityCalibrator:
     parameter: str = ""
 
 
+@dataclass(frozen=True)
+class PseudoLabelSelfTrainingResult:
+    model: object
+    probabilities: np.ndarray
+    metadata: dict[str, object]
+
+
 def _add_subject(row: dict, subject: str | None) -> dict:
     if subject is not None:
         row = {"subject": subject, **row}
@@ -213,6 +221,20 @@ def normalize_source_time_selection(mode: str | None) -> str:
             f"Unknown source_time_selection '{mode}'. Available modes: {', '.join(SOURCE_TIME_SELECTION_CHOICES)}."
         )
     return normalized
+
+
+def _normalize_pseudo_label_confidence_threshold(value: float | str) -> float:
+    threshold = float(value)
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("pseudo_label_confidence_threshold must be between 0 and 1.")
+    return threshold
+
+
+def _normalize_positive_int(value: int | str, *, name: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise ValueError(f"{name} must be at least 1.")
+    return parsed
 
 
 def _parse_float_sequence(value: object | Sequence[object] | None, *, default: Sequence[float]) -> tuple[float, ...]:
@@ -1607,6 +1629,147 @@ def _apply_class_prior_correction(
     return corrected / row_sums
 
 
+def _pseudo_label_signature(selected: np.ndarray, pseudo_labels: np.ndarray) -> tuple[tuple[int, int], ...]:
+    selected_indices = np.flatnonzero(np.asarray(selected, dtype=bool))
+    labels = np.asarray(pseudo_labels, dtype=int)
+    return tuple((int(index), int(labels[index])) for index in selected_indices)
+
+
+def _pseudo_label_class_counts(labels: np.ndarray, classes: np.ndarray) -> str:
+    labels = np.asarray(labels, dtype=int)
+    parts = [
+        f"{int(class_label)}:{int(np.count_nonzero(labels == class_label))}"
+        for class_label in np.asarray(classes, dtype=int)
+    ]
+    return "|".join(parts)
+
+
+def _fit_pseudo_label_self_training_decoder(
+    *,
+    train_features: np.ndarray,
+    train_labels: np.ndarray,
+    target_features: np.ndarray,
+    classes: np.ndarray,
+    decoder_name: str,
+    emission_mode: str,
+    max_iter: int,
+    feature_preprocessor: str,
+    pca_components: int | float | None,
+    tune_hyperparameters: bool,
+    tuning_cv,
+    tuning_scoring: str,
+    tuning_c_grid: Sequence[float],
+    class_prior_correction: str,
+    confidence_threshold: float,
+    max_iterations: int,
+    min_new: int,
+) -> PseudoLabelSelfTrainingResult:
+    """Self-train on high-confidence held-out target predictions without target labels."""
+
+    train_features = np.asarray(train_features, dtype=float)
+    train_labels = np.asarray(train_labels, dtype=int)
+    target_features = np.asarray(target_features, dtype=float)
+    classes = np.asarray(classes, dtype=int)
+    threshold = _normalize_pseudo_label_confidence_threshold(confidence_threshold)
+    max_iterations = _normalize_positive_int(max_iterations, name="pseudo_label_max_iterations")
+    min_new = _normalize_positive_int(min_new, name="pseudo_label_min_new")
+
+    def fit_predict(features: np.ndarray, labels: np.ndarray):
+        model = make_decoder(
+            decoder_name,
+            max_iter=max_iter,
+            emission_mode=emission_mode,
+            feature_preprocessor=feature_preprocessor,
+            pca_components=pca_components,
+            tune_hyperparameters=tune_hyperparameters,
+            tuning_cv=tuning_cv,
+            tuning_scoring=tuning_scoring,
+            tuning_c_grid=tuning_c_grid,
+        )
+        model.fit(features, labels)
+        probabilities = _align_probability_columns(
+            predict_emission_probabilities(
+                model,
+                target_features,
+                emission_mode=emission_mode,
+            ),
+            model=model,
+            classes=classes,
+        )
+        probabilities = _apply_class_prior_correction(
+            probabilities,
+            labels,
+            classes,
+            class_prior_correction,
+        )
+        return model, probabilities
+
+    model, probabilities = fit_predict(train_features, train_labels)
+    selected = probabilities.max(axis=1) >= threshold
+    pseudo_labels = probabilities.argmax(axis=1).astype(int)
+    stop_reason = "none_selected"
+    iterations = 0
+    seen_signatures: set[tuple[tuple[int, int], ...]] = set()
+
+    if np.any(selected):
+        stop_reason = "max_iterations"
+        for iteration in range(1, max_iterations + 1):
+            signature = _pseudo_label_signature(selected, pseudo_labels)
+            if signature in seen_signatures:
+                stop_reason = "selection_repeated"
+                break
+            seen_signatures.add(signature)
+
+            selected_target_features = target_features[selected]
+            selected_target_labels = pseudo_labels[selected]
+            augmented_features = np.vstack([train_features, selected_target_features])
+            augmented_labels = np.concatenate([train_labels, selected_target_labels])
+            model, probabilities = fit_predict(augmented_features, augmented_labels)
+            iterations = iteration
+
+            next_selected = probabilities.max(axis=1) >= threshold
+            next_pseudo_labels = probabilities.argmax(axis=1).astype(int)
+            if not np.any(next_selected):
+                stop_reason = "none_selected_after_refit"
+                selected = next_selected
+                pseudo_labels = next_pseudo_labels
+                break
+
+            next_signature = _pseudo_label_signature(next_selected, next_pseudo_labels)
+            if next_signature == signature:
+                stop_reason = "selection_unchanged"
+                selected = next_selected
+                pseudo_labels = next_pseudo_labels
+                break
+
+            n_new = int(np.count_nonzero(next_selected & ~selected))
+            if n_new < min_new:
+                stop_reason = "insufficient_new"
+                selected = next_selected
+                pseudo_labels = next_pseudo_labels
+                break
+
+            selected = next_selected
+            pseudo_labels = next_pseudo_labels
+
+    selected_labels = pseudo_labels[selected]
+    metadata = {
+        "pseudo_label_self_training": True,
+        "pseudo_label_protocol": PSEUDO_LABEL_SELF_TRAINING_PROTOCOL,
+        "pseudo_label_uses_target_features": True,
+        "pseudo_label_uses_target_labels": False,
+        "pseudo_label_confidence_threshold": float(threshold),
+        "pseudo_label_max_iterations": int(max_iterations),
+        "pseudo_label_min_new": int(min_new),
+        "pseudo_label_iterations": int(iterations),
+        "pseudo_label_n_selected": int(np.count_nonzero(selected)),
+        "pseudo_label_selected_fraction": float(np.mean(selected)) if selected.size else 0.0,
+        "pseudo_label_stop_reason": stop_reason,
+        "pseudo_label_class_counts": _pseudo_label_class_counts(selected_labels, classes),
+    }
+    return PseudoLabelSelfTrainingResult(model=model, probabilities=probabilities, metadata=metadata)
+
+
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
     """Return top-k accuracy for probability columns aligned to integer labels."""
 
@@ -1752,6 +1915,10 @@ def _model_hash(
     alignment_metadata: Mapping[str, object] | None = None,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
+    pseudo_label_self_training: bool = False,
+    pseudo_label_confidence_threshold: float = 0.90,
+    pseudo_label_max_iterations: int = 5,
+    pseudo_label_min_new: int = 1,
 ) -> str:
     payload: dict[str, object] = {
         "backend": backend,
@@ -1790,6 +1957,16 @@ def _model_hash(
             {
                 "label_shuffle_control": True,
                 "label_shuffle_seed": int(label_shuffle_seed),
+            }
+        )
+    if pseudo_label_self_training:
+        payload.update(
+            {
+                "pseudo_label_self_training": True,
+                "pseudo_label_protocol": PSEUDO_LABEL_SELF_TRAINING_PROTOCOL,
+                "pseudo_label_confidence_threshold": float(pseudo_label_confidence_threshold),
+                "pseudo_label_max_iterations": int(pseudo_label_max_iterations),
+                "pseudo_label_min_new": int(pseudo_label_min_new),
             }
         )
     return stable_hash(payload)
@@ -1986,6 +2163,10 @@ def run_time_resolved_decode(
     alignment_target_calibration_seed: int = 13,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
+    pseudo_label_self_training: bool = False,
+    pseudo_label_confidence_threshold: float | str = 0.90,
+    pseudo_label_max_iterations: int | str = 5,
+    pseudo_label_min_new: int | str = 1,
 ) -> pd.DataFrame:
     """Run time-resolved decoding on an MNE epochs file and save metrics as CSV.
 
@@ -2053,6 +2234,18 @@ def run_time_resolved_decode(
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
     label_shuffle_control = bool(label_shuffle_control)
     label_shuffle_seed = int(label_shuffle_seed)
+    pseudo_label_self_training = bool(pseudo_label_self_training)
+    pseudo_label_confidence_threshold = _normalize_pseudo_label_confidence_threshold(
+        pseudo_label_confidence_threshold
+    )
+    pseudo_label_max_iterations = _normalize_positive_int(
+        pseudo_label_max_iterations,
+        name="pseudo_label_max_iterations",
+    )
+    pseudo_label_min_new = _normalize_positive_int(
+        pseudo_label_min_new,
+        name="pseudo_label_min_new",
+    )
     alignment_target_calibration_seed = int(alignment_target_calibration_seed)
     dataset_name_value = "" if dataset_name is None else str(dataset_name)
     outer_test_groups_value = _normalize_outer_test_groups(outer_test_groups)
@@ -2069,16 +2262,37 @@ def run_time_resolved_decode(
             raise ValueError("source alignment should be combined with posthoc response-window aggregation, not source_time_selection.")
         if source_calibration_name != "none":
             raise ValueError("source alignment currently requires source_calibration='none'.")
+    if pseudo_label_self_training:
+        if normalized_temporal_train_window is not None:
+            raise ValueError("pseudo_label_self_training currently supports same-time decoding only.")
+        if source_time_selection_name != "none":
+            raise ValueError("pseudo_label_self_training should be combined with posthoc response-window aggregation, not source_time_selection.")
+        if source_calibration_name != "none":
+            raise ValueError("pseudo_label_self_training currently requires source_calibration='none'.")
+        if tune_hyperparameters:
+            raise ValueError("pseudo_label_self_training currently requires tune_hyperparameters=False.")
+        if alignment_config.target_calibrated or alignment_config.oracle_target_calibrated:
+            raise ValueError(
+                "pseudo_label_self_training is category-2 adaptation and cannot be combined with "
+                "target_calibrated_alignment or oracle_target_calibrated_alignment."
+            )
     if source_time_selection_name != "none" and normalized_temporal_train_window is not None:
         raise ValueError("source_time_selection currently supports same-time decoding only.")
     time_decode_backend = (
         "sklearn"
         if requested_time_decode_backend == "auto"
-        and (normalized_temporal_train_window is not None or source_time_selection_name != "none" or alignment_config.enabled)
+        and (
+            normalized_temporal_train_window is not None
+            or source_time_selection_name != "none"
+            or alignment_config.enabled
+            or pseudo_label_self_training
+        )
         else "mne"
         if requested_time_decode_backend == "auto"
         else requested_time_decode_backend
     )
+    if pseudo_label_self_training and time_decode_backend != "sklearn":
+        raise ValueError("pseudo_label_self_training requires the sklearn time-decode backend.")
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
@@ -2143,6 +2357,19 @@ def run_time_resolved_decode(
             "source_time_selection": source_time_selection_name,
             "source_time_selection_times": source_time_selection_time_values,
             "source_alignment": alignment_config.static_metadata() if alignment_config.enabled else {},
+            **(
+                {
+                    "pseudo_label_self_training": {
+                        "enabled": True,
+                        "protocol": PSEUDO_LABEL_SELF_TRAINING_PROTOCOL,
+                        "confidence_threshold": float(pseudo_label_confidence_threshold),
+                        "max_iterations": int(pseudo_label_max_iterations),
+                        "min_new": int(pseudo_label_min_new),
+                    }
+                }
+                if pseudo_label_self_training
+                else {}
+            ),
             "outer_test_groups": outer_test_groups_value,
         }
     )
@@ -2168,6 +2395,10 @@ def run_time_resolved_decode(
         alignment_metadata=alignment_config.static_metadata() if alignment_config.enabled else None,
         label_shuffle_control=label_shuffle_control,
         label_shuffle_seed=label_shuffle_seed,
+        pseudo_label_self_training=pseudo_label_self_training,
+        pseudo_label_confidence_threshold=pseudo_label_confidence_threshold,
+        pseudo_label_max_iterations=pseudo_label_max_iterations,
+        pseudo_label_min_new=pseudo_label_min_new,
     )
 
     raw_data = epochs.get_data(copy=False)
@@ -2581,34 +2812,59 @@ def run_time_resolved_decode(
                         if tune_hyperparameters
                         else 3
                     )
-                    model = make_decoder(
-                        decoder_name,
-                        max_iter=max_iter,
-                        emission_mode=current_emission_mode,
-                        feature_preprocessor=feature_preprocessor_name,
-                        pca_components=pca_components_value,
-                        tune_hyperparameters=tune_hyperparameters,
-                        tuning_cv=tuning_cv,
-                        tuning_scoring=tuning_scoring,
-                        tuning_c_grid=tuning_c_grid_values,
-                    )
-                    model.fit(train_feature_matrix, train_labels)
-
-                    probabilities = _align_probability_columns(
-                        predict_emission_probabilities(
-                            model,
-                            test_feature_matrix,
+                    pseudo_label_metadata: dict[str, object] = {}
+                    if pseudo_label_self_training:
+                        pseudo_label_result = _fit_pseudo_label_self_training_decoder(
+                            train_features=train_feature_matrix,
+                            train_labels=train_labels,
+                            target_features=test_feature_matrix,
+                            classes=classes,
+                            decoder_name=decoder_name,
                             emission_mode=current_emission_mode,
-                        ),
-                        model=model,
-                        classes=classes,
-                    )
-                    probabilities = _apply_class_prior_correction(
-                        probabilities,
-                        train_labels,
-                        classes,
-                        class_prior_correction_name,
-                    )
+                            max_iter=max_iter,
+                            feature_preprocessor=feature_preprocessor_name,
+                            pca_components=pca_components_value,
+                            tune_hyperparameters=tune_hyperparameters,
+                            tuning_cv=tuning_cv,
+                            tuning_scoring=tuning_scoring,
+                            tuning_c_grid=tuning_c_grid_values,
+                            class_prior_correction=class_prior_correction_name,
+                            confidence_threshold=pseudo_label_confidence_threshold,
+                            max_iterations=pseudo_label_max_iterations,
+                            min_new=pseudo_label_min_new,
+                        )
+                        model = pseudo_label_result.model
+                        probabilities = pseudo_label_result.probabilities
+                        pseudo_label_metadata = pseudo_label_result.metadata
+                    else:
+                        model = make_decoder(
+                            decoder_name,
+                            max_iter=max_iter,
+                            emission_mode=current_emission_mode,
+                            feature_preprocessor=feature_preprocessor_name,
+                            pca_components=pca_components_value,
+                            tune_hyperparameters=tune_hyperparameters,
+                            tuning_cv=tuning_cv,
+                            tuning_scoring=tuning_scoring,
+                            tuning_c_grid=tuning_c_grid_values,
+                        )
+                        model.fit(train_feature_matrix, train_labels)
+
+                        probabilities = _align_probability_columns(
+                            predict_emission_probabilities(
+                                model,
+                                test_feature_matrix,
+                                emission_mode=current_emission_mode,
+                            ),
+                            model=model,
+                            classes=classes,
+                        )
+                        probabilities = _apply_class_prior_correction(
+                            probabilities,
+                            train_labels,
+                            classes,
+                            class_prior_correction_name,
+                        )
                     calibrator = fit_inner_source_probability_calibrator(
                         features=features,
                         train_idx=train_idx,
@@ -2635,6 +2891,7 @@ def run_time_resolved_decode(
                         tuning_scoring=tuning_scoring,
                         tuning_c_grid=tuning_c_grid_values,
                     )
+                    tuning_metadata.update(pseudo_label_metadata)
                     current_model_hash = _model_hash(
                         decoder_name=decoder_name,
                         emission_mode=current_emission_mode,
@@ -2657,6 +2914,10 @@ def run_time_resolved_decode(
                         alignment_metadata=alignment_metadata,
                         label_shuffle_control=label_shuffle_control,
                         label_shuffle_seed=label_shuffle_seed,
+                        pseudo_label_self_training=pseudo_label_self_training,
+                        pseudo_label_confidence_threshold=pseudo_label_confidence_threshold,
+                        pseudo_label_max_iterations=pseudo_label_max_iterations,
+                        pseudo_label_min_new=pseudo_label_min_new,
                     )
                     _append_decoded_outputs(
                         rows=rows,
@@ -3077,6 +3338,32 @@ def main() -> None:
     )
     parser.add_argument("--label-shuffle-seed", type=int, default=13, help="Seed for --label-shuffle-control.")
     parser.add_argument(
+        "--pseudo-label-self-training",
+        action="store_true",
+        help=(
+            "Category-2 unlabeled target adaptation: iteratively add high-confidence "
+            "held-out target predictions as pseudo-labels and refit the classifier."
+        ),
+    )
+    parser.add_argument(
+        "--pseudo-label-confidence-threshold",
+        type=float,
+        default=0.90,
+        help="Minimum predicted probability required before a held-out target row is pseudo-labeled.",
+    )
+    parser.add_argument(
+        "--pseudo-label-max-iterations",
+        type=int,
+        default=5,
+        help="Maximum pseudo-label/refit iterations per outer fold and time window.",
+    )
+    parser.add_argument(
+        "--pseudo-label-min-new",
+        type=int,
+        default=1,
+        help="Stop when fewer than this many new target rows enter the pseudo-labeled set.",
+    )
+    parser.add_argument(
         "--time-decode-backend",
         choices=TIME_DECODE_BACKEND_CHOICES,
         default="auto",
@@ -3264,6 +3551,10 @@ def main() -> None:
         alignment_target_calibration_seed=args.alignment_target_calibration_seed,
         label_shuffle_control=args.label_shuffle_control,
         label_shuffle_seed=args.label_shuffle_seed,
+        pseudo_label_self_training=args.pseudo_label_self_training,
+        pseudo_label_confidence_threshold=args.pseudo_label_confidence_threshold,
+        pseudo_label_max_iterations=args.pseudo_label_max_iterations,
+        pseudo_label_min_new=args.pseudo_label_min_new,
     )
     print(f"Wrote {args.out}")
     if args.observations_out is not None:

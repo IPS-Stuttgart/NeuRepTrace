@@ -261,6 +261,13 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
         "alignment_target_calibration_seed": int(decoding.get("alignment_target_calibration_seed", 13)),
         "label_shuffle_control": _bool_value(decoding.get("label_shuffle_control"), name="decoding.label_shuffle_control"),
         "label_shuffle_seed": int(decoding.get("label_shuffle_seed", 13)),
+        "pseudo_label_self_training": _bool_value(
+            decoding.get("pseudo_label_self_training"),
+            name="decoding.pseudo_label_self_training",
+        ),
+        "pseudo_label_confidence_threshold": float(decoding.get("pseudo_label_confidence_threshold", 0.90)),
+        "pseudo_label_max_iterations": int(decoding.get("pseudo_label_max_iterations", 5)),
+        "pseudo_label_min_new": int(decoding.get("pseudo_label_min_new", 1)),
     }
     if temporal_train_mode is not None:
         kwargs["temporal_train_mode"] = temporal_train_mode
