@@ -1130,7 +1130,8 @@ def _select_decode_windows(windows: list[TimeWindow], decode_window: DecodeWindo
     if decode_window is None:
         return list(windows)
     decode_start, decode_stop = decode_window
-    selected = [window for window in windows if decode_start <= window[2] <= decode_stop]
+    tolerance = 1e-9
+    selected = [window for window in windows if decode_start - tolerance <= window[2] <= decode_stop + tolerance]
     if selected:
         return selected
 
