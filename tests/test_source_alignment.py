@@ -594,7 +594,7 @@ def test_anchor_availability_flags_insufficient_target_calibration_repetitions()
     assert row["estimated_repetitions_per_anchor"] == 2
     assert row["prefit_status"] == "likely_fit_failure"
     assert "target_calibration_subject_insufficient_alignment_anchor_repetitions" in row["prefit_failure_reason"]
-    assert "requires at least 2" in row["prefit_failure_detail"]
+    assert "require at least 2" in row["prefit_failure_detail"]
 
 
 @pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
