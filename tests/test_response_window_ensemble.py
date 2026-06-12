@@ -121,6 +121,7 @@ def test_response_window_uses_group_when_subject_column_is_empty(tmp_path: Path)
 
     ensembled, metrics = run_response_window_ensemble([csv_path], mode="uniform")
 
+    assert sorted(ensembled["subject"].unique().tolist()) == ["sub-01", "sub-02", "sub-03"]
     assert sorted(ensembled["group"].unique().tolist()) == ["sub-01", "sub-02", "sub-03"]
     assert len(ensembled) == len(observations.loc[observations["time"].eq(0.184)])
     assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
@@ -474,7 +475,7 @@ def test_response_window_uses_outer_test_group_when_subject_is_empty(tmp_path: P
 
     weights = ensembled.groupby("outer_test_groups")["response_window_weights"].first().to_dict()
     assert set(weights) == {"sub-01", "sub-02", "sub-03"}
-    assert ensembled["subject"].isna().all()
+    assert sorted(ensembled["subject"].unique().tolist()) == ["sub-01", "sub-02", "sub-03"]
     assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
 
 

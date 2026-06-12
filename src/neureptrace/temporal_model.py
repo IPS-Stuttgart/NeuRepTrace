@@ -94,6 +94,16 @@ def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
             frame["sequence_id"] = frame["sample_index"]
         if "subject" not in frame.columns:
             frame["subject"] = csv_path.stem
+        else:
+            frame["subject"] = frame["subject"].astype(object)
+            subject_tokens = frame["subject"].astype(str).str.strip().str.lower()
+            missing_subject = frame["subject"].isna() | subject_tokens.isin({"", "nan", "none", "nat"})
+            for fallback_column in ("group", "outer_test_groups"):
+                if fallback_column not in frame.columns or not bool(missing_subject.any()):
+                    continue
+                frame.loc[missing_subject, "subject"] = frame.loc[missing_subject, fallback_column]
+                subject_tokens = frame["subject"].astype(str).str.strip().str.lower()
+                missing_subject = frame["subject"].isna() | subject_tokens.isin({"", "nan", "none", "nat"})
         if "decoder" not in frame.columns:
             frame["decoder"] = "decoder"
         if "emission_mode" not in frame.columns:
