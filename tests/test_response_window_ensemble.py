@@ -112,6 +112,20 @@ def test_response_window_uniform_logit_ensemble_writes_metrics(tmp_path: Path):
     assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
 
 
+def test_response_window_uses_group_when_subject_column_is_empty(tmp_path: Path):
+    csv_path = tmp_path / "observations.csv"
+    observations = _toy_observations()
+    observations["group"] = observations["subject"]
+    observations["subject"] = np.nan
+    observations.to_csv(csv_path, index=False)
+
+    ensembled, metrics = run_response_window_ensemble([csv_path], mode="uniform")
+
+    assert sorted(ensembled["group"].unique().tolist()) == ["sub-01", "sub-02", "sub-03"]
+    assert len(ensembled) == len(observations.loc[observations["time"].eq(0.184)])
+    assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
+
+
 def test_response_window_rejects_duplicate_nearest_time_mapping(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     observations = _toy_observations()

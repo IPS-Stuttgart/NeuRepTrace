@@ -97,7 +97,9 @@ def _nearest_times(available_times: np.ndarray, requested_times: tuple[float, ..
 def _has_nonempty_values(series: pd.Series) -> bool:
     if series.dropna().empty:
         return False
-    return series.dropna().astype(str).str.strip().ne("").any()
+    values = series.dropna().astype(str).str.strip()
+    values = values.loc[~values.str.lower().isin({"", "nan", "none", "nat"})]
+    return not values.empty
 
 
 def _subject_key_column(frame: pd.DataFrame) -> str | None:
@@ -136,7 +138,11 @@ def _target_subject_values(base: pd.DataFrame, key_columns: list[str]) -> np.nda
 def _nonempty_unique_values(frame: pd.DataFrame, column: str) -> list[str]:
     if column not in frame.columns:
         return []
-    return sorted(value for value in frame[column].dropna().astype(str).str.strip().unique().tolist() if value)
+    return sorted(
+        value
+        for value in frame[column].dropna().astype(str).str.strip().unique().tolist()
+        if value and value.lower() not in {"nan", "none", "nat"}
+    )
 
 
 def _check_single_plain_response_source(selected: pd.DataFrame) -> None:
