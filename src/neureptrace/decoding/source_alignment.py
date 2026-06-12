@@ -1627,10 +1627,6 @@ def _source_inner_strict_loso_scores(
         test_labels = labels_by_subject[test_subject]
 
         predicted_raw = _nearest_centroid_predict(train_features, train_labels, test_features)
-        if predicted_raw.size:
-            raw_predictions.extend(predicted_raw.tolist())
-            raw_truth.extend(test_labels.tolist())
-
         if len(train_subjects) < 2:
             continue
         try:
@@ -1651,7 +1647,16 @@ def _source_inner_strict_loso_scores(
         except (ValueError, np.linalg.LinAlgError):
             continue
         predicted_aligned = _nearest_centroid_predict(aligned_train_features, train_labels, aligned_test_features)
-        if predicted_aligned.size:
+
+        # Keep the raw and aligned source-inner diagnostics paired.  Alignment
+        # fitting can fail for an inner held-out source subject, especially with
+        # sparse or metadata-derived anchors.  Including raw predictions for
+        # folds where the aligned side was skipped makes the reported raw and
+        # aligned balanced accuracies refer to different held-out subjects and
+        # can create a misleading aligned-minus-raw diagnostic.
+        if predicted_raw.size and predicted_aligned.size:
+            raw_predictions.extend(predicted_raw.tolist())
+            raw_truth.extend(test_labels.tolist())
             aligned_predictions.extend(predicted_aligned.tolist())
             aligned_truth.extend(test_labels.tolist())
 

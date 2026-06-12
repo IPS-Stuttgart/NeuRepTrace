@@ -283,6 +283,38 @@ def test_source_alignment_methods_expose_group_projection_metadata(method):
     assert aligned_distance < raw_distance
 
 
+def test_source_inner_diagnostics_skip_raw_when_aligned_inner_folds_fail(monkeypatch):
+    """Raw/aligned source-inner diagnostics must score the same inner folds."""
+
+    import neureptrace.decoding.source_alignment as source_alignment_module
+
+    features, labels, subjects = _rotated_subject_features(seed=67)
+    original_fit = source_alignment_module._fit_source_alignment_model
+    full_outer_subject_count = len(np.unique(subjects))
+
+    def fail_inner_alignment(*args, **kwargs):
+        features_by_subject = args[0] if args else kwargs["features_by_subject"]
+        if len(features_by_subject) < full_outer_subject_count:
+            raise ValueError("simulated inner alignment failure")
+        return original_fit(*args, **kwargs)
+
+    monkeypatch.setattr(source_alignment_module, "_fit_source_alignment_model", fail_inner_alignment)
+
+    result = align_train_test_features(
+        train_features=features,
+        train_labels=labels,
+        train_subject_ids=subjects,
+        test_features=features[:6],
+        config=source_alignment_config(method="mcca", components=2),
+        compute_source_inner_diagnostics=True,
+    )
+
+    assert result.train_features.shape == (features.shape[0], 2)
+    assert result.diagnostics["source_inner_raw_balanced_accuracy"] == ""
+    assert result.diagnostics["source_inner_aligned_balanced_accuracy"] == ""
+    assert result.diagnostics["source_inner_aligned_minus_raw"] == ""
+
+
 @pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
 def test_target_centered_group_projection_uses_unlabeled_target_mean(method):
     features, labels, subjects = _rotated_subject_features(seed=53)
