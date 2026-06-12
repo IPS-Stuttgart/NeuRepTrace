@@ -20,7 +20,6 @@ from neureptrace.decoding.mcca import (
     _class_repetition_matrix,
     _contains_label,
     _feature_matrix,
-    _label_vector,
     _normalize_sample_mode,
     _ordered_unique_labels,
 )
@@ -96,7 +95,7 @@ def class_alignment_matrix(
     if classes is None:
         class_order = _ordered_unique_labels(vector)
     else:
-        class_order = np.asarray(classes).ravel()
+        class_order = _label_vector(classes, expected_length=None, name="classes")
     _check_requested_classes(vector, class_order)
 
     if sample_mode == "class_mean":
@@ -232,6 +231,30 @@ def _check_requested_classes(labels: np.ndarray, classes: np.ndarray) -> None:
     missing = [label for label in classes if not _contains_label(labels, label)]
     if missing:
         raise ValueError(f"classes include labels absent from labels: {missing!r}.")
+
+
+def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int | None, name: str) -> np.ndarray:
+    """Return a 1D object vector while preserving tuple-like anchor labels.
+
+    Target-calibration alignment often uses composite metadata anchors such as
+    ``(run, stimulus)``.  ``np.asarray(labels).ravel()`` turns rectangular lists
+    of tuples into a flattened array of tuple fields, which changes the apparent
+    row count and breaks row-aligned target M-CCA calibration.  Building the
+    object vector by assignment keeps each tuple as one atomic label.
+    """
+
+    if isinstance(labels, np.ndarray) and labels.ndim == 1:
+        vector = labels.astype(object, copy=False).reshape(-1)
+    else:
+        try:
+            items = list(labels)
+        except TypeError:
+            items = [labels]
+        vector = np.empty(len(items), dtype=object)
+        vector[:] = items
+    if expected_length is not None and vector.shape[0] != expected_length:
+        raise ValueError(f"{name} length must match feature rows: {vector.shape[0]} != {expected_length}.")
+    return vector
 
 
 def _minimum_class_count(labels: np.ndarray, classes: np.ndarray) -> int:
