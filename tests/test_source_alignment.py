@@ -17,7 +17,7 @@ from neureptrace.decoding.source_alignment import (
 )
 
 
-def _rotated_subject_features(seed=13):
+def _rotated_subject_features(seed=13, n_subjects=3):
     rng = np.random.default_rng(seed)
     labels_one_subject = np.repeat(np.arange(3), 8)
     prototypes = np.array(
@@ -30,7 +30,7 @@ def _rotated_subject_features(seed=13):
     features = []
     labels = []
     subjects = []
-    for subject in range(3):
+    for subject in range(n_subjects):
         q, _r = np.linalg.qr(rng.normal(size=(4, 4)))
         subject_features = prototypes[labels_one_subject] @ q + 0.02 * rng.normal(size=(labels_one_subject.size, 4))
         features.append(subject_features)
@@ -622,9 +622,9 @@ def test_oracle_target_calibrated_alignment_accepts_target_anchor_values():
 
 @pytest.mark.parametrize("method", ["procrustes", "hyperalignment", "mcca"])
 def test_source_inner_diagnostics_follow_target_projection_for_oracle_alignment(method):
-    features, labels, subjects = _rotated_subject_features(seed=71)
-    source_mask = subjects != "s2"
-    target_mask = subjects == "s2"
+    features, labels, subjects = _rotated_subject_features(seed=71, n_subjects=4)
+    source_mask = subjects != "s3"
+    target_mask = subjects == "s3"
 
     oracle = align_train_test_features(
         train_features=features[source_mask],
