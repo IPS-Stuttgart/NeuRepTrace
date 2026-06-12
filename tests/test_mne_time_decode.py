@@ -280,6 +280,97 @@ def test_run_time_resolved_decode_pseudo_label_alignment_uses_pseudo_labels_not_
     assert diagnostics["target_transform_type"].unique().tolist() == ["pseudo_label_template_procrustes"]
 
 
+def test_run_time_resolved_decode_pseudo_label_alignment_fallback_keeps_requested_protocol(
+    tmp_path: Path,
+    monkeypatch,
+):
+    labels = np.array([0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1])
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    data[:8, 0, :] = labels[:8].reshape(-1, 1)
+    data[8:, 0, :] = 0.0
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    target_calibration_label_calls = []
+    PseudoLabelRecordingDecoder.fit_labels = []
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs.get("target_labels") is None
+        target_calibration_labels = kwargs.get("target_calibration_labels")
+        if target_calibration_labels is not None:
+            target_calibration_label_calls.append(np.asarray(target_calibration_labels, dtype=int).copy())
+            raise ValueError("missing alignment anchors: [1]")
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "class_mean",
+                "alignment_target_projection": "group_projection",
+                "alignment_target_labels_used": False,
+                "alignment_target_pseudo_labels_used": False,
+                "alignment_n_components": 1,
+            },
+            diagnostics={
+                "alignment_method": "procrustes",
+                "sample_mode": "class_mean",
+                "n_source_subjects": 2,
+                "n_classes": 2,
+                "n_alignment_rows": 2,
+                "n_repetitions_per_class": "",
+                "requested_components": 1,
+                "actual_components": 1,
+                "feature_dim": 1,
+                "decode_feature_dim": 1,
+                "uses_channel_projection_collapse": False,
+                "alignment_dimensionality_reduction": False,
+                "uses_unlabeled_target_data": False,
+                "target_transform_type": "source_group_projection",
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: PseudoLabelRecordingDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-03_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-03",),
+        out_path=tmp_path / "pseudo_alignment_fallback_summary.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=1,
+        decode_window=(0.184, 0.184),
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        pseudo_label_self_training=True,
+        pseudo_label_confidence_threshold=0.9,
+        pseudo_label_max_iterations=3,
+        alignment_method="procrustes",
+        alignment_target_projection="pseudo_label_target_calibrated_alignment",
+        alignment_times="same_decode_window",
+    )
+
+    assert target_calibration_label_calls
+    np.testing.assert_array_equal(target_calibration_label_calls[0], np.zeros(4, dtype=int))
+    assert set(results["alignment_target_projection"].unique()) == {"pseudo_label_target_calibrated_alignment"}
+    assert set(results["alignment_target_projection_fit"].unique()) == {"source_group_projection_fallback"}
+    assert set(results["alignment_target_pseudo_labels_used"].unique()) == {False}
+    assert set(results["alignment_pseudo_label_fallback"].unique()) == {True}
+    assert results["pseudo_label_stop_reason"].tolist() == ["alignment_missing_pseudo_anchors"]
+    assert results["pseudo_label_alignment_successful_iterations"].tolist() == [0]
+
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["alignment_target_projection"].unique().tolist() == [
+        "pseudo_label_target_calibrated_alignment"
+    ]
+    assert diagnostics["alignment_target_projection_fit"].unique().tolist() == ["source_group_projection_fallback"]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection_fallback"]
+
+
 def test_source_time_selection_rejects_duplicate_nearest_windows():
     windows = [(0, 2, 0.10), (1, 3, 0.20)]
 

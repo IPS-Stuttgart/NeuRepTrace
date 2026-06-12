@@ -1795,6 +1795,50 @@ def _pseudo_alignment_stop_reason(error: Exception) -> str:
     return "alignment_fit_failed"
 
 
+def _pseudo_label_target_alignment_fallback_result(
+    result: SourceAlignmentResult,
+    alignment_config,
+    *,
+    stop_reason: str,
+) -> SourceAlignmentResult:
+    """Retag source-only fallback folds as the requested category-2 protocol."""
+
+    target_projection_fit = "source_group_projection_fallback"
+    metadata = {
+        **result.metadata,
+        **alignment_config.static_metadata(),
+        "alignment_target_projection": PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
+        "alignment_target_projection_fit": target_projection_fit,
+        "alignment_target_alignment_rows": 0,
+        "alignment_target_labels_used": False,
+        "alignment_target_pseudo_labels_used": False,
+        "alignment_target_anchor_values_used": False,
+        "alignment_pseudo_label_target_calibrated": True,
+        "alignment_pseudo_label_fallback": True,
+        "alignment_pseudo_label_fallback_reason": stop_reason,
+    }
+    diagnostics = {
+        **result.diagnostics,
+        "uses_unlabeled_target_data": True,
+        "target_transform_type": target_projection_fit,
+        "alignment_target_projection": PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
+        "alignment_target_projection_fit": target_projection_fit,
+        "alignment_target_alignment_rows": 0,
+        "alignment_target_labels_used": False,
+        "alignment_target_pseudo_labels_used": False,
+        "alignment_target_anchor_values_used": False,
+        "alignment_pseudo_label_target_calibrated": True,
+        "alignment_valid_for_benchmark": True,
+        "alignment_protocol": PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
+    }
+    return SourceAlignmentResult(
+        train_features=result.train_features,
+        test_features=result.test_features,
+        metadata=metadata,
+        diagnostics=diagnostics,
+    )
+
+
 def _fit_pseudo_label_target_alignment_self_training_decoder(
     *,
     train_features: np.ndarray,
@@ -1945,6 +1989,13 @@ def _fit_pseudo_label_target_alignment_self_training_decoder(
 
             selected = next_selected
             pseudo_labels = next_pseudo_labels
+
+    if alignment_successful_iterations == 0:
+        alignment_result = _pseudo_label_target_alignment_fallback_result(
+            alignment_result,
+            alignment_config,
+            stop_reason=stop_reason,
+        )
 
     selected_labels = pseudo_labels[selected]
     metadata = {
