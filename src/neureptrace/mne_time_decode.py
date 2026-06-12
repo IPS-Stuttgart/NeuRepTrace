@@ -35,7 +35,9 @@ from neureptrace.decoding import (
 from neureptrace.decoding.source_alignment import (
     ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS,
     ALIGNMENT_DIAGNOSTIC_COLUMNS,
+    PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
     SOURCE_ALIGNMENT_ANCHOR_MODES,
+    SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES,
     SOURCE_ALIGNMENT_METHODS,
     SOURCE_ALIGNMENT_TARGET_PROJECTIONS,
     SOURCE_ALIGNMENT_UNSUPERVISED_METHODS,
@@ -85,6 +87,10 @@ SOURCE_ALIGNMENT_RUN_ANCHOR_MODES = (
 SOURCE_ALIGNMENT_RUN_TARGET_PROJECTIONS = (
     *SOURCE_ALIGNMENT_TARGET_PROJECTIONS,
     "target",
+    "pseudo",
+    "pseudo_label",
+    "pseudo_label_target",
+    "pseudo_label_target_calibrated",
     "oracle",
     "oracle_target",
     "target_calibrated",
@@ -168,6 +174,9 @@ class PseudoLabelSelfTrainingResult:
     model: object
     probabilities: np.ndarray
     metadata: dict[str, object]
+    alignment_result: SourceAlignmentResult | None = None
+    selected: np.ndarray | None = None
+    pseudo_labels: np.ndarray | None = None
 
 
 def _add_subject(row: dict, subject: str | None) -> dict:
@@ -1768,7 +1777,204 @@ def _fit_pseudo_label_self_training_decoder(
         "pseudo_label_stop_reason": stop_reason,
         "pseudo_label_class_counts": _pseudo_label_class_counts(selected_labels, classes),
     }
-    return PseudoLabelSelfTrainingResult(model=model, probabilities=probabilities, metadata=metadata)
+    return PseudoLabelSelfTrainingResult(
+        model=model,
+        probabilities=probabilities,
+        metadata=metadata,
+        selected=selected.copy(),
+        pseudo_labels=pseudo_labels.copy(),
+    )
+
+
+def _pseudo_alignment_stop_reason(error: Exception) -> str:
+    text = str(error)
+    if "missing alignment anchors" in text:
+        return "alignment_missing_pseudo_anchors"
+    if "has only" in text and "repetitions" in text:
+        return "alignment_insufficient_pseudo_repetitions"
+    return "alignment_fit_failed"
+
+
+def _fit_pseudo_label_target_alignment_self_training_decoder(
+    *,
+    train_features: np.ndarray,
+    train_labels: np.ndarray,
+    train_subject_ids: np.ndarray,
+    target_features: np.ndarray,
+    classes: np.ndarray,
+    decoder_name: str,
+    emission_mode: str,
+    max_iter: int,
+    feature_preprocessor: str,
+    pca_components: int | float | None,
+    tune_hyperparameters: bool,
+    tuning_cv,
+    tuning_scoring: str,
+    tuning_c_grid: Sequence[float],
+    class_prior_correction: str,
+    confidence_threshold: float,
+    max_iterations: int,
+    min_new: int,
+    alignment_config,
+    train_anchor_values: np.ndarray | None,
+) -> PseudoLabelSelfTrainingResult:
+    """Self-train and refit a target projection from pseudo-labeled target rows."""
+
+    train_features = np.asarray(train_features, dtype=float)
+    train_labels = np.asarray(train_labels, dtype=int)
+    train_subject_ids = np.asarray(train_subject_ids, dtype=object)
+    target_features = np.asarray(target_features, dtype=float)
+    classes = np.asarray(classes, dtype=int)
+    threshold = _normalize_pseudo_label_confidence_threshold(confidence_threshold)
+    max_iterations = _normalize_positive_int(max_iterations, name="pseudo_label_max_iterations")
+    min_new = _normalize_positive_int(min_new, name="pseudo_label_min_new")
+
+    initial_alignment_config = replace(alignment_config, target_projection="group_projection")
+    alignment_result = align_train_test_features(
+        train_features=train_features,
+        train_labels=train_labels,
+        train_subject_ids=train_subject_ids,
+        test_features=target_features,
+        train_anchor_values=train_anchor_values,
+        config=initial_alignment_config,
+        compute_source_inner_diagnostics=False,
+    )
+
+    def fit_predict(features: np.ndarray, labels: np.ndarray, predict_features: np.ndarray):
+        model = make_decoder(
+            decoder_name,
+            max_iter=max_iter,
+            emission_mode=emission_mode,
+            feature_preprocessor=feature_preprocessor,
+            pca_components=pca_components,
+            tune_hyperparameters=tune_hyperparameters,
+            tuning_cv=tuning_cv,
+            tuning_scoring=tuning_scoring,
+            tuning_c_grid=tuning_c_grid,
+        )
+        model.fit(features, labels)
+        probabilities = _align_probability_columns(
+            predict_emission_probabilities(
+                model,
+                predict_features,
+                emission_mode=emission_mode,
+            ),
+            model=model,
+            classes=classes,
+        )
+        probabilities = _apply_class_prior_correction(
+            probabilities,
+            labels,
+            classes,
+            class_prior_correction,
+        )
+        return model, probabilities
+
+    model, probabilities = fit_predict(
+        alignment_result.train_features,
+        train_labels,
+        alignment_result.test_features,
+    )
+    selected = probabilities.max(axis=1) >= threshold
+    pseudo_labels = probabilities.argmax(axis=1).astype(int)
+    stop_reason = "none_selected"
+    iterations = 0
+    alignment_successful_iterations = 0
+    alignment_error = ""
+    seen_signatures: set[tuple[tuple[int, int], ...]] = set()
+
+    if np.any(selected):
+        stop_reason = "max_iterations"
+        for iteration in range(1, max_iterations + 1):
+            signature = _pseudo_label_signature(selected, pseudo_labels)
+            if signature in seen_signatures:
+                stop_reason = "selection_repeated"
+                break
+            seen_signatures.add(signature)
+
+            selected_target_labels = pseudo_labels[selected]
+            try:
+                next_alignment_result = align_train_test_features(
+                    train_features=train_features,
+                    train_labels=train_labels,
+                    train_subject_ids=train_subject_ids,
+                    test_features=target_features,
+                    train_anchor_values=train_anchor_values,
+                    target_calibration_features=target_features[selected],
+                    target_calibration_labels=selected_target_labels,
+                    config=alignment_config,
+                )
+            except ValueError as exc:
+                stop_reason = _pseudo_alignment_stop_reason(exc)
+                alignment_error = str(exc)
+                break
+
+            selected_target_features = next_alignment_result.test_features[selected]
+            augmented_features = np.vstack([next_alignment_result.train_features, selected_target_features])
+            augmented_labels = np.concatenate([train_labels, selected_target_labels])
+            model, probabilities = fit_predict(
+                augmented_features,
+                augmented_labels,
+                next_alignment_result.test_features,
+            )
+            alignment_result = next_alignment_result
+            iterations = iteration
+            alignment_successful_iterations = iteration
+
+            next_selected = probabilities.max(axis=1) >= threshold
+            next_pseudo_labels = probabilities.argmax(axis=1).astype(int)
+            if not np.any(next_selected):
+                stop_reason = "none_selected_after_refit"
+                selected = next_selected
+                pseudo_labels = next_pseudo_labels
+                break
+
+            next_signature = _pseudo_label_signature(next_selected, next_pseudo_labels)
+            if next_signature == signature:
+                stop_reason = "selection_unchanged"
+                selected = next_selected
+                pseudo_labels = next_pseudo_labels
+                break
+
+            n_new = int(np.count_nonzero(next_selected & ~selected))
+            if n_new < min_new:
+                stop_reason = "insufficient_new"
+                selected = next_selected
+                pseudo_labels = next_pseudo_labels
+                break
+
+            selected = next_selected
+            pseudo_labels = next_pseudo_labels
+
+    selected_labels = pseudo_labels[selected]
+    metadata = {
+        "pseudo_label_self_training": True,
+        "pseudo_label_protocol": PSEUDO_LABEL_SELF_TRAINING_PROTOCOL,
+        "pseudo_label_uses_target_features": True,
+        "pseudo_label_uses_target_labels": False,
+        "pseudo_label_confidence_threshold": float(threshold),
+        "pseudo_label_max_iterations": int(max_iterations),
+        "pseudo_label_min_new": int(min_new),
+        "pseudo_label_iterations": int(iterations),
+        "pseudo_label_n_selected": int(np.count_nonzero(selected)),
+        "pseudo_label_selected_fraction": float(np.mean(selected)) if selected.size else 0.0,
+        "pseudo_label_stop_reason": stop_reason,
+        "pseudo_label_class_counts": _pseudo_label_class_counts(selected_labels, classes),
+        "pseudo_label_refines_alignment": True,
+        "pseudo_label_alignment_protocol": PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
+        "pseudo_label_alignment_method": alignment_config.method,
+        "pseudo_label_alignment_target_projection": PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
+        "pseudo_label_alignment_successful_iterations": int(alignment_successful_iterations),
+        "pseudo_label_alignment_error": alignment_error,
+    }
+    return PseudoLabelSelfTrainingResult(
+        model=model,
+        probabilities=probabilities,
+        metadata=metadata,
+        alignment_result=alignment_result,
+        selected=selected.copy(),
+        pseudo_labels=pseudo_labels.copy(),
+    )
 
 
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
@@ -2247,6 +2453,7 @@ def run_time_resolved_decode(
         pseudo_label_min_new,
         name="pseudo_label_min_new",
     )
+    pseudo_label_target_alignment = pseudo_label_self_training and alignment_config.pseudo_label_target_calibrated
     alignment_target_calibration_seed = int(alignment_target_calibration_seed)
     dataset_name_value = "" if dataset_name is None else str(dataset_name)
     outer_test_groups_value = _normalize_outer_test_groups(outer_test_groups)
@@ -2263,6 +2470,16 @@ def run_time_resolved_decode(
             raise ValueError("source alignment should be combined with posthoc response-window aggregation, not source_time_selection.")
         if source_calibration_name != "none":
             raise ValueError("source alignment currently requires source_calibration='none'.")
+        if alignment_config.pseudo_label_target_calibrated:
+            if alignment_config.anchor_mode not in SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES:
+                raise ValueError(
+                    "pseudo_label_target_calibrated_alignment currently supports class_mean or "
+                    "class_repetition anchors because pseudo labels are decoder-class labels."
+                )
+            if not pseudo_label_self_training:
+                raise ValueError(
+                    "pseudo_label_target_calibrated_alignment requires pseudo_label_self_training=true."
+                )
     if pseudo_label_self_training:
         if normalized_temporal_train_window is not None:
             raise ValueError("pseudo_label_self_training currently supports same-time decoding only.")
@@ -2736,7 +2953,7 @@ def run_time_resolved_decode(
                 train_feature_matrix = features[train_idx]
                 test_feature_matrix = features[scored_test_idx]
                 alignment_metadata = None
-                if alignment_config.enabled:
+                if alignment_config.enabled and not pseudo_label_target_alignment:
                     train_anchor_values = None if alignment_anchor_info.values is None else alignment_anchor_info.values[train_idx]
                     oracle_target_labels = (
                         test_labels
@@ -2815,25 +3032,90 @@ def run_time_resolved_decode(
                     )
                     pseudo_label_metadata: dict[str, object] = {}
                     if pseudo_label_self_training:
-                        pseudo_label_result = _fit_pseudo_label_self_training_decoder(
-                            train_features=train_feature_matrix,
-                            train_labels=train_labels,
-                            target_features=test_feature_matrix,
-                            classes=classes,
-                            decoder_name=decoder_name,
-                            emission_mode=current_emission_mode,
-                            max_iter=max_iter,
-                            feature_preprocessor=feature_preprocessor_name,
-                            pca_components=pca_components_value,
-                            tune_hyperparameters=tune_hyperparameters,
-                            tuning_cv=tuning_cv,
-                            tuning_scoring=tuning_scoring,
-                            tuning_c_grid=tuning_c_grid_values,
-                            class_prior_correction=class_prior_correction_name,
-                            confidence_threshold=pseudo_label_confidence_threshold,
-                            max_iterations=pseudo_label_max_iterations,
-                            min_new=pseudo_label_min_new,
-                        )
+                        if pseudo_label_target_alignment:
+                            train_anchor_values = (
+                                None if alignment_anchor_info.values is None else alignment_anchor_info.values[train_idx]
+                            )
+                            pseudo_label_result = _fit_pseudo_label_target_alignment_self_training_decoder(
+                                train_features=train_feature_matrix,
+                                train_labels=train_labels,
+                                train_subject_ids=groups[train_idx],
+                                target_features=test_feature_matrix,
+                                classes=classes,
+                                decoder_name=decoder_name,
+                                emission_mode=current_emission_mode,
+                                max_iter=max_iter,
+                                feature_preprocessor=feature_preprocessor_name,
+                                pca_components=pca_components_value,
+                                tune_hyperparameters=tune_hyperparameters,
+                                tuning_cv=tuning_cv,
+                                tuning_scoring=tuning_scoring,
+                                tuning_c_grid=tuning_c_grid_values,
+                                class_prior_correction=class_prior_correction_name,
+                                confidence_threshold=pseudo_label_confidence_threshold,
+                                max_iterations=pseudo_label_max_iterations,
+                                min_new=pseudo_label_min_new,
+                                alignment_config=alignment_config,
+                                train_anchor_values=train_anchor_values,
+                            )
+                            if pseudo_label_result.alignment_result is not None:
+                                alignment_result = pseudo_label_result.alignment_result
+                                alignment_metadata = alignment_result.metadata
+                                selected = pseudo_label_result.selected
+                                pseudo_labels = pseudo_label_result.pseudo_labels
+                                if selected is not None and pseudo_labels is not None:
+                                    selected_labels = np.asarray(pseudo_labels, dtype=int)[np.asarray(selected, dtype=bool)]
+                                else:
+                                    selected_labels = None
+                                availability_row = _alignment_anchor_availability_row(
+                                    train_labels=train_labels,
+                                    train_subject_ids=groups[train_idx],
+                                    train_anchor_values=train_anchor_values,
+                                    target_calibration_labels=selected_labels,
+                                    alignment_config=alignment_config,
+                                    dataset_name=dataset_name_value,
+                                    test_subject=_test_subject_label(groups, test_idx, fallback=fold),
+                                    alignment_window_center=center,
+                                    alignment_window_size=float(window_ms) / 1000.0,
+                                    decode_window_center=center,
+                                    decode_window_size=float(window_ms) / 1000.0,
+                                )
+                                alignment_anchor_availability_rows.append(availability_row)
+                                _write_alignment_anchor_availability(
+                                    out_path.parent / "alignment_anchor_availability.csv",
+                                    alignment_anchor_availability_rows,
+                                )
+                                alignment_diagnostic_rows.append(
+                                    _alignment_diagnostic_row(
+                                        alignment_result,
+                                        dataset_name=dataset_name_value,
+                                        test_subject=_test_subject_label(groups, test_idx, fallback=fold),
+                                        alignment_window_center=center,
+                                        alignment_window_size=float(window_ms) / 1000.0,
+                                        decode_window_center=center,
+                                        decode_window_size=float(window_ms) / 1000.0,
+                                    )
+                                )
+                        else:
+                            pseudo_label_result = _fit_pseudo_label_self_training_decoder(
+                                train_features=train_feature_matrix,
+                                train_labels=train_labels,
+                                target_features=test_feature_matrix,
+                                classes=classes,
+                                decoder_name=decoder_name,
+                                emission_mode=current_emission_mode,
+                                max_iter=max_iter,
+                                feature_preprocessor=feature_preprocessor_name,
+                                pca_components=pca_components_value,
+                                tune_hyperparameters=tune_hyperparameters,
+                                tuning_cv=tuning_cv,
+                                tuning_scoring=tuning_scoring,
+                                tuning_c_grid=tuning_c_grid_values,
+                                class_prior_correction=class_prior_correction_name,
+                                confidence_threshold=pseudo_label_confidence_threshold,
+                                max_iterations=pseudo_label_max_iterations,
+                                min_new=pseudo_label_min_new,
+                            )
                         model = pseudo_label_result.model
                         probabilities = pseudo_label_result.probabilities
                         pseudo_label_metadata = pseudo_label_result.metadata
