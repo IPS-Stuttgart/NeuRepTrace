@@ -594,8 +594,33 @@ def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: s
     return matrix
 
 
+def _object_vector(values: Sequence | np.ndarray) -> np.ndarray:
+    """Return a 1D object vector while preserving tuple-like labels.
+
+    ``np.asarray([(1, 2), (3, 4)], dtype=object)`` still creates a 2D object
+    array because the tuples have a uniform length.  Alignment anchors may be
+    composite metadata keys such as ``(run, stimulus_id)``; flattening those keys
+    changes the row count and can make valid hyperalignment anchor labels fail
+    the length check.  Build the object vector via assignment from
+    ``list(values)`` for generic Python sequences so each item remains one scalar
+    label.
+    """
+
+    if isinstance(values, np.ndarray):
+        if values.ndim == 1:
+            return values.astype(object, copy=False).reshape(-1)
+        return values.reshape(-1).astype(object)
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
+    return vector
+
+
 def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(labels).ravel()
+    vector = _object_vector(labels)
     if len(vector) != expected_length:
         raise ValueError(f"{name} length must match feature rows: {len(vector)} != {expected_length}.")
     return vector

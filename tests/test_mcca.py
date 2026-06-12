@@ -186,6 +186,32 @@ def test_class_alignment_matrices_accept_tuple_object_anchor_labels():
     np.testing.assert_allclose(repetition_alignment.aligned_by_subject["a"].ravel(), [1.0, 3.0, 10.0, 30.0])
 
 
+def test_class_alignment_matrices_preserve_tuple_labels_from_plain_sequences():
+    features = {
+        "a": np.array([[1.0], [3.0], [10.0], [30.0]]),
+        "b": np.array([[101.0], [103.0], [110.0], [130.0]]),
+    }
+    labels = {
+        "a": [
+            ("run-01", "famous"),
+            ("run-01", "famous"),
+            ("run-01", "scrambled"),
+            ("run-01", "scrambled"),
+        ],
+        "b": [
+            ("run-01", "famous"),
+            ("run-01", "famous"),
+            ("run-01", "scrambled"),
+            ("run-01", "scrambled"),
+        ],
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_mean")
+
+    assert alignment.classes.tolist() == [("run-01", "famous"), ("run-01", "scrambled")]
+    np.testing.assert_allclose(alignment.aligned_by_subject["a"], [[2.0], [20.0]])
+
+
 def test_class_alignment_matrices_class_repetition_defaults_to_seeded_random():
     features = {
         "a": np.array([[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]]),
