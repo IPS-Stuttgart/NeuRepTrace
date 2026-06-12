@@ -651,6 +651,32 @@ def test_aggregate_workflow_outputs_rejects_mixed_alignment_and_response_configs
         aggregate_workflow_outputs([mcca_dir, procrustes_dir], out_dir=tmp_path / "aggregate")
 
 
+def test_aggregate_workflow_outputs_allows_shard_local_outer_group_overrides(tmp_path: Path):
+    first_dir = tmp_path / "sub-01-shard"
+    second_dir = tmp_path / "sub-02-shard"
+    for output_dir, subject in ((first_dir, "sub-01"), (second_dir, "sub-02")):
+        _write_shard_manifest(
+            output_dir,
+            outer_test_groups=subject,
+            config_overrides=(
+                "workflow.response_window_ensemble=true\n"
+                "decoding.alignment_method=target_baseline_covariance\n"
+                f"decoding.outer_test_groups=[{subject}]"
+            ),
+            response_window_ensemble="true",
+            alignment_method="target_baseline_covariance",
+        )
+        decode_dir = output_dir / "decode"
+        decode_dir.mkdir(parents=True)
+        _toy_observations(subject).to_csv(decode_dir / "observations.csv", index=False)
+
+    aggregate_dir = tmp_path / "aggregate"
+    aggregate_workflow_outputs([first_dir, second_dir], out_dir=aggregate_dir)
+
+    manifest = json.loads((aggregate_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["outer_test_groups"] == "sub-01|sub-02"
+
+
 def test_aggregate_workflow_outputs_rejects_shard_without_manifest(tmp_path: Path):
     valid_dir = tmp_path / "valid-shard"
     missing_dir = tmp_path / "missing-manifest-shard"
