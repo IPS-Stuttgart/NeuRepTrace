@@ -11,7 +11,7 @@ and it is reported as an upper bound that is not valid for benchmark claims.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -1332,30 +1332,29 @@ def _common_anchor_values(anchors_by_subject: Mapping[Hashable, np.ndarray]) -> 
         subject_id: _ordered_unique_anchor_values(anchors_by_subject[subject_id])
         for subject_id in subject_ids[1:]
     }
-    return np.asarray(
-        [anchor for anchor in first if all(_contains_anchor_value(values, anchor) for values in other_unique.values())],
-        dtype=object,
+    return _object_value_vector(
+        anchor for anchor in first if all(_contains_anchor_value(values, anchor) for values in other_unique.values())
     )
 
 
 def _ordered_unique_anchor_values(values: Sequence[Any] | np.ndarray) -> np.ndarray:
     """Return unique anchor values in first-observed order without sorting."""
 
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _anchor_value_vector(values)
     unique: list[object] = []
     for value in vector:
         if not _contains_anchor_value(unique, value):
             unique.append(value)
-    return np.asarray(unique, dtype=object)
+    return _object_value_vector(unique)
 
 
 def _contains_anchor_value(values: Sequence[Any] | np.ndarray, target: object) -> bool:
-    return any(_anchor_values_equal(value, target) for value in values)
+    return any(_anchor_values_equal(value, target) for value in _anchor_value_vector(values))
 
 
 def _anchor_mask(values: Sequence[Any] | np.ndarray, target: object) -> np.ndarray:
     return np.asarray(
-        [_anchor_values_equal(value, target) for value in np.asarray(values, dtype=object).reshape(-1)],
+        [_anchor_values_equal(value, target) for value in _anchor_value_vector(values)],
         dtype=bool,
     )
 
@@ -1365,13 +1364,33 @@ def _count_anchor_value(values: Sequence[Any] | np.ndarray, target: object) -> i
 
 
 def _same_anchor_value_set(left: Sequence[Any] | np.ndarray, right: Sequence[Any] | np.ndarray) -> bool:
-    left_values = np.asarray(left, dtype=object).reshape(-1)
-    right_values = np.asarray(right, dtype=object).reshape(-1)
+    left_values = _anchor_value_vector(left)
+    right_values = _anchor_value_vector(right)
     if left_values.size != right_values.size:
         return False
     return all(_contains_anchor_value(right_values, value) for value in left_values) and all(
         _contains_anchor_value(left_values, value) for value in right_values
     )
+
+
+def _anchor_value_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    array = np.asarray(values, dtype=object)
+    if array.ndim == 0:
+        return _object_value_vector([array.item()])
+    if array.ndim == 1:
+        return array.reshape(-1)
+    if array.shape[1:] == (1,):
+        return array.reshape(array.shape[0])
+    rows = array.reshape(array.shape[0], -1)
+    return _object_value_vector(tuple(row.tolist()) for row in rows)
+
+
+def _object_value_vector(values: Iterable[object]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
 
 
 def _anchor_values_equal(left: object, right: object) -> bool:
@@ -1406,7 +1425,7 @@ def _alignment_low_rank_warning(alignment: Any) -> str:
     if warning:
         return str(warning)
     sample_mode = str(getattr(alignment, "sample_mode", ""))
-    classes = np.asarray(getattr(alignment, "classes", []), dtype=object).reshape(-1)
+    classes = _anchor_value_vector(getattr(alignment, "classes", []))
     try:
         n_rows = int(getattr(alignment, "n_alignment_rows", classes.size))
     except (TypeError, ValueError):
@@ -1423,7 +1442,7 @@ def _alignment_low_rank_warning(alignment: Any) -> str:
 def _anchor_vector(values: Sequence[Any] | np.ndarray | None, *, expected_length: int, name: str) -> np.ndarray:
     if values is None:
         raise ValueError(f"{name} is required for this alignment mode.")
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _anchor_value_vector(values)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must have the same row count as the corresponding feature matrix.")
     if any(_is_missing_anchor_value(value) for value in vector):
@@ -1462,7 +1481,7 @@ def _median_int_or_blank(values: Sequence[int]) -> int | float | str:
 
 
 def _preview_values(values: Sequence[Any] | np.ndarray, *, limit: int = 8) -> str:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _anchor_value_vector(values)
     preview = [str(value) for value in vector[:limit]]
     if vector.size > limit:
         preview.append("...")
@@ -1481,7 +1500,7 @@ def _estimate_alignment_rows(
     if sample_mode != "class_repetition":
         return int(common_anchors.size), ""
     filtered = {
-        subject_id: np.asarray([anchor for anchor in anchors if _contains_anchor_value(common_anchors, anchor)], dtype=object)
+        subject_id: _object_value_vector(anchor for anchor in anchors if _contains_anchor_value(common_anchors, anchor))
         for subject_id, anchors in anchors_by_subject.items()
     }
     try:
@@ -1511,7 +1530,7 @@ def _update_projection_anchor_availability(
     if projection_anchors is None:
         failures.append(f"{prefix}_projection_missing_anchor_values")
         return
-    vector = np.asarray(projection_anchors, dtype=object).reshape(-1)
+    vector = _anchor_value_vector(projection_anchors)
     row[rows_key] = int(vector.shape[0])
     missing_mask = np.asarray([_is_missing_anchor_value(value) for value in vector], dtype=bool)
     if np.any(missing_mask):
@@ -1519,19 +1538,18 @@ def _update_projection_anchor_availability(
     valid_vector = vector[~missing_mask]
     available = _ordered_unique_anchor_values(valid_vector)
     row[values_key] = int(available.size)
-    missing = np.asarray([anchor for anchor in common_anchors if not _contains_anchor_value(available, anchor)], dtype=object)
+    missing = _object_value_vector(anchor for anchor in common_anchors if not _contains_anchor_value(available, anchor))
     row[missing_count_key] = int(missing.size)
     row[missing_preview_key] = _preview_values(missing)
     if missing.size:
         failures.append(f"{prefix}_subject_missing_alignment_anchors")
     if required_repetitions_per_anchor is not None and required_repetitions_per_anchor > 1:
-        insufficient = np.asarray(
+        insufficient = _object_value_vector(
             [
                 anchor
                 for anchor in common_anchors
                 if _count_anchor_value(valid_vector, anchor) < int(required_repetitions_per_anchor)
-            ],
-            dtype=object,
+            ]
         )
         if insufficient.size:
             failures.append(f"{prefix}_subject_insufficient_alignment_anchor_repetitions")

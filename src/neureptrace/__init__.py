@@ -15,6 +15,7 @@ from neureptrace import (  # noqa: E402
     _metadata_column_validation_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
+    _source_alignment_anchor_patch,
 )
 
 _dataset_config_participant_patch.install()
@@ -26,3 +27,4 @@ _decoding_c_grid_patch.install()
 _decoding_probability_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
+_source_alignment_anchor_patch.install()
