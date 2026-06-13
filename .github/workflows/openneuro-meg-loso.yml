@@ -313,10 +313,42 @@ jobs:
 
             - name: Install NeuRepTrace and OpenNeuro client
               shell: bash
+              env:
+                  DECODER_INPUT: ${{ inputs.decoder }}
+                  CONFIG_OVERRIDES_INPUT: ${{ inputs.config_overrides }}
               run: |
                   set -euo pipefail
                   python -m pip install --upgrade pip
-                  python -m pip install -e . openneuro-py
+                  needs_torch=$(python - <<'PY'
+                  from __future__ import annotations
+
+                  import os
+
+                  aliases = {
+                      "dann",
+                      "domain-adversarial",
+                      "domain-adversarial-nn",
+                      "domain-adversarial-neural-network",
+                  }
+
+                  def _norm(value: str) -> str:
+                      return value.strip().strip("\"'").lower().replace("_", "-")
+
+                  needs = _norm(os.environ.get("DECODER_INPUT", "")) in aliases
+                  for override in os.environ.get("CONFIG_OVERRIDES_INPUT", "").replace(";", "\n").splitlines():
+                      if "=" not in override:
+                          continue
+                      key, value = override.split("=", 1)
+                      if _norm(key) in {"decoding.classifier", "decoding.decoder"} and _norm(value) in aliases:
+                          needs = True
+                  print("true" if needs else "false")
+                  PY
+                  )
+                  if [[ "$needs_torch" == "true" ]]; then
+                    python -m pip install -e ".[torch]" openneuro-py
+                  else
+                    python -m pip install -e . openneuro-py
+                  fi
 
             - name: Resolve run parameters
               shell: bash
