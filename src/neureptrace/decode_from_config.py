@@ -268,6 +268,18 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
         "pseudo_label_confidence_threshold": float(decoding.get("pseudo_label_confidence_threshold", 0.90)),
         "pseudo_label_max_iterations": int(decoding.get("pseudo_label_max_iterations", 5)),
         "pseudo_label_min_new": int(decoding.get("pseudo_label_min_new", 1)),
+        "dann_hidden_units": int(decoding.get("dann_hidden_units", 64)),
+        "dann_embedding_dim": int(decoding.get("dann_embedding_dim", 32)),
+        "dann_max_epochs": int(decoding.get("dann_max_epochs", 80)),
+        "dann_batch_size": int(decoding.get("dann_batch_size", 128)),
+        "dann_learning_rate": float(decoding.get("dann_learning_rate", 1e-3)),
+        "dann_weight_decay": float(decoding.get("dann_weight_decay", 1e-4)),
+        "dann_domain_loss_weight": float(decoding.get("dann_domain_loss_weight", 0.1)),
+        "dann_validation_fraction": float(decoding.get("dann_validation_fraction", 0.1)),
+        "dann_patience": int(decoding.get("dann_patience", 10)),
+        "dann_dropout": float(decoding.get("dann_dropout", 0.1)),
+        "dann_random_state": int(decoding.get("dann_random_state", 13)),
+        "dann_device": str(decoding.get("dann_device", "auto")),
     }
     if temporal_train_mode is not None:
         kwargs["temporal_train_mode"] = temporal_train_mode

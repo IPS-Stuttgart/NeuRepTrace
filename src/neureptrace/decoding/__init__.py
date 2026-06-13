@@ -49,6 +49,7 @@ BUILTIN_DECODER_CHOICES = (
     "ecoc_linear_svm",
     "hierarchical_logistic",
     "torch_mlp",
+    "dann",
 )
 DECODER_ALIASES = (
     "l1-logistic",
@@ -81,6 +82,10 @@ DECODER_ALIASES = (
     "large-dev-hierarchical",
     "deep-mlp",
     "shallow-torch-mlp",
+    "domain-adversarial",
+    "domain-adversarial-nn",
+    "domain-adversarial-neural-network",
+    "domain_adversarial_neural_network",
 )
 DECODER_CHOICES = tuple(
     dict.fromkeys(
@@ -887,6 +892,11 @@ def make_decoder(
                 random_state=random_state,
             ),
         )
+    if normalized == "dann":
+        raise ValueError(
+            "The 'dann' decoder requires unlabeled target fold features and is only supported "
+            "through run_time_resolved_decode / decode-from-config."
+        )
 
     registry_decoder = _make_registry_decoder_pipeline(
         normalized,
@@ -1294,6 +1304,8 @@ def normalize_decoder_name(name: str) -> str:
         return "hierarchical_logistic"
     if normalized in {"deep_mlp", "mlp", "torch_deep_mlp", "shallow_torch_mlp"}:
         return "torch_mlp"
+    if normalized in {"domain_adversarial", "domain_adversarial_nn", "domain_adversarial_neural_network"}:
+        return "dann"
     if normalized in BUILTIN_DECODER_CHOICES:
         return normalized
     registry_name = _normalize_registry_decoder_name_or_none(name)

@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
+from neureptrace.decoding.dann import DANNFitResult
 from neureptrace.decoding.source_alignment import SourceAlignmentResult
 from neureptrace.mne_time_decode import (
     _apply_class_prior_correction,
@@ -112,6 +113,11 @@ class PseudoLabelRecordingDecoder:
         return probabilities / probabilities.sum(axis=1, keepdims=True)
 
 
+class FakeDANNModel:
+    def __init__(self, classes: np.ndarray):
+        self.classes_ = np.asarray(classes)
+
+
 def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     labels = np.array([0, 0, 0, 1, 1, 2, 2, 2])
 
@@ -122,6 +128,82 @@ def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     np.testing.assert_array_equal(shuffled_a, shuffled_b)
     assert sorted(shuffled_a.tolist()) == sorted(labels.tolist())
     assert not np.array_equal(shuffled_a, shuffled_c)
+
+
+def test_run_time_resolved_decode_dann_uses_unlabeled_target_features(tmp_path: Path, monkeypatch):
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    data[:, 0, :] = labels.reshape(-1, 1)
+    data[:, 1, :] = np.arange(len(labels)).reshape(-1, 1)
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    calls = []
+
+    def fake_fit_dann_predict_proba(**kwargs):
+        calls.append(
+            {
+                "source_rows": kwargs["source_features"].shape[0],
+                "target_rows": kwargs["target_features"].shape[0],
+                "source_labels": np.asarray(kwargs["source_labels"], dtype=int).copy(),
+                "max_epochs": kwargs["max_epochs"],
+                "domain_loss_weight": kwargs["domain_loss_weight"],
+            }
+        )
+        probabilities = np.tile(np.array([[0.8, 0.2]]), (kwargs["target_features"].shape[0], 1))
+        return DANNFitResult(
+            model=FakeDANNModel(np.array([0, 1])),
+            probabilities=probabilities,
+            metadata={
+                "dann_adaptation": True,
+                "dann_protocol": "unlabeled_target_domain_adversarial",
+                "dann_uses_target_features": True,
+                "dann_uses_target_labels": False,
+                "dann_valid_for_benchmark": True,
+                "dann_target_rows": int(kwargs["target_features"].shape[0]),
+                "dann_source_rows": int(kwargs["source_features"].shape[0]),
+                "dann_domain_loss_weight": float(kwargs["domain_loss_weight"]),
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.fit_dann_predict_proba", fake_fit_dann_predict_proba)
+
+    observations_out = tmp_path / "dann_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-03_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-03",),
+        out_path=tmp_path / "dann_summary.csv",
+        observation_out_path=observations_out,
+        n_splits=3,
+        window_ms=1,
+        step_ms=1,
+        decode_window=(0.184, 0.184),
+        decoder="domain-adversarial-neural-network",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        dann_max_epochs=3,
+        dann_domain_loss_weight=0.25,
+    )
+
+    assert normalize_decoder_name("domain-adversarial-neural-network") == "dann"
+    assert len(calls) == 1
+    assert calls[0]["source_rows"] == 8
+    assert calls[0]["target_rows"] == 4
+    np.testing.assert_array_equal(calls[0]["source_labels"], labels[:8])
+    assert calls[0]["max_epochs"] == 3
+    assert calls[0]["domain_loss_weight"] == 0.25
+    assert results["decoder"].unique().tolist() == ["dann"]
+    assert results["dann_protocol"].unique().tolist() == ["unlabeled_target_domain_adversarial"]
+    assert results["dann_uses_target_features"].unique().tolist() == [True]
+    assert results["dann_uses_target_labels"].unique().tolist() == [False]
+
+    observations = pd.read_csv(observations_out)
+    assert observations["dann_protocol"].unique().tolist() == ["unlabeled_target_domain_adversarial"]
+    assert observations["dann_uses_target_labels"].unique().tolist() == [False]
 
 
 def test_run_time_resolved_decode_pseudo_label_self_training_uses_predictions_not_target_labels(

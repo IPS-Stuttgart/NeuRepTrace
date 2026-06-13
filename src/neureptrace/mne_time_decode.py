@@ -11,13 +11,16 @@ import numpy as np
 import pandas as pd
 from mne.decoding import SlidingEstimator
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import StandardScaler
 
 from neureptrace.decoding import (
     DECODER_CLI_CHOICES,
     EMISSION_MODE_CHOICES,
     FEATURE_PREPROCESSOR_CHOICES,
     TUNING_SCORING_CHOICES,
+    _feature_preprocessor_steps,
     make_cross_validator,
     make_decoder,
     make_tuning_cross_validator,
@@ -32,6 +35,7 @@ from neureptrace.decoding import (
     predict_emission_probabilities,
     time_windows,
 )
+from neureptrace.decoding.dann import DANNFitResult, DANN_PROTOCOL, fit_dann_predict_proba
 from neureptrace.decoding.source_alignment import (
     ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS,
     ALIGNMENT_DIAGNOSTIC_COLUMNS,
@@ -243,6 +247,29 @@ def _normalize_positive_int(value: int | str, *, name: str) -> int:
     parsed = int(value)
     if parsed < 1:
         raise ValueError(f"{name} must be at least 1.")
+    return parsed
+
+
+def _normalize_positive_float(value: float | str, *, name: str) -> float:
+    parsed = float(value)
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return parsed
+
+
+def _normalize_nonnegative_float(value: float | str, *, name: str) -> float:
+    parsed = float(value)
+    if not np.isfinite(parsed) or parsed < 0.0:
+        raise ValueError(f"{name} must be non-negative and finite.")
+    return parsed
+
+
+def _normalize_unit_interval_float(value: float | str, *, name: str, include_one: bool = False) -> float:
+    parsed = float(value)
+    upper_ok = parsed <= 1.0 if include_one else parsed < 1.0
+    if not np.isfinite(parsed) or parsed < 0.0 or not upper_ok:
+        bracket = "[0, 1]" if include_one else "[0, 1)"
+        raise ValueError(f"{name} must be finite in {bracket}.")
     return parsed
 
 
@@ -2028,6 +2055,72 @@ def _fit_pseudo_label_target_alignment_self_training_decoder(
     )
 
 
+def _fit_dann_decoder(
+    *,
+    train_features: np.ndarray,
+    train_labels: np.ndarray,
+    target_features: np.ndarray,
+    classes: np.ndarray,
+    feature_preprocessor: str,
+    pca_components: int | float | None,
+    hidden_units: int,
+    embedding_dim: int,
+    max_epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    weight_decay: float,
+    domain_loss_weight: float,
+    validation_fraction: float,
+    patience: int,
+    dropout: float,
+    random_state: int,
+    device: str,
+):
+    preprocessor = make_pipeline(
+        StandardScaler(),
+        *_feature_preprocessor_steps(feature_preprocessor, pca_components),
+    )
+    train_features = np.asarray(train_features, dtype=float)
+    target_features = np.asarray(target_features, dtype=float)
+    train_labels = np.asarray(train_labels, dtype=int)
+    transformed_train = preprocessor.fit_transform(train_features, train_labels)
+    transformed_target = preprocessor.transform(target_features)
+    dann_result = fit_dann_predict_proba(
+        source_features=transformed_train,
+        source_labels=train_labels,
+        target_features=transformed_target,
+        hidden_units=hidden_units,
+        embedding_dim=embedding_dim,
+        max_epochs=max_epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        domain_loss_weight=domain_loss_weight,
+        validation_fraction=validation_fraction,
+        patience=patience,
+        dropout=dropout,
+        random_state=random_state,
+        device=device,
+    )
+    probabilities = _align_probability_columns(
+        dann_result.probabilities,
+        model=dann_result.model,
+        classes=classes,
+    )
+    metadata = {
+        **dann_result.metadata,
+        "dann_feature_preprocessor": feature_preprocessor,
+        "dann_pca_components": "" if pca_components is None else pca_components,
+        "dann_input_feature_dim": int(train_features.shape[1]),
+        "dann_decode_feature_dim": int(transformed_train.shape[1]),
+    }
+    return DANNFitResult(
+        model=dann_result.model,
+        probabilities=probabilities,
+        metadata=metadata,
+    )
+
+
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
     """Return top-k accuracy for probability columns aligned to integer labels."""
 
@@ -2177,6 +2270,19 @@ def _model_hash(
     pseudo_label_confidence_threshold: float = 0.90,
     pseudo_label_max_iterations: int = 5,
     pseudo_label_min_new: int = 1,
+    dann_enabled: bool = False,
+    dann_hidden_units: int = 64,
+    dann_embedding_dim: int = 32,
+    dann_max_epochs: int = 80,
+    dann_batch_size: int = 128,
+    dann_learning_rate: float = 1e-3,
+    dann_weight_decay: float = 1e-4,
+    dann_domain_loss_weight: float = 0.1,
+    dann_validation_fraction: float = 0.1,
+    dann_patience: int = 10,
+    dann_dropout: float = 0.1,
+    dann_random_state: int = 13,
+    dann_device: str = "auto",
 ) -> str:
     payload: dict[str, object] = {
         "backend": backend,
@@ -2225,6 +2331,24 @@ def _model_hash(
                 "pseudo_label_confidence_threshold": float(pseudo_label_confidence_threshold),
                 "pseudo_label_max_iterations": int(pseudo_label_max_iterations),
                 "pseudo_label_min_new": int(pseudo_label_min_new),
+            }
+        )
+    if dann_enabled:
+        payload.update(
+            {
+                "dann_protocol": DANN_PROTOCOL,
+                "dann_hidden_units": int(dann_hidden_units),
+                "dann_embedding_dim": int(dann_embedding_dim),
+                "dann_max_epochs": int(dann_max_epochs),
+                "dann_batch_size": int(dann_batch_size),
+                "dann_learning_rate": float(dann_learning_rate),
+                "dann_weight_decay": float(dann_weight_decay),
+                "dann_domain_loss_weight": float(dann_domain_loss_weight),
+                "dann_validation_fraction": float(dann_validation_fraction),
+                "dann_patience": int(dann_patience),
+                "dann_dropout": float(dann_dropout),
+                "dann_random_state": int(dann_random_state),
+                "dann_device": str(dann_device),
             }
         )
     return stable_hash(payload)
@@ -2425,6 +2549,18 @@ def run_time_resolved_decode(
     pseudo_label_confidence_threshold: float | str = 0.90,
     pseudo_label_max_iterations: int | str = 5,
     pseudo_label_min_new: int | str = 1,
+    dann_hidden_units: int | str = 64,
+    dann_embedding_dim: int | str = 32,
+    dann_max_epochs: int | str = 80,
+    dann_batch_size: int | str = 128,
+    dann_learning_rate: float | str = 1e-3,
+    dann_weight_decay: float | str = 1e-4,
+    dann_domain_loss_weight: float | str = 0.1,
+    dann_validation_fraction: float | str = 0.1,
+    dann_patience: int | str = 10,
+    dann_dropout: float | str = 0.1,
+    dann_random_state: int | str = 13,
+    dann_device: str = "auto",
 ) -> pd.DataFrame:
     """Run time-resolved decoding on an MNE epochs file and save metrics as CSV.
 
@@ -2504,12 +2640,46 @@ def run_time_resolved_decode(
         pseudo_label_min_new,
         name="pseudo_label_min_new",
     )
+    dann_enabled = decoder_name == "dann"
+    dann_hidden_units = _normalize_positive_int(dann_hidden_units, name="dann_hidden_units")
+    dann_embedding_dim = _normalize_positive_int(dann_embedding_dim, name="dann_embedding_dim")
+    dann_max_epochs = _normalize_positive_int(dann_max_epochs, name="dann_max_epochs")
+    dann_batch_size = _normalize_positive_int(dann_batch_size, name="dann_batch_size")
+    dann_learning_rate = _normalize_positive_float(dann_learning_rate, name="dann_learning_rate")
+    dann_weight_decay = _normalize_nonnegative_float(dann_weight_decay, name="dann_weight_decay")
+    dann_domain_loss_weight = _normalize_nonnegative_float(
+        dann_domain_loss_weight,
+        name="dann_domain_loss_weight",
+    )
+    dann_validation_fraction = _normalize_unit_interval_float(
+        dann_validation_fraction,
+        name="dann_validation_fraction",
+    )
+    dann_patience = _normalize_positive_int(dann_patience, name="dann_patience")
+    dann_dropout = _normalize_unit_interval_float(dann_dropout, name="dann_dropout")
+    dann_random_state = int(dann_random_state)
+    dann_device = str(dann_device)
     pseudo_label_target_alignment = pseudo_label_self_training and alignment_config.pseudo_label_target_calibrated
     alignment_target_calibration_seed = int(alignment_target_calibration_seed)
     dataset_name_value = "" if dataset_name is None else str(dataset_name)
     outer_test_groups_value = _normalize_outer_test_groups(outer_test_groups)
     if requested_time_decode_backend == "mne" and normalized_temporal_train_window is not None:
         raise ValueError("The MNE time-decode backend currently supports same-time decoding only.")
+    if dann_enabled:
+        if emission_modes != ["uncalibrated"]:
+            raise ValueError("The DANN decoder emits uncalibrated softmax probabilities; set emission_mode='uncalibrated'.")
+        if tune_hyperparameters:
+            raise ValueError("The DANN decoder does not support sklearn hyperparameter tuning.")
+        if normalized_temporal_train_window is not None:
+            raise ValueError("The DANN decoder currently supports same-time decoding only.")
+        if source_time_selection_name != "none":
+            raise ValueError("The DANN decoder should be combined with posthoc response-window aggregation, not source_time_selection.")
+        if source_calibration_name != "none":
+            raise ValueError("The DANN decoder currently requires source_calibration='none'.")
+        if pseudo_label_self_training:
+            raise ValueError("The DANN decoder is already an unlabeled target adaptation method and cannot be combined with pseudo_label_self_training.")
+        if alignment_config.enabled:
+            raise ValueError("The first DANN implementation should be run with alignment_method='none'.")
     if alignment_config.enabled:
         if requested_time_decode_backend == "mne":
             raise ValueError("source alignment requires the sklearn time-decode backend.")
@@ -2555,6 +2725,7 @@ def run_time_resolved_decode(
             or source_time_selection_name != "none"
             or alignment_config.enabled
             or pseudo_label_self_training
+            or dann_enabled
         )
         else "mne"
         if requested_time_decode_backend == "auto"
@@ -2562,6 +2733,8 @@ def run_time_resolved_decode(
     )
     if pseudo_label_self_training and time_decode_backend != "sklearn":
         raise ValueError("pseudo_label_self_training requires the sklearn time-decode backend.")
+    if dann_enabled and time_decode_backend != "sklearn":
+        raise ValueError("The DANN decoder requires the sklearn time-decode backend.")
 
     if label_column not in metadata.columns:
         raise ValueError(f"Label column '{label_column}' not found in metadata.")
@@ -3082,7 +3255,38 @@ def run_time_resolved_decode(
                         else 3
                     )
                     pseudo_label_metadata: dict[str, object] = {}
-                    if pseudo_label_self_training:
+                    dann_metadata: dict[str, object] = {}
+                    if dann_enabled:
+                        dann_result = _fit_dann_decoder(
+                            train_features=train_feature_matrix,
+                            train_labels=train_labels,
+                            target_features=test_feature_matrix,
+                            classes=classes,
+                            feature_preprocessor=feature_preprocessor_name,
+                            pca_components=pca_components_value,
+                            hidden_units=dann_hidden_units,
+                            embedding_dim=dann_embedding_dim,
+                            max_epochs=dann_max_epochs,
+                            batch_size=dann_batch_size,
+                            learning_rate=dann_learning_rate,
+                            weight_decay=dann_weight_decay,
+                            domain_loss_weight=dann_domain_loss_weight,
+                            validation_fraction=dann_validation_fraction,
+                            patience=dann_patience,
+                            dropout=dann_dropout,
+                            random_state=dann_random_state,
+                            device=dann_device,
+                        )
+                        model = dann_result.model
+                        probabilities = dann_result.probabilities
+                        probabilities = _apply_class_prior_correction(
+                            probabilities,
+                            train_labels,
+                            classes,
+                            class_prior_correction_name,
+                        )
+                        dann_metadata = dann_result.metadata
+                    elif pseudo_label_self_training:
                         if pseudo_label_target_alignment:
                             train_anchor_values = (
                                 None if alignment_anchor_info.values is None else alignment_anchor_info.values[train_idx]
@@ -3226,6 +3430,7 @@ def run_time_resolved_decode(
                         tuning_c_grid=tuning_c_grid_values,
                     )
                     tuning_metadata.update(pseudo_label_metadata)
+                    tuning_metadata.update(dann_metadata)
                     current_model_hash = _model_hash(
                         decoder_name=decoder_name,
                         emission_mode=current_emission_mode,
@@ -3252,6 +3457,19 @@ def run_time_resolved_decode(
                         pseudo_label_confidence_threshold=pseudo_label_confidence_threshold,
                         pseudo_label_max_iterations=pseudo_label_max_iterations,
                         pseudo_label_min_new=pseudo_label_min_new,
+                        dann_enabled=dann_enabled,
+                        dann_hidden_units=dann_hidden_units,
+                        dann_embedding_dim=dann_embedding_dim,
+                        dann_max_epochs=dann_max_epochs,
+                        dann_batch_size=dann_batch_size,
+                        dann_learning_rate=dann_learning_rate,
+                        dann_weight_decay=dann_weight_decay,
+                        dann_domain_loss_weight=dann_domain_loss_weight,
+                        dann_validation_fraction=dann_validation_fraction,
+                        dann_patience=dann_patience,
+                        dann_dropout=dann_dropout,
+                        dann_random_state=dann_random_state,
+                        dann_device=dann_device,
                     )
                     _append_decoded_outputs(
                         rows=rows,
@@ -3697,6 +3915,18 @@ def main() -> None:
         default=1,
         help="Stop when fewer than this many new target rows enter the pseudo-labeled set.",
     )
+    parser.add_argument("--dann-hidden-units", type=int, default=64, help="Hidden units in the DANN feature/domain MLP.")
+    parser.add_argument("--dann-embedding-dim", type=int, default=32, help="Shared DANN embedding dimension.")
+    parser.add_argument("--dann-max-epochs", type=int, default=80, help="Maximum DANN training epochs per outer fold and time window.")
+    parser.add_argument("--dann-batch-size", type=int, default=128, help="DANN source/target minibatch size.")
+    parser.add_argument("--dann-learning-rate", type=float, default=1e-3, help="DANN AdamW learning rate.")
+    parser.add_argument("--dann-weight-decay", type=float, default=1e-4, help="DANN AdamW weight decay.")
+    parser.add_argument("--dann-domain-loss-weight", type=float, default=0.1, help="DANN domain-adversarial loss weight.")
+    parser.add_argument("--dann-validation-fraction", type=float, default=0.1, help="Source-only validation fraction for DANN early stopping.")
+    parser.add_argument("--dann-patience", type=int, default=10, help="DANN source-validation early stopping patience.")
+    parser.add_argument("--dann-dropout", type=float, default=0.1, help="DANN dropout probability.")
+    parser.add_argument("--dann-random-state", type=int, default=13, help="DANN random seed.")
+    parser.add_argument("--dann-device", default="auto", help="DANN torch device: auto, cpu, cuda, cuda:0, etc.")
     parser.add_argument(
         "--time-decode-backend",
         choices=TIME_DECODE_BACKEND_CHOICES,
@@ -3889,6 +4119,18 @@ def main() -> None:
         pseudo_label_confidence_threshold=args.pseudo_label_confidence_threshold,
         pseudo_label_max_iterations=args.pseudo_label_max_iterations,
         pseudo_label_min_new=args.pseudo_label_min_new,
+        dann_hidden_units=args.dann_hidden_units,
+        dann_embedding_dim=args.dann_embedding_dim,
+        dann_max_epochs=args.dann_max_epochs,
+        dann_batch_size=args.dann_batch_size,
+        dann_learning_rate=args.dann_learning_rate,
+        dann_weight_decay=args.dann_weight_decay,
+        dann_domain_loss_weight=args.dann_domain_loss_weight,
+        dann_validation_fraction=args.dann_validation_fraction,
+        dann_patience=args.dann_patience,
+        dann_dropout=args.dann_dropout,
+        dann_random_state=args.dann_random_state,
+        dann_device=args.dann_device,
     )
     print(f"Wrote {args.out}")
     if args.observations_out is not None:
