@@ -6,6 +6,7 @@ from neureptrace.decoding.mcca import fit_class_mcca
 from neureptrace.decoding.mcca_target import class_alignment_matrix, fit_target_mcca_projection
 from neureptrace.decoding.source_alignment import (
     GROUP_PROJECTION_TARGET_CENTERED,
+    _inner_target_calibration_mask,
     ORACLE_TARGET_CALIBRATED_ALIGNMENT,
     TARGET_CALIBRATED_ALIGNMENT,
     _target_alignment_matrix,
@@ -354,6 +355,31 @@ def test_target_centered_group_projection_uses_unlabeled_target_mean(method):
         == "strict_source_loso_nearest_centroid_group_projection_target_centered"
     )
     assert not np.allclose(strict.test_features, centered.test_features)
+
+
+def test_inner_target_calibration_mask_keeps_disjoint_eval_rows_per_anchor():
+    anchors = np.array(["a", "a", "a", "b", "b", "b", "c", "c", "c"], dtype=object)
+
+    mask = _inner_target_calibration_mask(
+        anchors,
+        classes=np.array(["a", "b", "c"], dtype=object),
+        per_anchor=1,
+        seed=13,
+    )
+
+    assert mask.dtype == bool
+    assert int(mask.sum()) == 3
+    for anchor in ("a", "b", "c"):
+        anchor_mask = anchors == anchor
+        assert int(np.sum(mask & anchor_mask)) == 1
+        assert int(np.sum(~mask & anchor_mask)) == 2
+
+
+def test_inner_target_calibration_mask_rejects_when_eval_would_be_empty():
+    anchors = np.array(["a", "b", "c"], dtype=object)
+
+    with pytest.raises(ValueError, match="disjoint from scored rows"):
+        _inner_target_calibration_mask(anchors, classes=np.array(["a", "b", "c"], dtype=object), per_anchor=1, seed=13)
 
 
 def test_metadata_anchor_values_reject_numpy_missing_values():

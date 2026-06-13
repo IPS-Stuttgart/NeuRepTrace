@@ -61,3 +61,28 @@ def test_class_repetition_matrix_preserves_tuple_anchor_labels_with_offsets():
     )
 
     np.testing.assert_allclose(aligned, np.array([[1.0], [3.0], [20.0], [30.0]]))
+
+
+def test_class_alignment_matrix_preserves_numpy_tuple_anchor_arrays():
+    features = np.array(
+        [
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [0.0, 10.0],
+            [0.0, 14.0],
+        ]
+    )
+    labels = np.array(
+        [
+            ("run-01", "stim-a"),
+            ("run-01", "stim-a"),
+            ("run-01", "stim-b"),
+            ("run-01", "stim-b"),
+        ],
+        dtype=object,
+    )
+    classes = np.array([("run-01", "stim-a"), ("run-01", "stim-b")], dtype=object)
+
+    aligned = class_alignment_matrix(features, labels, classes=classes, sample_mode="class_mean")
+
+    np.testing.assert_allclose(aligned, np.array([[2.0, 0.0], [0.0, 12.0]]))

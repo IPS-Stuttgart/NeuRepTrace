@@ -245,6 +245,10 @@ def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int | None,
 
     if isinstance(labels, np.ndarray) and labels.ndim == 1:
         vector = labels.astype(object, copy=False).reshape(-1)
+    elif isinstance(labels, np.ndarray):
+        rows = [tuple(row.tolist()) for row in np.asarray(labels, dtype=object).reshape(labels.shape[0], -1)]
+        vector = np.empty(len(rows), dtype=object)
+        vector[:] = rows
     else:
         try:
             items = list(labels)
