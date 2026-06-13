@@ -138,6 +138,30 @@ def test_hyperalignment_class_alignment_accepts_tuple_object_anchor_labels():
     np.testing.assert_allclose(alignment.aligned_by_subject["b"], [[102.0], [120.0]])
 
 
+def test_hyperalignment_class_alignment_accepts_numpy_tuple_label_arrays():
+    features = {
+        "a": np.array([[1.0, 0.0], [3.0, 0.0], [0.0, 2.0], [0.0, 4.0]]),
+        "b": np.array([[2.0, 1.0], [4.0, 1.0], [1.0, 3.0], [1.0, 5.0]]),
+    }
+    labels = {
+        "a": np.array(
+            [("run-01", "stim-a"), ("run-01", "stim-a"), ("run-01", "stim-b"), ("run-01", "stim-b")],
+            dtype=object,
+        ),
+        "b": np.array(
+            [("run-01", "stim-a"), ("run-01", "stim-a"), ("run-01", "stim-b"), ("run-01", "stim-b")],
+            dtype=object,
+        ),
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_mean")
+
+    assert alignment.n_alignment_rows == 2
+    assert alignment.classes.tolist() == [("run-01", "stim-a"), ("run-01", "stim-b")]
+    np.testing.assert_allclose(alignment.aligned_by_subject["a"], np.array([[2.0, 0.0], [0.0, 3.0]]))
+    np.testing.assert_allclose(alignment.aligned_by_subject["b"], np.array([[3.0, 1.0], [1.0, 4.0]]))
+
+
 def test_hyperalignment_class_alignment_preserves_tuple_labels_from_plain_sequences():
     features = {
         "a": np.array([[1.0], [3.0], [10.0], [30.0]]),

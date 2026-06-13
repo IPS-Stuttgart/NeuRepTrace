@@ -609,7 +609,10 @@ def _object_vector(values: Sequence | np.ndarray) -> np.ndarray:
     if isinstance(values, np.ndarray):
         if values.ndim == 1:
             return values.astype(object, copy=False).reshape(-1)
-        return values.reshape(-1).astype(object)
+        rows = [tuple(row.tolist()) for row in np.asarray(values, dtype=object).reshape(values.shape[0], -1)]
+        vector = np.empty(len(rows), dtype=object)
+        vector[:] = rows
+        return vector
     try:
         items = list(values)
     except TypeError:

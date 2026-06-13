@@ -556,9 +556,9 @@ def align_train_test_features(
         if target_calibration_features is None
         else _feature_matrix(target_calibration_features, name="target_calibration_features")
     )
-    train_vector = np.asarray(train_labels).reshape(-1)
+    train_vector = _anchor_value_vector(train_labels)
     subject_vector = np.asarray(train_subject_ids, dtype=object).reshape(-1)
-    target_vector = None if target_labels is None else np.asarray(target_labels).reshape(-1)
+    target_vector = None if target_labels is None else _anchor_value_vector(target_labels)
     train_anchor_vector = (
         np.empty(train_matrix.shape[0], dtype=object)
         if unsupervised_alignment
@@ -578,7 +578,7 @@ def align_train_test_features(
         )
     )
     target_calibration_label_vector = (
-        None if target_calibration_labels is None else np.asarray(target_calibration_labels).reshape(-1)
+        None if target_calibration_labels is None else _anchor_value_vector(target_calibration_labels)
     )
     target_calibration_anchor_vector = (
         None
@@ -905,7 +905,7 @@ def source_alignment_anchor_availability(
         row["prefit_status"] = "alignment_disabled"
         return row
 
-    train_vector = np.asarray(train_labels, dtype=object).reshape(-1)
+    train_vector = _anchor_value_vector(train_labels)
     subject_vector = np.asarray(train_subject_ids, dtype=object).reshape(-1)
     if train_vector.shape[0] != subject_vector.shape[0]:
         raise ValueError("train_labels and train_subject_ids must have the same row count.")
@@ -1020,7 +1020,7 @@ def _target_alignment_matrix(
 ) -> np.ndarray:
     if labels is None:  # guarded earlier, but this keeps type-checkers honest
         raise ValueError("oracle_target_calibrated_alignment requires target labels or anchor values.")
-    labels = np.asarray(labels).reshape(-1)
+    labels = _anchor_value_vector(labels)
     if labels.shape[0] != features.shape[0]:
         raise ValueError("target alignment anchors must have the same row count as target features.")
     missing = [class_label for class_label in classes if not np.any(_anchor_mask(labels, class_label))]
@@ -1606,32 +1606,91 @@ def _transform_inner_heldout_subject(
     test_anchors: np.ndarray,
     fit: _SourceAlignmentFit,
     config: SourceAlignmentConfig,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """Transform a source-inner held-out subject with the configured target path."""
 
     if not config.fits_target_projection:
         target_feature_mean = np.mean(test_features, axis=0) if config.target_centered_group_projection else None
-        return fit.model.transform_group(test_features, feature_mean=target_feature_mean)
+        return fit.model.transform_group(test_features, feature_mean=target_feature_mean), np.ones(
+            test_features.shape[0],
+            dtype=bool,
+        )
+
+    evaluation_mask = np.ones(test_features.shape[0], dtype=bool)
+    projection_features = test_features
+    projection_anchors = test_anchors
+    selected_offsets_by_class = fit.alignment.selected_offsets_by_class
+    if config.target_calibrated:
+        calibration_mask = _inner_target_calibration_mask(
+            test_anchors,
+            classes=fit.alignment.classes,
+            per_anchor=config.target_calibration_per_anchor,
+            seed=config.target_calibration_seed,
+        )
+        evaluation_mask = ~calibration_mask
+        if not np.any(evaluation_mask):
+            raise ValueError("source-inner target-calibrated diagnostic left no held-out rows for scoring.")
+        projection_features = test_features[calibration_mask]
+        projection_anchors = test_anchors[calibration_mask]
+        if fit.alignment.n_repetitions_per_class is not None:
+            selected_offsets_by_class = {
+                class_position: np.arange(int(fit.alignment.n_repetitions_per_class), dtype=int)
+                for class_position, _class_label in enumerate(fit.alignment.classes)
+            }
 
     target_anchors = _target_alignment_matrix(
-        test_features,
-        test_anchors,
+        projection_features,
+        projection_anchors,
         classes=fit.alignment.classes,
         config=config,
         n_repetitions_per_class=fit.alignment.n_repetitions_per_class,
-        selected_offsets_by_class=fit.alignment.selected_offsets_by_class,
+        selected_offsets_by_class=selected_offsets_by_class,
     )
+    scoring_features = test_features[evaluation_mask]
     if config.method in {"procrustes", "hyperalignment"}:
         target_projection = fit_projection_to_hyperalignment(target_anchors, template=fit.model.template)
-        return transform_with_projection(test_features, target_projection)
+        return transform_with_projection(scoring_features, target_projection), evaluation_mask
     if config.method == "mcca":
         target_projection = fit_target_mcca_projection(
             target_anchors,
             fit.model,
             regularization=config.mcca_regularization,
         )
-        return target_projection.transform(test_features)
+        return target_projection.transform(scoring_features), evaluation_mask
     raise ValueError(f"Unsupported source alignment method: {config.method}")
+
+
+def _inner_target_calibration_mask(
+    anchors: Sequence[Any] | np.ndarray,
+    *,
+    classes: Sequence[Any] | np.ndarray,
+    per_anchor: int,
+    seed: int,
+) -> np.ndarray:
+    """Select disjoint calibration rows for source-inner target-calibrated diagnostics."""
+
+    anchor_vector = _anchor_value_vector(anchors)
+    class_order = _anchor_value_vector(classes)
+    per_anchor = int(per_anchor)
+    if per_anchor < 1:
+        raise ValueError("alignment_target_calibration_per_anchor must be positive.")
+    calibration_mask = np.zeros(anchor_vector.shape[0], dtype=bool)
+    for class_position, class_label in enumerate(class_order):
+        positions = np.flatnonzero(_anchor_mask(anchor_vector, class_label))
+        if positions.size <= per_anchor:
+            raise ValueError(
+                "source-inner target-calibrated diagnostic needs at least "
+                f"{per_anchor + 1} held-out rows for anchor {class_label!r} so calibration rows are disjoint from scored rows."
+            )
+        selected_local = select_class_limited_indices(
+            np.zeros(positions.size, dtype=int),
+            per_anchor,
+            selection=DEFAULT_CLASS_LIMIT_SELECTION,
+            seed=seed,
+            seed_context=class_position,
+        )
+        calibration_mask[positions[selected_local]] = True
+    return calibration_mask
 
 
 def _source_inner_strict_loso_scores(
@@ -1665,10 +1724,9 @@ def _source_inner_strict_loso_scores(
         test_features = features_by_subject[test_subject]
         test_labels = labels_by_subject[test_subject]
 
-        predicted_raw = _nearest_centroid_predict(train_features, train_labels, test_features)
-        if len(train_subjects) < 2:
-            continue
         try:
+            if len(train_subjects) < 2:
+                continue
             inner_fit = _fit_source_alignment_model(
                 {subject_id: features_by_subject[subject_id] for subject_id in train_subjects},
                 {subject_id: anchors_by_subject[subject_id] for subject_id in train_subjects},
@@ -1677,7 +1735,7 @@ def _source_inner_strict_loso_scores(
                 external_anchor_mode=external_anchor_mode,
             )
             aligned_train_features = np.vstack([inner_fit.transformed_by_subject[subject_id] for subject_id in train_subjects])
-            aligned_test_features = _transform_inner_heldout_subject(
+            aligned_test_features, evaluation_mask = _transform_inner_heldout_subject(
                 test_features=test_features,
                 test_anchors=anchors_by_subject[test_subject],
                 fit=inner_fit,
@@ -1685,19 +1743,20 @@ def _source_inner_strict_loso_scores(
             )
         except (ValueError, np.linalg.LinAlgError):
             continue
+        scored_test_features = test_features[evaluation_mask]
+        scored_test_labels = test_labels[evaluation_mask]
+        predicted_raw = _nearest_centroid_predict(train_features, train_labels, scored_test_features)
         predicted_aligned = _nearest_centroid_predict(aligned_train_features, train_labels, aligned_test_features)
 
-        # Keep the raw and aligned source-inner diagnostics paired.  Alignment
-        # fitting can fail for an inner held-out source subject, especially with
-        # sparse or metadata-derived anchors.  Including raw predictions for
-        # folds where the aligned side was skipped makes the reported raw and
-        # aligned balanced accuracies refer to different held-out subjects and
-        # can create a misleading aligned-minus-raw diagnostic.
+        # Keep raw and aligned diagnostics paired on the same scored rows.  In
+        # target-calibrated mode this excludes the held-out source rows that were
+        # used to fit the target projection, mirroring the outer disjoint target
+        # calibration protocol instead of an oracle-like all-target diagnostic.
         if predicted_raw.size and predicted_aligned.size:
             raw_predictions.extend(predicted_raw.tolist())
-            raw_truth.extend(test_labels.tolist())
+            raw_truth.extend(scored_test_labels.tolist())
             aligned_predictions.extend(predicted_aligned.tolist())
-            aligned_truth.extend(test_labels.tolist())
+            aligned_truth.extend(scored_test_labels.tolist())
 
     raw_score = (
         _balanced_accuracy(np.asarray(raw_truth, dtype=object), np.asarray(raw_predictions, dtype=object))
@@ -1761,7 +1820,7 @@ def _source_inner_unsupervised_loso_scores(
 
 
 def _nearest_centroid_predict(train_features: np.ndarray, train_labels: np.ndarray, test_features: np.ndarray) -> np.ndarray:
-    labels = np.asarray(train_labels).reshape(-1)
+    labels = _anchor_value_vector(train_labels)
     classes = _ordered_unique_anchor_values(labels)
     if len(classes) < 2:
         return np.asarray([], dtype=object)
