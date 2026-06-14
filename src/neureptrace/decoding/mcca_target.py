@@ -265,14 +265,19 @@ def _minimum_class_count(labels: np.ndarray, classes: np.ndarray) -> int:
     return min(_count_label(labels, class_label) for class_label in classes)
 
 
+def _label_mask(labels: Sequence | np.ndarray, class_label: object) -> np.ndarray:
+    """Return a label mask while preserving composite tuple-like labels."""
+
+    return np.asarray(
+        [_contains_label([label], class_label) for label in _label_vector(labels, expected_length=None, name="labels")],
+        dtype=bool,
+    )
+
+
 def _count_label(labels: Sequence | np.ndarray, class_label: object) -> int:
     """Count labels using the same robust equality semantics as class lookup."""
 
-    return sum(
-        1
-        for label in np.asarray(labels, dtype=object).reshape(-1)
-        if _contains_label([label], class_label)
-    )
+    return int(np.sum(_label_mask(labels, class_label)))
 
 
 def _add_template_mean(transformed: Sequence[Sequence[float]] | np.ndarray, template_mean: Sequence[float] | np.ndarray, *, strict: bool) -> np.ndarray:
