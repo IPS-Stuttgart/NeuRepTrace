@@ -1,0 +1,94 @@
+diff --git a/src/neureptrace/mne_time_decode.py b/src/neureptrace/mne_time_decode.py
+index a48fbbf..0000000 100644
+--- a/src/neureptrace/mne_time_decode.py
++++ b/src/neureptrace/mne_time_decode.py
+@@ -114,6 +114,28 @@ def _test_subject_label(groups: np.ndarray | None, test_idx: np.ndarray, *, fall
+     return "|".join(values)
+ 
+ 
++def _alignment_anchor_mask(values: Sequence[object] | np.ndarray, anchor: object) -> np.ndarray:
++    """Return an equality mask for scalar and composite alignment anchors.
++
++    Target-calibration splits may use composite metadata anchors, e.g. tuple-like
++    ``(run, stimulus)`` values.  ``numpy_object_array == tuple`` broadcasts the
++    tuple fields instead of treating the tuple as one atomic anchor, which can
++    raise a ``ValueError`` or silently select incorrect rows.  Compare row by row
++    and coerce scalar equality results to bool.
++    """
++
++    vector = np.asarray(values, dtype=object).reshape(-1)
++    mask = np.zeros(vector.shape[0], dtype=bool)
++    for index, value in enumerate(vector):
++        try:
++            equal = value == anchor
++        except (TypeError, ValueError):
++            equal = False
++        try:
++            mask[index] = bool(equal)
++        except (TypeError, ValueError):
++            mask[index] = False
++    return mask
++
++
+ def _alignment_target_calibration_split(
+     *,
+     labels: np.ndarray,
+@@ -135,7 +157,7 @@ def _alignment_target_calibration_split(
+     calibration_mask = np.zeros(test_idx.shape[0], dtype=bool)
+     anchor_order = pd.Series(target_values).drop_duplicates().tolist()
+     for anchor_position, anchor in enumerate(anchor_order):
+-        positions = np.flatnonzero(target_values == anchor)
++        positions = np.flatnonzero(_alignment_anchor_mask(target_values, anchor))
+         if positions.size <= per_anchor:
+             raise ValueError(
+                 "target_calibrated_alignment needs at least "
+diff --git a/tests/test_mne_time_decode.py b/tests/test_mne_time_decode.py
+index 36334b2..0000000 100644
+--- a/tests/test_mne_time_decode.py
++++ b/tests/test_mne_time_decode.py
+@@ -7,13 +7,17 @@ import pytest
+ 
+ from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
+-from neureptrace.decoding.source_alignment import SourceAlignmentResult
++from neureptrace.decoding.source_alignment import TARGET_CALIBRATED_ALIGNMENT, SourceAlignmentResult, source_alignment_config
+ from neureptrace.mne_time_decode import (
+     _apply_class_prior_correction,
+     _align_probability_columns,
+     _alignment_anchor_values,
++    _alignment_target_calibration_split,
+     _filter_splits_for_outer_test_groups,
+     _nearest_candidate_windows,
+     _shuffle_training_labels,
+@@ -82,6 +86,31 @@ class RecordingFeatureDecoder:
+         return np.full((features.shape[0], len(self.classes_)), 1.0 / len(self.classes_))
+ 
++
++def test_target_calibration_split_preserves_composite_anchor_values():
++    anchors = np.empty(6, dtype=object)
++    anchors[:] = [
++        ("run-01", "stim-a"),
++        ("run-01", "stim-a"),
++        ("run-01", "stim-a"),
++        ("run-01", "stim-b"),
++        ("run-01", "stim-b"),
++        ("run-01", "stim-b"),
++    ]
++    split = _alignment_target_calibration_split(
++        labels=np.array([0, 0, 0, 1, 1, 1]),
++        test_idx=np.arange(6),
++        alignment_config=source_alignment_config(
++            method="mcca",
++            anchor_mode="stimulus_id_repetition",
++            target_projection=TARGET_CALIBRATED_ALIGNMENT,
++            target_calibration_per_anchor=1,
++        ),
++        anchor_values=anchors,
++        seed=13,
++        context=("tuple-anchor",),
++    )
++    assert split.calibration_indices.size == 2
++    assert split.evaluation_indices.size == 4
++
+ 
+ def test_normalize_decoder_name_accepts_aliases():
+     assert normalize_decoder_name("multinomial-logistic") == "multinomial_logistic"
