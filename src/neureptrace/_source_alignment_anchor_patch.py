@@ -51,6 +51,17 @@ def _patch_source_alignment(source_alignment: ModuleType) -> None:
     if getattr(source_alignment, _PATCH_MARKER, False):
         return
 
+    # Newer source_alignment implementations preserve composite anchor values
+    # natively via _anchor_value_vector/_object_value_vector.  Do not overwrite
+    # those helpers with this compatibility patch: the older patch path uses
+    # np.asarray(..., dtype=object) in projection-availability diagnostics, which
+    # can still report tuple anchors as multiple missing scalar values.  Marking
+    # the patch as installed keeps the import hook idempotent while letting the
+    # native implementation run.
+    if hasattr(source_alignment, "_anchor_value_vector") and hasattr(source_alignment, "_object_value_vector"):
+        setattr(source_alignment, _PATCH_MARKER, True)
+        return
+
     def _anchor_vector(values: Sequence[Any] | np.ndarray | None, *, expected_length: int, name: str) -> np.ndarray:
         if values is None:
             raise ValueError(f"{name} is required for this alignment mode.")
@@ -88,22 +99,20 @@ def _patch_source_alignment(source_alignment: ModuleType) -> None:
         valid_vector = vector[~missing_mask]
         available = source_alignment._ordered_unique_anchor_values(valid_vector)
         row[values_key] = int(available.size)
-        missing = np.asarray(
-            [anchor for anchor in common_anchors if not source_alignment._contains_anchor_value(available, anchor)],
-            dtype=object,
+        missing = _object_vector(
+            [anchor for anchor in common_anchors if not source_alignment._contains_anchor_value(available, anchor)]
         )
-        row[missing_count_key] = int(missing.size)
+        row[missing_count_key] = int(missing.shape[0])
         row[missing_preview_key] = source_alignment._preview_values(missing)
         if missing.size:
             failures.append(f"{prefix}_subject_missing_alignment_anchors")
         if required_repetitions_per_anchor is not None and required_repetitions_per_anchor > 1:
-            insufficient = np.asarray(
+            insufficient = _object_vector(
                 [
                     anchor
                     for anchor in common_anchors
                     if source_alignment._count_anchor_value(valid_vector, anchor) < int(required_repetitions_per_anchor)
-                ],
-                dtype=object,
+                ]
             )
             if insufficient.size:
                 failures.append(f"{prefix}_subject_insufficient_alignment_anchor_repetitions")
