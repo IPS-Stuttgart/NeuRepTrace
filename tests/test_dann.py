@@ -5,6 +5,7 @@ from neureptrace.decoding.dann import DANN_PROTOCOL, fit_dann_predict_proba
 
 
 def test_fit_dann_predict_proba_marks_unlabeled_target_adaptation():
+    pytest.importorskip("torch")
     rng = np.random.default_rng(13)
     source_features = np.vstack(
         [

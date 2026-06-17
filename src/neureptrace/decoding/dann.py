@@ -95,12 +95,6 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         *,
         target_features: np.ndarray,
     ):
-        torch = _torch()
-        if self.random_state is not None:
-            torch.manual_seed(int(self.random_state))
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(int(self.random_state))
-
         x_source = np.asarray(source_features, dtype=np.float32)
         x_target = np.asarray(target_features, dtype=np.float32)
         if x_source.ndim != 2 or x_target.ndim != 2:
@@ -118,6 +112,12 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         n_classes = int(self.classes_.shape[0])
         if n_classes < 2:
             raise ValueError("DANN needs at least two source classes.")
+
+        torch = _torch()
+        if self.random_state is not None:
+            torch.manual_seed(int(self.random_state))
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(int(self.random_state))
 
         hidden_units = _positive_int(self.hidden_units, "dann_hidden_units")
         embedding_dim = _positive_int(self.embedding_dim, "dann_embedding_dim")
