@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from neureptrace.dataset_config import (
     apply_overrides,
     effective_config,
@@ -22,7 +24,15 @@ from neureptrace.mne_time_decode_ensemble import (
     normalize_time_decode_decoder_name,
     run_time_resolved_decode as run_ensemble_time_resolved_decode,
 )
-from neureptrace.mne_time_decode import DEFAULT_BASELINE_WINDOW
+from neureptrace.mne_time_decode import (
+    DEFAULT_BASELINE_WINDOW,
+    _normalize_integer,
+    _normalize_nonnegative_float,
+    _normalize_positive_float,
+    _normalize_positive_int,
+    _normalize_pseudo_label_confidence_threshold,
+    _normalize_unit_interval_float,
+)
 
 
 DANN_DECODER_NAMES = {
@@ -48,10 +58,26 @@ def _window_ms(
     default: float,
 ) -> float:
     if key_ms in preprocessing:
-        return float(preprocessing[key_ms])
+        return _normalize_positive_float(preprocessing[key_ms], name=f"preprocessing.{key_ms}")
     if key_seconds in preprocessing:
-        return float(preprocessing[key_seconds]) * 1000.0
-    return default
+        return _normalize_positive_float(preprocessing[key_seconds], name=f"preprocessing.{key_seconds}") * 1000.0
+    return _normalize_positive_float(default, name=f"preprocessing.{key_ms}")
+
+
+def _finite_float(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite.")
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    return parsed
+
+
+def _normalize_open_unit_interval(value: Any, *, name: str) -> float:
+    parsed = _normalize_unit_interval_float(value, name=name)
+    if parsed <= 0.0:
+        raise ValueError(f"{name} must be finite in (0, 1).")
+    return parsed
 
 
 def _list_value(value: Any, *, name: str) -> list[Any]:
@@ -89,7 +115,7 @@ def _float_tuple(value: Any, *, name: str, length: int | None = None, allow_none
         if allow_none:
             return None
         raise ValueError(f"{name} cannot be disabled.")
-    values = tuple(float(item) for item in _list_value(value, name=name))
+    values = tuple(_finite_float(item, name=name) for item in _list_value(value, name=name))
     if length is not None and len(values) != length:
         raise ValueError(f"{name} must contain exactly {length} value(s).")
     return values
@@ -176,14 +202,23 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
     if "label_column" not in decoding:
         raise ValueError("decode-from-config requires decoding.label_column.")
 
-    baseline_window = preprocessing.get("baseline_window", DEFAULT_BASELINE_WINDOW)
-    temporal_train_window = decoding.get(
-        "temporal_train_window",
-        preprocessing.get("temporal_train_window"),
+    baseline_window = _float_tuple(
+        preprocessing.get("baseline_window", DEFAULT_BASELINE_WINDOW),
+        name="preprocessing.baseline_window",
+        length=2,
+        allow_none=True,
     )
-    decode_window = decoding.get(
-        "decode_window",
-        preprocessing.get("decode_window"),
+    temporal_train_window = _float_tuple(
+        decoding.get("temporal_train_window", preprocessing.get("temporal_train_window")),
+        name="decoding.temporal_train_window",
+        length=2,
+        allow_none=True,
+    )
+    decode_window = _float_tuple(
+        decoding.get("decode_window", preprocessing.get("decode_window")),
+        name="decoding.decode_window",
+        length=2,
+        allow_none=True,
     )
     temporal_train_mode = decoding.get(
         "temporal_train_mode",
@@ -215,8 +250,8 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             key_seconds="window_step",
             default=10.0,
         ),
-        "n_splits": int(decoding.get("n_splits", 5)),
-        "max_iter": int(decoding.get("max_iter", 1000)),
+        "n_splits": _normalize_positive_int(decoding.get("n_splits", 5), name="decoding.n_splits"),
+        "max_iter": _normalize_positive_int(decoding.get("max_iter", 1000), name="decoding.max_iter"),
         "decoder": decoding.get("decoder", decoding.get("classifier", "logistic")),
         "emission_mode": decoding.get("emission_mode", "calibrated"),
         "feature_preprocessor": decoding.get(
@@ -228,9 +263,12 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             preprocessing.get("pca_components"),
         ),
         "normalization": preprocessing.get("normalization", "none"),
-        "baseline_window": tuple(baseline_window) if baseline_window is not None else None,
+        "baseline_window": baseline_window,
         "tune_hyperparameters": _bool_value(decoding.get("tune_hyperparameters"), name="decoding.tune_hyperparameters"),
-        "tuning_cv_splits": int(decoding.get("tuning_cv_splits", 3)),
+        "tuning_cv_splits": _normalize_positive_int(
+            decoding.get("tuning_cv_splits", 3),
+            name="decoding.tuning_cv_splits",
+        ),
         "tuning_scoring": decoding.get("tuning_scoring", "accuracy"),
         "tuning_c_grid": decoding.get("tuning_c_grid"),
         "calibration_out_path": _resolve_output(
@@ -238,17 +276,18 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
             config_dir=config_dir,
             key="calibration_csv",
         ),
-        "calibration_bins": int(decoding.get("calibration_bins", 10)),
+        "calibration_bins": _normalize_positive_int(
+            decoding.get("calibration_bins", 10),
+            name="decoding.calibration_bins",
+        ),
         "observation_out_path": _resolve_output(
             config,
             config_dir=config_dir,
             key="observations_csv",
         ),
         "subject": decoding.get("subject"),
-        "decode_window": tuple(decode_window) if decode_window is not None else None,
-        "temporal_train_window": (
-            tuple(temporal_train_window) if temporal_train_window is not None else None
-        ),
+        "decode_window": decode_window,
+        "temporal_train_window": temporal_train_window,
         "time_decode_backend": decoding.get("time_decode_backend", "sklearn"),
         "class_prior_correction": decoding.get(
             "class_prior_correction",
@@ -257,41 +296,103 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
         "source_calibration": decoding.get("source_calibration", "none"),
         "source_time_selection": decoding.get("source_time_selection", "none"),
         "source_time_selection_times": decoding.get("source_time_selection_times"),
-        "source_time_selection_output_time": float(decoding.get("source_time_selection_output_time", 0.184)),
+        "source_time_selection_output_time": _finite_float(
+            decoding.get("source_time_selection_output_time", 0.184),
+            name="decoding.source_time_selection_output_time",
+        ),
         "alignment_method": decoding.get("alignment_method", "none"),
         "alignment_anchor_mode": decoding.get("alignment_anchor_mode", "class_mean"),
         "alignment_anchor_column": decoding.get("alignment_anchor_column"),
-        "alignment_repetition_cap": decoding.get("alignment_repetition_cap", 16),
-        "alignment_components": decoding.get("alignment_components", 64),
+        "alignment_repetition_cap": _normalize_positive_int(
+            decoding.get("alignment_repetition_cap", 16),
+            name="decoding.alignment_repetition_cap",
+        ),
+        "alignment_components": _normalize_positive_int(
+            decoding.get("alignment_components", 64),
+            name="decoding.alignment_components",
+        ),
         "alignment_times": decoding.get("alignment_times"),
         "alignment_target_projection": decoding.get("alignment_target_projection", "group_projection"),
-        "alignment_target_calibration_per_anchor": decoding.get("alignment_target_calibration_per_anchor", 1),
-        "alignment_target_calibration_seed": int(decoding.get("alignment_target_calibration_seed", 13)),
+        "alignment_target_calibration_per_anchor": _normalize_positive_int(
+            decoding.get("alignment_target_calibration_per_anchor", 1),
+            name="decoding.alignment_target_calibration_per_anchor",
+        ),
+        "alignment_target_calibration_seed": _normalize_integer(
+            decoding.get("alignment_target_calibration_seed", 13),
+            name="decoding.alignment_target_calibration_seed",
+            minimum=0,
+        ),
         "label_shuffle_control": _bool_value(decoding.get("label_shuffle_control"), name="decoding.label_shuffle_control"),
-        "label_shuffle_seed": int(decoding.get("label_shuffle_seed", 13)),
+        "label_shuffle_seed": _normalize_integer(
+            decoding.get("label_shuffle_seed", 13),
+            name="decoding.label_shuffle_seed",
+            minimum=0,
+        ),
         "pseudo_label_self_training": _bool_value(
             decoding.get("pseudo_label_self_training"),
             name="decoding.pseudo_label_self_training",
         ),
-        "pseudo_label_confidence_threshold": float(decoding.get("pseudo_label_confidence_threshold", 0.90)),
-        "pseudo_label_max_iterations": int(decoding.get("pseudo_label_max_iterations", 5)),
-        "pseudo_label_min_new": int(decoding.get("pseudo_label_min_new", 1)),
+        "pseudo_label_confidence_threshold": _normalize_pseudo_label_confidence_threshold(
+            decoding.get("pseudo_label_confidence_threshold", 0.90),
+        ),
+        "pseudo_label_max_iterations": _normalize_positive_int(
+            decoding.get("pseudo_label_max_iterations", 5),
+            name="decoding.pseudo_label_max_iterations",
+        ),
+        "pseudo_label_min_new": _normalize_positive_int(
+            decoding.get("pseudo_label_min_new", 1),
+            name="decoding.pseudo_label_min_new",
+        ),
     }
     decoder_name = normalize_time_decode_decoder_name(str(kwargs["decoder"]))
     if decoder_name in DANN_DECODER_NAMES:
         kwargs.update(
             {
-                "dann_hidden_units": int(decoding.get("dann_hidden_units", 64)),
-                "dann_embedding_dim": int(decoding.get("dann_embedding_dim", 32)),
-                "dann_max_epochs": int(decoding.get("dann_max_epochs", 80)),
-                "dann_batch_size": int(decoding.get("dann_batch_size", 128)),
-                "dann_learning_rate": float(decoding.get("dann_learning_rate", 1e-3)),
-                "dann_weight_decay": float(decoding.get("dann_weight_decay", 1e-4)),
-                "dann_domain_loss_weight": float(decoding.get("dann_domain_loss_weight", 0.1)),
-                "dann_validation_fraction": float(decoding.get("dann_validation_fraction", 0.1)),
-                "dann_patience": int(decoding.get("dann_patience", 10)),
-                "dann_dropout": float(decoding.get("dann_dropout", 0.1)),
-                "dann_random_state": int(decoding.get("dann_random_state", 13)),
+                "dann_hidden_units": _normalize_positive_int(
+                    decoding.get("dann_hidden_units", 64),
+                    name="decoding.dann_hidden_units",
+                ),
+                "dann_embedding_dim": _normalize_positive_int(
+                    decoding.get("dann_embedding_dim", 32),
+                    name="decoding.dann_embedding_dim",
+                ),
+                "dann_max_epochs": _normalize_positive_int(
+                    decoding.get("dann_max_epochs", 80),
+                    name="decoding.dann_max_epochs",
+                ),
+                "dann_batch_size": _normalize_positive_int(
+                    decoding.get("dann_batch_size", 128),
+                    name="decoding.dann_batch_size",
+                ),
+                "dann_learning_rate": _normalize_positive_float(
+                    decoding.get("dann_learning_rate", 1e-3),
+                    name="decoding.dann_learning_rate",
+                ),
+                "dann_weight_decay": _normalize_nonnegative_float(
+                    decoding.get("dann_weight_decay", 1e-4),
+                    name="decoding.dann_weight_decay",
+                ),
+                "dann_domain_loss_weight": _normalize_nonnegative_float(
+                    decoding.get("dann_domain_loss_weight", 0.1),
+                    name="decoding.dann_domain_loss_weight",
+                ),
+                "dann_validation_fraction": _normalize_open_unit_interval(
+                    decoding.get("dann_validation_fraction", 0.1),
+                    name="decoding.dann_validation_fraction",
+                ),
+                "dann_patience": _normalize_positive_int(
+                    decoding.get("dann_patience", 10),
+                    name="decoding.dann_patience",
+                ),
+                "dann_dropout": _normalize_unit_interval_float(
+                    decoding.get("dann_dropout", 0.1),
+                    name="decoding.dann_dropout",
+                ),
+                "dann_random_state": _normalize_integer(
+                    decoding.get("dann_random_state", 13),
+                    name="decoding.dann_random_state",
+                    minimum=0,
+                ),
                 "dann_device": str(decoding.get("dann_device", "auto")),
             }
         )
@@ -335,7 +436,11 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
                 name="decoding.ensemble_baseline_group_columns",
             )
         if "ensemble_min_probability" in decoding:
-            kwargs["ensemble_min_probability"] = float(decoding["ensemble_min_probability"])
+            kwargs["ensemble_min_probability"] = _normalize_unit_interval_float(
+                decoding["ensemble_min_probability"],
+                name="decoding.ensemble_min_probability",
+                include_one=True,
+            )
         if "ensemble_source_temperatures" in decoding or "ensemble_source_temperature" in decoding:
             ensemble_source_temperatures = decoding.get(
                 "ensemble_source_temperatures",

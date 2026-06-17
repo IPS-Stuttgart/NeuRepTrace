@@ -120,3 +120,75 @@ def test_decode_from_config_quoted_false_flags_stay_disabled(tmp_path: Path) -> 
 
     assert kwargs["tune_hyperparameters"] is False
     assert kwargs["label_shuffle_control"] is False
+
+
+@pytest.mark.parametrize(
+    ("preprocessing", "decoding", "message"),
+    [
+        ({"window_ms": True}, {}, "preprocessing.window_ms"),
+        ({"window_size": float("inf")}, {}, "preprocessing.window_size"),
+        ({"step_ms": 0}, {}, "preprocessing.step_ms"),
+        ({"baseline_window": [False, 0.0]}, {}, "preprocessing.baseline_window"),
+        ({}, {"decode_window": [0.0, float("nan")]}, "decoding.decode_window"),
+        ({}, {"temporal_train_window": [True, 0.2]}, "decoding.temporal_train_window"),
+        ({}, {"n_splits": True}, "decoding.n_splits"),
+        ({}, {"max_iter": 100.5}, "decoding.max_iter"),
+        ({}, {"tuning_cv_splits": 0}, "decoding.tuning_cv_splits"),
+        ({}, {"calibration_bins": float("inf")}, "decoding.calibration_bins"),
+        ({}, {"source_time_selection_output_time": True}, "decoding.source_time_selection_output_time"),
+        ({}, {"alignment_repetition_cap": 0}, "decoding.alignment_repetition_cap"),
+        ({}, {"alignment_components": 64.5}, "decoding.alignment_components"),
+        ({}, {"alignment_target_calibration_seed": -1}, "decoding.alignment_target_calibration_seed"),
+        ({}, {"label_shuffle_seed": True}, "decoding.label_shuffle_seed"),
+        ({}, {"pseudo_label_confidence_threshold": True}, "pseudo_label_confidence_threshold"),
+        ({}, {"pseudo_label_max_iterations": 0}, "decoding.pseudo_label_max_iterations"),
+        ({}, {"pseudo_label_min_new": 1.5}, "decoding.pseudo_label_min_new"),
+    ],
+)
+def test_decode_from_config_rejects_malformed_result_controls(
+    tmp_path: Path,
+    preprocessing: dict,
+    decoding: dict,
+    message: str,
+) -> None:
+    from neureptrace.decode_from_config import _decode_kwargs
+
+    config = {
+        "dataset": {"name": "synthetic"},
+        "preprocessing": preprocessing,
+        "decoding": {"label_column": "condition", **decoding},
+        "outputs": {"base_dir": tmp_path.as_posix()},
+    }
+
+    with pytest.raises(ValueError, match=message):
+        _decode_kwargs(config, config_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("decoding", "message"),
+    [
+        ({"dann_max_epochs": True}, "decoding.dann_max_epochs"),
+        ({"dann_batch_size": 12.5}, "decoding.dann_batch_size"),
+        ({"dann_learning_rate": 0.0}, "decoding.dann_learning_rate"),
+        ({"dann_weight_decay": -0.1}, "decoding.dann_weight_decay"),
+        ({"dann_validation_fraction": 0.0}, "decoding.dann_validation_fraction"),
+        ({"dann_dropout": 1.0}, "decoding.dann_dropout"),
+        ({"dann_random_state": True}, "decoding.dann_random_state"),
+    ],
+)
+def test_decode_from_config_rejects_malformed_dann_controls(
+    tmp_path: Path,
+    decoding: dict,
+    message: str,
+) -> None:
+    from neureptrace.decode_from_config import _decode_kwargs
+
+    config = {
+        "dataset": {"name": "synthetic"},
+        "preprocessing": {},
+        "decoding": {"label_column": "condition", "decoder": "dann", **decoding},
+        "outputs": {"base_dir": tmp_path.as_posix()},
+    }
+
+    with pytest.raises(ValueError, match=message):
+        _decode_kwargs(config, config_dir=tmp_path)

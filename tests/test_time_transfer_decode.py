@@ -5,6 +5,7 @@ from pathlib import Path
 import mne
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.time_transfer_decode import run_time_transfer_decode
 
@@ -88,3 +89,30 @@ def test_time_transfer_decode_train_window_ensemble(tmp_path: Path):
 
     assert set(results["temporal_mode"]) == {"train_window_transfer_ensemble"}
     assert results["n_train_windows"].ge(1).all()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"window_ms": True}, "window_ms"),
+        ({"window_ms": float("inf")}, "window_ms"),
+        ({"step_ms": np.nan}, "step_ms"),
+        ({"max_iter": 200.5}, "max_iter"),
+        ({"max_iter": True}, "max_iter"),
+        ({"tune_hyperparameters": "sometimes"}, "tune_hyperparameters"),
+        ({"tuning_cv_splits": 0}, "tuning_cv_splits"),
+        ({"calibration_bins": 1.5}, "calibration_bins"),
+        ({"tmin": True}, "tmin"),
+        ({"tmax": np.inf}, "tmax"),
+        ({"tmin": 0.2, "tmax": 0.1}, "tmax"),
+    ],
+)
+def test_time_transfer_decode_rejects_malformed_numeric_controls(tmp_path: Path, kwargs, message: str):
+    with pytest.raises(ValueError, match=message):
+        run_time_transfer_decode(
+            train_epochs_path=tmp_path / "missing-train-epo.fif",
+            validation_epochs_path=tmp_path / "missing-validation-epo.fif",
+            label_column="condition",
+            out_path=tmp_path / "transfer.csv",
+            **kwargs,
+        )
