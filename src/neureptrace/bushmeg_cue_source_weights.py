@@ -65,15 +65,9 @@ class CueSourceWeights:
 
     def __post_init__(self) -> None:
         mode = normalize_cue_source_weighting_mode(self.mode)
-        temperature = float(self.temperature)
-        blend = float(self.blend)
-        if not np.isfinite(temperature) or temperature <= 0.0:
-            raise ValueError("cue_source_weighting.temperature must be positive and finite.")
-        if not np.isfinite(blend) or blend < 0.0 or blend > 1.0:
-            raise ValueError("cue_source_weighting.blend must be in [0, 1].")
-        top_k = None if self.top_k in {None, "", "none", "None"} else int(self.top_k)
-        if top_k is not None and top_k < 1:
-            raise ValueError("cue_source_weighting.top_k must be at least 1 when set.")
+        temperature = _positive_float(self.temperature, name="cue_source_weighting.temperature")
+        blend = _unit_interval_float(self.blend, name="cue_source_weighting.blend")
+        top_k = _normalize_optional_positive_integer(self.top_k, name="cue_source_weighting.top_k")
         normalized_features = {
             str(subject): _unit_feature_vector(vector)
             for subject, vector in self.features.items()
@@ -178,10 +172,76 @@ def _list_value(value: Any, default: Sequence[Any]) -> list[Any]:
     return [value]
 
 
+def _finite_float(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a finite number.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite number.") from exc
+    if not np.isfinite(number):
+        raise ValueError(f"{name} must be a finite number.")
+    return number
+
+
+def _positive_float(value: Any, *, name: str) -> float:
+    number = _finite_float(value, name=name)
+    if number <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return number
+
+
+def _unit_interval_float(value: Any, *, name: str) -> float:
+    number = _finite_float(value, name=name)
+    if number < 0.0 or number > 1.0:
+        raise ValueError(f"{name} must be in [0, 1].")
+    return number
+
+
+def _normalize_integer(value: Any, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    integer = int(number)
+    if minimum is not None and integer < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    return integer
+
+
+def _normalize_optional_positive_integer(value: Any, *, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() in {"", "none", "None"}:
+        return None
+    return _normalize_integer(value, name=name, minimum=1)
+
+
+def _normalize_temporal_bins(value: Any) -> int:
+    return _normalize_integer(value, name="cue_source_weighting.temporal_bins", minimum=1)
+
+
 def _truthy(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
     if isinstance(value, str):
-        return value.strip().lower() not in {"", "0", "false", "no", "off", "none", "null"}
-    return bool(value)
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"", "0", "false", "no", "n", "off", "none", "null"}:
+            return False
+    if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
+        if int(value) in {0, 1}:
+            return bool(value)
+    raise ValueError(f"Cannot interpret {value!r} as a boolean flag.")
+
+
+def _optional_float(value: Any, *, name: str) -> float | None:
+    return None if value is None else _finite_float(value, name=name)
 
 
 def normalize_cue_source_weighting_mode(value: Any) -> str:
@@ -226,10 +286,19 @@ def normalize_cue_feature_kinds(value: Any) -> tuple[str, ...]:
 
 
 def _window_tuple(value: Any, default: tuple[float, float]) -> tuple[float, float]:
-    items = list(default if value is None else value)
+    if value is None:
+        items = list(default)
+    elif isinstance(value, (str, bytes)):
+        raise ValueError("Cue calibration windows must contain exactly [start, stop].")
+    else:
+        try:
+            items = list(value)
+        except TypeError as exc:
+            raise ValueError("Cue calibration windows must contain exactly [start, stop].") from exc
     if len(items) != 2:
         raise ValueError("Cue calibration windows must contain exactly [start, stop].")
-    start, stop = float(items[0]), float(items[1])
+    start = _finite_float(items[0], name="cue_window_start")
+    stop = _finite_float(items[1], name="cue_window_stop")
     if not np.isfinite(start) or not np.isfinite(stop) or stop <= start:
         raise ValueError("Cue calibration windows must be finite and have stop > start.")
     return start, stop
@@ -252,10 +321,12 @@ def _time_mask(times: np.ndarray, window: tuple[float, float], *, name: str) -> 
 def _crop_data(data: np.ndarray, times: np.ndarray, *, tmin: float | None, tmax: float | None) -> tuple[np.ndarray, np.ndarray]:
     mask = np.ones(len(times), dtype=bool)
     tolerance = 1e-12
+    tmin = _optional_float(tmin, name="cue_tmin")
+    tmax = _optional_float(tmax, name="cue_tmax")
     if tmin is not None:
-        mask &= times >= float(tmin) - tolerance
+        mask &= times >= tmin - tolerance
     if tmax is not None:
-        mask &= times <= float(tmax) + tolerance
+        mask &= times <= tmax + tolerance
     if not np.any(mask):
         raise ValueError(f"Cue crop window [{tmin}, {tmax}] does not overlap the epoch time axis.")
     return data[:, :, mask], times[mask]
@@ -377,22 +448,25 @@ def _load_cue_subjects_from_config(config: Mapping[str, Any], *, config_dir: Pat
 
 def _channel_logvar(data: np.ndarray, times: np.ndarray, window: tuple[float, float], *, name: str, epsilon: float = 1e-12) -> np.ndarray:
     mask = _time_mask(times, window, name=name)
+    epsilon = _positive_float(epsilon, name="cue_feature_epsilon")
     variance = np.var(data[:, :, mask], axis=(0, 2), ddof=1 if data.shape[0] * int(mask.sum()) > 1 else 0)
     return np.log(np.maximum(variance, epsilon))
 
 
 def _evoked_bin_means(data: np.ndarray, times: np.ndarray, window: tuple[float, float], *, temporal_bins: int) -> np.ndarray:
+    temporal_bins = _normalize_temporal_bins(temporal_bins)
     mask = _time_mask(times, window, name="cue response")
     evoked = np.asarray(data[:, :, mask], dtype=np.float64).mean(axis=0)
-    bins = np.array_split(np.arange(evoked.shape[1]), int(temporal_bins))
+    bins = np.array_split(np.arange(evoked.shape[1]), temporal_bins)
     return np.concatenate([evoked[:, bin_indices].mean(axis=1) for bin_indices in bins], axis=0)
 
 
 def _evoked_gfp_bins(data: np.ndarray, times: np.ndarray, window: tuple[float, float], *, temporal_bins: int) -> np.ndarray:
+    temporal_bins = _normalize_temporal_bins(temporal_bins)
     mask = _time_mask(times, window, name="cue response")
     evoked = np.asarray(data[:, :, mask], dtype=np.float64).mean(axis=0)
     gfp = np.sqrt(np.mean(evoked * evoked, axis=0))
-    bins = np.array_split(np.arange(gfp.shape[0]), int(temporal_bins))
+    bins = np.array_split(np.arange(gfp.shape[0]), temporal_bins)
     return np.asarray([gfp[bin_indices].mean() for bin_indices in bins], dtype=np.float64)
 
 
@@ -406,7 +480,7 @@ def cue_subject_feature_vector(
 ) -> np.ndarray:
     """Return one subject-level cue calibration vector."""
 
-    temporal_bins = max(1, int(temporal_bins))
+    temporal_bins = _normalize_temporal_bins(temporal_bins)
     parts: list[np.ndarray] = []
     for feature_kind in normalize_cue_feature_kinds(feature_kinds):
         if feature_kind == "baseline_logvar":
@@ -424,6 +498,7 @@ def cue_subject_feature_vector(
 
 
 def _unit_feature_vector(vector: np.ndarray, *, epsilon: float = 1e-12) -> np.ndarray:
+    epsilon = _positive_float(epsilon, name="cue_feature_epsilon")
     vector = np.asarray(vector, dtype=np.float64).reshape(-1)
     if vector.size == 0:
         raise ValueError("Cue feature vector must not be empty.")
@@ -460,7 +535,7 @@ def resolve_cue_source_weights(
     preprocessing = _section(config, "preprocessing")
     baseline_window = _window_tuple(raw.get("baseline_window", preprocessing.get("baseline_window", _base.DEFAULT_BASELINE_WINDOW)), _base.DEFAULT_BASELINE_WINDOW)
     response_window = _window_tuple(raw.get("response_window", DEFAULT_CUE_RESPONSE_WINDOW), DEFAULT_CUE_RESPONSE_WINDOW)
-    temporal_bins = int(raw.get("temporal_bins", DEFAULT_CUE_TEMPORAL_BINS))
+    temporal_bins = _normalize_temporal_bins(raw.get("temporal_bins", DEFAULT_CUE_TEMPORAL_BINS))
     feature_kinds = normalize_cue_feature_kinds(raw.get("feature_kinds", DEFAULT_CUE_FEATURE_KINDS))
     features = {
         subject: cue_subject_feature_vector(
@@ -475,9 +550,9 @@ def resolve_cue_source_weights(
     return CueSourceWeights(
         features=features,
         mode=normalize_cue_source_weighting_mode(raw.get("mode", DEFAULT_CUE_MODE)),
-        temperature=float(raw.get("temperature", DEFAULT_CUE_TEMPERATURE)),
+        temperature=_positive_float(raw.get("temperature", DEFAULT_CUE_TEMPERATURE), name="cue_source_weighting.temperature"),
         top_k=raw.get("top_k", DEFAULT_CUE_TOP_K),
-        blend=float(raw.get("blend", DEFAULT_CUE_BLEND)),
+        blend=_unit_interval_float(raw.get("blend", DEFAULT_CUE_BLEND), name="cue_source_weighting.blend"),
         config={
             "participant_file": raw.get("participant_file"),
             "feature_kinds": feature_kinds,
@@ -485,9 +560,9 @@ def resolve_cue_source_weights(
             "response_window": response_window,
             "temporal_bins": temporal_bins,
             "mode": raw.get("mode", DEFAULT_CUE_MODE),
-            "temperature": float(raw.get("temperature", DEFAULT_CUE_TEMPERATURE)),
+            "temperature": _positive_float(raw.get("temperature", DEFAULT_CUE_TEMPERATURE), name="cue_source_weighting.temperature"),
             "top_k": raw.get("top_k", DEFAULT_CUE_TOP_K),
-            "blend": float(raw.get("blend", DEFAULT_CUE_BLEND)),
+            "blend": _unit_interval_float(raw.get("blend", DEFAULT_CUE_BLEND), name="cue_source_weighting.blend"),
         },
     )
 
