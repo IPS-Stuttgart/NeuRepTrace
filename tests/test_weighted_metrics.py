@@ -127,3 +127,18 @@ def test_weighted_probability_metrics_validate_inputs() -> None:
 
     with pytest.raises(ValueError, match="positive"):
         weighted_reliability_bins(probabilities, labels, sample_weight, n_bins=0)
+
+
+def test_weighted_probability_metrics_reject_fractional_integer_parameters() -> None:
+    probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
+    labels = np.array([0, 1])
+    sample_weight = np.array([1.0, 1.0])
+
+    with pytest.raises(ValueError, match="k must be a positive integer"):
+        weighted_top_k_accuracy(probabilities, labels, sample_weight, k=1.5)
+
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+        weighted_expected_calibration_error(probabilities, labels, sample_weight, n_bins=1.5)
+
+    with pytest.raises(ValueError, match="n_bins must be a positive integer"):
+        weighted_reliability_bins(probabilities, labels, sample_weight, n_bins=True)

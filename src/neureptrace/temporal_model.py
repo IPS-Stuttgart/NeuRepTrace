@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 EPSILON = 1e-12
+PROBABILITY_SUM_TOLERANCE = 1.0e-3
 MODEL_GROUP_COLUMNS = ("decoder", "emission_mode")
 SEQUENCE_KEY_COLUMN_CANDIDATES = (
     "source_path",
@@ -69,9 +70,18 @@ def _validate_probability_matrix(probabilities: np.ndarray) -> np.ndarray:
         raise ValueError("Probability observations must contain only finite values.")
     if np.any(probability_array < -EPSILON):
         raise ValueError("Probability observations must be non-negative.")
+    if np.any(probability_array > 1.0 + EPSILON):
+        raise ValueError("Probability observations must not exceed 1.0.")
     row_sums = probability_array.sum(axis=1)
     if np.any(row_sums <= EPSILON):
         raise ValueError("Probability observation rows must have positive mass.")
+    bad_rows = np.flatnonzero(np.abs(row_sums - 1.0) > PROBABILITY_SUM_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            "Probability observation rows must sum to 1.0 within tolerance "
+            f"{PROBABILITY_SUM_TOLERANCE:g}; example row sums: {examples}"
+        )
     return probability_array
 
 
@@ -94,6 +104,16 @@ def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
             frame["sequence_id"] = frame["sample_index"]
         if "subject" not in frame.columns:
             frame["subject"] = csv_path.stem
+        else:
+            frame["subject"] = frame["subject"].astype(object)
+            subject_tokens = frame["subject"].astype(str).str.strip().str.lower()
+            missing_subject = frame["subject"].isna() | subject_tokens.isin({"", "nan", "none", "nat"})
+            for fallback_column in ("group", "outer_test_groups"):
+                if fallback_column not in frame.columns or not bool(missing_subject.any()):
+                    continue
+                frame.loc[missing_subject, "subject"] = frame.loc[missing_subject, fallback_column]
+                subject_tokens = frame["subject"].astype(str).str.strip().str.lower()
+                missing_subject = frame["subject"].isna() | subject_tokens.isin({"", "nan", "none", "nat"})
         if "decoder" not in frame.columns:
             frame["decoder"] = "decoder"
         if "emission_mode" not in frame.columns:
@@ -274,6 +294,7 @@ def _fit_control(
     random_seed: int,
     stay_grid_size: int,
 ) -> list[dict[str, float]]:
+    n_permutations = _validate_non_negative_integer(n_permutations, name="n_permutations")
     rng = np.random.default_rng(random_seed)
     rows = []
     for _ in range(n_permutations):
@@ -304,6 +325,18 @@ def _model_row(group_values: dict[str, str], condition: str, fit: dict[str, floa
         "persistence_gain_per_observation_sd": None,
         "empirical_p_value": empirical_p_value,
     }
+
+
+def _validate_non_negative_integer(value: int, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a non-negative integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 0.0:
+        raise ValueError(f"{name} must be a non-negative integer.")
+    return int(numeric)
 
 
 def _control_row(
@@ -419,6 +452,7 @@ def fit_temporal_models(
     out_states: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """Fit sticky switching models to probability observation CSVs and controls."""
+    n_permutations = _validate_non_negative_integer(n_permutations, name="n_permutations")
     observations = read_probability_observations(observation_csvs)
     prob_columns = probability_columns(observations)
     rows = []

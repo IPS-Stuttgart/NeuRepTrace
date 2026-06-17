@@ -70,6 +70,7 @@ WINDOW_FEATURE_MODE_CHOICES = (
 DEFAULT_WINDOW_FEATURE_MODE = "sensor_flat"
 DEFAULT_TEMPORAL_BINS = 4
 EPSILON = 1e-12
+PROBABILITY_SUM_TOLERANCE = 1.0e-3
 TimeWindow = tuple[int, int, float]
 
 
@@ -517,11 +518,28 @@ def _safe_pca_components(pca_components: int | float | str | None, *, feature_pr
 def _average_probabilities(probabilities: Sequence[np.ndarray], *, mode: str) -> np.ndarray:
     if not probabilities:
         raise ValueError("At least one probability matrix is required for ensembling.")
+    stack = np.stack(probabilities, axis=0)
+    if stack.ndim != 3:
+        raise ValueError("Probability ensemble inputs must have shape (n_sources, n_samples, n_classes).")
+    if not np.all(np.isfinite(stack)):
+        raise ValueError("Probability ensemble inputs must be finite.")
+    if np.any(stack < 0.0):
+        raise ValueError("Probability ensemble inputs must be non-negative.")
+    if np.any(stack > 1.0):
+        raise ValueError("Probability ensemble inputs must not exceed 1.0.")
+    row_sums = stack.sum(axis=2)
+    bad_rows = np.flatnonzero(np.abs(row_sums.ravel() - 1.0) > PROBABILITY_SUM_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums.ravel()[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            "Probability ensemble rows must sum to 1.0 within tolerance "
+            f"{PROBABILITY_SUM_TOLERANCE:g}; example row sums: {examples}"
+        )
     mode = mode.lower().replace("-", "_")
     if mode in {"mean", "arithmetic"}:
-        averaged = np.mean(np.stack(probabilities, axis=0), axis=0)
+        averaged = np.mean(stack, axis=0)
     elif mode in {"log", "log_mean", "geometric"}:
-        log_average = np.mean([np.log(np.clip(matrix, EPSILON, 1.0)) for matrix in probabilities], axis=0)
+        log_average = np.mean(np.log(np.clip(stack, EPSILON, 1.0)), axis=0)
         shifted = log_average - np.max(log_average, axis=1, keepdims=True)
         averaged = np.exp(np.clip(shifted, -50.0, 50.0))
     else:

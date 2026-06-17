@@ -72,3 +72,15 @@ def test_rank_class_scores_allows_empty_class_axis() -> None:
     assert np.isnan(result["top_k_accuracy"][1])
     assert np.isnan(result["mean_true_label_rank"])
     assert result["rows"] == [{}, {}]
+
+
+def test_rank_class_scores_rejects_fractional_rank_parameters() -> None:
+    scores = [[0.8, 0.2]]
+    classes = ["target", "distractor"]
+    y_true = ["target"]
+
+    with pytest.raises(ValueError, match="top_k values must be integers"):
+        rank_class_scores(scores, classes, y_true, top_k=(1.5,))
+
+    with pytest.raises(ValueError, match="row_top_k values must be integers"):
+        rank_class_scores(scores, classes, y_true, row_top_k=1.5)

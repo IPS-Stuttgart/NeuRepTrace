@@ -86,15 +86,15 @@ def test_non_max_suppression_keeps_non_overlapping_high_scoring_events():
             _row("run-1", 0.10, (0.46, 0.10, 0.44)),
             _row("run-1", 0.20, (0.47, 0.10, 0.43)),
             _row("run-1", 0.30, (0.46, 0.10, 0.44)),
-            _row("run-1", 0.50, (0.10, 0.45, 0.10)),
-            _row("run-1", 0.60, (0.10, 0.46, 0.10)),
+            _row("run-1", 0.50, (0.10, 0.50, 0.40)),
+            _row("run-1", 0.60, (0.10, 0.51, 0.39)),
         ]
     )
 
     events = detect_stimulus_events(
         frame,
         stream_columns=("stream_id",),
-        target_classes=["A", "B", "C"],
+        target_classes=["A", "B"],
         threshold_window=THRESHOLD_WINDOW,
         threshold_quantile=0.0,
         detection_window=(0.0, float("inf")),

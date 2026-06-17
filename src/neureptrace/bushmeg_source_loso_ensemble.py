@@ -53,6 +53,7 @@ DEFAULT_ENSEMBLE_CLASS_BIAS = "none"
 DEFAULT_STACKING_MAX_ITER = 250
 DEFAULT_STACKING_LEARNING_RATE = 0.25
 DEFAULT_STACKING_EPSILON = 1.0e-12
+DEFAULT_PROBABILITY_TOLERANCE = 1.0e-3
 DEFAULT_RERANK_TOP_K = 0
 DEFAULT_RERANK_ALPHA_GRID = (0.0, 0.25, 0.5, 1.0, 2.0)
 ENSEMBLE_WEIGHTING_MODES = {"uniform", "rank", "softmax", "stacked"}
@@ -178,6 +179,62 @@ def _softmax_scores(scores: np.ndarray) -> np.ndarray:
     return exp_scores / exp_scores.sum(axis=1, keepdims=True)
 
 
+def _validate_probability_matrix(
+    probabilities: np.ndarray,
+    *,
+    context: str,
+    n_classes: int | None = None,
+) -> np.ndarray:
+    probabilities = np.asarray(probabilities, dtype=float)
+    if probabilities.ndim != 2:
+        raise ValueError(f"{context} must be a two-dimensional probability matrix.")
+    if n_classes is not None and probabilities.shape[1] != int(n_classes):
+        raise ValueError(f"{context} class count does not match expected n_classes={int(n_classes)}.")
+    if not np.all(np.isfinite(probabilities)):
+        raise ValueError(f"{context} probabilities must be finite.")
+    if np.any(probabilities < 0.0):
+        raise ValueError(f"{context} probabilities must be non-negative.")
+    if np.any(probabilities > 1.0):
+        raise ValueError(f"{context} probabilities must not exceed 1.0.")
+    row_sums = probabilities.sum(axis=1)
+    bad_rows = np.flatnonzero(np.abs(row_sums - 1.0) > DEFAULT_PROBABILITY_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            f"{context} probability rows must sum to 1.0 within tolerance "
+            f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
+        )
+    return probabilities
+
+
+def _validate_probability_cube(
+    probability_cube: np.ndarray,
+    *,
+    context: str,
+    n_classes: int,
+) -> np.ndarray:
+    cube = np.asarray(probability_cube, dtype=float)
+    if cube.ndim != 3:
+        raise ValueError(f"{context} must have shape (n_candidates, n_samples, n_classes).")
+    if cube.shape[2] != int(n_classes):
+        raise ValueError(f"{context} class count does not match expected n_classes={int(n_classes)}.")
+    if not np.all(np.isfinite(cube)):
+        raise ValueError(f"{context} probabilities must be finite.")
+    if np.any(cube < 0.0):
+        raise ValueError(f"{context} probabilities must be non-negative.")
+    if np.any(cube > 1.0):
+        raise ValueError(f"{context} probabilities must not exceed 1.0.")
+    row_sums = cube.sum(axis=2)
+    bad_rows = np.flatnonzero(np.abs(row_sums.ravel() - 1.0) > DEFAULT_PROBABILITY_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums.ravel()[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            f"{context} probability rows must sum to 1.0 within tolerance "
+            f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
+        )
+    return cube
+
+
 def _apply_topk_pairwise_reranker(probabilities: np.ndarray, reranker: TopKPairwiseReranker | None) -> np.ndarray:
     """Apply a source-fitted one-vs-one reranker to only the top-k classes.
 
@@ -188,11 +245,11 @@ def _apply_topk_pairwise_reranker(probabilities: np.ndarray, reranker: TopKPairw
     """
 
     probabilities = np.asarray(probabilities, dtype=float)
+    _validate_probability_matrix(probabilities, context="Reranker input")
     if reranker is None or reranker.alpha <= 0.0 or reranker.top_k <= 1:
         return probabilities
     n_classes = int(reranker.n_classes)
-    if probabilities.ndim != 2 or probabilities.shape[1] != n_classes:
-        raise ValueError("Reranker class count does not match probability matrix.")
+    _validate_probability_matrix(probabilities, context="Reranker input", n_classes=n_classes)
     intercepts = np.asarray(reranker.intercepts, dtype=float).reshape(n_classes, n_classes)
     slopes = np.asarray(reranker.slopes, dtype=float).reshape(n_classes, n_classes)
     log_probabilities = np.log(np.clip(probabilities, DEFAULT_STACKING_EPSILON, 1.0))
@@ -227,7 +284,11 @@ def _fit_topk_pairwise_reranker(
     top_k = min(_normalize_rerank_top_k(top_k), int(n_classes))
     if top_k <= 1:
         return None
-    probabilities = np.asarray(probabilities, dtype=float)
+    probabilities = _validate_probability_matrix(
+        probabilities,
+        context="Reranker fit input",
+        n_classes=int(n_classes),
+    )
     labels = np.asarray(labels, dtype=int).reshape(-1)
     if probabilities.shape != (labels.shape[0], int(n_classes)):
         raise ValueError("Reranker probabilities must have shape (n_samples, n_classes).")
@@ -330,17 +391,17 @@ def _fit_stacking_weights(
     leakage-safe stacking layer rather than a held-out-subject calibration step.
     """
 
-    cube = np.asarray(probability_cube, dtype=float)
+    cube = _validate_probability_cube(
+        probability_cube,
+        context="Stacking probability cube",
+        n_classes=int(n_classes),
+    )
     labels = np.asarray(labels, dtype=int).reshape(-1)
-    if cube.ndim != 3:
-        raise ValueError("probability_cube must have shape (n_candidates, n_samples, n_classes).")
     n_candidates, n_samples, cube_classes = cube.shape
     if n_candidates < 1 or n_samples != labels.shape[0] or cube_classes != int(n_classes):
         raise ValueError("probability_cube shape is inconsistent with labels or n_classes.")
     if n_candidates == 1:
         return np.ones(1, dtype=float)
-    cube = np.clip(cube, float(epsilon), 1.0)
-    cube /= cube.sum(axis=2, keepdims=True)
     true_probabilities = cube[:, np.arange(n_samples), labels]
     sample_weights = _class_balanced_sample_weights(labels, n_classes=n_classes)
     weights = np.full(n_candidates, 1.0 / float(n_candidates), dtype=float)
@@ -536,6 +597,7 @@ def _select_ensemble(
 
 
 def _renormalize(probabilities: np.ndarray) -> np.ndarray:
+    probabilities = _validate_probability_matrix(probabilities, context="Ensemble")
     row_sums = probabilities.sum(axis=1, keepdims=True)
     if np.any(row_sums <= 0.0) or not np.all(np.isfinite(row_sums)):
         raise ValueError("Ensemble probabilities must have positive finite row sums.")

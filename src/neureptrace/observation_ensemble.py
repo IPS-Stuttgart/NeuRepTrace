@@ -20,6 +20,7 @@ DEFAULT_WEIGHTS = (0.5, 0.5)
 DEFAULT_ENSEMBLE_DECODER = "baseline_debiased_logistic_linear_svm_ensemble"
 DEFAULT_ENSEMBLE_EMISSION_MODE = "baseline_debiased_ensemble"
 DEFAULT_MIN_PROBABILITY = 1e-12
+DEFAULT_PROBABILITY_TOLERANCE = 1e-3
 DEFAULT_SCORE_MODE = "log"
 ENSEMBLE_SCORE_MODE_CHOICES = ("log", "probability", "confidence_probability", "agreement_probability", "rank")
 
@@ -78,6 +79,8 @@ _METRIC_PROVENANCE_COLUMNS = (
 def _normalize_weights(weights: Sequence[float], n_decoders: int) -> np.ndarray:
     if len(weights) != n_decoders:
         raise ValueError(f"Expected {n_decoders} ensemble weights, got {len(weights)}.")
+    if any(isinstance(weight, (bool, np.bool_)) for weight in weights):
+        raise ValueError("Ensemble weights must be finite non-negative values with positive sum.")
     values = np.asarray(weights, dtype=float)
     if not np.isfinite(values).all() or (values < 0).any() or float(values.sum()) <= 0.0:
         raise ValueError("Ensemble weights must be finite non-negative values with positive sum.")
@@ -89,10 +92,41 @@ def _source_temperatures(temperatures: Sequence[float] | None, n_decoders: int) 
         return tuple(1.0 for _ in range(n_decoders))
     if len(temperatures) != n_decoders:
         raise ValueError(f"Expected {n_decoders} source temperatures, got {len(temperatures)}.")
+    if any(isinstance(temperature, (bool, np.bool_)) for temperature in temperatures):
+        raise ValueError("Source temperatures must be finite positive values.")
     values = tuple(float(temperature) for temperature in temperatures)
     if any(not np.isfinite(temperature) or temperature <= 0.0 for temperature in values):
         raise ValueError("Source temperatures must be finite positive values.")
     return values
+
+
+def _validate_probability_matrix(
+    probabilities: np.ndarray,
+    *,
+    context: str,
+    probability_tolerance: float = DEFAULT_PROBABILITY_TOLERANCE,
+) -> None:
+    if probabilities.ndim != 2:
+        raise ValueError(f"{context} probabilities must be a two-dimensional array.")
+    if isinstance(probability_tolerance, (bool, np.bool_)):
+        raise ValueError("probability_tolerance must be finite and non-negative.")
+    tolerance = float(probability_tolerance)
+    if not np.isfinite(tolerance) or tolerance < 0.0:
+        raise ValueError("probability_tolerance must be finite and non-negative.")
+    if not np.isfinite(probabilities).all():
+        raise ValueError(f"Probability values for {context} must be finite.")
+    if bool((probabilities < 0.0).any()):
+        raise ValueError(f"Probability values for {context} must be non-negative.")
+    if bool((probabilities > 1.0).any()):
+        raise ValueError(f"Probability values for {context} must not exceed 1.0.")
+    row_sums = probabilities.sum(axis=1)
+    bad_rows = np.flatnonzero(np.abs(row_sums - 1.0) > tolerance)
+    if len(bad_rows):
+        examples = [float(row_sums[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            f"Probability rows for {context} must sum to 1.0 within tolerance {tolerance:g}; "
+            f"example row sums: {examples}"
+        )
 
 
 def normalize_ensemble_score_mode(score_mode: str) -> str:
@@ -221,6 +255,7 @@ def _align_probability_matrices(
     *,
     prob_columns: Sequence[str],
     alignment_columns: Sequence[str],
+    probability_tolerance: float = DEFAULT_PROBABILITY_TOLERANCE,
 ) -> tuple[pd.DataFrame, list[np.ndarray]]:
     decoders = list(sources)
     base = sources[decoders[0]].copy().reset_index(drop=True)
@@ -247,8 +282,7 @@ def _align_probability_matrices(
         if aligned.loc[:, decoder_prob_columns].isna().any().any():
             raise ValueError(f"Missing aligned probability values for decoder {decoder!r}.")
         probabilities = aligned.loc[:, decoder_prob_columns].to_numpy(dtype=float)
-        if not np.isfinite(probabilities).all():
-            raise ValueError(f"Probability values for decoder {decoder!r} must be finite.")
+        _validate_probability_matrix(probabilities, context=f"decoder {decoder!r}", probability_tolerance=probability_tolerance)
         matrices.append(probabilities)
     return base, matrices
 
@@ -382,6 +416,7 @@ def ensemble_probability_observations(
     source_baseline_debiasing: bool = False,
     output_decoder: str = DEFAULT_ENSEMBLE_DECODER,
     output_emission_mode: str = DEFAULT_ENSEMBLE_EMISSION_MODE,
+    probability_tolerance: float = DEFAULT_PROBABILITY_TOLERANCE,
 ) -> pd.DataFrame:
     """Combine calibrated decoder observation rows with baseline-debiased log-probability ensembling."""
     if len(decoders) < 2:
@@ -397,7 +432,12 @@ def ensemble_probability_observations(
     temperatures = _source_temperatures(source_temperatures, len(decoders))
     sources = _source_frames(observations, decoders=decoders, source_emission_mode=source_emission_mode)
     alignment_columns = _alignment_columns(observations, prob_columns)
-    base, probability_matrices = _align_probability_matrices(sources, prob_columns=prob_columns, alignment_columns=alignment_columns)
+    base, probability_matrices = _align_probability_matrices(
+        sources,
+        prob_columns=prob_columns,
+        alignment_columns=alignment_columns,
+        probability_tolerance=probability_tolerance,
+    )
 
     log_scores = np.zeros_like(probability_matrices[0], dtype=float)
     probability_scores = np.zeros_like(probability_matrices[0], dtype=float)
@@ -537,13 +577,24 @@ def _top_k_accuracy_from_label_values(
         raise ValueError("probabilities and true_labels must contain the same number of rows.")
     if probabilities.shape[1] != label_values_array.shape[0]:
         raise ValueError("label_values must contain one label per probability column.")
-    if k < 1:
-        raise ValueError("k must be at least one.")
+    k = _validate_positive_integer(k, name="k")
 
-    effective_k = min(int(k), probabilities.shape[1])
+    effective_k = min(k, probabilities.shape[1])
     top_positions = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
     top_labels = label_values_array[top_positions]
     return float(np.mean(np.any(top_labels == true_labels[:, None], axis=1)))
+
+
+def _validate_positive_integer(value: int, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(numeric)
 
 
 def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10) -> pd.DataFrame:
@@ -560,6 +611,11 @@ def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10
         if len(group_columns) == 1 and not isinstance(group_key, tuple):
             group_key = (group_key,)
         probabilities = group.loc[:, list(prob_columns)].to_numpy(dtype=float)
+        _validate_probability_matrix(
+            probabilities,
+            context=f"metric group {dict(zip(group_columns, group_key))}",
+            probability_tolerance=DEFAULT_PROBABILITY_TOLERANCE,
+        )
         true_label_values = _integer_label_values(group["true_label"])
         true_positions = _label_positions(true_label_values, label_values)
         prediction_positions = probabilities.argmax(axis=1)

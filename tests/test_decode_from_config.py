@@ -109,6 +109,46 @@ def test_decode_from_config_passes_ensemble_controls_for_ensemble_decoder(tmp_pa
     assert kwargs["ensemble_source_baseline_debiasing"] is True
 
 
+def test_decode_from_config_does_not_leak_dann_controls_to_default_ensemble(tmp_path):
+    kwargs = _decode_kwargs(
+        {
+            "dataset": {"name": "demo"},
+            "decoding": {
+                "label_column": "condition",
+                "classifier": "logistic-svm-ensemble",
+                "dann_domain_loss_weight": 0.25,
+                "dann_max_epochs": 3,
+            },
+            "preprocessing": {},
+            "outputs": {"summary_csv": "summary.csv"},
+        },
+        config_dir=tmp_path,
+    )
+
+    assert "dann_domain_loss_weight" not in kwargs
+    assert "dann_max_epochs" not in kwargs
+
+
+def test_decode_from_config_passes_dann_controls_for_dann_decoder(tmp_path):
+    kwargs = _decode_kwargs(
+        {
+            "dataset": {"name": "demo"},
+            "decoding": {
+                "label_column": "condition",
+                "classifier": "domain-adversarial-neural-network",
+                "dann_domain_loss_weight": 0.25,
+                "dann_max_epochs": 3,
+            },
+            "preprocessing": {},
+            "outputs": {"summary_csv": "summary.csv"},
+        },
+        config_dir=tmp_path,
+    )
+
+    assert kwargs["dann_domain_loss_weight"] == 0.25
+    assert kwargs["dann_max_epochs"] == 3
+
+
 def test_decode_from_config_accepts_workflow_style_unquoted_string_lists(tmp_path):
     kwargs = _decode_kwargs(
         {

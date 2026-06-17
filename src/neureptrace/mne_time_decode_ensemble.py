@@ -168,6 +168,10 @@ def run_time_resolved_decode(
     alignment_target_calibration_seed: int = 13,
     label_shuffle_control: bool = False,
     label_shuffle_seed: int = 13,
+    pseudo_label_self_training: bool = False,
+    pseudo_label_confidence_threshold: float | str = 0.90,
+    pseudo_label_max_iterations: int | str = 5,
+    pseudo_label_min_new: int | str = 1,
     ensemble_source_decoders: Sequence[str] | None = None,
     ensemble_weights: Sequence[float] | None = None,
     ensemble_source_temperatures: Sequence[float] | None = None,
@@ -236,10 +240,19 @@ def run_time_resolved_decode(
             alignment_target_calibration_seed=alignment_target_calibration_seed,
             label_shuffle_control=label_shuffle_control,
             label_shuffle_seed=label_shuffle_seed,
+            pseudo_label_self_training=pseudo_label_self_training,
+            pseudo_label_confidence_threshold=pseudo_label_confidence_threshold,
+            pseudo_label_max_iterations=pseudo_label_max_iterations,
+            pseudo_label_min_new=pseudo_label_min_new,
         )
 
     if emission_mode != "calibrated":
         raise ValueError("logistic_svm_ensemble is defined for --emission-mode calibrated only.")
+    if pseudo_label_self_training:
+        raise ValueError(
+            "pseudo_label_self_training is not implemented for logistic_svm_ensemble yet; "
+            "run a non-ensemble decoder such as multinomial-logistic-weighted for this category-2 diagnostic."
+        )
 
     source_decoder_requests, source_decoders = _parse_source_decoders(ensemble_source_decoders)
     weights = _parse_weights(ensemble_weights, len(source_decoders))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.bushmeg_source_loso import SubjectEpochs
 from neureptrace.bushmeg_supervised_lowrank_loso import (
@@ -87,6 +88,21 @@ def test_combine_probabilities_supports_log_mean():
     np.testing.assert_allclose(combined.sum(axis=1), 1.0)
     assert combined[0, 0] > combined[0, 1]
     assert combined[1, 1] > combined[1, 0]
+
+
+def test_combine_probabilities_rejects_invalid_candidate_probabilities():
+    first = np.array([[0.9, 0.1], [0.2, 0.8]])
+    second = np.array([[0.4, 0.4], [0.4, 0.6]])
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _combine_probabilities([first, second], mode="log_mean")
+
+
+def test_combine_probabilities_rejects_invalid_min_probability():
+    first = np.array([[0.9, 0.1], [0.2, 0.8]])
+
+    with pytest.raises(ValueError, match="min_probability"):
+        _combine_probabilities([first], mode="log_mean", min_probability=1.0)
 
 
 def test_supervised_lowrank_loso_selects_and_predicts_on_synthetic_subjects():

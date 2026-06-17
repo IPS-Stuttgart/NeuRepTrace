@@ -139,6 +139,18 @@ def test_score_windowed_decoding_returns_accuracy_predictions_and_permutation_p(
     )
 
 
+def test_score_windowed_decoding_rejects_negative_permutation_counts():
+    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
+        score_windowed_decoding(
+            train_features=np.array([[-2.0], [-1.0], [1.0], [2.0]]),
+            train_labels=np.array([0, 0, 1, 1]),
+            validation_features=np.array([[-1.5], [1.5]]),
+            validation_labels=np.array([0, 1]),
+            fit_model=_fit_sign_classifier,
+            n_permutations=-1,
+        )
+
+
 def test_permutation_score_curves_returns_accuracy_and_balanced_accuracy():
     accuracy, balanced_accuracy = permutation_score_curves(
         train_features=np.array([[-2.0], [-1.0], [1.0], [2.0]]),
@@ -153,6 +165,22 @@ def test_permutation_score_curves_returns_accuracy_and_balanced_accuracy():
     assert accuracy.shape == (3,)
     assert balanced_accuracy.shape == (3,)
     assert np.all((0.0 <= balanced_accuracy) & (balanced_accuracy <= 1.0))
+
+
+def test_permutation_score_curves_rejects_fractional_permutation_counts():
+    kwargs = {
+        "train_features": np.array([[-2.0], [-1.0], [1.0], [2.0]]),
+        "train_labels": np.array([0, 0, 1, 1]),
+        "validation_features": np.array([[-2.0], [2.0]]),
+        "validation_labels": np.array([0, 1]),
+        "fit_model": _fit_sign_classifier,
+    }
+
+    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
+        permutation_score_curves(**kwargs, n_permutations=1.5)
+
+    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
+        permutation_score_curves(**kwargs, n_permutations=True)
 
 
 def test_score_windowed_decoding_rejects_mismatched_validation_labels():

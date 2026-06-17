@@ -30,6 +30,7 @@ DEFAULT_TEMPERATURE = 0.02
 DEFAULT_MAX_ITER = 250
 DEFAULT_LEARNING_RATE = 0.25
 DEFAULT_MIN_PROBABILITY = 1.0e-12
+DEFAULT_PROBABILITY_TOLERANCE = 1.0e-3
 DEFAULT_OUTPUT_DECODER = "source_oof_stacked_ensemble"
 DEFAULT_OUTPUT_EMISSION_MODE = "source_oof_stacked"
 WEIGHTING_MODES = {"uniform", "softmax", "stacked"}
@@ -207,7 +208,12 @@ def _raise_identity_mismatch(
     )
 
 
-def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = DEFAULT_MIN_PROBABILITY) -> np.ndarray:
+def _renormalize_probabilities(
+    values: np.ndarray,
+    *,
+    min_probability: float = DEFAULT_MIN_PROBABILITY,
+    require_normalized: bool = True,
+) -> np.ndarray:
     probabilities = np.asarray(values, dtype=float)
     if probabilities.ndim != 2:
         raise ValueError("Probability values must be a two-dimensional matrix.")
@@ -215,6 +221,19 @@ def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = D
         raise ValueError("min_probability must lie in (0, 1).")
     if not np.isfinite(probabilities).all():
         raise ValueError("Probability values must be finite.")
+    if np.any(probabilities < 0.0):
+        raise ValueError("Probability values must be non-negative.")
+    if np.any(probabilities > 1.0):
+        raise ValueError("Probability values must not exceed 1.0.")
+    if require_normalized:
+        raw_row_sums = probabilities.sum(axis=1)
+        bad_rows = np.flatnonzero(np.abs(raw_row_sums - 1.0) > DEFAULT_PROBABILITY_TOLERANCE)
+        if len(bad_rows):
+            examples = [float(raw_row_sums[index]) for index in bad_rows[:5]]
+            raise ValueError(
+                "Probability rows must sum to 1.0 within tolerance "
+                f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
+            )
     probabilities = np.clip(probabilities, float(min_probability), 1.0)
     row_sums = probabilities.sum(axis=1, keepdims=True)
     if np.any(row_sums <= 0.0) or not np.isfinite(row_sums).all():
@@ -225,9 +244,33 @@ def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = D
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
     if len(labels) == 0:
         return float("nan")
-    effective_k = min(int(k), probabilities.shape[1])
+    effective_k = min(_validate_positive_integer(k, name="k"), probabilities.shape[1])
     top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
     return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
+
+
+def _validate_positive_integer(value: int, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(numeric)
+
+
+def _validate_positive_finite_float(value: float, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return numeric
 
 
 def _normalize_pooling(pooling: str, *, allow_auto: bool = True) -> str:
@@ -356,11 +399,10 @@ def class_balanced_sample_weights(labels: Sequence[int] | np.ndarray, *, n_class
     labels = _integer_label_array(labels, name="labels")
     if labels.size == 0:
         raise ValueError("Need at least one source-OOF prediction row for stacking.")
-    if int(n_classes) <= 0:
-        raise ValueError("n_classes must be positive.")
-    if np.any(labels < 0) or np.any(labels >= int(n_classes)):
+    n_classes = _validate_positive_integer(n_classes, name="n_classes")
+    if np.any(labels < 0) or np.any(labels >= n_classes):
         raise ValueError("labels must be integer class positions compatible with n_classes.")
-    counts = np.bincount(labels, minlength=int(n_classes)).astype(float)
+    counts = np.bincount(labels, minlength=n_classes).astype(float)
     weights = np.zeros(labels.shape[0], dtype=float)
     observed = counts[labels] > 0.0
     weights[observed] = 1.0 / counts[labels[observed]]
@@ -396,23 +438,24 @@ def fit_stacking_weights(
     n_candidates, n_samples, cube_classes = cube.shape
     if n_classes is None:
         n_classes = int(cube_classes)
-    if n_candidates < 1 or n_samples != labels.shape[0] or cube_classes != int(n_classes):
+    n_classes = _validate_positive_integer(n_classes, name="n_classes")
+    if n_candidates < 1 or n_samples != labels.shape[0] or cube_classes != n_classes:
         raise ValueError("probability_cube shape is inconsistent with labels or n_classes.")
-    if np.any(labels < 0) or np.any(labels >= int(n_classes)):
+    if np.any(labels < 0) or np.any(labels >= n_classes):
         raise ValueError("labels must be integer class positions compatible with probability_cube.")
+    max_iter = _validate_positive_integer(max_iter, name="max_iter")
+    learning_rate = _validate_positive_finite_float(learning_rate, name="learning_rate")
     if n_candidates == 1:
         return np.ones(1, dtype=float)
-    if learning_rate <= 0.0 or not np.isfinite(float(learning_rate)):
-        raise ValueError("learning_rate must be positive and finite.")
 
     cube = np.stack([_renormalize_probabilities(candidate, min_probability=min_probability) for candidate in cube], axis=0)
     true_probabilities = cube[:, np.arange(n_samples), labels]
     log_cube = np.log(cube)
     true_log_probabilities = log_cube[:, np.arange(n_samples), labels]
-    sample_weights = class_balanced_sample_weights(labels, n_classes=int(n_classes))
+    sample_weights = class_balanced_sample_weights(labels, n_classes=n_classes)
     weights = np.full(n_candidates, 1.0 / float(n_candidates), dtype=float)
 
-    for iteration in range(max(1, int(max_iter))):
+    for iteration in range(max_iter):
         if pooling == "linear":
             denominator = np.clip(weights @ true_probabilities, float(min_probability), 1.0)
             gradient = -np.average(true_probabilities / denominator[None, :], axis=1, weights=sample_weights)
@@ -459,7 +502,11 @@ def combine_probability_cube(
         pooled_log = np.tensordot(weights_array, np.log(normalized), axes=(0, 0))
         pooled_log -= pooled_log.max(axis=1, keepdims=True)
         pooled = np.exp(pooled_log)
-    return _renormalize_probabilities(pooled, min_probability=min_probability)
+    return _renormalize_probabilities(
+        pooled,
+        min_probability=min_probability,
+        require_normalized=pooling == "linear",
+    )
 
 
 def _candidate_balanced_scores(probability_cube: np.ndarray, labels: np.ndarray) -> np.ndarray:
@@ -485,9 +532,7 @@ def _fixed_pooling_fit(
         weights = np.full(n_candidates, 1.0 / float(n_candidates), dtype=float)
         used_temperature = None
     elif weighting == "softmax":
-        used_temperature = DEFAULT_TEMPERATURE if temperature is None else float(temperature)
-        if not np.isfinite(used_temperature) or used_temperature <= 0.0:
-            raise ValueError("temperature must be positive and finite for softmax weighting.")
+        used_temperature = DEFAULT_TEMPERATURE if temperature is None else _validate_positive_finite_float(temperature, name="temperature")
         scores = _candidate_balanced_scores(cube, labels)
         weights = np.exp(np.clip((scores - float(scores.max())) / used_temperature, -60.0, 0.0))
         weights = weights / float(weights.sum())

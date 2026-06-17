@@ -131,3 +131,101 @@ def test_loso_observation_diagnostics_rejects_fractional_predicted_labels(tmp_pa
 
     with pytest.raises(ValueError, match="predicted_label values must be integer-valued"):
         write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_nonfinite_probabilities(tmp_path: Path):
+    observations = _toy_observations()
+    observations.loc[0, "prob_class_0"] = float("nan")
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="prob_class_\\* values must be finite"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_negative_probabilities(tmp_path: Path):
+    observations = _toy_observations()
+    observations.loc[0, "prob_class_0"] = -0.1
+    observations.loc[0, "prob_class_1"] = 0.3
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="prob_class_\\* values must be non-negative"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_unnormalized_probabilities(tmp_path: Path):
+    observations = _toy_observations()
+    observations.loc[0, "prob_class_0"] = 0.7
+    observations.loc[0, "prob_class_1"] = 0.1
+    observations.loc[0, "prob_class_2"] = 0.1
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="prob_class_\\* rows must sum to 1"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_nonfinite_confidence(tmp_path: Path):
+    observations = _toy_observations()
+    fixed_index = observations.index[observations["time"].eq(0.184)][0]
+    observations.loc[fixed_index, "confidence"] = float("nan")
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="confidence values must be finite"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_out_of_range_confidence(tmp_path: Path):
+    observations = _toy_observations()
+    fixed_index = observations.index[observations["time"].eq(0.184)][0]
+    observations.loc[fixed_index, "confidence"] = 1.2
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="confidence values must lie"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_mixed_decoder_provenance(tmp_path: Path):
+    observations = _toy_observations()
+    observations["decoder"] = "multinomial-logistic"
+    observations.loc[0, "decoder"] = "linear-svm"
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="mixes 'decoder' provenance"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_mixed_shuffle_provenance(tmp_path: Path):
+    observations = _toy_observations()
+    observations["label_shuffle_control"] = False
+    observations.loc[0, "label_shuffle_control"] = True
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="mixes 'label_shuffle_control' provenance"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_missing_seed_mixed_with_seed(tmp_path: Path):
+    observations = _toy_observations()
+    observations["label_shuffle_control"] = True
+    observations["label_shuffle_seed"] = "13"
+    observations.loc[0, "label_shuffle_seed"] = ""
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="missing 'label_shuffle_seed' provenance"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_duplicate_observation_rows(tmp_path: Path):
+    observations = pd.concat([_toy_observations(), _toy_observations().iloc[[0]]], ignore_index=True)
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="duplicate rows"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)

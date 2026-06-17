@@ -452,7 +452,8 @@ def _event_code_value(value: object) -> object:
 
 def _add_ds000117_identity_anchors(metadata: pd.DataFrame) -> pd.DataFrame:
     if "stim_file" in metadata.columns:
-        metadata["stimulus_file"] = metadata["stim_file"].astype(str)
+        stimulus_file = metadata["stim_file"].astype("string").str.strip()
+        metadata["stimulus_file"] = stimulus_file.where(stimulus_file.ne(""), pd.NA)
         metadata["stimulus_id"] = metadata["stim_file"].map(_stimulus_id_from_file)
     if "trigger" in metadata.columns:
         metadata["event_code"] = metadata["trigger"].map(_event_code_value)
@@ -462,7 +463,7 @@ def _add_ds000117_identity_anchors(metadata: pd.DataFrame) -> pd.DataFrame:
 def _derive_metadata(spec: OpenNeuroMegSpec, files: RunFiles, events: pd.DataFrame) -> pd.DataFrame:
     metadata = events.copy().reset_index(drop=True)
     if "trial_type" in metadata.columns:
-        metadata["trial_type"] = metadata["trial_type"].astype(str)
+        metadata["trial_type"] = metadata["trial_type"].astype("string").str.strip()
 
     if spec.dataset_id == "ds000117":
         metadata = _add_ds000117_identity_anchors(metadata)
@@ -492,7 +493,7 @@ def _derive_metadata(spec: OpenNeuroMegSpec, files: RunFiles, events: pd.DataFra
         parsed = metadata["trial_type"].str.extract(r"^(?P<stimulus_form>[^_]+)_(?P<stimulus_id>\d+)$")
         metadata["stimulus_form"] = parsed["stimulus_form"]
         metadata["stimulus_id"] = parsed["stimulus_id"]
-        metadata["stimulus_modality"] = metadata["stimulus_form"].map(lambda value: "photo" if str(value) == "Photo" else "drawing")
+        metadata["stimulus_modality"] = metadata["stimulus_form"].map({"Photo": "photo", "Drawing": "drawing"})
 
     return metadata
 
@@ -508,10 +509,12 @@ def _filter_metadata(
 ) -> pd.DataFrame:
     if label_column not in metadata.columns:
         raise ValueError(f"Requested label column '{label_column}' is not available. Columns: {', '.join(metadata.columns)}.")
-    filtered = metadata[metadata[label_column].notna()].copy()
-    filtered[label_column] = filtered[label_column].astype(str)
+    normalized_labels = metadata[label_column].astype("string").str.strip()
+    valid_labels = normalized_labels.notna() & normalized_labels.ne("")
+    filtered = metadata.loc[valid_labels].copy()
+    filtered[label_column] = normalized_labels.loc[valid_labels].astype(str)
     if include_labels:
-        wanted = {str(label) for label in include_labels}
+        wanted = {str(label).strip() for label in include_labels if str(label).strip()}
         filtered = filtered[filtered[label_column].isin(wanted)].copy()
     filtered = _limit_metadata_per_label(
         filtered,

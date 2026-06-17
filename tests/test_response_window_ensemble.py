@@ -112,6 +112,21 @@ def test_response_window_uniform_logit_ensemble_writes_metrics(tmp_path: Path):
     assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
 
 
+def test_response_window_uses_group_when_subject_column_is_empty(tmp_path: Path):
+    csv_path = tmp_path / "observations.csv"
+    observations = _toy_observations()
+    observations["group"] = observations["subject"]
+    observations["subject"] = np.nan
+    observations.to_csv(csv_path, index=False)
+
+    ensembled, metrics = run_response_window_ensemble([csv_path], mode="uniform")
+
+    assert sorted(ensembled["subject"].unique().tolist()) == ["sub-01", "sub-02", "sub-03"]
+    assert sorted(ensembled["group"].unique().tolist()) == ["sub-01", "sub-02", "sub-03"]
+    assert len(ensembled) == len(observations.loc[observations["time"].eq(0.184)])
+    assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
+
+
 def test_response_window_rejects_duplicate_nearest_time_mapping(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     observations = _toy_observations()
@@ -160,6 +175,17 @@ def test_plain_response_window_rejects_duplicate_trial_time_rows(tmp_path: Path)
     observations.to_csv(csv_path, index=False)
 
     with pytest.raises(ValueError, match="duplicate rows"):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
+@pytest.mark.parametrize(("column", "value", "message"), [("prob_class_0", np.nan, "finite"), ("prob_class_1", -0.1, "non-negative")])
+def test_plain_response_window_rejects_invalid_probabilities(tmp_path: Path, column: str, value: float, message: str):
+    observations = _toy_observations()
+    observations.loc[0, column] = value
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match=message):
         run_response_window_ensemble([csv_path], mode="uniform")
 
 
@@ -460,7 +486,7 @@ def test_response_window_uses_outer_test_group_when_subject_is_empty(tmp_path: P
 
     weights = ensembled.groupby("outer_test_groups")["response_window_weights"].first().to_dict()
     assert set(weights) == {"sub-01", "sub-02", "sub-03"}
-    assert ensembled["subject"].isna().all()
+    assert sorted(ensembled["subject"].unique().tolist()) == ["sub-01", "sub-02", "sub-03"]
     assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
 
 

@@ -63,8 +63,17 @@ SOURCE_PROTOCOL_COLUMNS = (
 
 def _normalize_rows(probabilities: np.ndarray) -> np.ndarray:
     probabilities = np.asarray(probabilities, dtype=float)
+    if probabilities.ndim != 2:
+        raise ValueError("Response-window probabilities must be a two-dimensional array.")
+    if not np.all(np.isfinite(probabilities)):
+        raise ValueError("Response-window probabilities must be finite.")
+    if np.any(probabilities < 0.0):
+        raise ValueError("Response-window probabilities must be non-negative.")
     probabilities = np.clip(probabilities, EPSILON, None)
-    return probabilities / probabilities.sum(axis=1, keepdims=True)
+    row_sums = probabilities.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("Response-window probabilities must have positive row sums.")
+    return probabilities / row_sums
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -97,7 +106,9 @@ def _nearest_times(available_times: np.ndarray, requested_times: tuple[float, ..
 def _has_nonempty_values(series: pd.Series) -> bool:
     if series.dropna().empty:
         return False
-    return series.dropna().astype(str).str.strip().ne("").any()
+    values = series.dropna().astype(str).str.strip()
+    values = values.loc[~values.str.lower().isin({"", "nan", "none", "nat"})]
+    return not values.empty
 
 
 def _subject_key_column(frame: pd.DataFrame) -> str | None:
@@ -136,7 +147,11 @@ def _target_subject_values(base: pd.DataFrame, key_columns: list[str]) -> np.nda
 def _nonempty_unique_values(frame: pd.DataFrame, column: str) -> list[str]:
     if column not in frame.columns:
         return []
-    return sorted(value for value in frame[column].dropna().astype(str).str.strip().unique().tolist() if value)
+    return sorted(
+        value
+        for value in frame[column].dropna().astype(str).str.strip().unique().tolist()
+        if value and value.lower() not in {"nan", "none", "nat"}
+    )
 
 
 def _check_single_plain_response_source(selected: pd.DataFrame) -> None:

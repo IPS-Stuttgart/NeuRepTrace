@@ -4,9 +4,11 @@ The default supervised alignment protocol fits anchors from source subjects
 only. Held-out target rows are transformed with the source-fitted group
 projection. The ``target_calibrated_alignment`` protocol fits a target
 projection from disjoint target calibration rows before scoring separate target
-evaluation rows. The explicit ``oracle_target_calibrated_alignment`` debug
-protocol is the only mode that accepts scored held-out target labels or anchors,
-and it is reported as an upper bound that is not valid for benchmark claims.
+evaluation rows. The ``pseudo_label_target_calibrated_alignment`` protocol fits
+that target projection from classifier-generated pseudo labels. The explicit
+``oracle_target_calibrated_alignment`` debug protocol is the only mode that
+accepts scored held-out target labels or anchors, and it is reported as an upper
+bound that is not valid for benchmark claims.
 """
 
 from __future__ import annotations
@@ -42,12 +44,14 @@ SOURCE_ALIGNMENT_STIMULUS_ANCHOR_MODES = (
 SOURCE_ALIGNMENT_ANCHOR_MODES = (*SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES, *SOURCE_ALIGNMENT_STIMULUS_ANCHOR_MODES)
 TARGET_CALIBRATED_ALIGNMENT = "target_calibrated_alignment"
 ORACLE_TARGET_CALIBRATED_ALIGNMENT = "oracle_target_calibrated_alignment"
+PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT = "pseudo_label_target_calibrated_alignment"
 GROUP_PROJECTION_TARGET_CENTERED = "group_projection_target_centered"
 SOURCE_ALIGNMENT_TARGET_PROJECTIONS = (
     "group_projection",
     GROUP_PROJECTION_TARGET_CENTERED,
     TARGET_CALIBRATED_ALIGNMENT,
     ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+    PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
 )
 DEFAULT_ALIGNMENT_TIMES = (0.088, 0.136, 0.184, 0.232, 0.280)
 SAME_DECODE_WINDOW_ALIGNMENT = "same_decode_window"
@@ -111,11 +115,13 @@ ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "alignment_target_projection_fit",
     "alignment_target_alignment_rows",
     "alignment_target_labels_used",
+    "alignment_target_pseudo_labels_used",
     "alignment_target_anchor_values_used",
     "alignment_target_calibrated",
     "alignment_target_calibration_per_anchor",
     "alignment_target_calibration_seed",
     "alignment_oracle_target_calibrated",
+    "alignment_pseudo_label_target_calibrated",
     "alignment_debug_upper_bound",
     "alignment_valid_for_benchmark",
     "alignment_valid_for_strict_source_only",
@@ -199,8 +205,12 @@ class SourceAlignmentConfig:
         return self.enabled and self.target_projection == TARGET_CALIBRATED_ALIGNMENT
 
     @property
+    def pseudo_label_target_calibrated(self) -> bool:
+        return self.enabled and self.target_projection == PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT
+
+    @property
     def fits_target_projection(self) -> bool:
-        return self.oracle_target_calibrated or self.target_calibrated
+        return self.oracle_target_calibrated or self.target_calibrated or self.pseudo_label_target_calibrated
 
     @property
     def target_centered_group_projection(self) -> bool:
@@ -209,10 +219,12 @@ class SourceAlignmentConfig:
     def static_metadata(self) -> dict[str, Any]:
         oracle = self.oracle_target_calibrated
         target_calibrated = self.target_calibrated
+        pseudo_label_target_calibrated = self.pseudo_label_target_calibrated
         unsupervised = _uses_unlabeled_covariance_alignment(self.method)
         target_centered = self.target_centered_group_projection
-        uses_unlabeled_target = bool(unsupervised or target_centered)
+        uses_unlabeled_target = bool(unsupervised or target_centered or pseudo_label_target_calibrated)
         valid_for_strict_source_only = bool(not oracle and not target_calibrated and not uses_unlabeled_target)
+        valid_for_benchmark = bool(not oracle and not target_calibrated and not unsupervised and not target_centered)
         return {
             "alignment_method": self.method,
             "alignment_anchor_mode": self.anchor_mode,
@@ -229,6 +241,7 @@ class SourceAlignmentConfig:
             "alignment_target_projection": self.target_projection,
             "alignment_strict_source_only": bool(
                 self.enabled and not oracle and not target_calibrated and not unsupervised and not target_centered
+                and not pseudo_label_target_calibrated
             ),
             "alignment_uses_unlabeled_target_data": uses_unlabeled_target,
             "alignment_uses_class_labels": bool(
@@ -239,14 +252,17 @@ class SourceAlignmentConfig:
             "alignment_target_calibration_per_anchor": int(self.target_calibration_per_anchor),
             "alignment_target_calibration_seed": int(self.target_calibration_seed),
             "alignment_oracle_target_calibrated": bool(oracle),
+            "alignment_pseudo_label_target_calibrated": bool(pseudo_label_target_calibrated),
             "alignment_debug_upper_bound": bool(oracle),
-            "alignment_valid_for_benchmark": valid_for_strict_source_only,
+            "alignment_valid_for_benchmark": valid_for_benchmark,
             "alignment_valid_for_strict_source_only": valid_for_strict_source_only,
             "alignment_protocol": (
                 ORACLE_TARGET_CALIBRATED_ALIGNMENT
                 if oracle
                 else TARGET_CALIBRATED_ALIGNMENT
                 if target_calibrated
+                else PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT
+                if pseudo_label_target_calibrated
                 else "unlabeled_target_covariance_alignment"
                 if unsupervised
                 else GROUP_PROJECTION_TARGET_CENTERED
@@ -258,6 +274,8 @@ class SourceAlignmentConfig:
                 if oracle
                 else "uses disjoint target calibration rows; not valid for strict source-only benchmark"
                 if target_calibrated
+                else "uses target features with classifier-generated pseudo labels; category-2 transductive adaptation"
+                if pseudo_label_target_calibrated
                 else "uses unlabeled target covariance; report separately from strict source-only alignment"
                 if unsupervised
                 else "uses unlabeled target feature mean; report separately from strict source-only alignment"
@@ -347,6 +365,8 @@ def normalize_source_alignment_target_projection(target_projection: str | None) 
         normalized = TARGET_CALIBRATED_ALIGNMENT
     if normalized in {"oracle", "oracle_target", "oracle_target_calibrated"}:
         normalized = ORACLE_TARGET_CALIBRATED_ALIGNMENT
+    if normalized in {"pseudo", "pseudo_label", "pseudo_label_target", "pseudo_label_target_calibrated"}:
+        normalized = PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT
     if normalized not in SOURCE_ALIGNMENT_TARGET_PROJECTIONS:
         raise ValueError(
             f"Unknown alignment target projection {target_projection!r}. "
@@ -522,8 +542,13 @@ def align_train_test_features(
         raise ValueError("Strict source-only alignment does not accept target labels.")
     if target_anchor_values is not None and not config.oracle_target_calibrated:
         raise ValueError("Strict source-only alignment does not accept target anchor values.")
-    if any(value is not None for value in target_calibration_args) and not config.target_calibrated:
-        raise ValueError("Target calibration rows are accepted only with target_calibrated_alignment.")
+    if any(value is not None for value in target_calibration_args) and not (
+        config.target_calibrated or config.pseudo_label_target_calibrated
+    ):
+        raise ValueError(
+            "Target calibration rows are accepted only with target_calibrated_alignment "
+            "or pseudo_label_target_calibrated_alignment."
+        )
     class_anchor_mode = _uses_decoder_label_anchors(config.anchor_mode)
     if unsupervised_alignment:
         train_anchor_source = "unlabeled_covariance"
@@ -536,7 +561,7 @@ def align_train_test_features(
             train_anchor_values = train_labels
         if config.oracle_target_calibrated and target_anchor_values is None:
             target_anchor_values = target_labels
-        if config.target_calibrated and target_calibration_anchor_values is None:
+        if (config.target_calibrated or config.pseudo_label_target_calibrated) and target_calibration_anchor_values is None:
             target_calibration_anchor_values = target_calibration_labels
     else:
         train_anchor_source = "metadata"
@@ -546,8 +571,13 @@ def align_train_test_features(
         raise ValueError(
             "oracle_target_calibrated_alignment requires held-out target labels or anchor values and is not valid for benchmark reporting."
         )
-    if config.target_calibrated and target_calibration_anchor_values is None:
-        raise ValueError("target_calibrated_alignment requires disjoint target calibration labels or anchor values.")
+    if (config.target_calibrated or config.pseudo_label_target_calibrated) and target_calibration_anchor_values is None:
+        projection_name = (
+            "pseudo_label_target_calibrated_alignment"
+            if config.pseudo_label_target_calibrated
+            else "target_calibrated_alignment"
+        )
+        raise ValueError(f"{projection_name} requires target calibration labels or anchor values.")
 
     train_matrix = _feature_matrix(train_features, name="train_features")
     test_matrix = _feature_matrix(test_features, name="test_features")
@@ -595,8 +625,13 @@ def align_train_test_features(
         raise ValueError("train_features and train_subject_ids must have the same row count.")
     if target_vector is not None and test_matrix.shape[0] != target_vector.shape[0]:
         raise ValueError("test_features and target_labels must have the same row count.")
-    if config.target_calibrated and target_calibration_matrix is None:
-        raise ValueError("target_calibrated_alignment requires target_calibration_features.")
+    if (config.target_calibrated or config.pseudo_label_target_calibrated) and target_calibration_matrix is None:
+        projection_name = (
+            "pseudo_label_target_calibrated_alignment"
+            if config.pseudo_label_target_calibrated
+            else "target_calibrated_alignment"
+        )
+        raise ValueError(f"{projection_name} requires target_calibration_features.")
     if target_calibration_matrix is not None and target_calibration_label_vector is not None:
         if target_calibration_matrix.shape[0] != target_calibration_label_vector.shape[0]:
             raise ValueError("target_calibration_features and target_calibration_labels must have the same row count.")
@@ -747,8 +782,16 @@ def align_train_test_features(
 
     if config.method in {"procrustes", "hyperalignment"}:
         if config.fits_target_projection:
-            projection_features = target_calibration_matrix if config.target_calibrated else test_matrix
-            projection_anchors = target_calibration_anchor_vector if config.target_calibrated else target_anchor_vector
+            projection_features = (
+                target_calibration_matrix
+                if config.target_calibrated or config.pseudo_label_target_calibrated
+                else test_matrix
+            )
+            projection_anchors = (
+                target_calibration_anchor_vector
+                if config.target_calibrated or config.pseudo_label_target_calibrated
+                else target_anchor_vector
+            )
             target_anchors = _target_alignment_matrix(
                 projection_features,
                 projection_anchors,
@@ -760,7 +803,13 @@ def align_train_test_features(
             target_projection = fit_projection_to_hyperalignment(target_anchors, template=model.template)
             transformed_test = transform_with_projection(test_matrix, target_projection)
             target_alignment_rows = int(target_projection.n_alignment_rows)
-            target_projection_fit = "target_calibrated_template_procrustes" if config.target_calibrated else "template_procrustes"
+            target_projection_fit = (
+                "pseudo_label_template_procrustes"
+                if config.pseudo_label_target_calibrated
+                else "target_calibrated_template_procrustes"
+                if config.target_calibrated
+                else "template_procrustes"
+            )
         else:
             target_feature_mean = np.mean(test_matrix, axis=0) if config.target_centered_group_projection else None
             transformed_test = model.transform_group(test_matrix, feature_mean=target_feature_mean)
@@ -772,8 +821,16 @@ def align_train_test_features(
             )
     elif config.method == "mcca":
         if config.fits_target_projection:
-            projection_features = target_calibration_matrix if config.target_calibrated else test_matrix
-            projection_anchors = target_calibration_anchor_vector if config.target_calibrated else target_anchor_vector
+            projection_features = (
+                target_calibration_matrix
+                if config.target_calibrated or config.pseudo_label_target_calibrated
+                else test_matrix
+            )
+            projection_anchors = (
+                target_calibration_anchor_vector
+                if config.target_calibrated or config.pseudo_label_target_calibrated
+                else target_anchor_vector
+            )
             target_anchors = _target_alignment_matrix(
                 projection_features,
                 projection_anchors,
@@ -790,7 +847,9 @@ def align_train_test_features(
             transformed_test = target_projection.transform(test_matrix)
             target_alignment_rows = int(target_projection.n_alignment_rows)
             target_projection_fit = (
-                "target_calibrated_template_ridge_least_squares"
+                "pseudo_label_template_ridge_least_squares"
+                if config.pseudo_label_target_calibrated
+                else "target_calibrated_template_ridge_least_squares"
                 if config.target_calibrated
                 else "template_ridge_least_squares"
             )
@@ -837,7 +896,9 @@ def align_train_test_features(
             config,
             compute_source_inner_diagnostics=compute_source_inner_diagnostics,
         ),
-        "uses_unlabeled_target_data": bool(config.target_centered_group_projection),
+        "uses_unlabeled_target_data": bool(
+            config.pseudo_label_target_calibrated or config.target_centered_group_projection
+        ),
         "covariance_alignment_estimator": "",
         "target_transform_type": target_projection_fit,
     }
@@ -862,9 +923,15 @@ def align_train_test_features(
                 (config.oracle_target_calibrated and target_labels is not None)
                 or (config.target_calibrated and target_calibration_labels is not None)
             ),
+            "alignment_target_pseudo_labels_used": bool(
+                config.pseudo_label_target_calibrated and target_calibration_labels is not None
+            ),
             "alignment_target_anchor_values_used": bool(
                 (config.oracle_target_calibrated and target_anchor_vector is not None)
-                or (config.target_calibrated and target_calibration_anchor_vector is not None)
+                or (
+                    (config.target_calibrated or config.pseudo_label_target_calibrated)
+                    and target_calibration_anchor_vector is not None
+                )
             ),
         },
         diagnostics=diagnostics,
@@ -990,11 +1057,19 @@ def source_alignment_anchor_availability(
     )
 
     if config.fits_target_projection:
-        projection_labels = target_calibration_labels if config.target_calibrated else target_labels
-        projection_anchors = target_calibration_anchor_values if config.target_calibrated else target_anchor_values
+        projection_labels = (
+            target_calibration_labels
+            if config.target_calibrated or config.pseudo_label_target_calibrated
+            else target_labels
+        )
+        projection_anchors = (
+            target_calibration_anchor_values
+            if config.target_calibrated or config.pseudo_label_target_calibrated
+            else target_anchor_values
+        )
         if class_anchor_mode and projection_anchors is None:
             projection_anchors = projection_labels
-        prefix = "target_calibration" if config.target_calibrated else "target"
+        prefix = "target_calibration" if config.target_calibrated or config.pseudo_label_target_calibrated else "target"
         _update_projection_anchor_availability(
             row,
             prefix=prefix,
@@ -1019,7 +1094,7 @@ def _target_alignment_matrix(
     selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None = None,
 ) -> np.ndarray:
     if labels is None:  # guarded earlier, but this keeps type-checkers honest
-        raise ValueError("oracle_target_calibrated_alignment requires target labels or anchor values.")
+        raise ValueError("Target projection alignment requires target labels or anchor values.")
     labels = _anchor_value_vector(labels)
     if labels.shape[0] != features.shape[0]:
         raise ValueError("target alignment anchors must have the same row count as target features.")
@@ -1858,6 +1933,7 @@ __all__ = [
     "DEFAULT_ALIGNMENT_TIMES",
     "GROUP_PROJECTION_TARGET_CENTERED",
     "ORACLE_TARGET_CALIBRATED_ALIGNMENT",
+    "PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT",
     "SAME_DECODE_WINDOW_ALIGNMENT",
     "SOURCE_ALIGNMENT_ANCHOR_MODES",
     "SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS",

@@ -5,13 +5,17 @@ import pandas as pd
 import pytest
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
+from neureptrace.decoding.dann import DANNFitResult
 from neureptrace.decoding.source_alignment import SourceAlignmentResult
 from neureptrace.mne_time_decode import (
+    TIME_DECODE_DECODER_CLI_CHOICES,
     _apply_class_prior_correction,
     _align_probability_columns,
     _alignment_anchor_values,
+    _combine_probability_logits,
     _filter_splits_for_outer_test_groups,
     _nearest_candidate_windows,
+    _normalize_probability_rows,
     _shuffle_training_labels,
     apply_source_probability_calibration,
     fit_source_probability_calibrator,
@@ -93,6 +97,30 @@ class RecordingFeatureDecoder:
         return probabilities
 
 
+class PseudoLabelRecordingDecoder:
+    fit_labels: list[np.ndarray] = []
+
+    def fit(self, features: np.ndarray, labels: np.ndarray):
+        self.classes_ = np.unique(labels)
+        self.fit_labels.append(np.asarray(labels, dtype=int).copy())
+        return self
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probabilities = np.full((features.shape[0], len(self.classes_)), 0.005)
+        dominant = np.zeros(features.shape[0], dtype=int)
+        if len(self.classes_) > 1:
+            dominant = (features[:, 0] >= 0.5).astype(int)
+        class_to_column = {int(class_label): index for index, class_label in enumerate(self.classes_)}
+        for row_index, class_label in enumerate(dominant):
+            probabilities[row_index, class_to_column[int(class_label)]] = 0.99
+        return probabilities / probabilities.sum(axis=1, keepdims=True)
+
+
+class FakeDANNModel:
+    def __init__(self, classes: np.ndarray):
+        self.classes_ = np.asarray(classes)
+
+
 def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     labels = np.array([0, 0, 0, 1, 1, 2, 2, 2])
 
@@ -105,11 +133,399 @@ def test_label_shuffle_helper_is_deterministic_and_count_preserving():
     assert not np.array_equal(shuffled_a, shuffled_c)
 
 
+def test_run_time_resolved_decode_dann_uses_unlabeled_target_features(tmp_path: Path, monkeypatch):
+    assert "dann" in TIME_DECODE_DECODER_CLI_CHOICES
+    assert "domain-adversarial-neural-network" in TIME_DECODE_DECODER_CLI_CHOICES
+
+    labels = np.tile(np.array([0, 1, 0, 1]), 3)
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 2, len(times)), dtype=float)
+    data[:, 0, :] = labels.reshape(-1, 1)
+    data[:, 1, :] = np.arange(len(labels)).reshape(-1, 1)
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    calls = []
+
+    def fake_fit_dann_predict_proba(**kwargs):
+        calls.append(
+            {
+                "source_rows": kwargs["source_features"].shape[0],
+                "target_rows": kwargs["target_features"].shape[0],
+                "source_labels": np.asarray(kwargs["source_labels"], dtype=int).copy(),
+                "max_epochs": kwargs["max_epochs"],
+                "domain_loss_weight": kwargs["domain_loss_weight"],
+            }
+        )
+        probabilities = np.tile(np.array([[0.8, 0.2]]), (kwargs["target_features"].shape[0], 1))
+        return DANNFitResult(
+            model=FakeDANNModel(np.array([0, 1])),
+            probabilities=probabilities,
+            metadata={
+                "dann_adaptation": True,
+                "dann_protocol": "unlabeled_target_domain_adversarial",
+                "dann_uses_target_features": True,
+                "dann_uses_target_labels": False,
+                "dann_valid_for_benchmark": True,
+                "dann_target_rows": int(kwargs["target_features"].shape[0]),
+                "dann_source_rows": int(kwargs["source_features"].shape[0]),
+                "dann_domain_loss_weight": float(kwargs["domain_loss_weight"]),
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.fit_dann_predict_proba", fake_fit_dann_predict_proba)
+
+    observations_out = tmp_path / "dann_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-03_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-03",),
+        out_path=tmp_path / "dann_summary.csv",
+        observation_out_path=observations_out,
+        n_splits=3,
+        window_ms=1,
+        step_ms=1,
+        decode_window=(0.184, 0.184),
+        decoder="domain-adversarial-neural-network",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+        dann_max_epochs=3,
+        dann_domain_loss_weight=0.25,
+    )
+
+    assert normalize_decoder_name("domain-adversarial-neural-network") == "dann"
+    assert len(calls) == 1
+    assert calls[0]["source_rows"] == 8
+    assert calls[0]["target_rows"] == 4
+    np.testing.assert_array_equal(calls[0]["source_labels"], labels[:8])
+    assert calls[0]["max_epochs"] == 3
+    assert calls[0]["domain_loss_weight"] == 0.25
+    assert results["decoder"].unique().tolist() == ["dann"]
+    assert results["dann_protocol"].unique().tolist() == ["unlabeled_target_domain_adversarial"]
+    assert results["dann_uses_target_features"].unique().tolist() == [True]
+    assert results["dann_uses_target_labels"].unique().tolist() == [False]
+
+    observations = pd.read_csv(observations_out)
+    assert observations["dann_protocol"].unique().tolist() == ["unlabeled_target_domain_adversarial"]
+    assert observations["dann_uses_target_labels"].unique().tolist() == [False]
+
+
+def test_run_time_resolved_decode_drops_blank_string_labels(tmp_path: Path, monkeypatch):
+    labels = np.array(["a", " b ", "", "  ", "a", "b"], dtype=object)
+    groups = np.array(["sub-01", "sub-01", "sub-01", "sub-02", "sub-02", "sub-02"], dtype=object)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+
+    RecordingDecoder.fit_labels = []
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingDecoder())
+
+    observations_out = tmp_path / "observations.csv"
+    run_time_resolved_decode(
+        epochs_path=tmp_path / "blank_label_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-02",),
+        out_path=tmp_path / "summary.csv",
+        observation_out_path=observations_out,
+        n_splits=2,
+        window_ms=1,
+        step_ms=1,
+        decode_window=(0.184, 0.184),
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+    )
+
+    observations = pd.read_csv(observations_out)
+    assert observations["sample_index"].tolist() == [4, 5]
+    assert observations["true_class"].tolist() == ["a", "b"]
+    assert all(sorted(fit_labels.tolist()) == [0, 1] for fit_labels in RecordingDecoder.fit_labels)
+
+
+def test_run_time_resolved_decode_pseudo_label_self_training_uses_predictions_not_target_labels(
+    tmp_path: Path,
+    monkeypatch,
+):
+    labels = np.array([0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1])
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    data[:8, 0, :] = labels[:8].reshape(-1, 1)
+    data[8:, 0, :] = 0.0
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    PseudoLabelRecordingDecoder.fit_labels = []
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: PseudoLabelRecordingDecoder())
+
+    observations_out = tmp_path / "pseudo_observations.csv"
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-03_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-03",),
+        out_path=tmp_path / "pseudo_summary.csv",
+        observation_out_path=observations_out,
+        n_splits=3,
+        window_ms=1,
+        step_ms=1,
+        decode_window=(0.184, 0.184),
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        pseudo_label_self_training=True,
+        pseudo_label_confidence_threshold=0.9,
+        pseudo_label_max_iterations=3,
+    )
+
+    augmented_fits = [fit_labels for fit_labels in PseudoLabelRecordingDecoder.fit_labels if len(fit_labels) > 8]
+    assert augmented_fits, "Expected at least one augmented refit with pseudo-labeled target rows."
+    np.testing.assert_array_equal(augmented_fits[0][-4:], np.zeros(4, dtype=int))
+    assert set(results["pseudo_label_uses_target_labels"].unique()) == {False}
+    assert results["pseudo_label_n_selected"].tolist() == [4]
+    assert results["pseudo_label_iterations"].tolist() == [1]
+    assert results["pseudo_label_stop_reason"].tolist() == ["selection_unchanged"]
+
+    observations = pd.read_csv(observations_out)
+    assert observations["pseudo_label_protocol"].unique().tolist() == ["unlabeled_transductive_self_training"]
+    assert observations["pseudo_label_n_selected"].unique().tolist() == [4]
+
+
+def test_run_time_resolved_decode_pseudo_label_alignment_uses_pseudo_labels_not_target_labels(
+    tmp_path: Path,
+    monkeypatch,
+):
+    labels = np.array([0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1])
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    data[:8, 0, :] = labels[:8].reshape(-1, 1)
+    data[8:, 0, :] = 0.0
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    target_calibration_label_calls = []
+    PseudoLabelRecordingDecoder.fit_labels = []
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs.get("target_labels") is None
+        target_projection = kwargs["config"].target_projection
+        target_calibration_labels = kwargs.get("target_calibration_labels")
+        if target_calibration_labels is None:
+            assert target_projection == "group_projection"
+            metadata = {
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "class_mean",
+                "alignment_target_projection": "group_projection",
+                "alignment_target_labels_used": False,
+                "alignment_target_pseudo_labels_used": False,
+                "alignment_n_components": 1,
+            }
+            target_transform_type = "source_group_projection"
+        else:
+            target_calibration_labels = np.asarray(target_calibration_labels, dtype=int).copy()
+            target_calibration_label_calls.append(target_calibration_labels)
+            metadata = {
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "class_mean",
+                "alignment_target_projection": "pseudo_label_target_calibrated_alignment",
+                "alignment_pseudo_label_target_calibrated": True,
+                "alignment_target_labels_used": False,
+                "alignment_target_pseudo_labels_used": True,
+                "alignment_target_anchor_values_used": True,
+                "alignment_valid_for_benchmark": True,
+                "alignment_protocol": "pseudo_label_target_calibrated_alignment",
+                "alignment_n_components": 1,
+            }
+            target_transform_type = "pseudo_label_template_procrustes"
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata=metadata,
+            diagnostics={
+                "alignment_method": "procrustes",
+                "sample_mode": "class_mean",
+                "n_source_subjects": 2,
+                "n_classes": 2,
+                "n_alignment_rows": 2,
+                "n_repetitions_per_class": "",
+                "requested_components": 1,
+                "actual_components": 1,
+                "feature_dim": 1,
+                "decode_feature_dim": 1,
+                "uses_channel_projection_collapse": False,
+                "alignment_dimensionality_reduction": False,
+                "uses_unlabeled_target_data": target_calibration_labels is not None,
+                "target_transform_type": target_transform_type,
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: PseudoLabelRecordingDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-03_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-03",),
+        out_path=tmp_path / "pseudo_alignment_summary.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=1,
+        decode_window=(0.184, 0.184),
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        pseudo_label_self_training=True,
+        pseudo_label_confidence_threshold=0.9,
+        pseudo_label_max_iterations=3,
+        alignment_method="procrustes",
+        alignment_target_projection="pseudo_label_target_calibrated_alignment",
+        alignment_times="same_decode_window",
+    )
+
+    assert target_calibration_label_calls
+    np.testing.assert_array_equal(target_calibration_label_calls[0], np.zeros(4, dtype=int))
+    augmented_fits = [fit_labels for fit_labels in PseudoLabelRecordingDecoder.fit_labels if len(fit_labels) > 8]
+    assert augmented_fits
+    np.testing.assert_array_equal(augmented_fits[0][-4:], np.zeros(4, dtype=int))
+    assert set(results["pseudo_label_uses_target_labels"].unique()) == {False}
+    assert set(results["pseudo_label_refines_alignment"].unique()) == {True}
+    assert set(results["pseudo_label_alignment_successful_iterations"].unique()) == {1}
+    assert set(results["alignment_target_projection"].unique()) == {"pseudo_label_target_calibrated_alignment"}
+    assert set(results["alignment_target_labels_used"].unique()) == {False}
+    assert set(results["alignment_target_pseudo_labels_used"].unique()) == {True}
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["target_transform_type"].unique().tolist() == ["pseudo_label_template_procrustes"]
+
+
+def test_run_time_resolved_decode_pseudo_label_alignment_fallback_keeps_requested_protocol(
+    tmp_path: Path,
+    monkeypatch,
+):
+    labels = np.array([0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1])
+    groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    data[:8, 0, :] = labels[:8].reshape(-1, 1)
+    data[8:, 0, :] = 0.0
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+    target_calibration_label_calls = []
+    PseudoLabelRecordingDecoder.fit_labels = []
+
+    def fake_align_train_test_features(**kwargs):
+        assert kwargs.get("target_labels") is None
+        target_calibration_labels = kwargs.get("target_calibration_labels")
+        if target_calibration_labels is not None:
+            target_calibration_label_calls.append(np.asarray(target_calibration_labels, dtype=int).copy())
+            raise ValueError("missing alignment anchors: [1]")
+        return SourceAlignmentResult(
+            train_features=np.asarray(kwargs["train_features"], dtype=float),
+            test_features=np.asarray(kwargs["test_features"], dtype=float),
+            metadata={
+                "alignment_method": "procrustes",
+                "alignment_anchor_mode": "class_mean",
+                "alignment_target_projection": "group_projection",
+                "alignment_target_labels_used": False,
+                "alignment_target_pseudo_labels_used": False,
+                "alignment_n_components": 1,
+            },
+            diagnostics={
+                "alignment_method": "procrustes",
+                "sample_mode": "class_mean",
+                "n_source_subjects": 2,
+                "n_classes": 2,
+                "n_alignment_rows": 2,
+                "n_repetitions_per_class": "",
+                "requested_components": 1,
+                "actual_components": 1,
+                "feature_dim": 1,
+                "decode_feature_dim": 1,
+                "uses_channel_projection_collapse": False,
+                "alignment_dimensionality_reduction": False,
+                "uses_unlabeled_target_data": False,
+                "target_transform_type": "source_group_projection",
+            },
+        )
+
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: PseudoLabelRecordingDecoder())
+    monkeypatch.setattr("neureptrace.mne_time_decode.align_train_test_features", fake_align_train_test_features)
+
+    results = run_time_resolved_decode(
+        epochs_path=tmp_path / "sub-03_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-03",),
+        out_path=tmp_path / "pseudo_alignment_fallback_summary.csv",
+        n_splits=3,
+        window_ms=1,
+        step_ms=1,
+        decode_window=(0.184, 0.184),
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        pseudo_label_self_training=True,
+        pseudo_label_confidence_threshold=0.9,
+        pseudo_label_max_iterations=3,
+        alignment_method="procrustes",
+        alignment_target_projection="pseudo_label_target_calibrated_alignment",
+        alignment_times="same_decode_window",
+    )
+
+    assert target_calibration_label_calls
+    np.testing.assert_array_equal(target_calibration_label_calls[0], np.zeros(4, dtype=int))
+    assert set(results["alignment_target_projection"].unique()) == {"pseudo_label_target_calibrated_alignment"}
+    assert set(results["alignment_target_projection_fit"].unique()) == {"source_group_projection_fallback"}
+    assert set(results["alignment_target_pseudo_labels_used"].unique()) == {False}
+    assert set(results["alignment_pseudo_label_fallback"].unique()) == {True}
+    assert results["pseudo_label_stop_reason"].tolist() == ["alignment_missing_pseudo_anchors"]
+    assert results["pseudo_label_alignment_successful_iterations"].tolist() == [0]
+
+    diagnostics = pd.read_csv(tmp_path / "alignment_diagnostics.csv")
+    assert diagnostics["alignment_target_projection"].unique().tolist() == [
+        "pseudo_label_target_calibrated_alignment"
+    ]
+    assert diagnostics["alignment_target_projection_fit"].unique().tolist() == ["source_group_projection_fallback"]
+    assert diagnostics["target_transform_type"].unique().tolist() == ["source_group_projection_fallback"]
+
+
 def test_source_time_selection_rejects_duplicate_nearest_windows():
     windows = [(0, 2, 0.10), (1, 3, 0.20)]
 
     with pytest.raises(ValueError, match="collapse to duplicate decode windows"):
         _nearest_candidate_windows(windows, (0.09, 0.11))
+
+
+def test_normalize_probability_rows_rejects_values_above_one():
+    probabilities = np.asarray([[1.2, 0.0], [0.3, 0.7]], dtype=float)
+
+    with pytest.raises(ValueError, match="must not exceed 1.0"):
+        _normalize_probability_rows(probabilities)
+
+
+def test_normalize_probability_rows_rejects_unnormalized_rows():
+    probabilities = np.asarray([[0.4, 0.4], [0.3, 0.7]], dtype=float)
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _normalize_probability_rows(probabilities)
+
+
+def test_source_time_probability_logits_rejects_invalid_cube():
+    probability_cube = np.asarray(
+        [
+            [[0.7, 0.3], [0.4, 0.4]],
+            [[0.2, 0.8], [0.6, 0.4]],
+        ],
+        dtype=float,
+    )
+
+    with pytest.raises(ValueError, match="rows must sum to 1.0"):
+        _combine_probability_logits(probability_cube, np.asarray([0.5, 0.5], dtype=float))
 
 
 def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_labels(tmp_path: Path, monkeypatch):

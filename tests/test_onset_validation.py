@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.onset_validation import OnsetChunk, parse_chunk_spec, run_onset_chunk_validation, summarize_onset_chunks
 
@@ -68,6 +69,18 @@ def test_summarize_onset_chunks_reports_pre_and_post_windows():
     assert by_chunk.loc["pre", "detected_rate"] < by_chunk.loc["early", "detected_rate"]
     assert by_chunk.loc["late", "detected_rate"] > by_chunk.loc["pre", "detected_rate"]
     assert by_chunk.loc["pre", "chunk_expected_response"] == "null"
+
+
+def test_summarize_onset_chunks_rejects_invalid_inferred_probability_scores():
+    observations = _chunk_observations().drop(columns=["confidence", "predicted_label"])
+    observations.loc[0, ["prob_class_0", "prob_class_1"]] = [0.2, 0.2]
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        summarize_onset_chunks(
+            observations,
+            chunks=(OnsetChunk("early", 0.05, 0.20, "positive"),),
+            threshold_window=(-0.25, -0.05),
+        )
 
 
 def test_run_onset_chunk_validation_writes_outputs(tmp_path: Path):

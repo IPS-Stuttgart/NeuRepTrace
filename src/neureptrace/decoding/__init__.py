@@ -50,6 +50,7 @@ BUILTIN_DECODER_CHOICES = (
     "hierarchical_logistic",
     "torch_mlp",
 )
+FOLD_AWARE_DECODER_CHOICES = ("dann",)
 DECODER_ALIASES = (
     "l1-logistic",
     "logistic-l1",
@@ -82,7 +83,24 @@ DECODER_ALIASES = (
     "deep-mlp",
     "shallow-torch-mlp",
 )
+FOLD_AWARE_DECODER_ALIASES = (
+    "domain-adversarial",
+    "domain-adversarial-nn",
+    "domain-adversarial-neural-network",
+    "domain_adversarial_neural_network",
+)
 DECODER_CHOICES = tuple(
+    dict.fromkeys(
+        (
+            *BUILTIN_DECODER_CHOICES,
+            *FOLD_AWARE_DECODER_CHOICES,
+            *CLASSIFIER_REGISTRY.keys(),
+            *DECODER_ALIASES,
+            *FOLD_AWARE_DECODER_ALIASES,
+        )
+    )
+)
+DECODER_CLI_CHOICES = tuple(
     dict.fromkeys(
         (
             *BUILTIN_DECODER_CHOICES,
@@ -91,7 +109,6 @@ DECODER_CHOICES = tuple(
         )
     )
 )
-DECODER_CLI_CHOICES = DECODER_CHOICES
 EMISSION_MODE_CHOICES = ("calibrated", "uncalibrated")
 FEATURE_PREPROCESSOR_CHOICES = ("none", "pca", "pca_whiten", "anova_select", "pls_da")
 TUNING_SCORING_CHOICES = ("accuracy", "balanced_accuracy", "neg_log_loss", "neg_brier", "neg_ece")
@@ -887,6 +904,11 @@ def make_decoder(
                 random_state=random_state,
             ),
         )
+    if normalized == "dann":
+        raise ValueError(
+            "The 'dann' decoder requires unlabeled target fold features and is only supported "
+            "through run_time_resolved_decode / decode-from-config."
+        )
 
     registry_decoder = _make_registry_decoder_pipeline(
         normalized,
@@ -1294,6 +1316,10 @@ def normalize_decoder_name(name: str) -> str:
         return "hierarchical_logistic"
     if normalized in {"deep_mlp", "mlp", "torch_deep_mlp", "shallow_torch_mlp"}:
         return "torch_mlp"
+    if normalized in {"domain_adversarial", "domain_adversarial_nn", "domain_adversarial_neural_network"}:
+        return "dann"
+    if normalized in FOLD_AWARE_DECODER_CHOICES:
+        return normalized
     if normalized in BUILTIN_DECODER_CHOICES:
         return normalized
     registry_name = _normalize_registry_decoder_name_or_none(name)

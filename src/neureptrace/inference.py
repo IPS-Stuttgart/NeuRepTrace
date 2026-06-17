@@ -202,8 +202,7 @@ def _t_statistic(effects: np.ndarray) -> np.ndarray:
 
 
 def _sign_flip_t_statistics(effects: np.ndarray, *, n_permutations: int, random_state: int) -> np.ndarray:
-    if n_permutations < 1:
-        raise ValueError("n_permutations must be at least 1.")
+    n_permutations = _validate_positive_permutation_count(n_permutations)
     rng = np.random.default_rng(random_state)
     n_subjects = effects.shape[0]
     signs = rng.choice(np.array([-1.0, 1.0]), size=(n_permutations, n_subjects))
@@ -212,6 +211,18 @@ def _sign_flip_t_statistics(effects: np.ndarray, *, n_permutations: int, random_
     variances = (sum_squares[None, :] - n_subjects * means**2) / (n_subjects - 1)
     sem = np.sqrt(np.maximum(variances, 0.0) / n_subjects)
     return np.divide(means, sem, out=np.zeros_like(means), where=sem > 0)
+
+
+def _validate_positive_permutation_count(n_permutations: int) -> int:
+    if isinstance(n_permutations, (bool, np.bool_)):
+        raise ValueError("n_permutations must be a positive integer.")
+    try:
+        numeric = float(n_permutations)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_permutations must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError("n_permutations must be a positive integer.")
+    return int(numeric)
 
 
 def _contiguous_clusters(mask: np.ndarray) -> list[tuple[int, int]]:
@@ -268,6 +279,7 @@ def sign_flip_time_inference(
     """
     if not 0 < cluster_alpha < 1:
         raise ValueError("cluster_alpha must be between 0 and 1.")
+    n_permutations = _validate_positive_permutation_count(n_permutations)
 
     effects, condition_values, resolved_direction = _subject_time_effects_and_conditions(
         csv_paths,

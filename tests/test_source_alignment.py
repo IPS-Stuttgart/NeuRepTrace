@@ -8,6 +8,7 @@ from neureptrace.decoding.source_alignment import (
     GROUP_PROJECTION_TARGET_CENTERED,
     _inner_target_calibration_mask,
     ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+    PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
     TARGET_CALIBRATED_ALIGNMENT,
     _target_alignment_matrix,
     _transform_unsupervised_covariance_alignment_by_subject,
@@ -878,6 +879,47 @@ def test_target_calibrated_alignment_uses_separate_calibration_rows(method, targ
         "uses disjoint target calibration rows; not valid for strict source-only benchmark"
     )
     assert target_calibrated.diagnostics["target_transform_type"] == target_transform_type
+
+
+@pytest.mark.parametrize(
+    ("method", "target_transform_type"),
+    [
+        ("procrustes", "pseudo_label_template_procrustes"),
+        ("hyperalignment", "pseudo_label_template_procrustes"),
+        ("mcca", "pseudo_label_template_ridge_least_squares"),
+    ],
+)
+def test_pseudo_label_target_calibrated_alignment_marks_pseudo_labels(method, target_transform_type):
+    features, labels, subjects = _rotated_subject_features(seed=53)
+    source_mask = subjects != "s2"
+    target_positions = np.flatnonzero(subjects == "s2")
+    calibration_positions = np.asarray([target_positions[labels[target_positions] == label][0] for label in np.unique(labels)])
+    pseudo_labels = labels[calibration_positions]
+
+    result = align_train_test_features(
+        train_features=features[source_mask],
+        train_labels=labels[source_mask],
+        train_subject_ids=subjects[source_mask],
+        test_features=features[target_positions],
+        target_calibration_features=features[calibration_positions],
+        target_calibration_labels=pseudo_labels,
+        config=source_alignment_config(
+            method=method,
+            components=2,
+            target_projection=PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
+        ),
+    )
+
+    assert result.metadata["alignment_target_projection"] == PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT
+    assert result.metadata["alignment_target_calibrated"] is False
+    assert result.metadata["alignment_pseudo_label_target_calibrated"] is True
+    assert result.metadata["alignment_target_labels_used"] is False
+    assert result.metadata["alignment_target_pseudo_labels_used"] is True
+    assert result.metadata["alignment_target_anchor_values_used"] is True
+    assert result.metadata["alignment_valid_for_benchmark"] is True
+    assert result.metadata["alignment_protocol"] == PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT
+    assert result.diagnostics["target_transform_type"] == target_transform_type
+    assert result.diagnostics["uses_unlabeled_target_data"] is True
 
 
 def test_target_calibrated_mcca_uses_public_target_projection_helper():

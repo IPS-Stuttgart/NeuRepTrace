@@ -112,6 +112,22 @@ def _manifest_value_token(value: Any) -> str:
     return text
 
 
+def _manifest_compatibility_token(column: str, value: Any) -> str:
+    token = _manifest_value_token(value)
+    if column != "config_overrides" or not token:
+        return token
+    normalized = []
+    for override in token.replace(";", "\n").splitlines():
+        key, separator, raw_value = override.strip().partition("=")
+        if not separator:
+            continue
+        key = key.strip()
+        if key in {"decoding.outer_test_groups", "decoding.outer_test_group"}:
+            continue
+        normalized.append(f"{key}={raw_value.strip()}")
+    return "\n".join(normalized)
+
+
 def _validate_aggregate_manifest_compatibility(
     manifests: Sequence[dict[str, Any]],
     output_dirs: Sequence[Path],
@@ -120,7 +136,7 @@ def _validate_aggregate_manifest_compatibility(
         declared = [
             (
                 output_dirs[index],
-                _manifest_value_token(manifest.get(column)),
+                _manifest_compatibility_token(column, manifest.get(column)),
                 manifest.get("artifact_name", ""),
             )
             for index, manifest in enumerate(manifests)

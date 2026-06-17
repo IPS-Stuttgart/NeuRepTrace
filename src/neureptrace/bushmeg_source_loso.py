@@ -84,6 +84,7 @@ WINDOW_COMBINE_MODES = {"probability_mean", "log_probability_mean"}
 PSEUDOTRIAL_TRAINING_MODES = {"off", "replace", "augment"}
 DEFAULT_CLASS_BIAS_DELTAS = (-2.0, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 2.0)
 DEFAULT_CLASS_BIAS_ROUNDS = 2
+DEFAULT_PROBABILITY_TOLERANCE = 1.0e-3
 FEATURE_KIND_CHOICES = (
     "evoked",
     "bandpower",
@@ -1776,13 +1777,41 @@ def _fit_candidate_model(
     return model
 
 
-def _apply_class_bias(probabilities: np.ndarray, bias: np.ndarray) -> np.ndarray:
+def _validate_probability_matrix(
+    probabilities: np.ndarray,
+    *,
+    context: str,
+    n_classes: int | None = None,
+) -> np.ndarray:
     probabilities = np.asarray(probabilities, dtype=float)
-    bias = np.asarray(bias, dtype=float).reshape(-1)
     if probabilities.ndim != 2:
-        raise ValueError("probabilities must be a two-dimensional matrix.")
+        raise ValueError(f"{context} must be a two-dimensional probability matrix.")
+    if n_classes is not None and probabilities.shape[1] != int(n_classes):
+        raise ValueError(f"{context} class count does not match expected n_classes={int(n_classes)}.")
+    if not np.all(np.isfinite(probabilities)):
+        raise ValueError(f"{context} probabilities must be finite.")
+    if np.any(probabilities < 0.0):
+        raise ValueError(f"{context} probabilities must be non-negative.")
+    if np.any(probabilities > 1.0):
+        raise ValueError(f"{context} probabilities must not exceed 1.0.")
+    row_sums = probabilities.sum(axis=1)
+    bad_rows = np.flatnonzero(np.abs(row_sums - 1.0) > DEFAULT_PROBABILITY_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            f"{context} probability rows must sum to 1.0 within tolerance "
+            f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
+        )
+    return probabilities
+
+
+def _apply_class_bias(probabilities: np.ndarray, bias: np.ndarray) -> np.ndarray:
+    probabilities = _validate_probability_matrix(probabilities, context="Class-bias input")
+    bias = np.asarray(bias, dtype=float).reshape(-1)
     if bias.shape[0] != probabilities.shape[1]:
         raise ValueError("class-bias vector length must match the number of probability columns.")
+    if not np.all(np.isfinite(bias)):
+        raise ValueError("class-bias vector must be finite.")
     logits = np.log(np.clip(probabilities, 1e-12, 1.0)) + bias[None, :]
     logits -= np.max(logits, axis=1, keepdims=True)
     exp_logits = np.exp(np.clip(logits, -50.0, 50.0))
@@ -1791,8 +1820,28 @@ def _apply_class_bias(probabilities: np.ndarray, bias: np.ndarray) -> np.ndarray
 
 def _combine_window_probabilities(accumulator: np.ndarray, n_windows: int, mode: str) -> np.ndarray:
     mode = _normalize_window_combine(mode)
+    accumulator = np.asarray(accumulator, dtype=float)
+    if accumulator.ndim != 2:
+        raise ValueError("Window probability accumulator must be a two-dimensional matrix.")
+    if int(n_windows) <= 0:
+        raise ValueError("n_windows must be positive.")
+    if not np.all(np.isfinite(accumulator)):
+        raise ValueError("Window probability accumulator must be finite.")
     if mode == "probability_mean":
+        if np.any(accumulator < 0.0):
+            raise ValueError("Window probability accumulator must be non-negative.")
+        row_sums = accumulator.sum(axis=1)
+        expected = float(n_windows)
+        bad_rows = np.flatnonzero(np.abs(row_sums - expected) > DEFAULT_PROBABILITY_TOLERANCE)
+        if len(bad_rows):
+            examples = [float(row_sums[index]) for index in bad_rows[:5]]
+            raise ValueError(
+                "Window probability accumulator rows must sum to n_windows within tolerance "
+                f"{DEFAULT_PROBABILITY_TOLERANCE:g}; expected={expected:g}; example row sums: {examples}"
+            )
         return _base._probability_average(accumulator, n_windows)
+    if np.any(accumulator > 0.0):
+        raise ValueError("Log-probability accumulator must not contain positive values.")
     logits = accumulator / float(n_windows)
     logits -= np.max(logits, axis=1, keepdims=True)
     exp_logits = np.exp(np.clip(logits, -50.0, 50.0))
@@ -1820,7 +1869,11 @@ def _fit_class_bias(probabilities: np.ndarray, labels: np.ndarray, *, n_classes:
 
 
 def _fit_balanced_accuracy_class_bias(probabilities: np.ndarray, labels: np.ndarray, *, n_classes: int) -> np.ndarray:
-    probabilities = np.asarray(probabilities, dtype=float)
+    probabilities = _validate_probability_matrix(
+        probabilities,
+        context="Class-bias fit input",
+        n_classes=n_classes,
+    )
     labels = np.asarray(labels, dtype=int).reshape(-1)
     if probabilities.shape != (labels.shape[0], n_classes):
         raise ValueError("probabilities must have shape (n_trials, n_classes).")
@@ -1949,10 +2002,8 @@ def _xdawn_train_test_features(
 
 
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
-    probabilities = np.asarray(probabilities, dtype=float)
+    probabilities = _validate_probability_matrix(probabilities, context="Top-k probabilities")
     labels = np.asarray(labels, dtype=int).reshape(-1)
-    if probabilities.ndim != 2:
-        raise ValueError("probabilities must be a two-dimensional array.")
     if probabilities.shape[0] != labels.shape[0]:
         raise ValueError("probabilities and labels must contain the same number of rows.")
     if probabilities.shape[1] == 0:
@@ -2155,6 +2206,11 @@ def _predict_candidate(
 
 
 def _candidate_metrics(probabilities: np.ndarray, labels: np.ndarray, *, n_classes: int) -> dict[str, float]:
+    probabilities = _validate_probability_matrix(
+        probabilities,
+        context="Candidate metric input",
+        n_classes=n_classes,
+    )
     predictions = probabilities.argmax(axis=1)
     metrics = {
         "accuracy": float(accuracy_score(labels, predictions)),

@@ -6,6 +6,7 @@ import pytest
 
 from neureptrace.observation_ensemble import (
     DEFAULT_ENSEMBLE_DECODER,
+    _top_k_accuracy_from_label_values,
     ensemble_probability_observations,
     main,
     summarize_ensemble_metrics,
@@ -372,6 +373,30 @@ def test_ensemble_probability_observations_rejects_fractional_true_labels() -> N
         )
 
 
+def test_ensemble_probability_observations_rejects_negative_source_probabilities() -> None:
+    observations = _source_observations()
+    observations.loc[observations["decoder"] == "logistic", "prob_class_0"] = -0.1
+    observations.loc[observations["decoder"] == "logistic", "prob_class_1"] = 1.1
+
+    with pytest.raises(ValueError, match="must be non-negative"):
+        ensemble_probability_observations(
+            observations,
+            baseline_window=(-0.25, -0.15),
+        )
+
+
+def test_ensemble_probability_observations_rejects_unnormalized_source_probabilities() -> None:
+    observations = _source_observations()
+    observations.loc[observations["decoder"] == "logistic", "prob_class_0"] = 0.2
+    observations.loc[observations["decoder"] == "logistic", "prob_class_1"] = 0.2
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        ensemble_probability_observations(
+            observations,
+            baseline_window=(-0.25, -0.15),
+        )
+
+
 def test_summarize_ensemble_metrics_returns_time_resolved_rows() -> None:
     ensemble = ensemble_probability_observations(
         _source_observations(),
@@ -418,6 +443,57 @@ def test_summarize_ensemble_metrics_rejects_fractional_true_labels() -> None:
 
     with pytest.raises(ValueError, match="true_label values must be integer-valued class labels"):
         summarize_ensemble_metrics(ensemble)
+
+
+def test_summarize_ensemble_metrics_rejects_invalid_probabilities() -> None:
+    ensemble = ensemble_probability_observations(
+        _source_observations(),
+        baseline_window=(-0.25, -0.15),
+    )
+    ensemble.loc[0, "prob_class_0"] = 0.8
+    ensemble.loc[0, "prob_class_1"] = 0.8
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        summarize_ensemble_metrics(ensemble)
+
+
+def test_ensemble_top_k_accuracy_rejects_fractional_k() -> None:
+    probabilities = np.array([[0.8, 0.2], [0.4, 0.6]])
+    true_labels = np.array([10, 20])
+    label_values = np.array([10, 20])
+
+    with pytest.raises(ValueError, match="k must be a positive integer"):
+        _top_k_accuracy_from_label_values(probabilities, true_labels, label_values, k=1.5)
+
+    with pytest.raises(ValueError, match="k must be a positive integer"):
+        _top_k_accuracy_from_label_values(probabilities, true_labels, label_values, k=True)
+
+
+def test_ensemble_probability_observations_rejects_bool_weights() -> None:
+    with pytest.raises(ValueError, match="Ensemble weights"):
+        ensemble_probability_observations(
+            _source_observations(),
+            baseline_window=(-0.25, -0.15),
+            weights=(True, 1.0),
+        )
+
+
+def test_ensemble_probability_observations_rejects_bool_temperatures() -> None:
+    with pytest.raises(ValueError, match="Source temperatures"):
+        ensemble_probability_observations(
+            _source_observations(),
+            baseline_window=(-0.25, -0.15),
+            source_temperatures=(True, 1.0),
+        )
+
+
+def test_ensemble_probability_observations_rejects_bool_probability_tolerance() -> None:
+    with pytest.raises(ValueError, match="probability_tolerance"):
+        ensemble_probability_observations(
+            _source_observations(),
+            baseline_window=(-0.25, -0.15),
+            probability_tolerance=True,
+        )
 
 
 def test_ensemble_cli_writes_observations_and_metrics(tmp_path: Path) -> None:

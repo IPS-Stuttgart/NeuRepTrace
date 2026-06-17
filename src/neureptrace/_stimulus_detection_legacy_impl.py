@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from neureptrace.temporal_model import probability_columns
+from neureptrace.temporal_model import _normalize_probabilities, probability_columns
 
 DEFAULT_THRESHOLD_WINDOW = (-0.35, -0.05)
 DEFAULT_THRESHOLD_QUANTILE = 0.95
@@ -117,6 +117,23 @@ def _target_class_table(frame: pd.DataFrame, target_classes: Sequence[str | int]
     return selected
 
 
+def _validated_probability_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    columns = probability_columns(frame)
+    probabilities = _normalize_probabilities(frame[columns].to_numpy(dtype=float))
+    return pd.DataFrame(probabilities, index=frame.index, columns=columns)
+
+
+def _validated_confidence(frame: pd.DataFrame) -> pd.Series:
+    if "confidence" not in frame.columns:
+        raise ValueError("predicted_class_confidence scoring requires a confidence column.")
+    confidence = pd.to_numeric(frame["confidence"], errors="coerce")
+    if confidence.isna().any() or not np.isfinite(confidence.to_numpy(dtype=float)).all():
+        raise ValueError("confidence values must be finite.")
+    if bool(((confidence < 0.0) | (confidence > 1.0)).any()):
+        raise ValueError("confidence values must lie in [0, 1].")
+    return confidence
+
+
 def _score_values(
     frame: pd.DataFrame,
     *,
@@ -130,17 +147,15 @@ def _score_values(
     if score_mode == "class_probability":
         if score_column not in frame.columns:
             raise ValueError(f"Score column '{score_column}' is missing.")
-        return pd.to_numeric(frame[score_column], errors="coerce")
+        return _validated_probability_frame(frame)[score_column]
 
-    if "confidence" not in frame.columns:
-        raise ValueError("predicted_class_confidence scoring requires a confidence column.")
-    confidence = pd.to_numeric(frame["confidence"], errors="coerce").fillna(0.0)
+    confidence = _validated_confidence(frame)
     if "predicted_label" in frame.columns:
         matches = frame["predicted_label"].astype(str).eq(str(stimulus_label))
     elif "predicted_class" in frame.columns:
         matches = frame["predicted_class"].astype(str).eq(str(stimulus_class))
     else:
-        probabilities = frame[probability_columns(frame)].to_numpy(dtype=float)
+        probabilities = _validated_probability_frame(frame).to_numpy(dtype=float)
         matches = pd.Series(probabilities.argmax(axis=1).astype(str) == str(stimulus_label), index=frame.index)
     return confidence.where(matches, 0.0)
 

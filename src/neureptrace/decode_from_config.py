@@ -25,6 +25,14 @@ from neureptrace.mne_time_decode_ensemble import (
 from neureptrace.mne_time_decode import DEFAULT_BASELINE_WINDOW
 
 
+DANN_DECODER_NAMES = {
+    "dann",
+    "domain_adversarial",
+    "domain_adversarial_nn",
+    "domain_adversarial_neural_network",
+}
+
+
 def _section(config: Mapping[str, Any], name: str) -> dict[str, Any]:
     value = config.get(name, {}) or {}
     if not isinstance(value, dict):
@@ -261,7 +269,32 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
         "alignment_target_calibration_seed": int(decoding.get("alignment_target_calibration_seed", 13)),
         "label_shuffle_control": _bool_value(decoding.get("label_shuffle_control"), name="decoding.label_shuffle_control"),
         "label_shuffle_seed": int(decoding.get("label_shuffle_seed", 13)),
+        "pseudo_label_self_training": _bool_value(
+            decoding.get("pseudo_label_self_training"),
+            name="decoding.pseudo_label_self_training",
+        ),
+        "pseudo_label_confidence_threshold": float(decoding.get("pseudo_label_confidence_threshold", 0.90)),
+        "pseudo_label_max_iterations": int(decoding.get("pseudo_label_max_iterations", 5)),
+        "pseudo_label_min_new": int(decoding.get("pseudo_label_min_new", 1)),
     }
+    decoder_name = normalize_time_decode_decoder_name(str(kwargs["decoder"]))
+    if decoder_name in DANN_DECODER_NAMES:
+        kwargs.update(
+            {
+                "dann_hidden_units": int(decoding.get("dann_hidden_units", 64)),
+                "dann_embedding_dim": int(decoding.get("dann_embedding_dim", 32)),
+                "dann_max_epochs": int(decoding.get("dann_max_epochs", 80)),
+                "dann_batch_size": int(decoding.get("dann_batch_size", 128)),
+                "dann_learning_rate": float(decoding.get("dann_learning_rate", 1e-3)),
+                "dann_weight_decay": float(decoding.get("dann_weight_decay", 1e-4)),
+                "dann_domain_loss_weight": float(decoding.get("dann_domain_loss_weight", 0.1)),
+                "dann_validation_fraction": float(decoding.get("dann_validation_fraction", 0.1)),
+                "dann_patience": int(decoding.get("dann_patience", 10)),
+                "dann_dropout": float(decoding.get("dann_dropout", 0.1)),
+                "dann_random_state": int(decoding.get("dann_random_state", 13)),
+                "dann_device": str(decoding.get("dann_device", "auto")),
+            }
+        )
     if temporal_train_mode is not None:
         kwargs["temporal_train_mode"] = temporal_train_mode
     if "outer_test_groups" in decoding or "outer_test_group" in decoding:
