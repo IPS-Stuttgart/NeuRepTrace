@@ -184,8 +184,11 @@ def _metrics_for_rows(frame: pd.DataFrame) -> dict[str, float | int | str]:
 def _confidence_array(frame: pd.DataFrame) -> np.ndarray:
     if "confidence" in frame.columns:
         confidence = pd.to_numeric(frame["confidence"], errors="coerce").to_numpy(dtype=float)
-        if np.all(np.isfinite(confidence)):
-            return confidence
+        if not np.all(np.isfinite(confidence)):
+            raise ValueError("Observation table confidence values must be finite.")
+        if bool(((confidence < 0.0) | (confidence > 1.0)).any()):
+            raise ValueError("Observation table confidence values must lie in [0, 1].")
+        return confidence
     probabilities = _probability_matrix(frame)
     return probabilities.max(axis=1)
 

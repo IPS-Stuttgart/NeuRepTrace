@@ -162,3 +162,13 @@ def test_paired_decoder_statistics_rejects_duplicate_subject_decoder_modes():
 def test_sign_flip_p_value_uses_exact_test_when_small():
     p_value = sign_flip_p_value(pd.Series([1.0, 1.0, 1.0, 1.0]).to_numpy(), n_permutations=10_000)
     assert p_value == 0.125
+
+
+def test_sign_flip_p_value_rejects_fractional_permutation_counts():
+    differences = pd.Series([1.0, -0.5, 0.25]).to_numpy()
+
+    with pytest.raises(ValueError, match="n_permutations must be a positive integer"):
+        sign_flip_p_value(differences, n_permutations=1.5)
+
+    with pytest.raises(ValueError, match="n_permutations must be a positive integer"):
+        sign_flip_p_value(differences, n_permutations=True)

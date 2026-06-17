@@ -166,6 +166,28 @@ def test_loso_observation_diagnostics_rejects_unnormalized_probabilities(tmp_pat
         write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
 
 
+def test_loso_observation_diagnostics_rejects_nonfinite_confidence(tmp_path: Path):
+    observations = _toy_observations()
+    fixed_index = observations.index[observations["time"].eq(0.184)][0]
+    observations.loc[fixed_index, "confidence"] = float("nan")
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="confidence values must be finite"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
+def test_loso_observation_diagnostics_rejects_out_of_range_confidence(tmp_path: Path):
+    observations = _toy_observations()
+    fixed_index = observations.index[observations["time"].eq(0.184)][0]
+    observations.loc[fixed_index, "confidence"] = 1.2
+    observations_csv = tmp_path / "observations.csv"
+    observations.to_csv(observations_csv, index=False)
+
+    with pytest.raises(ValueError, match="confidence values must lie"):
+        write_loso_observation_diagnostics(observations_csv, out_dir=tmp_path / "diagnostics", best_time=0.184)
+
+
 def test_loso_observation_diagnostics_rejects_mixed_decoder_provenance(tmp_path: Path):
     observations = _toy_observations()
     observations["decoder"] = "multinomial-logistic"

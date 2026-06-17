@@ -195,6 +195,20 @@ def test_sign_flip_time_inference_reports_lower_is_better_direction(tmp_path: Pa
     assert time_table["effect_mean"].round(3).tolist() == [0.090, 0.190]
 
 
+def test_sign_flip_time_inference_rejects_fractional_permutation_counts(tmp_path: Path):
+    csv_paths = []
+    for idx in range(3):
+        csv_path = tmp_path / f"sub-{idx + 1:02d}_time_decode.csv"
+        _write_subject_csv(csv_path, f"sub-{idx + 1:02d}", [0.0, 0.04, 0.05, 0.03])
+        csv_paths.append(csv_path)
+
+    with pytest.raises(ValueError, match="n_permutations must be a positive integer"):
+        sign_flip_time_inference(csv_paths, n_permutations=1.5)
+
+    with pytest.raises(ValueError, match="n_permutations must be a positive integer"):
+        sign_flip_time_inference(csv_paths, n_permutations=True)
+
+
 def test_sign_flip_time_inference_finds_cluster(tmp_path: Path):
     csv_paths = []
     for idx in range(8):

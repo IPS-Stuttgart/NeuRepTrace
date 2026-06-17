@@ -525,8 +525,23 @@ def _expected_same_category_count(true_categories: Sequence[str], predicted_cate
     return float(sum(true_counts[category] * predicted_counts[category] for category in set(true_counts) | set(predicted_counts)) / total)
 
 
+def _validate_permutation_count(n_permutations: int | None) -> int | None:
+    if n_permutations is None:
+        return None
+    if isinstance(n_permutations, (bool, np.bool_)):
+        raise ValueError("n_permutations must be a non-negative integer.")
+    try:
+        numeric = float(n_permutations)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_permutations must be a non-negative integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 0.0:
+        raise ValueError("n_permutations must be a non-negative integer.")
+    return int(numeric)
+
+
 def _same_category_permutation_p_value(true_categories: Sequence[str], predicted_categories: Sequence[str], *, observed: int, n_permutations: int | None, seed) -> float:
-    if n_permutations is None or int(n_permutations) <= 0:
+    n_permutations = _validate_permutation_count(n_permutations)
+    if n_permutations is None or n_permutations <= 0:
         return np.nan
     true_categories_array = np.asarray(true_categories, dtype=object)
     predicted_categories_array = np.asarray(predicted_categories, dtype=object)
@@ -534,10 +549,10 @@ def _same_category_permutation_p_value(true_categories: Sequence[str], predicted
         return np.nan
     rng = np.random.default_rng(seed)
     exceedances = 0
-    for _ in range(int(n_permutations)):
+    for _ in range(n_permutations):
         shuffled = rng.permutation(predicted_categories_array)
         exceedances += int(np.sum(true_categories_array == shuffled) >= observed)
-    return float((exceedances + 1) / (int(n_permutations) + 1))
+    return float((exceedances + 1) / (n_permutations + 1))
 
 
 def _category_seed(seed: int | None, group_values: dict[str, object], category_column: str):

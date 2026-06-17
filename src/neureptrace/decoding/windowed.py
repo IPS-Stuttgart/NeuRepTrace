@@ -117,6 +117,7 @@ def score_windowed_decoding(
 ) -> WindowedDecodingResult:
     """Fit, predict, score accuracy, and optionally compute shuffled-label null scores."""
 
+    n_permutations = _validate_permutation_count(n_permutations)
     train_features = _feature_matrix(train_features, name="train_features")
     train_labels = _label_vector(train_labels, expected_length=train_features.shape[0], name="train_labels")
     validation_features = _feature_matrix(validation_features, name="validation_features")
@@ -210,8 +211,7 @@ def permutation_score_curves(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Train shuffled-label models and return accuracy and balanced-accuracy null curves."""
 
-    if n_permutations < 0:
-        raise ValueError("n_permutations must be non-negative.")
+    n_permutations = _validate_permutation_count(n_permutations)
     train_features = _feature_matrix(train_features, name="train_features")
     validation_features = _feature_matrix(validation_features, name="validation_features")
     train_labels = _label_vector(train_labels, expected_length=train_features.shape[0], name="train_labels")
@@ -225,7 +225,7 @@ def permutation_score_curves(
 
     permuted_accuracy = []
     permuted_balanced_accuracy = []
-    for _ in range(int(n_permutations)):
+    for _ in range(n_permutations):
         permuted_train_labels = np.array(train_labels, copy=True)
         permutation_rng.shuffle(permuted_train_labels)
         model = fit_model(train_features, permuted_train_labels)
@@ -242,6 +242,18 @@ def permutation_p_from_accuracy(accuracy: float, permutation_accuracy: Sequence[
     if permutation_accuracy.size == 0 or not np.isfinite(accuracy):
         return np.nan
     return float((np.sum(permutation_accuracy >= accuracy) + 1.0) / (permutation_accuracy.size + 1.0))
+
+
+def _validate_permutation_count(n_permutations: int) -> int:
+    if isinstance(n_permutations, (bool, np.bool_)):
+        raise ValueError("n_permutations must be a non-negative integer.")
+    try:
+        numeric = float(n_permutations)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_permutations must be a non-negative integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 0.0:
+        raise ValueError("n_permutations must be a non-negative integer.")
+    return int(numeric)
 
 
 def _balanced_accuracy(predictions: Sequence | np.ndarray, labels: Sequence | np.ndarray) -> float:
