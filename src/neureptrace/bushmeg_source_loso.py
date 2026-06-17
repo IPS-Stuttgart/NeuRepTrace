@@ -255,16 +255,18 @@ class FeatureCache:
         covariance_max_channels: int = DEFAULT_COVARIANCE_MAX_CHANNELS,
     ) -> np.ndarray:
         normalized_feature_kind = normalize_source_feature_kind(feature_kind)
-        key = (subject, window, int(temporal_bins), normalized_feature_kind, int(covariance_max_channels))
+        temporal_bins = _normalize_integer(temporal_bins, name="temporal_bins", minimum=1)
+        covariance_max_channels = _normalize_integer(covariance_max_channels, name="covariance_max_channels", minimum=1)
+        key = (subject, window, temporal_bins, normalized_feature_kind, covariance_max_channels)
         if key not in self._cache:
             subject_epochs = self._subjects[subject]
             self._cache[key] = _window_features(
                 subject_epochs.data,
                 subject_epochs.times,
                 window,
-                temporal_bins=int(temporal_bins),
+                temporal_bins=temporal_bins,
                 feature_kind=normalized_feature_kind,
-                covariance_max_channels=int(covariance_max_channels),
+                covariance_max_channels=covariance_max_channels,
             )
         return self._cache[key]
 
@@ -284,13 +286,16 @@ class FeatureCache:
         if not reference_key:
             raise ValueError("At least one reference subject is required for template-similarity features.")
         normalized_feature_kind = normalize_source_feature_kind(feature_kind)
+        temporal_bins = _normalize_integer(temporal_bins, name="temporal_bins", minimum=1)
+        covariance_max_channels = _normalize_integer(covariance_max_channels, name="covariance_max_channels", minimum=1)
+        n_classes = _normalize_integer(n_classes, name="n_classes", minimum=2)
         key = (
             reference_key,
             window,
-            int(temporal_bins),
+            temporal_bins,
             normalized_feature_kind,
-            int(covariance_max_channels),
-            int(n_classes),
+            covariance_max_channels,
+            n_classes,
         )
         if key not in self._template_cache:
             self._template_cache[key] = _class_template_features(
@@ -298,10 +303,10 @@ class FeatureCache:
                 self._subjects,
                 reference_key,
                 window,
-                int(temporal_bins),
-                int(n_classes),
+                temporal_bins,
+                n_classes,
                 feature_kind=normalized_feature_kind,
-                covariance_max_channels=int(covariance_max_channels),
+                covariance_max_channels=covariance_max_channels,
             )
         return self._template_cache[key]
 
@@ -401,7 +406,10 @@ def _normalize_window_combine(value: str | None) -> str:
 def _normalize_pseudotrial_mode(value: str | None, *, pseudotrials_per_class: int | None = None) -> str:
     """Normalize source pseudo-trial training modes."""
 
-    if pseudotrials_per_class is not None and int(pseudotrials_per_class) <= 0:
+    if (
+        pseudotrials_per_class is not None
+        and _normalize_integer(pseudotrials_per_class, name="pseudotrials_per_class", minimum=0) <= 0
+    ):
         return "off"
     normalized = "replace" if value is None else str(value).strip().lower().replace("-", "_")
     aliases = {
@@ -429,6 +437,47 @@ def _normalize_pseudotrial_mode(value: str | None, *, pseudotrials_per_class: in
     if normalized not in PSEUDOTRIAL_TRAINING_MODES:
         raise ValueError(f"Unknown pseudo-trial mode '{value}'. Available modes: {sorted(PSEUDOTRIAL_TRAINING_MODES)}.")
     return normalized
+
+
+def _finite_float(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a finite number.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite number.") from exc
+    if not np.isfinite(number):
+        raise ValueError(f"{name} must be a finite number.")
+    return number
+
+
+def _positive_float(value: Any, *, name: str) -> float:
+    number = _finite_float(value, name=name)
+    if number <= 0.0:
+        raise ValueError(f"{name} must be positive.")
+    return number
+
+
+def _nonnegative_float(value: Any, *, name: str) -> float:
+    number = _finite_float(value, name=name)
+    if number < 0.0:
+        raise ValueError(f"{name} must be non-negative.")
+    return number
+
+
+def _normalize_integer(value: Any, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    integer = int(number)
+    if minimum is not None and integer < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    return integer
 
 
 def normalize_source_feature_kind(feature_kind: str) -> str:
@@ -491,16 +540,16 @@ def normalize_source_feature_kind(feature_kind: str) -> str:
 
 def _window_size_seconds(preprocessing: Mapping[str, Any], default: float = 0.100) -> float:
     if "window_size" in preprocessing:
-        return float(preprocessing["window_size"])
+        return _positive_float(preprocessing["window_size"], name="window_size")
     if "window_ms" in preprocessing:
-        return float(preprocessing["window_ms"]) / 1000.0
-    return float(default)
+        return _positive_float(preprocessing["window_ms"], name="window_ms") / 1000.0
+    return _positive_float(default, name="window_size")
 
 
 def _float_list_value(value: Any, default: Sequence[float]) -> list[float]:
     """Return a config scalar/list as finite floats."""
 
-    values = [float(item) for item in _list_value(value, default)]
+    values = [_finite_float(item, name="window_grid_value") for item in _list_value(value, default)]
     if not values:
         raise ValueError("Expected at least one floating-point value.")
     if not np.all(np.isfinite(values)):
@@ -511,9 +560,9 @@ def _float_list_value(value: Any, default: Sequence[float]) -> list[float]:
 def _inclusive_float_range(start: float, stop: float, step: float) -> list[float]:
     """Return an inclusive float grid, robust to binary rounding noise."""
 
-    start = float(start)
-    stop = float(stop)
-    step = float(step)
+    start = _finite_float(start, name="window_range_start")
+    stop = _finite_float(stop, name="window_range_stop")
+    step = _finite_float(step, name="window_range_step")
     if not np.all(np.isfinite([start, stop, step])):
         raise ValueError("Window range start/stop/step must be finite.")
     if step <= 0.0:
@@ -562,8 +611,14 @@ def _window_sets_from_config_item(
 
     name = str(item.get("name", "windows"))
     if _config_bool(item.get("full_epoch"), default=False):
-        start = float(item.get("start", item.get("tmin", preprocessing.get("tmin", 0.0))))
-        stop = float(item.get("stop", item.get("tmax", preprocessing.get("tmax", start + default_window_width))))
+        start = _finite_float(
+            item.get("start", item.get("tmin", preprocessing.get("tmin", 0.0))),
+            name="window_range_start",
+        )
+        stop = _finite_float(
+            item.get("stop", item.get("tmax", preprocessing.get("tmax", start + default_window_width))),
+            name="window_range_stop",
+        )
         if not np.all(np.isfinite([start, stop])) or stop <= start:
             raise ValueError(f"full_epoch window set '{name}' must have finite stop > start.")
         return [(name, (WindowSpec(center=(start + stop) / 2.0, width=stop - start),))]
@@ -576,7 +631,7 @@ def _window_sets_from_config_item(
     if "centers" in item:
         centers = _float_list_value(item.get("centers"), [])
     elif {"start", "stop", "step"}.issubset(item):
-        centers = _inclusive_float_range(float(item["start"]), float(item["stop"]), float(item["step"]))
+        centers = _inclusive_float_range(item["start"], item["stop"], item["step"])
     else:
         raise ValueError(
             f"window set '{name}' must define either centers, start/stop/step, or full_epoch: true."
@@ -1309,7 +1364,8 @@ def _window_bandpower_features(
 
 
 def _channel_subset_indices(n_channels: int, max_channels: int) -> np.ndarray:
-    max_channels = max(1, int(max_channels))
+    n_channels = _normalize_integer(n_channels, name="n_channels", minimum=1)
+    max_channels = _normalize_integer(max_channels, name="covariance_max_channels", minimum=1)
     if n_channels <= max_channels:
         return np.arange(n_channels, dtype=int)
     return np.unique(np.linspace(0, n_channels - 1, max_channels, dtype=int))
@@ -1333,16 +1389,17 @@ def _window_covariance_features(
     tri = np.triu_indices(n_channels)
     features = np.empty((n_trials, len(tri[0])), dtype=np.float32)
     identity = np.eye(n_channels, dtype=np.float64)
+    shrinkage_value = _finite_float(shrinkage, name="covariance_shrinkage")
+    if not 0.0 <= shrinkage_value <= 1.0:
+        raise ValueError("covariance_shrinkage must be in [0, 1].")
+    epsilon_value = _positive_float(epsilon, name="covariance_epsilon")
     for trial_index in range(n_trials):
         trial = window_data[trial_index] - window_data[trial_index].mean(axis=1, keepdims=True)
         denom = max(n_times - 1, 1)
         covariance = (trial @ trial.T) / float(denom)
         mean_variance = float(np.trace(covariance) / max(n_channels, 1))
-        covariance = (
-            (1.0 - float(shrinkage)) * covariance
-            + float(shrinkage) * mean_variance * identity
-        )
-        covariance /= max(float(np.trace(covariance)), epsilon)
+        covariance = (1.0 - shrinkage_value) * covariance + shrinkage_value * mean_variance * identity
+        covariance /= max(float(np.trace(covariance)), epsilon_value)
         features[trial_index] = covariance[tri]
     return features
 
@@ -1393,9 +1450,12 @@ def _baseline_channel_whitener(
     flattened -= flattened.mean(axis=1, keepdims=True)
     covariance = (flattened @ flattened.T) / float(max(flattened.shape[1] - 1, 1))
     mean_variance = float(np.trace(covariance) / max(n_channels, 1))
-    covariance = (1.0 - float(shrinkage)) * covariance + float(shrinkage) * mean_variance * np.eye(n_channels)
+    shrinkage_value = _finite_float(shrinkage, name="mnn_shrinkage")
+    if not 0.0 <= shrinkage_value <= 1.0:
+        raise ValueError("mnn_shrinkage must be in [0, 1].")
+    covariance = (1.0 - shrinkage_value) * covariance + shrinkage_value * mean_variance * np.eye(n_channels)
     eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-    inverse_sqrt = 1.0 / np.sqrt(np.maximum(eigenvalues, float(epsilon)))
+    inverse_sqrt = 1.0 / np.sqrt(np.maximum(eigenvalues, _positive_float(epsilon, name="mnn_epsilon")))
     return (eigenvectors * inverse_sqrt[None, :]) @ eigenvectors.T
 
 
@@ -1597,7 +1657,7 @@ def _sample_weights_for_training(
 def _stable_pseudotrial_seed(seed: int, *tokens: object) -> int:
     """Return a deterministic NumPy seed for one candidate/window/fold context."""
 
-    payload = json.dumps([int(seed), *[str(token) for token in tokens]], separators=(",", ":")).encode("utf-8")
+    payload = json.dumps([_normalize_integer(seed, name="pseudotrial_seed"), *[str(token) for token in tokens]], separators=(",", ":")).encode("utf-8")
     digest = hashlib.blake2b(payload, digest_size=8).digest()
     return int.from_bytes(digest, "little") & 0x7FFFFFFF
 
@@ -1619,7 +1679,7 @@ def _source_class_pseudotrials(
     averaged rows; ``augment`` appends averaged rows to original source trials.
     """
 
-    count = int(pseudotrials_per_class)
+    count = _normalize_integer(pseudotrials_per_class, name="pseudotrials_per_class", minimum=0)
     mode = _normalize_pseudotrial_mode(pseudotrial_mode, pseudotrials_per_class=count)
     features = np.asarray(features, dtype=np.float32)
     labels = np.asarray(labels, dtype=int).reshape(-1)
@@ -1686,7 +1746,7 @@ def _source_pseudotrial_training_features(
     implementation routes through the newer mode-aware pseudo-trial builder.
     """
 
-    count = int(pseudotrials_per_subject_class)
+    count = _normalize_integer(pseudotrials_per_subject_class, name="pseudotrials_per_subject_class", minimum=0)
     features = np.asarray(features, dtype=np.float32)
     labels = np.asarray(labels, dtype=int).reshape(-1)
     subject_ids = np.asarray(subject_ids, dtype=object).reshape(-1)
@@ -1916,7 +1976,7 @@ def _fit_xdawn_filters(
     x = np.asarray(data[:, :, indices], dtype=np.float64)
     labels = np.asarray(labels)
     n_channels = x.shape[1]
-    n_components = min(max(1, int(n_components)), n_channels)
+    n_components = min(_normalize_integer(n_components, name="xdawn_components", minimum=1), n_channels)
     flattened = np.transpose(x, (1, 0, 2)).reshape(n_channels, -1)
     flattened -= flattened.mean(axis=1, keepdims=True)
     data_cov = (flattened @ flattened.T) / float(max(flattened.shape[1] - 1, 1))
@@ -1981,7 +2041,7 @@ def _xdawn_train_test_features(
         train_labels,
         train_times,
         window,
-        n_components=DEFAULT_XDAWN_COMPONENTS if n_components is None else int(n_components),
+        n_components=DEFAULT_XDAWN_COMPONENTS if n_components is None else n_components,
     )
     train_features = _xdawn_bin_mean_features(
         train_data,
@@ -2063,7 +2123,7 @@ def _predict_candidate(
     if label_shuffle_control:
         train_labels = _base._shuffle_training_labels(
             train_labels,
-            seed=int(label_shuffle_seed),
+            seed=_normalize_integer(label_shuffle_seed, name="label_shuffle_seed"),
             context=("bushmeg_source_loso", *shuffle_context, tuple(train_subjects), test_subject, candidate.name),
         )
     train_subject_ids = _stack_subject_ids(subjects, train_subjects)
@@ -2407,18 +2467,27 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
     feature_family_values = grid.get("feature_families", grid.get("feature_family"))
     feature_families = [normalize_source_feature_family(value) for value in _list_value(feature_family_values, ["bin_means"])]
     normalized_pca_values = [None if value in {None, "", "none", "None"} else normalize_pca_components(value) for value in pca_values]
-    temporal_bins_values = [int(value) for value in _list_value(grid.get("temporal_bins"), [4])]
+    temporal_bins_values = [
+        _normalize_integer(value, name="temporal_bins", minimum=1)
+        for value in _list_value(grid.get("temporal_bins"), [4])
+    ]
     c_grid = [float(value) for value in parse_c_grid(grid.get("c_grid", decoding.get("tuning_c_grid", "0.1,1.0,10.0")))]
     feature_kinds = [
         normalize_source_feature_kind(value)
         for value in _list_value(grid.get("feature_kinds"), [source_loso.get("feature_kind", "evoked")])
     ]
     xdawn_components_values = [
-        int(value)
+        _normalize_integer(value, name="xdawn_components", minimum=1)
         for value in _list_value(grid.get("xdawn_components"), [source_loso.get("xdawn_components", DEFAULT_XDAWN_COMPONENTS)])
     ]
-    covariance_max_channels_values = [int(value) for value in _list_value(grid.get("covariance_max_channels"), [DEFAULT_COVARIANCE_MAX_CHANNELS])]
-    deep_weight_decay_grid = [float(value) for value in _list_value(grid.get("deep_weight_decay_grid"), [1e-4])]
+    covariance_max_channels_values = [
+        _normalize_integer(value, name="covariance_max_channels", minimum=1)
+        for value in _list_value(grid.get("covariance_max_channels"), [DEFAULT_COVARIANCE_MAX_CHANNELS])
+    ]
+    deep_weight_decay_grid = [
+        _nonnegative_float(value, name="deep_weight_decay")
+        for value in _list_value(grid.get("deep_weight_decay_grid"), [1e-4])
+    ]
     sample_weighting_values = [
         _normalize_sample_weighting(value)
         for value in _list_value(
@@ -2442,7 +2511,7 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
     ]
     pseudotrial_values = list(
         dict.fromkeys(
-            max(0, int(value))
+            _normalize_integer(value, name="pseudotrials_per_class", minimum=0)
             for value in _list_value(
                 grid.get(
                     "pseudotrials_per_subject_class",
@@ -2466,7 +2535,7 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
         )
     ]
     pseudotrial_seed_values = [
-        int(value)
+        _normalize_integer(value, name="pseudotrial_seed")
         for value in _list_value(
             grid.get("pseudotrial_seeds", grid.get("pseudotrial_seed", source_loso.get("pseudotrial_seed", DEFAULT_RANDOM_SEED))),
             [DEFAULT_RANDOM_SEED],
@@ -2483,7 +2552,7 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CandidateSpec]:
                 pseudotrial_options.append((0, "off", DEFAULT_RANDOM_SEED))
                 continue
             for seed in pseudotrial_seed_values:
-                pseudotrial_options.append((int(count), mode, int(seed)))
+                pseudotrial_options.append((int(count), mode, seed))
     pseudotrial_options = list(dict.fromkeys(pseudotrial_options))
     include_pseudotrial_name_token = len(pseudotrial_options) > 1 or any(count > 0 for count, _mode, _seed in pseudotrial_options)
     include_window_combine_name_token = len(window_combine_values) > 1 or any(
@@ -2615,7 +2684,7 @@ def run_bushmeg_source_loso(
     source_loso = _section(config, "source_loso")
     decoding = _section(config, "decoding") or _section(config, "workflow")
     selection_metric = str(source_loso.get("selection_metric", DEFAULT_SELECTION_METRIC))
-    max_iter = int(decoding.get("max_iter", 1000))
+    max_iter = _normalize_integer(decoding.get("max_iter", 1000), name="max_iter", minimum=1)
     alignment_config = source_alignment_config(
         method=source_loso.get("alignment_method", source_loso.get("source_alignment", "none")),
         anchor_mode=source_loso.get("alignment_anchor_mode", "class_mean"),
@@ -2629,7 +2698,10 @@ def run_bushmeg_source_loso(
         source_loso.get("label_shuffle_control", decoding.get("label_shuffle_control")),
         default=False,
     )
-    label_shuffle_seed = int(source_loso.get("label_shuffle_seed", decoding.get("label_shuffle_seed", DEFAULT_RANDOM_SEED)))
+    label_shuffle_seed = _normalize_integer(
+        source_loso.get("label_shuffle_seed", decoding.get("label_shuffle_seed", DEFAULT_RANDOM_SEED)),
+        name="label_shuffle_seed",
+    )
 
     subjects, encoder = _load_subjects_from_config(config, config_dir=config_path.parent)
     candidates = _candidate_grid(config)

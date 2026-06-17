@@ -19,22 +19,31 @@ from neureptrace.bushmeg_source_loso import (
     _apply_class_bias,
     _candidate_metrics,
     _combine_window_probabilities,
+    _channel_subset_indices,
     _class_prototype_similarity_features,
     _candidate_grid,
     _fit_candidate_model,
     _fit_class_bias,
+    _fit_xdawn_filters,
+    _float_list_value,
+    _inclusive_float_range,
     _predict_candidate,
     _preprocessing_normalization_name,
     _prepare_window_train_test_features,
     run_bushmeg_source_loso,
     _sample_weights_for_training,
     _select_candidate,
+    _source_class_pseudotrials,
+    _source_pseudotrial_training_features,
+    _stable_pseudotrial_seed,
     _window_features,
     _window_bin_mean_features,
+    _window_covariance_features,
     _window_evoked_baseline_contrast_features,
     _window_evoked_slope_features,
     _window_evoked_dct_features,
     _window_evoked_stat_features,
+    _window_size_seconds,
     normalize_source_feature_family,
     normalize_source_feature_kind,
 )
@@ -210,6 +219,73 @@ def test_normalize_source_feature_family_aliases():
     assert normalize_source_feature_family("templates-plus-bin-means") == "template_similarity_plus_bin_means"
 
 
+def _minimal_candidate_grid_config(**grid_overrides):
+    grid = {
+        "decoders": ["logistic"],
+        "emission_modes": ["uncalibrated"],
+        "feature_preprocessors": ["none"],
+        "pca_components": [None],
+        "temporal_bins": [1],
+        "c_grid": [1.0],
+        "window_sets": [{"name": "post", "centers": [0.2], "window_size": 0.1}],
+    }
+    grid.update(grid_overrides)
+    return {
+        "preprocessing": {"window_size": 0.100, "tmin": -0.35, "tmax": 0.70},
+        "decoding": {
+            "classifier": "multinomial-logistic",
+            "emission_mode": "uncalibrated",
+            "feature_preprocessor": "none",
+            "pca_components": None,
+            "tuning_c_grid": "1.0",
+        },
+        "source_loso": {"candidate_grid": grid},
+    }
+
+
+@pytest.mark.parametrize(
+    ("grid_overrides", "message"),
+    [
+        ({"temporal_bins": [1.5]}, "temporal_bins must be an integer"),
+        ({"temporal_bins": [True]}, "temporal_bins must be an integer"),
+        ({"xdawn_components": [2.5]}, "xdawn_components must be an integer"),
+        ({"covariance_max_channels": [2.5]}, "covariance_max_channels must be an integer"),
+        ({"covariance_max_channels": [True]}, "covariance_max_channels must be an integer"),
+        ({"deep_weight_decay_grid": [True]}, "deep_weight_decay"),
+        ({"deep_weight_decay_grid": [-0.1]}, "deep_weight_decay must be non-negative"),
+        ({"pseudotrials_per_class": [1.5]}, "pseudotrials_per_class must be an integer"),
+        ({"pseudotrials_per_class": [-1]}, "pseudotrials_per_class must be at least 0"),
+        ({"pseudotrial_seed": 13.5}, "pseudotrial_seed must be an integer"),
+    ],
+)
+def test_candidate_grid_rejects_invalid_numeric_controls(grid_overrides, message):
+    with pytest.raises(ValueError, match=message):
+        _candidate_grid(_minimal_candidate_grid_config(**grid_overrides))
+
+
+def test_candidate_grid_rejects_invalid_window_grid_values():
+    with pytest.raises(ValueError, match="window_size"):
+        _candidate_grid(
+            {
+                **_minimal_candidate_grid_config(),
+                "preprocessing": {"window_size": True, "tmin": -0.35, "tmax": 0.70},
+            }
+        )
+
+    with pytest.raises(ValueError, match="window_grid_value"):
+        _float_list_value([0.1, True], [0.1])
+
+    with pytest.raises(ValueError, match="window_range_start"):
+        _inclusive_float_range(False, 0.3, 0.1)
+
+    with pytest.raises(ValueError, match="window_range_step"):
+        _candidate_grid(
+            _minimal_candidate_grid_config(
+                window_sets=[{"name": "bad", "start": 0.1, "stop": 0.3, "step": True, "window_size": 0.1}]
+            )
+        )
+
+
 def test_candidate_grid_supports_range_and_full_epoch_window_sets():
     config = {
         "preprocessing": {"window_size": 0.100, "tmin": -0.35, "tmax": 0.70},
@@ -275,6 +351,62 @@ def test_window_feature_kinds_add_logvar_and_covariance_branches():
     assert np.all(np.isfinite(evoked_stats))
     assert np.all(np.isfinite(evoked_dct))
     assert np.all(np.isfinite(covariance))
+
+
+def test_source_loso_helpers_reject_silent_numeric_coercions():
+    data = np.zeros((4, 2, 2), dtype=np.float32)
+    times = np.array([0.1, 0.2])
+    labels = np.array([0, 0, 1, 1])
+    window = WindowSpec(center=0.15, width=0.1)
+    subjects = {
+        "s1": SubjectEpochs(
+            subject="s1",
+            data=data,
+            times=times,
+            metadata=pd.DataFrame(),
+            labels=labels,
+        )
+    }
+
+    with pytest.raises(ValueError, match="temporal_bins must be an integer"):
+        FeatureCache(subjects).get("s1", window, 1.5)
+
+    with pytest.raises(ValueError, match="covariance_max_channels must be an integer"):
+        _channel_subset_indices(2, True)
+
+    with pytest.raises(ValueError, match="covariance_shrinkage"):
+        _window_covariance_features(data, times, window, covariance_max_channels=2, shrinkage=True)
+
+    with pytest.raises(ValueError, match="mnn_shrinkage"):
+        _baseline_channel_whitener(data, np.array([-0.2, -0.1]), shrinkage=True)
+
+    with pytest.raises(ValueError, match="pseudotrial_seed must be an integer"):
+        _stable_pseudotrial_seed(True, "s1")
+
+    with pytest.raises(ValueError, match="pseudotrials_per_class must be an integer"):
+        _source_class_pseudotrials(
+            np.ones((4, 2)),
+            labels,
+            np.array(["s1", "s1", "s2", "s2"]),
+            n_classes=2,
+            pseudotrials_per_class=1.5,
+            pseudotrial_mode="replace",
+            pseudotrial_seed=13,
+        )
+
+    with pytest.raises(ValueError, match="pseudotrials_per_subject_class must be an integer"):
+        _source_pseudotrial_training_features(
+            np.ones((4, 2)),
+            labels,
+            np.array(["s1", "s1", "s2", "s2"]),
+            pseudotrials_per_subject_class=True,
+        )
+
+    with pytest.raises(ValueError, match="xdawn_components must be an integer"):
+        _fit_xdawn_filters(data, labels, times, window, n_components=1.5)
+
+    with pytest.raises(ValueError, match="window_ms"):
+        _window_size_seconds({"window_ms": True})
 
 
 def test_mnn_feature_kinds_noise_normalize_before_feature_extraction():
