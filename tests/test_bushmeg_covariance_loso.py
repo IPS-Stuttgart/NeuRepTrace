@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.bushmeg_covariance_loso import (
     CovarianceCandidateSpec,
     CovarianceWindow,
+    _candidate_grid,
+    _channel_subset_indices,
+    _float_grid,
+    _normalize_covariance_epsilon,
+    _normalize_covariance_shrinkage,
     _shuffle_training_labels,
     covariance_feature_vector,
     normalize_covariance_feature_mode,
@@ -68,13 +74,8 @@ def _toy_subject(subject_id: str, *, offset: float) -> SubjectEpochs:
     )
 
 
-def test_covariance_loso_runs_on_in_memory_subjects():
-    subjects = {
-        "s1": _toy_subject("s1", offset=0.0),
-        "s2": _toy_subject("s2", offset=0.1),
-        "s3": _toy_subject("s3", offset=-0.1),
-    }
-    candidate = CovarianceCandidateSpec(
+def _toy_candidate() -> CovarianceCandidateSpec:
+    return CovarianceCandidateSpec(
         name="covariance_smoke",
         decoder="logistic",
         emission_mode="uncalibrated",
@@ -87,6 +88,19 @@ def test_covariance_loso_runs_on_in_memory_subjects():
         covariance_epsilon=1e-6,
         covariance_max_channels=4,
     )
+
+
+def _toy_subjects() -> dict[str, SubjectEpochs]:
+    return {
+        "s1": _toy_subject("s1", offset=0.0),
+        "s2": _toy_subject("s2", offset=0.1),
+        "s3": _toy_subject("s3", offset=-0.1),
+    }
+
+
+def test_covariance_loso_runs_on_in_memory_subjects():
+    subjects = _toy_subjects()
+    candidate = _toy_candidate()
 
     summary, inner, predictions = run_covariance_loso_subjects(
         subjects,
@@ -114,3 +128,88 @@ def test_label_shuffle_control_is_deterministic_and_count_preserving():
     np.testing.assert_array_equal(shuffled_a, shuffled_b)
     assert sorted(shuffled_a.tolist()) == sorted(labels.tolist())
     assert not np.array_equal(shuffled_a, shuffled_c)
+
+
+def test_covariance_numeric_controls_reject_booleans_and_fractional_counts():
+    with pytest.raises(ValueError, match="covariance_shrinkage"):
+        _normalize_covariance_shrinkage(True)
+
+    with pytest.raises(ValueError, match="covariance_epsilon"):
+        _normalize_covariance_epsilon(True)
+
+    with pytest.raises(ValueError, match="covariance_shrinkages"):
+        _float_grid([0.1, True], [0.1], name="covariance_shrinkages")
+
+    with pytest.raises(ValueError, match="covariance_max_channels must be an integer"):
+        _channel_subset_indices(4, 2.5)
+
+    with pytest.raises(ValueError, match="covariance_max_channels must be an integer"):
+        _channel_subset_indices(4, True)
+
+
+def test_covariance_candidate_grid_rejects_invalid_channel_and_window_values():
+    base_config = {
+        "decoding": {
+            "decoder": "logistic",
+            "emission_mode": "uncalibrated",
+            "feature_preprocessor": "none",
+            "pca_components": None,
+            "tuning_c_grid": "1.0",
+        },
+        "covariance_loso": {
+            "candidate_grid": {
+                "time_windows": [{"name": "post", "start": 0.0, "stop": 0.3}],
+                "covariance_max_channels": [4],
+            }
+        },
+    }
+
+    bad_channels = {
+        **base_config,
+        "covariance_loso": {
+            "candidate_grid": {
+                "time_windows": [{"name": "post", "start": 0.0, "stop": 0.3}],
+                "covariance_max_channels": [1.5],
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="covariance_max_channels must be an integer"):
+        _candidate_grid(bad_channels)
+
+    bad_window = {
+        **base_config,
+        "covariance_loso": {
+            "candidate_grid": {
+                "time_windows": [{"name": "post", "start": False, "stop": 0.3}],
+                "covariance_max_channels": [4],
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="covariance_window_start"):
+        _candidate_grid(bad_window)
+
+
+def test_covariance_loso_rejects_invalid_runtime_controls():
+    subjects = _toy_subjects()
+    candidate = _toy_candidate()
+
+    with pytest.raises(ValueError, match="max_iter must be an integer"):
+        run_covariance_loso_subjects(subjects, candidates=[candidate], class_names=["a", "b"], max_iter=300.5)
+
+    with pytest.raises(ValueError, match="max_iter must be an integer"):
+        run_covariance_loso_subjects(subjects, candidates=[candidate], class_names=["a", "b"], max_iter=True)
+
+    with pytest.raises(ValueError, match="label_shuffle_seed must be an integer"):
+        run_covariance_loso_subjects(
+            subjects,
+            candidates=[candidate],
+            class_names=["a", "b"],
+            label_shuffle_control=True,
+            label_shuffle_seed=13.5,
+        )
+
+    with pytest.raises(ValueError, match="label_shuffle_seed must be an integer"):
+        _shuffle_training_labels(np.array([0, 1]), seed=True, context=("outer",))
+
+    with pytest.raises(ValueError, match="at least two classes"):
+        run_covariance_loso_subjects(subjects, candidates=[candidate], class_names=["a"])

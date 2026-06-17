@@ -1211,11 +1211,16 @@ def parse_c_grid(values: Sequence[float] | str | None) -> tuple[float, ...]:
         return DEFAULT_TUNING_C_GRID
     if isinstance(values, str):
         values = [value.strip() for value in values.split(",") if value.strip()]
-    grid = tuple(float(value) for value in values)
+    grid_values = []
+    for value in values:
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError("All C values must be positive finite numbers.")
+        grid_values.append(float(value))
+    grid = tuple(grid_values)
     if not grid:
         raise ValueError("At least one C value is required for hyperparameter tuning.")
-    if any(value <= 0 for value in grid):
-        raise ValueError("All C values must be positive.")
+    if any(not np.isfinite(value) or value <= 0 for value in grid):
+        raise ValueError("All C values must be positive finite numbers.")
     return grid
 
 
