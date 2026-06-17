@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 
 from neureptrace.io.dataset import EpochDataset
-from neureptrace.temporal_decision_decode import _decoders, run_temporal_decision_decode_dataset
+import pytest
+
+from neureptrace.temporal_decision_decode import _combine, _decoders, run_temporal_decision_decode_dataset
 
 
 def _synthetic_grouped_dataset() -> EpochDataset:
@@ -37,6 +39,29 @@ def _synthetic_grouped_dataset() -> EpochDataset:
 
 def test_decoders_supports_logistic_svm_ensemble_alias():
     assert _decoders("logistic-svm-ensemble") == ("multinomial-logistic", "linear_svm")
+
+
+def test_temporal_decision_combine_rejects_invalid_source_probabilities():
+    valid = np.asarray([[0.7, 0.3], [0.2, 0.8]], dtype=float)
+    invalid = np.asarray([[1.2, -0.2], [0.1, 0.1]], dtype=float)
+
+    with pytest.raises(ValueError, match="must be non-negative"):
+        _combine([valid, invalid], mode="log_mean", min_probability=1e-12)
+
+
+def test_temporal_decision_combine_rejects_unnormalized_source_probabilities():
+    valid = np.asarray([[0.7, 0.3], [0.2, 0.8]], dtype=float)
+    invalid = np.asarray([[0.4, 0.4], [0.1, 0.1]], dtype=float)
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _combine([valid, invalid], mode="probability", min_probability=1e-12)
+
+
+def test_temporal_decision_combine_rejects_invalid_min_probability():
+    valid = np.asarray([[0.7, 0.3], [0.2, 0.8]], dtype=float)
+
+    with pytest.raises(ValueError, match="min_probability"):
+        _combine([valid], mode="log_mean", min_probability=0.0)
 
 
 def test_temporal_decision_decode_runs_leave_one_group_out(tmp_path):

@@ -56,18 +56,12 @@ from neureptrace.fieldtrip_mat import INPUT_FORMAT_CHOICES, load_fieldtrip_raw_m
 from neureptrace.metrics import brier_score_multiclass, expected_calibration_error, reliability_bins
 from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
+TIME_DECODE_DECODER_CLI_CHOICES = tuple(
+    dict.fromkeys((*DECODER_CLI_CHOICES, *FOLD_AWARE_DECODER_CHOICES, *FOLD_AWARE_DECODER_ALIASES))
+)
 FIELDTRIP_DEFAULT_ROOT_PATH = ("data", 0)
 EMISSION_RUN_CHOICES = (*EMISSION_MODE_CHOICES, "both")
 FEATURE_PREPROCESSOR_RUN_CHOICES = (*FEATURE_PREPROCESSOR_CHOICES, "pca-whiten", "anova-select", "select-percentile", "pls-da", "pls")
-TIME_DECODE_DECODER_CLI_CHOICES = tuple(
-    dict.fromkeys(
-        (
-            *DECODER_CLI_CHOICES,
-            *FOLD_AWARE_DECODER_CHOICES,
-            *FOLD_AWARE_DECODER_ALIASES,
-        )
-    )
-)
 EPOCH_NORMALIZATION_CHOICES = (
     "none",
     "subject_z",
@@ -170,6 +164,7 @@ SOURCE_TIME_STACKER_TIME_L2 = 1.0
 SOURCE_TIME_STACKER_BIAS_L2 = 0.25
 SOURCE_TIME_STACKER_BIAS_SCALE_GRID = (0.0, 0.25, 0.5, 0.75, 1.0)
 PROBABILITY_EPSILON = 1e-12
+PROBABILITY_SUM_TOLERANCE = 1e-3
 
 
 @dataclass(frozen=True)
@@ -995,11 +990,13 @@ def _softmax_rows(logits: np.ndarray) -> np.ndarray:
 
 
 def _combine_probability_logits(probability_cube: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    _validate_probability_cube(probability_cube, context="source-time probability cube")
     logits = np.log(np.clip(probability_cube, PROBABILITY_EPSILON, 1.0))
     return _softmax_rows(np.tensordot(logits, weights, axes=([1], [0])))
 
 
 def _combine_probability_logits_classwise(probability_cube: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    _validate_probability_cube(probability_cube, context="classwise source-time probability cube")
     logits = np.log(np.clip(probability_cube, PROBABILITY_EPSILON, 1.0))
     weights = np.asarray(weights, dtype=float)
     expected_shape = (logits.shape[2], logits.shape[1])
@@ -1101,6 +1098,7 @@ def _fit_logit_stacker_time_weights_and_bias(
     probability_cube: np.ndarray,
     labels: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, float, float]:
+    _validate_probability_cube(probability_cube, context="source-time stacker probability cube")
     n_times = probability_cube.shape[1]
     uniform = np.full(n_times, 1.0 / n_times, dtype=float)
     best_weights = uniform
@@ -1159,6 +1157,7 @@ def _combine_source_time_probabilities(
     selected_indices: Sequence[int],
     bias: np.ndarray | None = None,
 ) -> np.ndarray:
+    _validate_probability_cube(probability_cube, context="selected source-time probability cube")
     weights = np.asarray(weights, dtype=float)
     if weights.ndim == 1:
         active_weights = weights[list(selected_indices)]
@@ -2193,10 +2192,39 @@ def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
         raise ValueError("Predicted probabilities must be finite.")
     if np.any(probabilities < 0.0):
         raise ValueError("Predicted probabilities must be non-negative.")
+    if np.any(probabilities > 1.0):
+        raise ValueError("Predicted probabilities must not exceed 1.0.")
     row_sums = probabilities.sum(axis=1, keepdims=True)
     if np.any(row_sums <= 0.0):
         raise ValueError("Predicted probabilities must have positive row sums.")
+    bad_rows = np.flatnonzero(np.abs(row_sums.reshape(-1) - 1.0) > PROBABILITY_SUM_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums.reshape(-1)[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            "Predicted probability rows must sum to 1.0 within tolerance "
+            f"{PROBABILITY_SUM_TOLERANCE:g}; example row sums: {examples}"
+        )
     return probabilities / row_sums
+
+
+def _validate_probability_cube(probability_cube: np.ndarray, *, context: str) -> None:
+    cube = np.asarray(probability_cube, dtype=float)
+    if cube.ndim != 3:
+        raise ValueError(f"{context} must have shape (n_samples, n_times, n_classes).")
+    if not np.all(np.isfinite(cube)):
+        raise ValueError(f"{context} must be finite.")
+    if np.any(cube < 0.0):
+        raise ValueError(f"{context} must be non-negative.")
+    if np.any(cube > 1.0):
+        raise ValueError(f"{context} must not exceed 1.0.")
+    row_sums = cube.sum(axis=2)
+    bad_rows = np.flatnonzero(np.abs(row_sums.ravel() - 1.0) > PROBABILITY_SUM_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums.ravel()[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            f"{context} rows must sum to 1.0 within tolerance {PROBABILITY_SUM_TOLERANCE:g}; "
+            f"example row sums: {examples}"
+        )
 
 
 def _align_probability_columns(

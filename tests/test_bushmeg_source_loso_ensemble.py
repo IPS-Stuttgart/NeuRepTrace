@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from sklearn.metrics import balanced_accuracy_score
 
 from neureptrace.bushmeg_source_loso_ensemble import (
@@ -11,6 +12,7 @@ from neureptrace.bushmeg_source_loso_ensemble import (
     _normalize_rerank_top_k,
     _normalize_weighting,
     _parse_float_grid,
+    _renormalize,
 )
 
 
@@ -40,6 +42,20 @@ def test_fit_stacking_weights_prefers_source_oof_winner():
     assert np.isclose(weights.sum(), 1.0)
     assert weights[0] > 0.95
     assert weights[1] < 0.05
+
+
+def test_fit_stacking_weights_rejects_invalid_probability_cube():
+    labels = np.array([0, 1])
+    cube = np.array(
+        [
+            [[0.8, 0.2], [0.1, 0.9]],
+            [[0.4, 0.4], [0.2, 0.8]],
+        ],
+        dtype=float,
+    )
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _fit_stacking_weights(cube, labels, n_classes=2, max_iter=20)
 
 
 def test_parse_reranker_config_aliases():
@@ -75,3 +91,25 @@ def test_topk_pairwise_reranker_can_flip_consistent_source_pair_confusion():
     adjusted = _apply_topk_pairwise_reranker(probabilities, reranker)
     assert reranker.alpha > 0.0
     assert balanced_accuracy_score(labels, adjusted.argmax(axis=1)) > baseline
+
+
+def test_topk_pairwise_reranker_rejects_invalid_fit_probabilities():
+    probabilities = np.array([[0.6, 0.2], [0.1, 0.9]], dtype=float)
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _fit_topk_pairwise_reranker(probabilities, labels, n_classes=2, top_k=2)
+
+
+def test_topk_pairwise_reranker_rejects_invalid_apply_probabilities():
+    probabilities = np.array([[0.6, 0.2], [0.1, 0.9]], dtype=float)
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _apply_topk_pairwise_reranker(probabilities, None)
+
+
+def test_renormalize_rejects_invalid_ensemble_probabilities():
+    probabilities = np.array([[0.5, 0.7], [0.1, 0.9]], dtype=float)
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _renormalize(probabilities)

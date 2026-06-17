@@ -42,6 +42,8 @@ from neureptrace.dataset_config import apply_overrides, load_config
 from neureptrace.decoding import normalize_decoder_name, parse_c_grid, score_to_probabilities
 from neureptrace.mne_time_decode import _align_probability_columns
 
+DEFAULT_PROBABILITY_TOLERANCE = 1.0e-3
+
 
 DEFAULT_PLS_COMPONENTS = 32
 
@@ -301,7 +303,26 @@ def _predict_candidate(
 def _combine_probabilities(probability_list: Sequence[np.ndarray], *, mode: str, min_probability: float = 1e-12) -> np.ndarray:
     if not probability_list:
         raise ValueError("At least one candidate probability matrix is required.")
+    min_probability = float(min_probability)
+    if not np.isfinite(min_probability) or min_probability <= 0.0 or min_probability >= 1.0:
+        raise ValueError("min_probability must lie in (0, 1).")
     stack = np.stack(probability_list, axis=0)
+    if stack.ndim != 3:
+        raise ValueError("Candidate probabilities must have shape (n_candidates, n_samples, n_classes).")
+    if not np.all(np.isfinite(stack)):
+        raise ValueError("Candidate probabilities must be finite.")
+    if np.any(stack < 0.0):
+        raise ValueError("Candidate probabilities must be non-negative.")
+    if np.any(stack > 1.0):
+        raise ValueError("Candidate probabilities must not exceed 1.0.")
+    row_sums = stack.sum(axis=2)
+    bad_rows = np.flatnonzero(np.abs(row_sums.ravel() - 1.0) > DEFAULT_PROBABILITY_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums.ravel()[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            "Candidate probability rows must sum to 1.0 within tolerance "
+            f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
+        )
     normalized_mode = mode.lower().replace("-", "_")
     if normalized_mode in {"log", "log_mean", "geometric", "geometric_mean"}:
         log_probabilities = np.log(np.clip(stack, float(min_probability), 1.0)).mean(axis=0)

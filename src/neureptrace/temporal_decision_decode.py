@@ -25,6 +25,7 @@ from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
 ENSEMBLE_ALIASES = {"logistic_svm_ensemble", "logistic-svm-ensemble", "logistic_linear_svm_ensemble", "logistic-linear-svm-ensemble"}
 DEFAULT_ENSEMBLE_DECODERS = ("multinomial-logistic", "linear_svm")
+DEFAULT_PROBABILITY_TOLERANCE = 1.0e-3
 TimeWindow = tuple[int, int, float]
 
 
@@ -70,7 +71,28 @@ def _windows(times: np.ndarray, *, window_ms: float, step_ms: float, tmin: Any, 
 
 
 def _combine(probabilities: Sequence[np.ndarray], *, mode: str, min_probability: float) -> np.ndarray:
+    if not probabilities:
+        raise ValueError("At least one probability matrix is required for temporal decision aggregation.")
+    min_probability = float(min_probability)
+    if not np.isfinite(min_probability) or min_probability <= 0.0 or min_probability >= 1.0:
+        raise ValueError("min_probability must lie in (0, 1).")
     stack = np.stack(probabilities, axis=0)
+    if stack.ndim != 3:
+        raise ValueError("Temporal decision probabilities must have shape (n_sources, n_samples, n_classes).")
+    if not np.isfinite(stack).all():
+        raise ValueError("Temporal decision probabilities must be finite.")
+    if bool((stack < 0.0).any()):
+        raise ValueError("Temporal decision probabilities must be non-negative.")
+    if bool((stack > 1.0).any()):
+        raise ValueError("Temporal decision probabilities must not exceed 1.0.")
+    row_sums = stack.sum(axis=2)
+    bad_rows = np.flatnonzero(np.abs(row_sums - 1.0) > DEFAULT_PROBABILITY_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums.ravel()[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            "Temporal decision probability rows must sum to 1.0 within tolerance "
+            f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
+        )
     if mode.lower().replace("-", "_") in {"log", "log_mean", "geometric_mean"}:
         scores = np.mean(np.log(np.clip(stack, min_probability, 1.0)), axis=0)
         scores -= scores.max(axis=1, keepdims=True)
