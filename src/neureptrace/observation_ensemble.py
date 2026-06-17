@@ -79,6 +79,8 @@ _METRIC_PROVENANCE_COLUMNS = (
 def _normalize_weights(weights: Sequence[float], n_decoders: int) -> np.ndarray:
     if len(weights) != n_decoders:
         raise ValueError(f"Expected {n_decoders} ensemble weights, got {len(weights)}.")
+    if any(isinstance(weight, (bool, np.bool_)) for weight in weights):
+        raise ValueError("Ensemble weights must be finite non-negative values with positive sum.")
     values = np.asarray(weights, dtype=float)
     if not np.isfinite(values).all() or (values < 0).any() or float(values.sum()) <= 0.0:
         raise ValueError("Ensemble weights must be finite non-negative values with positive sum.")
@@ -90,6 +92,8 @@ def _source_temperatures(temperatures: Sequence[float] | None, n_decoders: int) 
         return tuple(1.0 for _ in range(n_decoders))
     if len(temperatures) != n_decoders:
         raise ValueError(f"Expected {n_decoders} source temperatures, got {len(temperatures)}.")
+    if any(isinstance(temperature, (bool, np.bool_)) for temperature in temperatures):
+        raise ValueError("Source temperatures must be finite positive values.")
     values = tuple(float(temperature) for temperature in temperatures)
     if any(not np.isfinite(temperature) or temperature <= 0.0 for temperature in values):
         raise ValueError("Source temperatures must be finite positive values.")
@@ -104,6 +108,8 @@ def _validate_probability_matrix(
 ) -> None:
     if probabilities.ndim != 2:
         raise ValueError(f"{context} probabilities must be a two-dimensional array.")
+    if isinstance(probability_tolerance, (bool, np.bool_)):
+        raise ValueError("probability_tolerance must be finite and non-negative.")
     tolerance = float(probability_tolerance)
     if not np.isfinite(tolerance) or tolerance < 0.0:
         raise ValueError("probability_tolerance must be finite and non-negative.")
@@ -571,13 +577,24 @@ def _top_k_accuracy_from_label_values(
         raise ValueError("probabilities and true_labels must contain the same number of rows.")
     if probabilities.shape[1] != label_values_array.shape[0]:
         raise ValueError("label_values must contain one label per probability column.")
-    if k < 1:
-        raise ValueError("k must be at least one.")
+    k = _validate_positive_integer(k, name="k")
 
-    effective_k = min(int(k), probabilities.shape[1])
+    effective_k = min(k, probabilities.shape[1])
     top_positions = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
     top_labels = label_values_array[top_positions]
     return float(np.mean(np.any(top_labels == true_labels[:, None], axis=1)))
+
+
+def _validate_positive_integer(value: int, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(numeric)
 
 
 def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10) -> pd.DataFrame:

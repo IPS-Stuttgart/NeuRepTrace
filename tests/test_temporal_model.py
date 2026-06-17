@@ -116,3 +116,18 @@ def test_fit_temporal_models_compares_observed_to_controls(tmp_path: Path):
     assert states is not None
     assert {"viterbi_state", "viterbi_class", "posterior_state_0", "posterior_state_1"}.issubset(states.columns)
     assert states[["posterior_state_0", "posterior_state_1"]].sum(axis=1).round(6).eq(1.0).all()
+
+
+def test_fit_temporal_models_rejects_invalid_permutation_counts(tmp_path: Path):
+    csv_path = tmp_path / "observations.csv"
+    _observation_frame().to_csv(csv_path, index=False)
+
+    for value in (-1, 1.5, True):
+        with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
+            fit_temporal_models(
+                [csv_path],
+                effect_window=(0.1, 0.4),
+                baseline_window=(-0.1, 0.0),
+                n_permutations=value,
+                stay_grid_size=30,
+            )
