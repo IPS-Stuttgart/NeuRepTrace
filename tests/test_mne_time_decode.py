@@ -15,7 +15,13 @@ from neureptrace.mne_time_decode import (
     _combine_probability_logits,
     _filter_splits_for_outer_test_groups,
     _nearest_candidate_windows,
+    _normalize_integer,
+    _normalize_nonnegative_float,
+    _normalize_positive_float,
+    _normalize_positive_int,
+    _normalize_pseudo_label_confidence_threshold,
     _normalize_probability_rows,
+    _normalize_unit_interval_float,
     _shuffle_training_labels,
     apply_source_probability_calibration,
     fit_source_probability_calibrator,
@@ -119,6 +125,31 @@ class PseudoLabelRecordingDecoder:
 class FakeDANNModel:
     def __init__(self, classes: np.ndarray):
         self.classes_ = np.asarray(classes)
+
+
+def test_mne_time_decode_rejects_fractional_integer_hyperparameters():
+    with pytest.raises(ValueError, match="pseudo_label_max_iterations must be an integer"):
+        _normalize_positive_int(1.5, name="pseudo_label_max_iterations")
+
+    with pytest.raises(ValueError, match="label_shuffle_seed must be an integer"):
+        _normalize_integer(13.5, name="label_shuffle_seed")
+
+
+def test_mne_time_decode_rejects_bool_numeric_hyperparameters():
+    with pytest.raises(ValueError, match="pseudo_label_min_new must be an integer"):
+        _normalize_positive_int(True, name="pseudo_label_min_new")
+
+    with pytest.raises(ValueError, match="pseudo_label_confidence_threshold"):
+        _normalize_pseudo_label_confidence_threshold(True)
+
+    with pytest.raises(ValueError, match="dann_learning_rate"):
+        _normalize_positive_float(True, name="dann_learning_rate")
+
+    with pytest.raises(ValueError, match="dann_weight_decay"):
+        _normalize_nonnegative_float(True, name="dann_weight_decay")
+
+    with pytest.raises(ValueError, match="dann_dropout"):
+        _normalize_unit_interval_float(True, name="dann_dropout")
 
 
 def test_label_shuffle_helper_is_deterministic_and_count_preserving():

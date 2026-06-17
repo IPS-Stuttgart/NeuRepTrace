@@ -65,6 +65,43 @@ def _mean_source_target_class_distance(source_features, source_labels, target_fe
     return float(np.mean(distances))
 
 
+def test_source_alignment_config_rejects_fractional_integer_parameters():
+    with pytest.raises(ValueError, match="alignment_repetition_cap must be an integer"):
+        source_alignment_config(method="procrustes", repetition_cap=1.5)
+
+    with pytest.raises(ValueError, match="alignment_target_calibration_per_anchor must be an integer"):
+        source_alignment_config(
+            method="procrustes",
+            target_projection=TARGET_CALIBRATED_ALIGNMENT,
+            target_calibration_per_anchor=1.5,
+        )
+
+    with pytest.raises(ValueError, match="alignment_target_calibration_seed must be an integer"):
+        source_alignment_config(
+            method="procrustes",
+            target_projection=TARGET_CALIBRATED_ALIGNMENT,
+            target_calibration_seed=13.5,
+        )
+
+    with pytest.raises(ValueError, match="alignment_hyperalignment_iterations must be an integer"):
+        source_alignment_config(method="hyperalignment", hyperalignment_iterations=1.5)
+
+
+def test_source_alignment_config_rejects_bool_numeric_parameters():
+    with pytest.raises(ValueError, match="alignment_components must be an integer"):
+        source_alignment_config(method="procrustes", components=True)
+
+    with pytest.raises(ValueError, match="alignment_target_calibration_seed must be an integer"):
+        source_alignment_config(
+            method="procrustes",
+            target_projection=TARGET_CALIBRATED_ALIGNMENT,
+            target_calibration_seed=True,
+        )
+
+    with pytest.raises(ValueError, match="alignment_mcca_regularization"):
+        source_alignment_config(method="mcca", mcca_regularization=True)
+
+
 def test_none_alignment_reproduces_raw_features():
     train_features = np.array([[1.0, 0.0], [0.0, 1.0]])
     test_features = np.array([[0.5, 0.5]])
