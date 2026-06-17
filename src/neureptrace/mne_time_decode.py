@@ -19,6 +19,8 @@ from neureptrace.decoding import (
     DECODER_CLI_CHOICES,
     EMISSION_MODE_CHOICES,
     FEATURE_PREPROCESSOR_CHOICES,
+    FOLD_AWARE_DECODER_ALIASES,
+    FOLD_AWARE_DECODER_CHOICES,
     TUNING_SCORING_CHOICES,
     _feature_preprocessor_steps,
     make_cross_validator,
@@ -57,6 +59,15 @@ from neureptrace.observations import ProbabilityObservationTable, stable_hash
 FIELDTRIP_DEFAULT_ROOT_PATH = ("data", 0)
 EMISSION_RUN_CHOICES = (*EMISSION_MODE_CHOICES, "both")
 FEATURE_PREPROCESSOR_RUN_CHOICES = (*FEATURE_PREPROCESSOR_CHOICES, "pca-whiten", "anova-select", "select-percentile", "pls-da", "pls")
+TIME_DECODE_DECODER_CLI_CHOICES = tuple(
+    dict.fromkeys(
+        (
+            *DECODER_CLI_CHOICES,
+            *FOLD_AWARE_DECODER_CHOICES,
+            *FOLD_AWARE_DECODER_ALIASES,
+        )
+    )
+)
 EPOCH_NORMALIZATION_CHOICES = (
     "none",
     "subject_z",
@@ -486,6 +497,15 @@ def _metadata_anchor_vector(values: Sequence[object] | pd.Series, *, name: str) 
     if series.isna().any():
         raise ValueError(f"alignment anchor column '{name}' contains missing values.")
     return series.astype(str).to_numpy(dtype=object)
+
+
+def _normalize_label_value(value: object) -> object:
+    if pd.isna(value):
+        return pd.NA
+    if isinstance(value, str):
+        text = value.strip()
+        return text if text else pd.NA
+    return value
 
 
 def _run_event_index_within_stimulus_anchors(
@@ -2745,12 +2765,13 @@ def run_time_resolved_decode(
     if tmin is not None or tmax is not None:
         epochs.crop(tmin=tmin, tmax=tmax)
 
-    raw_labels = metadata[label_column].to_numpy()
-    keep = pd.notna(raw_labels)
-    original_indices = np.arange(len(raw_labels))[keep]
+    normalized_labels = metadata[label_column].map(_normalize_label_value)
+    keep = normalized_labels.notna().to_numpy(dtype=bool)
+    original_indices = np.arange(len(normalized_labels))[keep]
     epochs = epochs[keep]
-    raw_labels = raw_labels[keep]
     metadata = metadata.loc[keep].reset_index(drop=True)
+    metadata[label_column] = normalized_labels.loc[keep].to_numpy(dtype=object)
+    raw_labels = metadata[label_column].to_numpy()
 
     encoder = LabelEncoder()
     labels = encoder.fit_transform(raw_labels)
@@ -3846,7 +3867,7 @@ def main() -> None:
     parser.add_argument("--step-ms", type=float, default=10.0)
     parser.add_argument("--n-splits", type=int, default=5)
     parser.add_argument("--max-iter", type=int, default=1000)
-    parser.add_argument("--decoder", choices=DECODER_CLI_CHOICES, default="logistic")
+    parser.add_argument("--decoder", choices=TIME_DECODE_DECODER_CLI_CHOICES, default="logistic")
     parser.add_argument("--emission-mode", choices=EMISSION_RUN_CHOICES, default="calibrated")
     parser.add_argument("--feature-preprocessor", choices=FEATURE_PREPROCESSOR_RUN_CHOICES, default="none")
     parser.add_argument(

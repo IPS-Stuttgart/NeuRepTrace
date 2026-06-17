@@ -63,8 +63,17 @@ SOURCE_PROTOCOL_COLUMNS = (
 
 def _normalize_rows(probabilities: np.ndarray) -> np.ndarray:
     probabilities = np.asarray(probabilities, dtype=float)
+    if probabilities.ndim != 2:
+        raise ValueError("Response-window probabilities must be a two-dimensional array.")
+    if not np.all(np.isfinite(probabilities)):
+        raise ValueError("Response-window probabilities must be finite.")
+    if np.any(probabilities < 0.0):
+        raise ValueError("Response-window probabilities must be non-negative.")
     probabilities = np.clip(probabilities, EPSILON, None)
-    return probabilities / probabilities.sum(axis=1, keepdims=True)
+    row_sums = probabilities.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("Response-window probabilities must have positive row sums.")
+    return probabilities / row_sums
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:

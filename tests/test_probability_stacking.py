@@ -204,6 +204,15 @@ def test_stack_probability_observations_rejects_fractional_target_labels() -> No
         stack_probability_observations(source, target, weighting="stacked", max_iter=120)
 
 
+def test_stack_probability_observations_rejects_negative_probability_values() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    source.loc[0, "prob_class_0"] = -0.1
+
+    with pytest.raises(ValueError, match="non-negative"):
+        stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+
 def test_stack_probability_observations_rejects_source_label_mismatch_with_custom_alignment_keys() -> None:
     source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
     target = _observation_rows(subject="target", labels=[0, 1, 0])

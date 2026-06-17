@@ -71,6 +71,16 @@ def test_make_decoder_produces_probabilities_for_standard_decoders():
         assert probabilities.shape == (3, 2)
 
 
+def test_generic_decoder_cli_choices_exclude_fold_aware_dann():
+    assert "dann" in DECODER_CHOICES
+    assert "domain-adversarial-neural-network" in DECODER_CHOICES
+    assert normalize_decoder_name("dann") == "dann"
+    assert normalize_decoder_name("domain-adversarial-neural-network") == "dann"
+    assert "dann" not in BUILTIN_DECODER_CHOICES
+    assert "dann" not in DECODER_CLI_CHOICES
+    assert "domain-adversarial-neural-network" not in DECODER_CLI_CHOICES
+
+
 def test_make_decoder_supports_ovo_and_hierarchical_logistic():
     rng = np.random.default_rng(53)
     features = rng.normal(size=(45, 6))

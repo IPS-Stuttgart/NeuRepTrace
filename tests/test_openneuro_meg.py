@@ -384,6 +384,28 @@ def test_ds004330_derives_stimulus_form_and_id():
     assert metadata.loc[0, "stimulus_modality"] == "drawing"
 
 
+def test_ds004330_leaves_unparsed_stimulus_modality_missing():
+    metadata = _derive_metadata(
+        DATASET_SPECS["ds004330"],
+        RunFiles(
+            subject="sub-01",
+            run="01",
+            raw_path=Path("sub-01_ses-01_task-main_run-01_meg.fif"),
+            events_path=Path("sub-01_ses-01_task-main_run-01_events.tsv"),
+        ),
+        pd.DataFrame(
+            {
+                "onset": [1.0, 2.0, 3.0],
+                "duration": [0.45, 0.45, 0.45],
+                "trial_type": ["Drawing_26", "Photo_12", "bad"],
+            }
+        ),
+    )
+
+    assert metadata["stimulus_modality"].tolist()[:2] == ["drawing", "photo"]
+    assert pd.isna(metadata.loc[2, "stimulus_modality"])
+
+
 def test_ds000117_uses_face_stim_type_labels():
     metadata = _derive_metadata(
         DATASET_SPECS["ds000117"],
@@ -395,10 +417,10 @@ def test_ds000117_uses_face_stim_type_labels():
         ),
         pd.DataFrame(
             {
-                "onset": [24.2, 36.5, 46.0],
-                "stim_type": ["Unfamiliar", "Famous", "Scrambled"],
-                "trigger": [13, 5, 17],
-                "stim_file": ["meg/u032.bmp", "meg/f123.bmp", "meg/s150.bmp"],
+                "onset": [24.2, 36.5, 46.0, 50.0],
+                "stim_type": ["Unfamiliar", "Famous", "Scrambled", pd.NA],
+                "trigger": [13, 5, 17, pd.NA],
+                "stim_file": ["meg/u032.bmp", "meg/f123.bmp", "meg/s150.bmp", pd.NA],
             }
         ),
     )
@@ -415,6 +437,58 @@ def test_ds000117_uses_face_stim_type_labels():
     assert filtered["stimulus_file"].tolist() == ["meg/u032.bmp", "meg/f123.bmp", "meg/s150.bmp"]
     assert filtered["stimulus_id"].tolist() == ["u032", "f123", "s150"]
     assert filtered["event_code"].tolist() == ["13", "5", "17"]
+    assert pd.isna(metadata.loc[3, "stimulus_file"])
+    assert pd.isna(metadata.loc[3, "stimulus_id"])
+    assert pd.isna(metadata.loc[3, "event_code"])
+
+
+def test_trial_type_labels_preserve_missing_values_before_filtering():
+    metadata = _derive_metadata(
+        DATASET_SPECS["ds006629"],
+        RunFiles(
+            subject="sub-01",
+            run="0",
+            raw_path=Path("sub-01_task-MMNHCS_run-0_meg.fif"),
+            events_path=Path("sub-01_task-MMNHCS_run-0_events.tsv"),
+        ),
+        pd.DataFrame(
+            {
+                "onset": [1.0, 2.0, 3.0],
+                "duration": [0.0, 0.0, 0.0],
+                "trial_type": ["standard", pd.NA, "deviant"],
+            }
+        ),
+    )
+    filtered = _filter_metadata(
+        metadata,
+        label_column=DATASET_SPECS["ds006629"].default_label_column,
+        include_labels=None,
+        max_events_per_label=None,
+        selection="first",
+        seed=13,
+    )
+
+    assert filtered["condition"].tolist() == ["standard", "deviant"]
+
+
+def test_openneuro_filter_drops_blank_labels_before_epoching():
+    metadata = pd.DataFrame(
+        {
+            "onset": [1.0, 2.0, 3.0, 4.0],
+            "condition": [" standard ", "", "  ", "deviant"],
+        }
+    )
+
+    filtered = _filter_metadata(
+        metadata,
+        label_column="condition",
+        include_labels=None,
+        max_events_per_label=None,
+        selection="first",
+        seed=13,
+    )
+
+    assert filtered["condition"].tolist() == ["standard", "deviant"]
 
 
 def test_openneuro_subject_and_path_formatting():

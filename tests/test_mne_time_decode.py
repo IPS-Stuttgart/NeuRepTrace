@@ -8,6 +8,7 @@ from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
 from neureptrace.decoding.dann import DANNFitResult
 from neureptrace.decoding.source_alignment import SourceAlignmentResult
 from neureptrace.mne_time_decode import (
+    TIME_DECODE_DECODER_CLI_CHOICES,
     _apply_class_prior_correction,
     _align_probability_columns,
     _alignment_anchor_values,
@@ -131,6 +132,9 @@ def test_label_shuffle_helper_is_deterministic_and_count_preserving():
 
 
 def test_run_time_resolved_decode_dann_uses_unlabeled_target_features(tmp_path: Path, monkeypatch):
+    assert "dann" in TIME_DECODE_DECODER_CLI_CHOICES
+    assert "domain-adversarial-neural-network" in TIME_DECODE_DECODER_CLI_CHOICES
+
     labels = np.tile(np.array([0, 1, 0, 1]), 3)
     groups = np.repeat(["sub-01", "sub-02", "sub-03"], 4)
     times = np.array([0.180, 0.184, 0.188])
@@ -204,6 +208,41 @@ def test_run_time_resolved_decode_dann_uses_unlabeled_target_features(tmp_path: 
     observations = pd.read_csv(observations_out)
     assert observations["dann_protocol"].unique().tolist() == ["unlabeled_target_domain_adversarial"]
     assert observations["dann_uses_target_labels"].unique().tolist() == [False]
+
+
+def test_run_time_resolved_decode_drops_blank_string_labels(tmp_path: Path, monkeypatch):
+    labels = np.array(["a", " b ", "", "  ", "a", "b"], dtype=object)
+    groups = np.array(["sub-01", "sub-01", "sub-01", "sub-02", "sub-02", "sub-02"], dtype=object)
+    times = np.array([0.180, 0.184, 0.188])
+    data = np.zeros((len(labels), 1, len(times)), dtype=float)
+    metadata = pd.DataFrame({"condition": labels, "group": groups})
+    epochs = FakeEpochs(data, times, metadata)
+
+    RecordingDecoder.fit_labels = []
+    monkeypatch.setattr("neureptrace.mne_time_decode.mne.read_epochs", lambda *args, **kwargs: epochs)
+    monkeypatch.setattr("neureptrace.mne_time_decode.make_decoder", lambda *args, **kwargs: RecordingDecoder())
+
+    observations_out = tmp_path / "observations.csv"
+    run_time_resolved_decode(
+        epochs_path=tmp_path / "blank_label_epo.fif",
+        label_column="condition",
+        group_column="group",
+        outer_test_groups=("sub-02",),
+        out_path=tmp_path / "summary.csv",
+        observation_out_path=observations_out,
+        n_splits=2,
+        window_ms=1,
+        step_ms=1,
+        decode_window=(0.184, 0.184),
+        decoder="logistic",
+        emission_mode="uncalibrated",
+        time_decode_backend="sklearn",
+    )
+
+    observations = pd.read_csv(observations_out)
+    assert observations["sample_index"].tolist() == [4, 5]
+    assert observations["true_class"].tolist() == ["a", "b"]
+    assert all(sorted(fit_labels.tolist()) == [0, 1] for fit_labels in RecordingDecoder.fit_labels)
 
 
 def test_run_time_resolved_decode_pseudo_label_self_training_uses_predictions_not_target_labels(

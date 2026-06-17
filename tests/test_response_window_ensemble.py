@@ -178,6 +178,17 @@ def test_plain_response_window_rejects_duplicate_trial_time_rows(tmp_path: Path)
         run_response_window_ensemble([csv_path], mode="uniform")
 
 
+@pytest.mark.parametrize(("column", "value", "message"), [("prob_class_0", np.nan, "finite"), ("prob_class_1", -0.1, "non-negative")])
+def test_plain_response_window_rejects_invalid_probabilities(tmp_path: Path, column: str, value: float, message: str):
+    observations = _toy_observations()
+    observations.loc[0, column] = value
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
 def test_plain_response_window_rejects_label_mismatch_across_times(tmp_path: Path):
     observations = _toy_observations()
     mask = (

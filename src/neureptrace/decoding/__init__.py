@@ -49,8 +49,8 @@ BUILTIN_DECODER_CHOICES = (
     "ecoc_linear_svm",
     "hierarchical_logistic",
     "torch_mlp",
-    "dann",
 )
+FOLD_AWARE_DECODER_CHOICES = ("dann",)
 DECODER_ALIASES = (
     "l1-logistic",
     "logistic-l1",
@@ -82,6 +82,8 @@ DECODER_ALIASES = (
     "large-dev-hierarchical",
     "deep-mlp",
     "shallow-torch-mlp",
+)
+FOLD_AWARE_DECODER_ALIASES = (
     "domain-adversarial",
     "domain-adversarial-nn",
     "domain-adversarial-neural-network",
@@ -91,12 +93,22 @@ DECODER_CHOICES = tuple(
     dict.fromkeys(
         (
             *BUILTIN_DECODER_CHOICES,
+            *FOLD_AWARE_DECODER_CHOICES,
+            *CLASSIFIER_REGISTRY.keys(),
+            *DECODER_ALIASES,
+            *FOLD_AWARE_DECODER_ALIASES,
+        )
+    )
+)
+DECODER_CLI_CHOICES = tuple(
+    dict.fromkeys(
+        (
+            *BUILTIN_DECODER_CHOICES,
             *CLASSIFIER_REGISTRY.keys(),
             *DECODER_ALIASES,
         )
     )
 )
-DECODER_CLI_CHOICES = DECODER_CHOICES
 EMISSION_MODE_CHOICES = ("calibrated", "uncalibrated")
 FEATURE_PREPROCESSOR_CHOICES = ("none", "pca", "pca_whiten", "anova_select", "pls_da")
 TUNING_SCORING_CHOICES = ("accuracy", "balanced_accuracy", "neg_log_loss", "neg_brier", "neg_ece")
@@ -1306,6 +1318,8 @@ def normalize_decoder_name(name: str) -> str:
         return "torch_mlp"
     if normalized in {"domain_adversarial", "domain_adversarial_nn", "domain_adversarial_neural_network"}:
         return "dann"
+    if normalized in FOLD_AWARE_DECODER_CHOICES:
+        return normalized
     if normalized in BUILTIN_DECODER_CHOICES:
         return normalized
     registry_name = _normalize_registry_decoder_name_or_none(name)

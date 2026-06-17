@@ -215,6 +215,8 @@ def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = D
         raise ValueError("min_probability must lie in (0, 1).")
     if not np.isfinite(probabilities).all():
         raise ValueError("Probability values must be finite.")
+    if np.any(probabilities < 0.0):
+        raise ValueError("Probability values must be non-negative.")
     probabilities = np.clip(probabilities, float(min_probability), 1.0)
     row_sums = probabilities.sum(axis=1, keepdims=True)
     if np.any(row_sums <= 0.0) or not np.isfinite(row_sums).all():
