@@ -11,5 +11,10 @@ def test_parse_c_grid_rejects_non_finite_values() -> None:
             parse_c_grid(values)
 
 
+def test_parse_c_grid_rejects_boolean_values() -> None:
+    with pytest.raises(ValueError, match="positive finite"):
+        parse_c_grid([True])
+
+
 def test_parse_c_grid_still_accepts_positive_finite_values() -> None:
     assert parse_c_grid("0.1,1,10") == (0.1, 1.0, 10.0)

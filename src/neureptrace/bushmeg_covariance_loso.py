@@ -143,17 +143,48 @@ def normalize_covariance_feature_mode(value: Any) -> str:
 
 
 def _normalize_covariance_shrinkage(value: Any) -> float:
-    shrinkage = float(value)
+    shrinkage = _finite_float(value, name="covariance_shrinkage")
     if not np.isfinite(shrinkage) or not 0.0 <= shrinkage <= 1.0:
         raise ValueError("covariance_shrinkage must be a finite value in [0, 1].")
     return shrinkage
 
 
 def _normalize_covariance_epsilon(value: Any) -> float:
-    epsilon = float(value)
+    epsilon = _finite_float(value, name="covariance_epsilon")
     if not np.isfinite(epsilon) or epsilon <= 0.0:
         raise ValueError("covariance_epsilon must be a positive finite value.")
     return epsilon
+
+
+def _finite_float(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a finite number.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite number.") from exc
+    if not np.isfinite(number):
+        raise ValueError(f"{name} must be a finite number.")
+    return number
+
+
+def _normalize_integer(value: Any, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    integer = int(number)
+    if minimum is not None and integer < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    return integer
+
+
+def _normalize_covariance_max_channels(value: Any) -> int:
+    return _normalize_integer(value, name="covariance_max_channels", minimum=1)
 
 
 def _sample_indices_for_window(times: np.ndarray, window: CovarianceWindow) -> np.ndarray:
@@ -169,10 +200,11 @@ def _sample_indices_for_window(times: np.ndarray, window: CovarianceWindow) -> n
 
 
 def _channel_subset_indices(n_channels: int, max_channels: int) -> np.ndarray:
-    max_channels = max(1, int(max_channels))
-    if int(n_channels) <= max_channels:
-        return np.arange(int(n_channels), dtype=int)
-    return np.unique(np.linspace(0, int(n_channels) - 1, max_channels, dtype=int))
+    n_channels = _normalize_integer(n_channels, name="n_channels", minimum=1)
+    max_channels = _normalize_covariance_max_channels(max_channels)
+    if n_channels <= max_channels:
+        return np.arange(n_channels, dtype=int)
+    return np.unique(np.linspace(0, n_channels - 1, max_channels, dtype=int))
 
 
 def _trial_covariance(signal: np.ndarray, *, shrinkage: float, epsilon: float) -> np.ndarray:
@@ -303,12 +335,12 @@ def _as_bool(value: Any, *, default: bool = False) -> bool:
     raise ValueError(f"Cannot interpret {value!r} as a boolean.")
 
 
-def _float_grid(value: Any, default: Sequence[float]) -> list[float]:
+def _float_grid(value: Any, default: Sequence[float], *, name: str) -> list[float]:
     if isinstance(value, str):
         tokens = [token.strip() for token in value.split(",") if token.strip()]
-        values = [float(token) for token in tokens] if tokens else list(default)
+        values = [_finite_float(token, name=name) for token in tokens] if tokens else list(default)
     else:
-        values = [float(item) for item in _as_list(value, default)]
+        values = [_finite_float(item, name=name) for item in _as_list(value, default)]
     if not values or not np.all(np.isfinite(values)):
         raise ValueError("Expected at least one finite numeric grid value.")
     return values
@@ -327,10 +359,11 @@ def _time_window_from_mapping(item: Mapping[str, Any], *, index: int) -> Covaria
         raw_range = item["range"]
         if not isinstance(raw_range, Sequence) or isinstance(raw_range, (str, bytes)) or len(raw_range) != 2:
             raise ValueError("Covariance window range must contain exactly two values.")
-        start, stop = map(float, raw_range)
+        start = _finite_float(raw_range[0], name="covariance_window_start")
+        stop = _finite_float(raw_range[1], name="covariance_window_stop")
     else:
-        start = float(item.get("start", item.get("tmin")))
-        stop = float(item.get("stop", item.get("tmax")))
+        start = _finite_float(item.get("start", item.get("tmin")), name="covariance_window_start")
+        stop = _finite_float(item.get("stop", item.get("tmax")), name="covariance_window_stop")
     if not np.all(np.isfinite([start, stop])) or stop <= start:
         raise ValueError("Covariance window stop must be finite and greater than start.")
     name = str(item.get("name", f"cov_{index:02d}_{start:g}_{stop:g}"))
@@ -345,7 +378,13 @@ def _candidate_windows(grid: Mapping[str, Any]) -> list[CovarianceWindow]:
         items: list[Mapping[str, Any]] = []
         for index, token in enumerate(token.strip() for token in raw_windows.split(",") if token.strip()):
             start_text, stop_text = token.split(":", maxsplit=1)
-            items.append({"name": f"cov_{index:02d}", "start": float(start_text), "stop": float(stop_text)})
+            items.append(
+                {
+                    "name": f"cov_{index:02d}",
+                    "start": _finite_float(start_text, name="covariance_window_start"),
+                    "stop": _finite_float(stop_text, name="covariance_window_stop"),
+                }
+            )
         raw_windows = items
     windows = []
     for index, item in enumerate(_as_list(raw_windows, [])):
@@ -378,9 +417,29 @@ def _candidate_grid(config: Mapping[str, Any]) -> list[CovarianceCandidateSpec]:
     pca_values = [_normalize_pca_value(value) for value in _as_list(grid.get("pca_components"), [decoding.get("pca_components", 64)])]
     classifier_grid = [float(value) for value in parse_c_grid(grid.get("c_grid", decoding.get("tuning_c_grid", "0.1,1.0,10.0")))]
     feature_modes = [normalize_covariance_feature_mode(value) for value in _as_list(grid.get("feature_modes", grid.get("covariance_feature_modes")), [covariance_loso.get("feature_mode", DEFAULT_COVARIANCE_FEATURE_MODE)])]
-    shrinkages = [_normalize_covariance_shrinkage(value) for value in _float_grid(grid.get("covariance_shrinkages", grid.get("shrinkages")), [covariance_loso.get("covariance_shrinkage", DEFAULT_COVARIANCE_SHRINKAGE)])]
-    epsilons = [_normalize_covariance_epsilon(value) for value in _float_grid(grid.get("covariance_epsilons", grid.get("epsilons")), [covariance_loso.get("covariance_epsilon", DEFAULT_COVARIANCE_EPSILON)])]
-    max_channels_values = [int(value) for value in _as_list(grid.get("covariance_max_channels"), [covariance_loso.get("covariance_max_channels", DEFAULT_COVARIANCE_MAX_CHANNELS)])]
+    shrinkages = [
+        _normalize_covariance_shrinkage(value)
+        for value in _float_grid(
+            grid.get("covariance_shrinkages", grid.get("shrinkages")),
+            [covariance_loso.get("covariance_shrinkage", DEFAULT_COVARIANCE_SHRINKAGE)],
+            name="covariance_shrinkages",
+        )
+    ]
+    epsilons = [
+        _normalize_covariance_epsilon(value)
+        for value in _float_grid(
+            grid.get("covariance_epsilons", grid.get("epsilons")),
+            [covariance_loso.get("covariance_epsilon", DEFAULT_COVARIANCE_EPSILON)],
+            name="covariance_epsilons",
+        )
+    ]
+    max_channels_values = [
+        _normalize_covariance_max_channels(value)
+        for value in _as_list(
+            grid.get("covariance_max_channels"),
+            [covariance_loso.get("covariance_max_channels", DEFAULT_COVARIANCE_MAX_CHANNELS)],
+        )
+    ]
 
     candidates: list[CovarianceCandidateSpec] = []
     for window in windows:
@@ -463,7 +522,7 @@ def _stack_labels(subjects: Mapping[str, SubjectEpochs], subject_ids: Sequence[s
 
 
 def _stable_seed(seed: int, context: Sequence[Any]) -> int:
-    payload = json.dumps([int(seed), *[str(item) for item in context]], sort_keys=True)
+    payload = json.dumps([_normalize_integer(seed, name="label_shuffle_seed"), *[str(item) for item in context]], sort_keys=True)
     digest = hashlib.sha256(payload.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "little") & ((1 << 63) - 1)
 
@@ -632,8 +691,12 @@ def run_covariance_loso_subjects(
         raise ValueError("Need at least three subjects for nested source-only LOSO.")
     if not candidates:
         raise ValueError("At least one covariance candidate is required.")
+    max_iter = _normalize_integer(max_iter, name="max_iter", minimum=1)
+    label_shuffle_seed = _normalize_integer(label_shuffle_seed, name="label_shuffle_seed")
     cache = CovarianceFeatureCache(subjects)
     n_classes = len(class_names)
+    if n_classes < 2:
+        raise ValueError("Covariance LOSO needs at least two classes.")
     class_names = list(class_names)
 
     summary_rows: list[dict[str, Any]] = []
@@ -726,8 +789,12 @@ def run_bushmeg_covariance_loso(
     covariance_loso = _section(config, "covariance_loso")
     selection_metric = str(covariance_loso.get("selection_metric", DEFAULT_SELECTION_METRIC))
     label_shuffle_control = _as_bool(covariance_loso.get("label_shuffle_control"), default=False)
-    label_shuffle_seed = int(covariance_loso.get("label_shuffle_seed", 0))
-    max_iter = int((_section(config, "decoding") or {}).get("max_iter", covariance_loso.get("max_iter", 1000)))
+    label_shuffle_seed = _normalize_integer(covariance_loso.get("label_shuffle_seed", 0), name="label_shuffle_seed")
+    max_iter = _normalize_integer(
+        (_section(config, "decoding") or {}).get("max_iter", covariance_loso.get("max_iter", 1000)),
+        name="max_iter",
+        minimum=1,
+    )
 
     subjects, encoder = _load_subjects_from_config(config, config_dir=config_path.parent)
     candidates = _candidate_grid(config)
