@@ -9,6 +9,7 @@ import pandas as pd
 
 from neureptrace.temporal_model import (
     SEQUENCE_KEY_COLUMN_CANDIDATES,
+    _normalize_probabilities,
     probability_columns,
     read_probability_observations,
     sequence_key_columns,
@@ -68,10 +69,10 @@ def _score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
     if score_column in frame.columns:
         return pd.to_numeric(frame[score_column], errors="coerce")
     prob_columns = probability_columns(frame)
+    probabilities = _normalize_probabilities(frame[prob_columns].to_numpy(dtype=float))
     if score_column == "confidence":
-        return frame[prob_columns].max(axis=1)
+        return pd.Series(probabilities.max(axis=1), index=frame.index)
     if score_column == "probability_true_class" and "true_label" in frame.columns:
-        probabilities = frame[prob_columns].to_numpy(dtype=float)
         true_labels, valid_labels = _integer_labels(frame["true_label"])
         scores = np.full(len(frame), np.nan, dtype=float)
         in_bounds = valid_labels & (true_labels >= 0) & (true_labels < probabilities.shape[1])
@@ -101,7 +102,7 @@ def _ensure_prediction_columns(frame: pd.DataFrame) -> pd.DataFrame:
     if "predicted_label" in frame.columns and "predicted_class" in frame.columns:
         return frame
     prob_columns = probability_columns(frame)
-    probabilities = frame[prob_columns].to_numpy(dtype=float)
+    probabilities = _normalize_probabilities(frame[prob_columns].to_numpy(dtype=float))
     predicted_labels = probabilities.argmax(axis=1)
     if "predicted_label" in frame.columns:
         parsed_labels, valid_labels = _integer_labels(frame["predicted_label"])

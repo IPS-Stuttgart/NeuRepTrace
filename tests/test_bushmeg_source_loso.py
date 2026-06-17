@@ -4,6 +4,7 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 from sklearn.metrics import balanced_accuracy_score
 from sklearn.preprocessing import LabelEncoder
 
@@ -371,6 +372,19 @@ def test_candidate_metrics_report_multiclass_topk():
     assert tied["top2_accuracy"] == 2 / 3
 
 
+def test_candidate_metrics_rejects_invalid_probabilities():
+    probabilities = np.array(
+        [
+            [0.6, 0.6],
+            [0.2, 0.8],
+        ]
+    )
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _candidate_metrics(probabilities, labels, n_classes=2)
+
+
 def test_log_probability_window_combine_uses_geometric_mean():
     probabilities_a = np.array([[0.9, 0.1], [0.4, 0.6]], dtype=float)
     probabilities_b = np.array([[0.5, 0.5], [0.8, 0.2]], dtype=float)
@@ -386,6 +400,20 @@ def test_log_probability_window_combine_uses_geometric_mean():
 
     np.testing.assert_allclose(log_probability_mean, expected)
     assert not np.allclose(log_probability_mean, probability_mean)
+
+
+def test_probability_window_combine_rejects_invalid_probability_accumulator():
+    accumulator = np.array([[0.9, 0.1], [0.2, 0.2]], dtype=float)
+
+    with pytest.raises(ValueError, match="must sum to n_windows"):
+        _combine_window_probabilities(accumulator, 1, "probability_mean")
+
+
+def test_log_probability_window_combine_rejects_positive_accumulator():
+    accumulator = np.array([[0.0, 0.1], [-0.2, -0.3]], dtype=float)
+
+    with pytest.raises(ValueError, match="must not contain positive values"):
+        _combine_window_probabilities(accumulator, 1, "log_probability_mean")
 
 
 def test_candidate_grid_expands_window_combine_modes():
@@ -718,6 +746,25 @@ def test_balanced_accuracy_class_bias_can_adjust_overpredicted_class():
     adjusted = _apply_class_bias(probabilities, bias)
 
     assert balanced_accuracy_score(labels, adjusted.argmax(axis=1)) > baseline_score
+
+
+def test_balanced_accuracy_class_bias_rejects_invalid_probabilities():
+    probabilities = np.array([[0.6, 0.2], [0.1, 0.9]])
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _fit_class_bias(probabilities, labels, n_classes=2, mode="balanced_accuracy")
+
+
+def test_apply_class_bias_rejects_invalid_probabilities_and_bias():
+    probabilities = np.array([[0.6, 0.4], [0.1, 0.9]])
+
+    with pytest.raises(ValueError, match="must be finite"):
+        _apply_class_bias(probabilities, np.array([0.0, np.nan]))
+
+    probabilities[0, 0] = 1.2
+    with pytest.raises(ValueError, match="must not exceed 1.0"):
+        _apply_class_bias(probabilities, np.zeros(2))
 
 
 def test_fit_candidate_model_routes_sample_weight_to_registry_decoder():

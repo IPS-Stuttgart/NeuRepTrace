@@ -30,6 +30,7 @@ DEFAULT_TEMPERATURE = 0.02
 DEFAULT_MAX_ITER = 250
 DEFAULT_LEARNING_RATE = 0.25
 DEFAULT_MIN_PROBABILITY = 1.0e-12
+DEFAULT_PROBABILITY_TOLERANCE = 1.0e-3
 DEFAULT_OUTPUT_DECODER = "source_oof_stacked_ensemble"
 DEFAULT_OUTPUT_EMISSION_MODE = "source_oof_stacked"
 WEIGHTING_MODES = {"uniform", "softmax", "stacked"}
@@ -207,7 +208,12 @@ def _raise_identity_mismatch(
     )
 
 
-def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = DEFAULT_MIN_PROBABILITY) -> np.ndarray:
+def _renormalize_probabilities(
+    values: np.ndarray,
+    *,
+    min_probability: float = DEFAULT_MIN_PROBABILITY,
+    require_normalized: bool = True,
+) -> np.ndarray:
     probabilities = np.asarray(values, dtype=float)
     if probabilities.ndim != 2:
         raise ValueError("Probability values must be a two-dimensional matrix.")
@@ -217,6 +223,17 @@ def _renormalize_probabilities(values: np.ndarray, *, min_probability: float = D
         raise ValueError("Probability values must be finite.")
     if np.any(probabilities < 0.0):
         raise ValueError("Probability values must be non-negative.")
+    if np.any(probabilities > 1.0):
+        raise ValueError("Probability values must not exceed 1.0.")
+    if require_normalized:
+        raw_row_sums = probabilities.sum(axis=1)
+        bad_rows = np.flatnonzero(np.abs(raw_row_sums - 1.0) > DEFAULT_PROBABILITY_TOLERANCE)
+        if len(bad_rows):
+            examples = [float(raw_row_sums[index]) for index in bad_rows[:5]]
+            raise ValueError(
+                "Probability rows must sum to 1.0 within tolerance "
+                f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
+            )
     probabilities = np.clip(probabilities, float(min_probability), 1.0)
     row_sums = probabilities.sum(axis=1, keepdims=True)
     if np.any(row_sums <= 0.0) or not np.isfinite(row_sums).all():
@@ -461,7 +478,11 @@ def combine_probability_cube(
         pooled_log = np.tensordot(weights_array, np.log(normalized), axes=(0, 0))
         pooled_log -= pooled_log.max(axis=1, keepdims=True)
         pooled = np.exp(pooled_log)
-    return _renormalize_probabilities(pooled, min_probability=min_probability)
+    return _renormalize_probabilities(
+        pooled,
+        min_probability=min_probability,
+        require_normalized=pooling == "linear",
+    )
 
 
 def _candidate_balanced_scores(probability_cube: np.ndarray, labels: np.ndarray) -> np.ndarray:

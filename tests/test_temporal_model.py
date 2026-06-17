@@ -51,6 +51,7 @@ def test_read_probability_observations_adds_source_file(tmp_path: Path):
     ("column", "value", "message"),
     [
         ("prob_class_0", -0.1, "non-negative"),
+        ("prob_class_0", 1.2, "must not exceed 1.0"),
         ("prob_class_1", float("nan"), "finite"),
     ],
 )
@@ -71,6 +72,16 @@ def test_read_probability_observations_rejects_zero_probability_mass(tmp_path: P
     frame.to_csv(csv_path, index=False)
 
     with pytest.raises(ValueError, match="positive mass"):
+        read_probability_observations([csv_path])
+
+
+def test_read_probability_observations_rejects_unnormalized_probability_rows(tmp_path: Path):
+    csv_path = tmp_path / "unnormalized_observations.csv"
+    frame = _observation_frame()
+    frame.loc[0, ["prob_class_0", "prob_class_1"]] = [0.2, 0.2]
+    frame.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
         read_probability_observations([csv_path])
 
 
