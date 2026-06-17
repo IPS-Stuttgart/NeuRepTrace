@@ -4,6 +4,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.stimulus_detection import (
     detect_stimulus_events,
@@ -104,6 +105,47 @@ def test_detect_stimulus_events_returns_empty_when_no_stimulus_crosses_threshold
 
     assert events.empty
     assert {"stream_id", "event_index", "stimulus_class", "onset_time", "score_threshold"}.issubset(events.columns)
+
+
+def test_stimulus_detection_rejects_invalid_class_probability_rows():
+    frame = _stream_frame()
+    frame.loc[0, ["prob_class_0", "prob_class_1", "prob_class_2"]] = [0.2, 0.2, 0.2]
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        fit_stimulus_detection_thresholds(
+            frame,
+            stream_columns=("stream_id",),
+            threshold_window=THRESHOLD_WINDOW,
+            threshold_quantile=1.0,
+        )
+
+
+def test_stimulus_detection_rejects_invalid_predicted_confidence_values():
+    frame = _stream_frame()
+    frame.loc[0, "confidence"] = 1.2
+
+    with pytest.raises(ValueError, match="confidence values must lie"):
+        fit_stimulus_detection_thresholds(
+            frame,
+            stream_columns=("stream_id",),
+            threshold_window=THRESHOLD_WINDOW,
+            threshold_quantile=1.0,
+            score_mode="predicted_class_confidence",
+        )
+
+
+def test_stimulus_detection_rejects_invalid_probabilities_when_inferring_predicted_class():
+    frame = _stream_frame().drop(columns=["predicted_label", "predicted_class"])
+    frame.loc[0, ["prob_class_0", "prob_class_1", "prob_class_2"]] = [0.2, 0.2, 0.2]
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        fit_stimulus_detection_thresholds(
+            frame,
+            stream_columns=("stream_id",),
+            threshold_window=THRESHOLD_WINDOW,
+            threshold_quantile=1.0,
+            score_mode="predicted_class_confidence",
+        )
 
 
 def test_detect_stimulus_events_returns_multiple_events_per_stream():

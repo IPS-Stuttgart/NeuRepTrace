@@ -87,6 +87,18 @@ def test_detect_onsets_rejects_invalid_inferred_probability_scores():
         )
 
 
+def test_detect_onsets_rejects_invalid_confidence_scores():
+    frame = _observation_frame()
+    frame.loc[0, "confidence"] = 1.2
+
+    with pytest.raises(ValueError, match="confidence values must lie"):
+        detect_onsets(
+            frame,
+            threshold_window=(-0.20, -0.10),
+            threshold_quantile=0.875,
+        )
+
+
 def test_detection_start_excludes_baseline_false_alarms():
     events = detect_onsets(
         _observation_frame(),

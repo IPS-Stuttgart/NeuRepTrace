@@ -56,7 +56,18 @@ def _integer_label(value: object) -> int | None:
     return int(numeric)
 
 
+def _confidence_values(frame: pd.DataFrame) -> pd.Series:
+    confidence = pd.to_numeric(frame["confidence"], errors="coerce")
+    if confidence.isna().any() or not np.isfinite(confidence.to_numpy(dtype=float)).all():
+        raise ValueError("confidence values must be finite.")
+    if bool(((confidence < 0.0) | (confidence > 1.0)).any()):
+        raise ValueError("confidence values must lie in [0, 1].")
+    return confidence
+
+
 def score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
+    if score_column == "confidence" and score_column in frame.columns:
+        return _confidence_values(frame)
     if score_column in frame.columns:
         return pd.to_numeric(frame[score_column], errors="coerce")
     prob_columns = probability_columns(frame)

@@ -5,6 +5,8 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from neureptrace.temporal_model import _normalize_probabilities
+
 DEFAULT_THRESHOLD_WINDOW = (-0.35, -0.05)
 DEFAULT_THRESHOLD_QUANTILE = 0.95
 DEFAULT_TEMPLATE_WINDOW = (0.0, 0.35)
@@ -99,28 +101,41 @@ def _target_class_table(frame: pd.DataFrame, target_classes: Sequence[str | int]
     return selected
 
 
+def _validated_probability_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    columns = _probability_columns(frame)
+    probabilities = _normalize_probabilities(frame[columns].to_numpy(dtype=float))
+    return pd.DataFrame(probabilities, index=frame.index, columns=columns)
+
+
+def _validated_confidence(frame: pd.DataFrame) -> pd.Series:
+    if "confidence" not in frame.columns:
+        raise ValueError("predicted_class_confidence scoring requires a confidence column.")
+    confidence = pd.to_numeric(frame["confidence"], errors="coerce")
+    if confidence.isna().any() or not np.isfinite(confidence.to_numpy(dtype=float)).all():
+        raise ValueError("confidence values must be finite.")
+    if bool(((confidence < 0.0) | (confidence > 1.0)).any()):
+        raise ValueError("confidence values must lie in [0, 1].")
+    return confidence
+
+
 def _score_values(frame: pd.DataFrame, *, stimulus_label: int | str, stimulus_class: str, score_column: str, score_mode: str) -> pd.Series:
     if score_mode == "class_probability":
         if score_column not in frame.columns:
             raise ValueError(f"Score column '{score_column}' is missing.")
-        return pd.to_numeric(frame[score_column], errors="coerce")
+        return _validated_probability_frame(frame)[score_column]
     if score_mode != "predicted_class_confidence":
         raise ValueError("score_mode must be 'class_probability' or 'predicted_class_confidence'.")
-    if "confidence" not in frame.columns:
-        raise ValueError("predicted_class_confidence scoring requires a confidence column.")
-    confidence = pd.to_numeric(frame["confidence"], errors="coerce").fillna(0.0)
+    confidence = _validated_confidence(frame)
     if "predicted_label" in frame.columns:
         matches = frame["predicted_label"].astype(str).eq(str(stimulus_label))
     elif "predicted_class" in frame.columns:
         matches = frame["predicted_class"].astype(str).eq(str(stimulus_class))
     else:
         probability_columns = _probability_columns(frame)
-        probabilities = frame[probability_columns].to_numpy(dtype=float)
-        finite_probabilities = np.where(np.isfinite(probabilities), probabilities, -np.inf)
-        predicted_indices = finite_probabilities.argmax(axis=1)
-        has_prediction = np.isfinite(finite_probabilities).any(axis=1)
+        probabilities = _validated_probability_frame(frame).to_numpy(dtype=float)
+        predicted_indices = probabilities.argmax(axis=1)
         probability_labels = np.asarray([str(_probability_label_from_column(column)) for column in probability_columns], dtype=object)
-        matches = pd.Series(has_prediction & (probability_labels[predicted_indices] == str(stimulus_label)), index=frame.index)
+        matches = pd.Series(probability_labels[predicted_indices] == str(stimulus_label), index=frame.index)
     return confidence.where(matches, 0.0)
 
 

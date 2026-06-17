@@ -12,6 +12,7 @@ from neureptrace.stimulus_detection import (
     _event_row,
     _run_duration,
 )
+from neureptrace.temporal_model import _normalize_probabilities
 
 
 @dataclass(frozen=True)
@@ -121,19 +122,37 @@ def _as_float(value: object) -> float:
     return float(pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0])
 
 
+def _validated_probability_observation(observation: Mapping[str, object]) -> tuple[list[str], np.ndarray]:
+    columns = _probability_columns_from_observation(observation)
+    probabilities = _normalize_probabilities(
+        np.array([[observation[column] for column in columns]], dtype=float)
+    )[0]
+    return columns, probabilities
+
+
+def _validated_confidence(observation: Mapping[str, object]) -> float:
+    if "confidence" not in observation:
+        raise ValueError("predicted_class_confidence scoring requires a confidence column.")
+    confidence = _as_float(observation["confidence"])
+    if not np.isfinite(confidence):
+        raise ValueError("confidence values must be finite.")
+    if confidence < 0.0 or confidence > 1.0:
+        raise ValueError("confidence values must lie in [0, 1].")
+    return confidence
+
+
 def _score_observation(observation: Mapping[str, object], threshold_row: pd.Series) -> float:
     score_mode = str(threshold_row["score_mode"])
     score_column = str(threshold_row["score_column"])
     if score_mode == "class_probability":
         if score_column not in observation:
             raise ValueError(f"Score column '{score_column}' is missing.")
-        return _as_float(observation[score_column])
+        columns, probabilities = _validated_probability_observation(observation)
+        return float(probabilities[columns.index(score_column)])
 
     if score_mode != "predicted_class_confidence":
         raise ValueError("score_mode must be 'class_probability' or 'predicted_class_confidence'.")
-    if "confidence" not in observation:
-        raise ValueError("predicted_class_confidence scoring requires a confidence column.")
-    confidence = 0.0 if pd.isna(observation["confidence"]) else _as_float(observation["confidence"])
+    confidence = _validated_confidence(observation)
     stimulus_label = str(threshold_row["stimulus_label"])
     stimulus_class = str(threshold_row["stimulus_class"])
     if "predicted_label" in observation:
@@ -141,9 +160,8 @@ def _score_observation(observation: Mapping[str, object], threshold_row: pd.Seri
     if "predicted_class" in observation:
         return confidence if str(observation["predicted_class"]) == stimulus_class else 0.0
 
-    probability_columns = _probability_columns_from_observation(observation)
-    probabilities = np.array([float(observation[column]) for column in probability_columns], dtype=float)
-    predicted_label = int(np.nanargmax(probabilities))
+    _, probabilities = _validated_probability_observation(observation)
+    predicted_label = int(probabilities.argmax())
     return confidence if str(predicted_label) == stimulus_label else 0.0
 
 

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace._onset_utils import (
     ensure_prediction_columns,
@@ -23,6 +24,13 @@ def test_probability_true_class_scores_ignore_fractional_labels():
     assert np.isnan(scores.iloc[1])
     assert scores.iloc[2] == 0.7
     assert np.isnan(scores.iloc[3])
+
+
+def test_confidence_scores_must_be_valid_probabilities():
+    frame = pd.DataFrame({"confidence": [0.8, 1.2], "prob_class_0": [0.8, 0.2], "prob_class_1": [0.2, 0.8]})
+
+    with pytest.raises(ValueError, match="confidence values must lie"):
+        score_values(frame, "confidence")
 
 
 def test_ensure_prediction_columns_does_not_truncate_fractional_labels():

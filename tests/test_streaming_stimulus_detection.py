@@ -157,6 +157,56 @@ def test_streaming_detector_rejects_missing_threshold_group_column():
         detector.update(observation)
 
 
+def test_streaming_detector_rejects_invalid_class_probability_rows():
+    frame = _stream_frame(final_gap=True)
+    thresholds = _thresholds(frame, target_classes=["A"])
+    detector = StreamingStimulusDetector(
+        StimulusDetectionConfig(stream_columns=("stream_id",), detection_window=(0.0, float("inf"))),
+        thresholds,
+    )
+    observation = _observation("run-1", 0.10, (0.86, 0.08, 0.06))
+    observation["prob_class_0"] = 0.2
+    observation["prob_class_1"] = 0.2
+    observation["prob_class_2"] = 0.2
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        detector.update(observation)
+
+
+def test_streaming_detector_rejects_invalid_predicted_confidence_values():
+    frame = _stream_frame(final_gap=True)
+    thresholds = _thresholds(frame, target_classes=["A"])
+    thresholds["score_mode"] = "predicted_class_confidence"
+    detector = StreamingStimulusDetector(
+        StimulusDetectionConfig(stream_columns=("stream_id",), detection_window=(0.0, float("inf"))),
+        thresholds,
+    )
+    observation = _observation("run-1", 0.10, (0.86, 0.08, 0.06))
+    observation["confidence"] = 1.2
+
+    with pytest.raises(ValueError, match="confidence values must lie"):
+        detector.update(observation)
+
+
+def test_streaming_detector_rejects_invalid_probabilities_when_inferring_predicted_class():
+    frame = _stream_frame(final_gap=True)
+    thresholds = _thresholds(frame, target_classes=["A"])
+    thresholds["score_mode"] = "predicted_class_confidence"
+    detector = StreamingStimulusDetector(
+        StimulusDetectionConfig(stream_columns=("stream_id",), detection_window=(0.0, float("inf"))),
+        thresholds,
+    )
+    observation = _observation("run-1", 0.10, (0.86, 0.08, 0.06))
+    observation.pop("predicted_label")
+    observation.pop("predicted_class")
+    observation["prob_class_0"] = 0.2
+    observation["prob_class_1"] = 0.2
+    observation["prob_class_2"] = 0.2
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        detector.update(observation)
+
+
 def test_streaming_detector_matches_offline_events_with_causal_confirmation():
     frame = _stream_frame(final_gap=True)
     thresholds = _thresholds(frame)
