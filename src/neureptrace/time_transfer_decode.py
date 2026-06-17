@@ -41,6 +41,8 @@ from neureptrace.mne_time_decode import (
     _load_epochs_and_metadata,
     _model_hash,
     _normalize_baseline_window,
+    _normalize_positive_float,
+    _normalize_positive_int,
     _normalize_temporal_train_window,
     _probability_average,
     _select_temporal_train_windows,
@@ -52,6 +54,36 @@ from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
 EMISSION_RUN_CHOICES = (*EMISSION_MODE_CHOICES, "both")
 TimeWindow = tuple[int, int, float]
+
+
+def _normalize_bool_control(value, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(value, (bool, np.bool_)):
+        if value in {0, 1}:
+            return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value.")
+
+
+def _normalize_optional_time_bound(value, *, name: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite.")
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    return parsed
+
+
+def _check_time_bounds(tmin: float | None, tmax: float | None) -> None:
+    if tmin is not None and tmax is not None and tmax < tmin:
+        raise ValueError("tmax must be greater than or equal to tmin.")
 
 
 def _tuning_metadata(
@@ -301,6 +333,16 @@ def run_time_transfer_decode(
     while metrics, calibration bins, and probability observations are emitted for
     every validation trial/time window.
     """
+
+    tmin = _normalize_optional_time_bound(tmin, name="tmin")
+    tmax = _normalize_optional_time_bound(tmax, name="tmax")
+    _check_time_bounds(tmin, tmax)
+    window_ms = _normalize_positive_float(window_ms, name="window_ms")
+    step_ms = _normalize_positive_float(step_ms, name="step_ms")
+    max_iter = _normalize_positive_int(max_iter, name="max_iter")
+    tune_hyperparameters = _normalize_bool_control(tune_hyperparameters, name="tune_hyperparameters")
+    tuning_cv_splits = _normalize_positive_int(tuning_cv_splits, name="tuning_cv_splits")
+    calibration_bins = _normalize_positive_int(calibration_bins, name="calibration_bins")
 
     train_epochs, _train_metadata, train_labels, validation_epochs, validation_metadata, validation_labels, validation_original_indices, encoder = _load_transfer_inputs(
         train_epochs_path=train_epochs_path,

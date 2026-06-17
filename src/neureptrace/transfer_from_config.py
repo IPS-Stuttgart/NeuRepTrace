@@ -13,7 +13,7 @@ from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 from sklearn.preprocessing import LabelEncoder
 
 from neureptrace.dataset_config import apply_overrides, effective_config, load_config, load_epoch_dataset_from_config
-from neureptrace.decode_from_config import _resolve_output, _section, _window_ms, _write_provenance_sidecars
+from neureptrace.decode_from_config import _bool_value, _resolve_output, _section, _window_ms, _write_provenance_sidecars
 from neureptrace.decoding import (
     make_decoder,
     normalize_decoder_name,
@@ -30,6 +30,7 @@ from neureptrace.mne_time_decode import (
     _apply_epoch_normalization,
     _features_for_window,
     _normalize_baseline_window,
+    _normalize_positive_int,
     _top_k_accuracy,
 )
 from neureptrace.observations import ProbabilityObservationTable, stable_hash
@@ -75,6 +76,22 @@ def _transfer_output_paths(config: Mapping[str, Any], *, config_dir: Path) -> tu
     if summary is None:
         raise ValueError("transfer-from-config requires outputs.summary_csv.")
     return summary, observations
+
+
+def _normalize_optional_time_bound(value: Any, *, name: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite.")
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    return parsed
+
+
+def _check_time_bounds(tmin: float | None, tmax: float | None) -> None:
+    if tmin is not None and tmax is not None and tmax < tmin:
+        raise ValueError("preprocessing.tmax must be greater than or equal to preprocessing.tmin.")
 
 
 def _observation_rows(
@@ -146,7 +163,7 @@ def run_transfer_from_config(
     config_path = Path(config_path)
     config = apply_overrides(load_config(config_path), overrides)
     if write_provenance is not None:
-        config.setdefault("outputs", {})["provenance"] = bool(write_provenance)
+        config.setdefault("outputs", {})["provenance"] = _bool_value(write_provenance, name="write_provenance")
     dataset = load_epoch_dataset_from_config(config, base_dir=config_path.parent, check_files=True)
     preprocessing = _section(config, "preprocessing")
     transfer = _transfer_section(config)
@@ -173,7 +190,10 @@ def run_transfer_from_config(
         transfer.get("feature_preprocessor", preprocessing.get("feature_preprocessor", "none"))
     )
     pca_components = None if feature_preprocessor == "none" else normalize_pca_components(transfer.get("pca_components", preprocessing.get("pca_components")))
-    max_iter = int(transfer.get("max_iter", _section(config, "decoding").get("max_iter", 1000)))
+    max_iter = _normalize_positive_int(
+        transfer.get("max_iter", _section(config, "decoding").get("max_iter", 1000)),
+        name="transfer.max_iter",
+    )
     baseline_window = _normalize_baseline_window(preprocessing.get("baseline_window", DEFAULT_BASELINE_WINDOW))
     data = _apply_epoch_normalization(
         dataset.data,
@@ -187,9 +207,12 @@ def run_transfer_from_config(
         step_ms=_window_ms(preprocessing, key_ms="step_ms", key_seconds="window_step", default=10.0),
     )
     if preprocessing.get("tmin") is not None or preprocessing.get("tmax") is not None:
-        tmin = -np.inf if preprocessing.get("tmin") is None else float(preprocessing.get("tmin"))
-        tmax = np.inf if preprocessing.get("tmax") is None else float(preprocessing.get("tmax"))
-        windows = [window for window in windows if tmin <= window[2] <= tmax]
+        tmin = _normalize_optional_time_bound(preprocessing.get("tmin"), name="preprocessing.tmin")
+        tmax = _normalize_optional_time_bound(preprocessing.get("tmax"), name="preprocessing.tmax")
+        _check_time_bounds(tmin, tmax)
+        lower = -np.inf if tmin is None else tmin
+        upper = np.inf if tmax is None else tmax
+        windows = [window for window in windows if lower <= window[2] <= upper]
     if not windows:
         raise ValueError("No transfer time windows are available after preprocessing time selection.")
 
