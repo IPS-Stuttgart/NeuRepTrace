@@ -213,6 +213,24 @@ def test_stack_probability_observations_rejects_negative_probability_values() ->
         stack_probability_observations(source, target, weighting="stacked", max_iter=120)
 
 
+def test_stack_probability_observations_rejects_probability_values_above_one() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    source.loc[0, "prob_class_0"] = 1.2
+
+    with pytest.raises(ValueError, match="must not exceed 1.0"):
+        stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+
+def test_stack_probability_observations_rejects_unnormalized_probability_rows() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    source.loc[0, ["prob_class_0", "prob_class_1"]] = [0.2, 0.2]
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+
 def test_stack_probability_observations_rejects_source_label_mismatch_with_custom_alignment_keys() -> None:
     source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
     target = _observation_rows(subject="target", labels=[0, 1, 0])

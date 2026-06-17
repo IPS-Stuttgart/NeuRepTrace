@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.onset_detection import (
     annotate_threshold_crossings,
@@ -72,6 +73,18 @@ def test_detect_onsets_finds_first_threshold_crossing():
     assert by_sequence.loc[1, "is_correct_at_detection"]
     assert by_sequence.loc[0, "detection_run_length"] == 2
     assert by_sequence.loc[0, "score_peak_in_run"] == 0.92
+
+
+def test_detect_onsets_rejects_invalid_inferred_probability_scores():
+    frame = _observation_frame().drop(columns=["confidence", "predicted_label", "predicted_class"])
+    frame.loc[0, ["prob_class_0", "prob_class_1"]] = [0.2, 0.2]
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        detect_onsets(
+            frame,
+            threshold_window=(-0.20, -0.10),
+            threshold_quantile=0.875,
+        )
 
 
 def test_detection_start_excludes_baseline_false_alarms():

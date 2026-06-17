@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 EPSILON = 1e-12
+PROBABILITY_SUM_TOLERANCE = 1.0e-3
 MODEL_GROUP_COLUMNS = ("decoder", "emission_mode")
 SEQUENCE_KEY_COLUMN_CANDIDATES = (
     "source_path",
@@ -69,9 +70,18 @@ def _validate_probability_matrix(probabilities: np.ndarray) -> np.ndarray:
         raise ValueError("Probability observations must contain only finite values.")
     if np.any(probability_array < -EPSILON):
         raise ValueError("Probability observations must be non-negative.")
+    if np.any(probability_array > 1.0 + EPSILON):
+        raise ValueError("Probability observations must not exceed 1.0.")
     row_sums = probability_array.sum(axis=1)
     if np.any(row_sums <= EPSILON):
         raise ValueError("Probability observation rows must have positive mass.")
+    bad_rows = np.flatnonzero(np.abs(row_sums - 1.0) > PROBABILITY_SUM_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            "Probability observation rows must sum to 1.0 within tolerance "
+            f"{PROBABILITY_SUM_TOLERANCE:g}; example row sums: {examples}"
+        )
     return probability_array
 
 
