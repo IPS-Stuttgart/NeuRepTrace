@@ -13,8 +13,10 @@ from neureptrace import (  # noqa: E402
     _decoding_regularization_patch,
     _event_detection_extensions,
     _metadata_column_validation_patch,
+    _mne_alignment_calibration_anchor_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
+    _source_alignment_anchor_patch,
 )
 
 _dataset_config_participant_patch.install()
@@ -26,3 +28,5 @@ _decoding_c_grid_patch.install()
 _decoding_probability_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
+_source_alignment_anchor_patch.install()
+_mne_alignment_calibration_anchor_patch.install()

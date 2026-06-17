@@ -517,7 +517,7 @@ def _rescale_group_projection(matrix: np.ndarray, projections, matrices) -> np.n
 
 
 def _class_mean_matrix(features: np.ndarray, labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
-    return np.vstack([np.mean(features[labels == class_label], axis=0) for class_label in classes])
+    return np.vstack([np.mean(features[_label_mask(labels, class_label)], axis=0) for class_label in classes])
 
 
 def _class_repetition_matrix(
@@ -532,7 +532,7 @@ def _class_repetition_matrix(
 ) -> np.ndarray:
     rows = []
     for class_position, class_label in enumerate(classes):
-        class_features = features[labels == class_label]
+        class_features = features[_label_mask(labels, class_label)]
         if class_features.shape[0] < repetitions:
             raise ValueError(f"Class {class_label!r} has only {class_features.shape[0]} repetitions, need {repetitions}.")
         if selected_offsets_by_class is None:
@@ -567,7 +567,7 @@ def _common_repetition_offsets(
 
     offsets = {}
     for class_position, class_label in enumerate(classes):
-        available = min(int(np.sum(labels == class_label)) for labels in labels_by_subject.values())
+        available = min(_count_label(labels, class_label) for labels in labels_by_subject.values())
         if available < repetitions:
             raise ValueError(f"Class {class_label!r} has only {available} common repetitions, need {repetitions}.")
         offsets[class_position] = select_class_limited_indices(
@@ -582,19 +582,65 @@ def _common_repetition_offsets(
 
 def _common_classes(labels_by_subject: Mapping[Hashable, np.ndarray]) -> np.ndarray:
     subject_ids = tuple(labels_by_subject.keys())
-    first_classes = np.unique(labels_by_subject[subject_ids[0]])
+    first_classes = _ordered_unique_labels(labels_by_subject[subject_ids[0]])
     for subject_id in subject_ids[1:]:
-        classes = np.unique(labels_by_subject[subject_id])
-        if not np.array_equal(first_classes, classes):
+        classes = _ordered_unique_labels(labels_by_subject[subject_id])
+        if not _same_label_set(first_classes, classes):
             raise ValueError(f"Subject {subject_id!r} has classes {classes.tolist()}, expected {first_classes.tolist()}.")
     return first_classes
+
+
+def _ordered_unique_labels(labels: Sequence | np.ndarray) -> np.ndarray:
+    """Return unique labels in first-observed order without sorting."""
+
+    values = np.asarray(labels, dtype=object).reshape(-1)
+    unique: list[object] = []
+    for value in values:
+        if not _contains_label(unique, value):
+            unique.append(value)
+    out = np.empty(len(unique), dtype=object)
+    out[:] = unique
+    return out
+
+
+def _same_label_set(left: Sequence | np.ndarray, right: Sequence | np.ndarray) -> bool:
+    left_values = np.asarray(left, dtype=object).reshape(-1)
+    right_values = np.asarray(right, dtype=object).reshape(-1)
+    if left_values.size != right_values.size:
+        return False
+    return all(_contains_label(right_values, value) for value in left_values) and all(
+        _contains_label(left_values, value) for value in right_values
+    )
+
+
+def _contains_label(values: Sequence | np.ndarray, target: object) -> bool:
+    return any(_labels_equal(value, target) for value in values)
+
+
+def _label_mask(labels: Sequence | np.ndarray, target: object) -> np.ndarray:
+    return np.asarray([_labels_equal(label, target) for label in np.asarray(labels, dtype=object).reshape(-1)], dtype=bool)
+
+
+def _count_label(labels: Sequence | np.ndarray, target: object) -> int:
+    return int(np.sum(_label_mask(labels, target)))
+
+
+def _labels_equal(left: object, right: object) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
 
 
 def _common_repetition_count(labels_by_subject: Mapping[Hashable, np.ndarray], classes: np.ndarray, *, requested: int | None) -> int:
     counts = []
     for subject_id, labels in labels_by_subject.items():
         for class_label in classes:
-            count = int(np.sum(labels == class_label))
+            count = _count_label(labels, class_label)
             if count < 1:
                 raise ValueError(f"Subject {subject_id!r} has no samples for class {class_label!r}.")
             counts.append(count)
@@ -672,8 +718,35 @@ def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: s
     return matrix
 
 
+def _object_vector(values: Sequence | np.ndarray) -> np.ndarray:
+    """Return a 1D object vector while preserving tuple-like labels.
+
+    ``np.asarray([(1, 2), (3, 4)], dtype=object)`` still creates a 2D object
+    array because the tuples have a uniform length.  Alignment anchors may be
+    composite metadata keys such as ``(run, stimulus_id)``; flattening those keys
+    changes the row count and can make valid M-CCA anchor labels fail the length
+    check.  Build the object vector via assignment from ``list(values)`` for
+    generic Python sequences so each item remains one scalar label.
+    """
+
+    if isinstance(values, np.ndarray):
+        if values.ndim == 1:
+            return values.astype(object, copy=False).reshape(-1)
+        rows = [tuple(row.tolist()) for row in np.asarray(values, dtype=object).reshape(values.shape[0], -1)]
+        vector = np.empty(len(rows), dtype=object)
+        vector[:] = rows
+        return vector
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
+    return vector
+
+
 def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(labels).ravel()
+    vector = _object_vector(labels)
     if len(vector) != expected_length:
         raise ValueError(f"{name} length must match feature rows: {len(vector)} != {expected_length}.")
     return vector

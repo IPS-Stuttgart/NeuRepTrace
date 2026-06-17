@@ -24,6 +24,10 @@ TARGET_PROJECTION_GROUP_FALLBACKS = {
     "average_projection",
     "source_group_projection",
     "calibration_free_group_projection",
+    "group_projection_target_centered",
+    "source_group_projection_target_centered",
+    "target_centered_group_projection",
+    "unlabeled_target_centered_group_projection",
 }
 
 

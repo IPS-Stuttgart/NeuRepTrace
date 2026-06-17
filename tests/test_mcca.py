@@ -15,6 +15,12 @@ def _synthetic_subjects(seed=13):
     return subjects
 
 
+def _object_label_vector(values):
+    vector = np.empty(len(values), dtype=object)
+    vector[:] = list(values)
+    return vector
+
+
 def test_fit_mcca_recovers_shared_rows():
     subjects = _synthetic_subjects()
     model = fit_mcca(subjects, n_components=3, regularization=1e-5)
@@ -129,6 +135,105 @@ def test_class_alignment_matrix_uses_explicit_class_order():
     assert np.allclose(aligned, [[0.0, 3.0], [2.0, 0.0]])
     with pytest.raises(ValueError, match="absent"):
         class_alignment_matrix(features, labels, classes=np.array([1, 3]), sample_mode="class_mean")
+
+
+def test_target_class_alignment_matrix_preserves_mixed_label_order():
+    features = np.array([[1.0, 0.0], [0.0, 2.0], [3.0, 0.0], [0.0, 4.0]])
+    labels = np.array([1, "stim-b", 1, "stim-b"], dtype=object)
+
+    aligned = class_alignment_matrix(features, labels, sample_mode="class_mean")
+
+    np.testing.assert_allclose(aligned, [[2.0, 0.0], [0.0, 3.0]])
+
+
+def test_class_alignment_matrices_accept_tuple_object_anchor_labels():
+    features = {
+        "a": np.array([[1.0], [3.0], [10.0], [30.0]]),
+        "b": np.array([[101.0], [103.0], [110.0], [130.0]]),
+    }
+    labels = {
+        "a": _object_label_vector(
+            [
+                ("face", "famous"),
+                ("face", "famous"),
+                ("face", "scrambled"),
+                ("face", "scrambled"),
+            ]
+        ),
+        "b": _object_label_vector(
+            [
+                ("face", "famous"),
+                ("face", "famous"),
+                ("face", "scrambled"),
+                ("face", "scrambled"),
+            ]
+        ),
+    }
+
+    mean_alignment = class_alignment_matrices(features, labels, sample_mode="class_mean")
+
+    assert mean_alignment.classes.tolist() == [("face", "famous"), ("face", "scrambled")]
+    np.testing.assert_allclose(mean_alignment.aligned_by_subject["a"], [[2.0], [20.0]])
+    np.testing.assert_allclose(mean_alignment.aligned_by_subject["b"], [[102.0], [120.0]])
+
+    repetition_alignment = class_alignment_matrices(
+        features,
+        labels,
+        sample_mode="class_repetition",
+        n_repetitions_per_class=2,
+        repetition_selection="first",
+    )
+    np.testing.assert_allclose(repetition_alignment.aligned_by_subject["a"].ravel(), [1.0, 3.0, 10.0, 30.0])
+
+
+def test_class_alignment_matrices_accept_numpy_tuple_label_arrays():
+    features = {
+        "a": np.array([[1.0, 0.0], [3.0, 0.0], [0.0, 2.0], [0.0, 4.0]]),
+        "b": np.array([[2.0, 1.0], [4.0, 1.0], [1.0, 3.0], [1.0, 5.0]]),
+    }
+    labels = {
+        "a": np.array(
+            [("run-01", "stim-a"), ("run-01", "stim-a"), ("run-01", "stim-b"), ("run-01", "stim-b")],
+            dtype=object,
+        ),
+        "b": np.array(
+            [("run-01", "stim-a"), ("run-01", "stim-a"), ("run-01", "stim-b"), ("run-01", "stim-b")],
+            dtype=object,
+        ),
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_mean")
+
+    assert alignment.n_alignment_rows == 2
+    assert alignment.classes.tolist() == [("run-01", "stim-a"), ("run-01", "stim-b")]
+    np.testing.assert_allclose(alignment.aligned_by_subject["a"], np.array([[2.0, 0.0], [0.0, 3.0]]))
+    np.testing.assert_allclose(alignment.aligned_by_subject["b"], np.array([[3.0, 1.0], [1.0, 4.0]]))
+
+
+def test_class_alignment_matrices_preserve_tuple_labels_from_plain_sequences():
+    features = {
+        "a": np.array([[1.0], [3.0], [10.0], [30.0]]),
+        "b": np.array([[101.0], [103.0], [110.0], [130.0]]),
+    }
+    labels = {
+        "a": [
+            ("run-01", "famous"),
+            ("run-01", "famous"),
+            ("run-01", "scrambled"),
+            ("run-01", "scrambled"),
+        ],
+        "b": [
+            ("run-01", "famous"),
+            ("run-01", "famous"),
+            ("run-01", "scrambled"),
+            ("run-01", "scrambled"),
+        ],
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_mean")
+
+    assert alignment.classes.tolist() == [("run-01", "famous"), ("run-01", "scrambled")]
+    np.testing.assert_allclose(alignment.aligned_by_subject["a"], [[2.0], [20.0]])
 
 
 def test_class_alignment_matrices_class_repetition_defaults_to_seeded_random():

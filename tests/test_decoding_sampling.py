@@ -48,6 +48,18 @@ def test_select_class_limited_indices_random_is_seeded_by_context():
     assert other_context.tolist() != selected.tolist()
 
 
+def test_select_class_limited_indices_accepts_mixed_hashable_labels():
+    labels = np.array([1, "stim-b", 1, "stim-b", 1, "stim-b"], dtype=object)
+
+    first = select_class_limited_indices(labels, 2, selection="first")
+    random = select_class_limited_indices(labels, 2, selection="random", seed=0)
+    repeated = select_class_limited_indices(labels, 2, selection="random", seed=0)
+
+    assert first.tolist() == [0, 1, 2, 3]
+    assert random.tolist() == repeated.tolist()
+    assert len(random) == 4
+
+
 def test_select_class_limited_indices_validates_inputs():
     with pytest.raises(ValueError, match="max_per_class"):
         select_class_limited_indices([1, 2], 0)

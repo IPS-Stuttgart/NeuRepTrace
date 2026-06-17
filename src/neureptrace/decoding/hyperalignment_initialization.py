@@ -169,6 +169,11 @@ def _fit_mean_initialized_hyperalignment(
         if delta < template_tolerance:
             break
 
+    projections = {
+        subject_id: _orthogonal_procrustes_projection(centered[subject_id], template)
+        for subject_id in subject_ids
+    }
+
     projection_objects = {
         subject_id: SubjectHyperalignmentProjection(
             subject_id=subject_id,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Iterable
 
 import numpy as np
@@ -43,7 +42,7 @@ def select_class_limited_indices(
         while keeping each split reproducible.
     """
 
-    labels = np.asarray(labels).ravel()
+    labels = np.asarray(labels, dtype=object).ravel()
     if max_per_class is None:
         return np.arange(labels.shape[0], dtype=int)
 
@@ -54,21 +53,59 @@ def select_class_limited_indices(
 
     if selection == "first":
         selected = []
-        counts = Counter()
+        counts: list[int] = []
+        seen: list[object] = []
         for index, label in enumerate(labels):
-            if counts[label] < max_per_class:
+            position = _label_position(seen, label)
+            if position is None:
+                seen.append(label)
+                counts.append(0)
+                position = len(seen) - 1
+            if counts[position] < max_per_class:
                 selected.append(index)
-                counts[label] += 1
+                counts[position] += 1
         return np.asarray(selected, dtype=int)
 
     rng = _class_limit_rng(seed, seed_context)
     selected = []
-    for label in np.unique(labels):
-        class_indices = np.flatnonzero(labels == label)
+    for label in _ordered_unique_labels(labels):
+        class_indices = np.flatnonzero(_label_mask(labels, label))
         if class_indices.size > max_per_class:
             class_indices = rng.choice(class_indices, size=max_per_class, replace=False)
         selected.extend(int(index) for index in class_indices)
     return np.asarray(sorted(selected), dtype=int)
+
+
+def _ordered_unique_labels(labels) -> list[object]:
+    """Return labels in first-observed order without sorting or hashing."""
+
+    unique: list[object] = []
+    for label in np.asarray(labels, dtype=object).reshape(-1):
+        if _label_position(unique, label) is None:
+            unique.append(label)
+    return unique
+
+
+def _label_position(labels: list[object], target: object) -> int | None:
+    for index, label in enumerate(labels):
+        if _labels_equal(label, target):
+            return index
+    return None
+
+
+def _label_mask(labels, target: object) -> np.ndarray:
+    return np.asarray([_labels_equal(label, target) for label in np.asarray(labels, dtype=object).reshape(-1)], dtype=bool)
+
+
+def _labels_equal(left: object, right: object) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
 
 
 def normalize_class_limit_selection(value: str) -> str:

@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from neureptrace.decoding.hyperalignment_initialization import (
+    HyperalignmentModel,
     HYPERALIGNMENT_INITIALIZATION_MODES,
     class_alignment_matrix,
     class_alignment_matrices,
@@ -10,6 +11,7 @@ from neureptrace.decoding.hyperalignment_initialization import (
     fit_projection_to_hyperalignment,
     transform_with_projection,
 )
+from neureptrace.decoding.hyperalignment import _orthogonal_procrustes_projection
 from neureptrace.decoding.mcca_target import class_alignment_matrix as target_class_alignment_matrix
 
 
@@ -22,8 +24,25 @@ def _aligned_subjects():
     }
 
 
+def _object_label_vector(values):
+    vector = np.empty(len(values), dtype=object)
+    vector[:] = list(values)
+    return vector
+
+
 def _assert_orthonormal_columns(matrix: np.ndarray) -> None:
     np.testing.assert_allclose(matrix.T @ matrix, np.eye(matrix.shape[1]), atol=1e-10)
+
+
+def _assert_subject_projections_are_fitted_to_stored_template(
+    model: HyperalignmentModel,
+    aligned: dict[str, np.ndarray],
+) -> None:
+    for subject_id, matrix in aligned.items():
+        projection = model.projections[subject_id]
+        centered = matrix - projection.feature_mean
+        expected = _orthogonal_procrustes_projection(centered, model.template)
+        np.testing.assert_allclose(projection.projection, expected, atol=1e-10)
 
 
 def test_mean_initialized_hyperalignment_fits_common_space():
@@ -40,6 +59,14 @@ def test_mean_initialized_hyperalignment_fits_common_space():
     assert model.transform("s1", aligned["s1"]).shape == (6, 3)
 
 
+def test_mean_initialized_hyperalignment_refits_final_projections_to_template():
+    aligned = _aligned_subjects()
+
+    model = fit_hyperalignment(aligned, n_components=3, n_iterations=1, initialization="mean")
+
+    _assert_subject_projections_are_fitted_to_stored_template(model, aligned)
+
+
 def test_pca_initialized_group_projection_is_orthonormalized():
     aligned = _aligned_subjects()
 
@@ -47,6 +74,14 @@ def test_pca_initialized_group_projection_is_orthonormalized():
 
     assert model.group_projection.shape == (4, 3)
     _assert_orthonormal_columns(model.group_projection)
+
+
+def test_pca_initialized_hyperalignment_refits_final_projections_to_template():
+    aligned = _aligned_subjects()
+
+    model = fit_hyperalignment(aligned, n_components=3, n_iterations=1, initialization="pca")
+
+    _assert_subject_projections_are_fitted_to_stored_template(model, aligned)
 
 
 def test_class_hyperalignment_accepts_mean_initialization():
@@ -70,6 +105,87 @@ def test_class_hyperalignment_accepts_mean_initialization():
     assert alignment.repetition_seed == 0
     assert model.template.shape == (6, 3)
     _assert_orthonormal_columns(model.group_projection)
+
+
+def test_hyperalignment_class_alignment_accepts_tuple_object_anchor_labels():
+    features = {
+        "a": np.array([[1.0], [3.0], [10.0], [30.0]]),
+        "b": np.array([[101.0], [103.0], [110.0], [130.0]]),
+    }
+    labels = {
+        "a": _object_label_vector(
+            [
+                ("face", "famous"),
+                ("face", "famous"),
+                ("face", "scrambled"),
+                ("face", "scrambled"),
+            ]
+        ),
+        "b": _object_label_vector(
+            [
+                ("face", "famous"),
+                ("face", "famous"),
+                ("face", "scrambled"),
+                ("face", "scrambled"),
+            ]
+        ),
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_mean")
+
+    assert alignment.classes.tolist() == [("face", "famous"), ("face", "scrambled")]
+    np.testing.assert_allclose(alignment.aligned_by_subject["a"], [[2.0], [20.0]])
+    np.testing.assert_allclose(alignment.aligned_by_subject["b"], [[102.0], [120.0]])
+
+
+def test_hyperalignment_class_alignment_accepts_numpy_tuple_label_arrays():
+    features = {
+        "a": np.array([[1.0, 0.0], [3.0, 0.0], [0.0, 2.0], [0.0, 4.0]]),
+        "b": np.array([[2.0, 1.0], [4.0, 1.0], [1.0, 3.0], [1.0, 5.0]]),
+    }
+    labels = {
+        "a": np.array(
+            [("run-01", "stim-a"), ("run-01", "stim-a"), ("run-01", "stim-b"), ("run-01", "stim-b")],
+            dtype=object,
+        ),
+        "b": np.array(
+            [("run-01", "stim-a"), ("run-01", "stim-a"), ("run-01", "stim-b"), ("run-01", "stim-b")],
+            dtype=object,
+        ),
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_mean")
+
+    assert alignment.n_alignment_rows == 2
+    assert alignment.classes.tolist() == [("run-01", "stim-a"), ("run-01", "stim-b")]
+    np.testing.assert_allclose(alignment.aligned_by_subject["a"], np.array([[2.0, 0.0], [0.0, 3.0]]))
+    np.testing.assert_allclose(alignment.aligned_by_subject["b"], np.array([[3.0, 1.0], [1.0, 4.0]]))
+
+
+def test_hyperalignment_class_alignment_preserves_tuple_labels_from_plain_sequences():
+    features = {
+        "a": np.array([[1.0], [3.0], [10.0], [30.0]]),
+        "b": np.array([[101.0], [103.0], [110.0], [130.0]]),
+    }
+    labels = {
+        "a": [
+            ("run-01", "famous"),
+            ("run-01", "famous"),
+            ("run-01", "scrambled"),
+            ("run-01", "scrambled"),
+        ],
+        "b": [
+            ("run-01", "famous"),
+            ("run-01", "famous"),
+            ("run-01", "scrambled"),
+            ("run-01", "scrambled"),
+        ],
+    }
+
+    alignment = class_alignment_matrices(features, labels, sample_mode="class_mean")
+
+    assert alignment.classes.tolist() == [("run-01", "famous"), ("run-01", "scrambled")]
+    np.testing.assert_allclose(alignment.aligned_by_subject["a"], [[2.0], [20.0]])
 
 
 def test_hyperalignment_class_repetition_uses_common_offsets_when_counts_differ():

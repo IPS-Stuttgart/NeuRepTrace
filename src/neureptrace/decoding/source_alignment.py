@@ -13,7 +13,7 @@ bound that is not valid for benchmark claims.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -23,6 +23,7 @@ from neureptrace.decoding.hyperalignment_initialization import fit_class_hyperal
 from neureptrace.decoding.hyperalignment_initialization import fit_projection_to_hyperalignment
 from neureptrace.decoding.hyperalignment_initialization import transform_with_projection
 from neureptrace.decoding.mcca import fit_class_mcca
+from neureptrace.decoding.mcca_target import fit_target_mcca_projection
 from neureptrace.decoding.sampling import DEFAULT_CLASS_LIMIT_SEED, DEFAULT_CLASS_LIMIT_SELECTION, select_class_limited_indices
 
 SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS = ("procrustes", "hyperalignment", "mcca")
@@ -44,8 +45,10 @@ SOURCE_ALIGNMENT_ANCHOR_MODES = (*SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES, *SOURCE_A
 TARGET_CALIBRATED_ALIGNMENT = "target_calibrated_alignment"
 ORACLE_TARGET_CALIBRATED_ALIGNMENT = "oracle_target_calibrated_alignment"
 PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT = "pseudo_label_target_calibrated_alignment"
+GROUP_PROJECTION_TARGET_CENTERED = "group_projection_target_centered"
 SOURCE_ALIGNMENT_TARGET_PROJECTIONS = (
     "group_projection",
+    GROUP_PROJECTION_TARGET_CENTERED,
     TARGET_CALIBRATED_ALIGNMENT,
     ORACLE_TARGET_CALIBRATED_ALIGNMENT,
     PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT,
@@ -64,6 +67,19 @@ DEFAULT_ALIGNMENT_REPETITION_CAP = 16
 DEFAULT_ALIGNMENT_COMPONENTS = 64
 MAX_FULL_COVARIANCE_FEATURES = 256
 MIN_COVARIANCE_EIGENVALUE = 1e-6
+MISSING_ANCHOR_TEXT_VALUES = frozenset(
+    {
+        "",
+        "<na>",
+        "<nat>",
+        "na",
+        "n/a",
+        "nan",
+        "nat",
+        "none",
+        "null",
+    }
+)
 ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "dataset",
     "test_subject",
@@ -83,6 +99,7 @@ ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "decode_window_size",
     "uses_channel_projection_collapse",
     "alignment_dimensionality_reduction",
+    "alignment_low_rank_warning",
     "anchor_row_correlation_before",
     "anchor_row_correlation_after",
     "source_inner_decoding_before_alignment",
@@ -107,6 +124,7 @@ ALIGNMENT_DIAGNOSTIC_COLUMNS = (
     "alignment_pseudo_label_target_calibrated",
     "alignment_debug_upper_bound",
     "alignment_valid_for_benchmark",
+    "alignment_valid_for_strict_source_only",
     "alignment_protocol",
     "alignment_protocol_note",
 )
@@ -148,6 +166,7 @@ ALIGNMENT_ANCHOR_AVAILABILITY_COLUMNS = (
     "target_calibration_missing_common_anchor_values_preview",
     "prefit_status",
     "prefit_failure_reason",
+    "prefit_failure_detail",
     "alignment_window_center",
     "alignment_window_size",
     "decode_window_center",
@@ -193,11 +212,19 @@ class SourceAlignmentConfig:
     def fits_target_projection(self) -> bool:
         return self.oracle_target_calibrated or self.target_calibrated or self.pseudo_label_target_calibrated
 
+    @property
+    def target_centered_group_projection(self) -> bool:
+        return self.enabled and self.target_projection == GROUP_PROJECTION_TARGET_CENTERED
+
     def static_metadata(self) -> dict[str, Any]:
         oracle = self.oracle_target_calibrated
         target_calibrated = self.target_calibrated
         pseudo_label_target_calibrated = self.pseudo_label_target_calibrated
         unsupervised = _uses_unlabeled_covariance_alignment(self.method)
+        target_centered = self.target_centered_group_projection
+        uses_unlabeled_target = bool(unsupervised or target_centered or pseudo_label_target_calibrated)
+        valid_for_strict_source_only = bool(not oracle and not target_calibrated and not uses_unlabeled_target)
+        valid_for_benchmark = bool(not oracle and not target_calibrated and not unsupervised and not target_centered)
         return {
             "alignment_method": self.method,
             "alignment_anchor_mode": self.anchor_mode,
@@ -213,9 +240,10 @@ class SourceAlignmentConfig:
             "alignment_same_decode_window": bool(self.same_decode_window),
             "alignment_target_projection": self.target_projection,
             "alignment_strict_source_only": bool(
-                self.enabled and not oracle and not target_calibrated and not pseudo_label_target_calibrated and not unsupervised
+                self.enabled and not oracle and not target_calibrated and not unsupervised and not target_centered
+                and not pseudo_label_target_calibrated
             ),
-            "alignment_uses_unlabeled_target_data": bool(unsupervised or pseudo_label_target_calibrated),
+            "alignment_uses_unlabeled_target_data": uses_unlabeled_target,
             "alignment_uses_class_labels": bool(
                 self.method in SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS
                 and self.anchor_mode in SOURCE_ALIGNMENT_CLASS_ANCHOR_MODES
@@ -226,7 +254,8 @@ class SourceAlignmentConfig:
             "alignment_oracle_target_calibrated": bool(oracle),
             "alignment_pseudo_label_target_calibrated": bool(pseudo_label_target_calibrated),
             "alignment_debug_upper_bound": bool(oracle),
-            "alignment_valid_for_benchmark": bool(not oracle and not target_calibrated),
+            "alignment_valid_for_benchmark": valid_for_benchmark,
+            "alignment_valid_for_strict_source_only": valid_for_strict_source_only,
             "alignment_protocol": (
                 ORACLE_TARGET_CALIBRATED_ALIGNMENT
                 if oracle
@@ -236,6 +265,8 @@ class SourceAlignmentConfig:
                 if pseudo_label_target_calibrated
                 else "unlabeled_target_covariance_alignment"
                 if unsupervised
+                else GROUP_PROJECTION_TARGET_CENTERED
+                if target_centered
                 else "strict_source_only"
             ),
             "alignment_protocol_note": (
@@ -245,6 +276,10 @@ class SourceAlignmentConfig:
                 if target_calibrated
                 else "uses target features with classifier-generated pseudo labels; category-2 transductive adaptation"
                 if pseudo_label_target_calibrated
+                else "uses unlabeled target covariance; report separately from strict source-only alignment"
+                if unsupervised
+                else "uses unlabeled target feature mean; report separately from strict source-only alignment"
+                if target_centered
                 else ""
             ),
         }
@@ -317,6 +352,15 @@ def normalize_source_alignment_anchor_mode(anchor_mode: str | None) -> str:
 
 def normalize_source_alignment_target_projection(target_projection: str | None) -> str:
     normalized = "group_projection" if target_projection is None else str(target_projection).strip().lower().replace("-", "_")
+    if normalized in {
+        "target_centered_group_projection",
+        "target_centered_group",
+        "group_target_centered",
+        "group_projection_target_mean",
+        "target_mean_group_projection",
+        "unlabeled_target_centered_group_projection",
+    }:
+        normalized = GROUP_PROJECTION_TARGET_CENTERED
     if normalized in {"target", "target_calibrated", "target_calibration", "calibrated_target"}:
         normalized = TARGET_CALIBRATED_ALIGNMENT
     if normalized in {"oracle", "oracle_target", "oracle_target_calibrated"}:
@@ -343,6 +387,9 @@ def parse_alignment_times(times: Sequence[float] | str | None) -> tuple[tuple[fl
             return (), True
         if text.startswith("[") and text.endswith("]"):
             text = text[1:-1]
+        # static metadata serializes fixed alignment times with "|"; accepting
+        # it here lets provenance/config override values round-trip cleanly.
+        text = text.replace("|", ",").replace(";", ",")
         parts = [part.strip() for chunk in text.split(",") for part in chunk.split() if part.strip()]
         values = tuple(float(part) for part in parts)
     else:
@@ -448,8 +495,13 @@ def source_alignment_config(
         raise ValueError("alignment hyperalignment_iterations must be positive.")
     if config.mcca_regularization < 0 or not np.isfinite(config.mcca_regularization):
         raise ValueError("alignment mcca_regularization must be finite and non-negative.")
-    if _uses_unlabeled_covariance_alignment(config.method) and config.fits_target_projection:
-        raise ValueError("Unsupervised covariance alignment uses unlabeled target data and does not support target-calibrated projections.")
+    if _uses_unlabeled_covariance_alignment(config.method) and (
+        config.fits_target_projection or config.target_centered_group_projection
+    ):
+        raise ValueError(
+            "Unsupervised covariance alignment uses unlabeled target data and does not support "
+            "target-calibrated projections or target-centered projections."
+        )
     return config
 
 
@@ -534,9 +586,9 @@ def align_train_test_features(
         if target_calibration_features is None
         else _feature_matrix(target_calibration_features, name="target_calibration_features")
     )
-    train_vector = np.asarray(train_labels).reshape(-1)
+    train_vector = _anchor_value_vector(train_labels)
     subject_vector = np.asarray(train_subject_ids, dtype=object).reshape(-1)
-    target_vector = None if target_labels is None else np.asarray(target_labels).reshape(-1)
+    target_vector = None if target_labels is None else _anchor_value_vector(target_labels)
     train_anchor_vector = (
         np.empty(train_matrix.shape[0], dtype=object)
         if unsupervised_alignment
@@ -556,7 +608,7 @@ def align_train_test_features(
         )
     )
     target_calibration_label_vector = (
-        None if target_calibration_labels is None else np.asarray(target_calibration_labels).reshape(-1)
+        None if target_calibration_labels is None else _anchor_value_vector(target_calibration_labels)
     )
     target_calibration_anchor_vector = (
         None
@@ -612,6 +664,7 @@ def align_train_test_features(
                 "alignment_repetitions_per_class": "",
                 "alignment_target_alignment_rows": "",
                 "alignment_target_projection_fit": "",
+                "alignment_low_rank_warning": "",
                 "alignment_target_labels_used": False,
                 "alignment_target_anchor_values_used": False,
             },
@@ -627,11 +680,14 @@ def align_train_test_features(
     anchors_by_subject = {subject_id: train_anchor_vector[subject_vector == subject_id] for subject_id in subject_ids}
     sample_mode = _alignment_sample_mode(config.anchor_mode)
     if unsupervised_alignment:
-        train_aligned, test_aligned, covariance_metadata = _transform_unsupervised_covariance_alignment(
+        train_aligned_by_subject, test_aligned, covariance_metadata = _transform_unsupervised_covariance_alignment_by_subject(
             features_by_subject,
             test_matrix,
             method=config.method,
         )
+        train_aligned = np.empty((train_matrix.shape[0], test_aligned.shape[1]), dtype=float)
+        for subject_id in subject_ids:
+            train_aligned[subject_vector == subject_id] = train_aligned_by_subject[subject_id]
         source_inner_raw_ba = float("nan")
         source_inner_aligned_ba = float("nan")
         if compute_source_inner_diagnostics:
@@ -658,6 +714,7 @@ def align_train_test_features(
             "decode_feature_dim": int(test_aligned.shape[1]),
             "uses_channel_projection_collapse": False,
             "alignment_dimensionality_reduction": bool(test_aligned.shape[1] < train_matrix.shape[1]),
+            "alignment_low_rank_warning": "",
             "anchor_row_correlation_before": "",
             "anchor_row_correlation_after": "",
             "source_inner_decoding_before_alignment": _finite_or_blank(source_inner_raw_ba),
@@ -690,6 +747,7 @@ def align_train_test_features(
                 "alignment_repetitions_per_class": "",
                 "alignment_target_alignment_rows": int(test_matrix.shape[0]),
                 "alignment_target_projection_fit": covariance_metadata["target_transform_type"],
+                "alignment_low_rank_warning": "",
                 "alignment_target_labels_used": False,
                 "alignment_target_anchor_values_used": False,
                 **covariance_metadata,
@@ -740,6 +798,7 @@ def align_train_test_features(
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
+                selected_offsets_by_class=alignment.selected_offsets_by_class,
             )
             target_projection = fit_projection_to_hyperalignment(target_anchors, template=model.template)
             transformed_test = transform_with_projection(test_matrix, target_projection)
@@ -752,9 +811,14 @@ def align_train_test_features(
                 else "template_procrustes"
             )
         else:
-            transformed_test = model.transform_group(test_matrix)
+            target_feature_mean = np.mean(test_matrix, axis=0) if config.target_centered_group_projection else None
+            transformed_test = model.transform_group(test_matrix, feature_mean=target_feature_mean)
             target_alignment_rows = ""
-            target_projection_fit = "source_group_projection"
+            target_projection_fit = (
+                "source_group_projection_target_centered"
+                if config.target_centered_group_projection
+                else "source_group_projection"
+            )
     elif config.method == "mcca":
         if config.fits_target_projection:
             projection_features = (
@@ -773,14 +837,15 @@ def align_train_test_features(
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
+                selected_offsets_by_class=alignment.selected_offsets_by_class,
             )
-            target_mean, target_projection = _fit_target_projection_to_template(
+            target_projection = fit_target_mcca_projection(
                 target_anchors,
-                model.component_scores,
+                model,
                 regularization=config.mcca_regularization,
             )
-            transformed_test = (test_matrix - target_mean) @ target_projection
-            target_alignment_rows = int(target_anchors.shape[0])
+            transformed_test = target_projection.transform(test_matrix)
+            target_alignment_rows = int(target_projection.n_alignment_rows)
             target_projection_fit = (
                 "pseudo_label_template_ridge_least_squares"
                 if config.pseudo_label_target_calibrated
@@ -789,9 +854,14 @@ def align_train_test_features(
                 else "template_ridge_least_squares"
             )
         else:
-            transformed_test = model.transform_group(test_matrix)
+            target_feature_mean = np.mean(test_matrix, axis=0) if config.target_centered_group_projection else None
+            transformed_test = model.transform_group(test_matrix, feature_mean=target_feature_mean)
             target_alignment_rows = ""
-            target_projection_fit = "source_group_projection"
+            target_projection_fit = (
+                "source_group_projection_target_centered"
+                if config.target_centered_group_projection
+                else "source_group_projection"
+            )
     else:  # pragma: no cover - guarded by normalization
         raise ValueError(f"Unsupported source alignment method: {config.method}")
     n_alignment_rows = int(next(iter(fit.anchor_before.values())).shape[0])
@@ -800,6 +870,7 @@ def align_train_test_features(
         if np.isfinite(source_inner_aligned_ba) and np.isfinite(source_inner_raw_ba)
         else float("nan")
     )
+    low_rank_warning = _alignment_low_rank_warning(alignment)
     diagnostics = {
         "alignment_method": config.method,
         "sample_mode": sample_mode,
@@ -813,6 +884,7 @@ def align_train_test_features(
         "decode_feature_dim": int(transformed_test.shape[1]),
         "uses_channel_projection_collapse": False,
         "alignment_dimensionality_reduction": bool(transformed_test.shape[1] < train_matrix.shape[1]),
+        "alignment_low_rank_warning": low_rank_warning,
         "anchor_row_correlation_before": _finite_or_blank(_mean_pairwise_anchor_row_correlation(fit.anchor_before)),
         "anchor_row_correlation_after": _finite_or_blank(_mean_pairwise_anchor_row_correlation(fit.anchor_after)),
         "source_inner_decoding_before_alignment": _finite_or_blank(source_inner_raw_ba),
@@ -820,10 +892,13 @@ def align_train_test_features(
         "source_inner_raw_balanced_accuracy": _finite_or_blank(source_inner_raw_ba),
         "source_inner_aligned_balanced_accuracy": _finite_or_blank(source_inner_aligned_ba),
         "source_inner_aligned_minus_raw": _finite_or_blank(source_inner_gain),
-        "source_inner_validation_type": (
-            "strict_source_loso_nearest_centroid_group_projection" if compute_source_inner_diagnostics else ""
+        "source_inner_validation_type": _source_inner_validation_type(
+            config,
+            compute_source_inner_diagnostics=compute_source_inner_diagnostics,
         ),
-        "uses_unlabeled_target_data": bool(config.pseudo_label_target_calibrated),
+        "uses_unlabeled_target_data": bool(
+            config.pseudo_label_target_calibrated or config.target_centered_group_projection
+        ),
         "covariance_alignment_estimator": "",
         "target_transform_type": target_projection_fit,
     }
@@ -843,6 +918,7 @@ def align_train_test_features(
             "alignment_repetitions_per_class": "" if alignment.n_repetitions_per_class is None else int(alignment.n_repetitions_per_class),
             "alignment_target_alignment_rows": target_alignment_rows,
             "alignment_target_projection_fit": target_projection_fit,
+            "alignment_low_rank_warning": low_rank_warning,
             "alignment_target_labels_used": bool(
                 (config.oracle_target_calibrated and target_labels is not None)
                 or (config.target_calibrated and target_calibration_labels is not None)
@@ -896,7 +972,7 @@ def source_alignment_anchor_availability(
         row["prefit_status"] = "alignment_disabled"
         return row
 
-    train_vector = np.asarray(train_labels, dtype=object).reshape(-1)
+    train_vector = _anchor_value_vector(train_labels)
     subject_vector = np.asarray(train_subject_ids, dtype=object).reshape(-1)
     if train_vector.shape[0] != subject_vector.shape[0]:
         raise ValueError("train_labels and train_subject_ids must have the same row count.")
@@ -925,26 +1001,32 @@ def source_alignment_anchor_availability(
         row["prefit_failure_reason"] = ";".join(failures)
         return row
 
-    train_anchor_vector = _anchor_vector(
-        train_anchor_values,
-        expected_length=train_vector.shape[0],
-        name="train_anchor_values",
-    )
+    try:
+        train_anchor_vector = _anchor_vector(
+            train_anchor_values,
+            expected_length=train_vector.shape[0],
+            name="train_anchor_values",
+        )
+    except ValueError as exc:
+        failures.append("invalid_train_anchor_values")
+        row["prefit_status"] = "likely_fit_failure"
+        row["prefit_failure_reason"] = ";".join(dict.fromkeys(failures))
+        row["prefit_failure_detail"] = str(exc)
+        return row
     if len(subject_ids) < 2:
         failures.append("strict_source_alignment_requires_at_least_two_source_subjects")
     anchors_by_subject = {subject_id: train_anchor_vector[subject_vector == subject_id] for subject_id in subject_ids}
-    unique_counts = [int(np.unique(anchors).size) for anchors in anchors_by_subject.values()]
+    unique_counts = [int(_ordered_unique_anchor_values(anchors).size) for anchors in anchors_by_subject.values()]
     common_anchors = _common_anchor_values(anchors_by_subject) if subject_ids else np.asarray([], dtype=object)
-    common_set = set(common_anchors.tolist())
     common_counts = [
-        int(np.sum(np.asarray([anchor in common_set for anchor in anchors], dtype=bool)))
+        int(np.sum(np.asarray([_contains_anchor_value(common_anchors, anchor) for anchor in anchors], dtype=bool)))
         for anchors in anchors_by_subject.values()
     ]
     retained_rows = int(sum(common_counts))
     total_rows = int(train_anchor_vector.shape[0])
     row.update(
         {
-            "n_source_anchor_values": int(np.unique(train_anchor_vector).size),
+            "n_source_anchor_values": int(_ordered_unique_anchor_values(train_anchor_vector).size),
             "n_common_source_anchors": int(common_anchors.size),
             "common_source_anchor_values_preview": _preview_values(common_anchors),
             "source_anchor_rows_total": total_rows,
@@ -968,8 +1050,11 @@ def source_alignment_anchor_availability(
     )
     row["estimated_alignment_rows"] = estimated_rows
     row["estimated_repetitions_per_anchor"] = estimated_repetitions
-    if config.method == "mcca" and estimated_rows != "" and int(estimated_rows) < 2:
-        failures.append("mcca_requires_at_least_two_aligned_rows")
+    if config.method in SOURCE_ALIGNMENT_CLASS_ANCHORED_METHODS and estimated_rows != "" and int(estimated_rows) < 2:
+        failures.append(f"{config.method}_requires_at_least_two_aligned_rows")
+    required_projection_repetitions = (
+        int(estimated_repetitions) if isinstance(estimated_repetitions, (int, np.integer)) else None
+    )
 
     if config.fits_target_projection:
         projection_labels = (
@@ -991,6 +1076,7 @@ def source_alignment_anchor_availability(
             projection_anchors=projection_anchors,
             common_anchors=common_anchors,
             failures=failures,
+            required_repetitions_per_anchor=required_projection_repetitions,
         )
 
     row["prefit_status"] = "likely_fit_failure" if failures else "ok"
@@ -1005,72 +1091,81 @@ def _target_alignment_matrix(
     classes: np.ndarray,
     config: SourceAlignmentConfig,
     n_repetitions_per_class: int | None,
+    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None = None,
 ) -> np.ndarray:
     if labels is None:  # guarded earlier, but this keeps type-checkers honest
         raise ValueError("Target projection alignment requires target labels or anchor values.")
-    labels = np.asarray(labels).reshape(-1)
+    labels = _anchor_value_vector(labels)
     if labels.shape[0] != features.shape[0]:
         raise ValueError("target alignment anchors must have the same row count as target features.")
-    missing = [class_label for class_label in classes if not np.any(labels == class_label)]
+    missing = [class_label for class_label in classes if not np.any(_anchor_mask(labels, class_label))]
     if missing:
         raise ValueError(f"Target subject is missing alignment anchors: {missing!r}.")
     if _alignment_sample_mode(config.anchor_mode) == "class_mean":
-        return np.vstack([np.mean(features[labels == class_label], axis=0) for class_label in classes])
+        return np.vstack([np.mean(features[_anchor_mask(labels, class_label)], axis=0) for class_label in classes])
 
     if n_repetitions_per_class is None:
         raise ValueError("class_repetition oracle target alignment requires a repetition count.")
+    repetitions = int(n_repetitions_per_class)
+    selected_offsets = _normalize_target_repetition_offsets(
+        selected_offsets_by_class,
+        labels=labels,
+        classes=classes,
+        n_repetitions_per_class=repetitions,
+    )
     rows = []
     for class_position, class_label in enumerate(classes):
-        class_features = features[labels == class_label]
-        if class_features.shape[0] < n_repetitions_per_class:
+        class_features = features[_anchor_mask(labels, class_label)]
+        if class_features.shape[0] < repetitions:
             raise ValueError(
                 f"Target class {class_label!r} has only {class_features.shape[0]} repetitions, "
-                f"need {n_repetitions_per_class}."
+                f"need {repetitions}."
             )
-        selected = select_class_limited_indices(
-            np.zeros(class_features.shape[0], dtype=int),
-            int(n_repetitions_per_class),
-            selection=DEFAULT_CLASS_LIMIT_SELECTION,
-            seed=DEFAULT_CLASS_LIMIT_SEED,
-            seed_context=class_position,
-        )
+        if selected_offsets is None:
+            selected = select_class_limited_indices(
+                np.zeros(class_features.shape[0], dtype=int),
+                repetitions,
+                selection=DEFAULT_CLASS_LIMIT_SELECTION,
+                seed=config.target_calibration_seed
+                if config.target_calibrated
+                else DEFAULT_CLASS_LIMIT_SEED,
+                seed_context=class_position,
+            )
+        else:
+            selected = selected_offsets[class_position]
         rows.extend(class_features[selected])
     return np.vstack(rows)
 
 
-def _fit_target_projection_to_template(
-    features: np.ndarray,
-    template: np.ndarray,
+def _normalize_target_repetition_offsets(
+    selected_offsets_by_class: Mapping[int, Sequence[int] | np.ndarray] | None,
     *,
-    regularization: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Fit a target-subject linear projection to an existing common template.
-
-    This intentionally uses target labels/anchors and is therefore only suitable
-    for the oracle debug upper bound.
-    """
-
-    matrix = _feature_matrix(features, name="target_alignment_features")
-    template_matrix = _feature_matrix(template, name="target_alignment_template")
-    if matrix.shape[0] != template_matrix.shape[0]:
-        raise ValueError(
-            "target alignment features and template must have the same row count: "
-            f"{matrix.shape[0]} != {template_matrix.shape[0]}."
-        )
-    mean = np.mean(matrix, axis=0)
-    centered = matrix - mean
-    ridge = float(regularization)
-    if ridge < 0 or not np.isfinite(ridge):
-        raise ValueError("target projection regularization must be finite and non-negative.")
-    dual = centered @ centered.T
-    if ridge > 0:
-        dual = dual + ridge * np.eye(dual.shape[0])
-    try:
-        coefficients = np.linalg.solve(dual, template_matrix)
-    except np.linalg.LinAlgError:
-        coefficients = np.linalg.pinv(dual) @ template_matrix
-    projection = centered.T @ coefficients
-    return mean, projection
+    labels: np.ndarray,
+    classes: np.ndarray,
+    n_repetitions_per_class: int,
+) -> dict[int, np.ndarray] | None:
+    if selected_offsets_by_class is None:
+        return None
+    normalized: dict[int, np.ndarray] = {}
+    for class_position, class_label in enumerate(classes):
+        try:
+            offsets = np.asarray(selected_offsets_by_class[class_position], dtype=int)
+        except KeyError as exc:
+            raise ValueError(f"selected_offsets_by_class is missing class position {class_position}.") from exc
+        if offsets.ndim != 1:
+            raise ValueError("selected_offsets_by_class entries must be one-dimensional.")
+        if offsets.size != n_repetitions_per_class:
+            raise ValueError(
+                "selected_offsets_by_class entries must match n_repetitions_per_class: "
+                f"{offsets.size} != {n_repetitions_per_class}."
+            )
+        class_count = _count_anchor_value(labels, class_label)
+        if offsets.size and (int(np.min(offsets)) < 0 or int(np.max(offsets)) >= class_count):
+            raise ValueError(
+                f"selected offsets for class {class_label!r} are outside the target subject's available repetitions."
+            )
+        normalized[class_position] = offsets
+    return normalized
 
 
 def _fit_source_alignment_model(
@@ -1088,6 +1183,7 @@ def _fit_source_alignment_model(
         external_anchor_mode=external_anchor_mode,
     )
     n_repetitions = _effective_repetitions_per_class(fit_anchors_by_subject, sample_mode, config)
+    repetition_selection = _source_alignment_repetition_selection(config, sample_mode)
 
     if config.method in {"procrustes", "hyperalignment"}:
         iterations = 1 if config.method == "procrustes" else config.hyperalignment_iterations
@@ -1096,6 +1192,7 @@ def _fit_source_alignment_model(
             fit_anchors_by_subject,
             sample_mode=sample_mode,
             n_repetitions_per_class=n_repetitions,
+            repetition_selection=repetition_selection,
             n_components=config.components,
             n_iterations=iterations,
             initialization="mean" if config.method == "procrustes" else "pca",
@@ -1106,6 +1203,7 @@ def _fit_source_alignment_model(
             fit_anchors_by_subject,
             sample_mode=sample_mode,
             n_repetitions_per_class=n_repetitions,
+            repetition_selection=repetition_selection,
             n_components=config.components,
             regularization=config.mcca_regularization,
             subject_pca_components=config.mcca_subject_pca_components,
@@ -1133,39 +1231,57 @@ def _transform_unsupervised_covariance_alignment(
     *,
     method: str,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    transformed_by_subject, transformed_test, metadata = _transform_unsupervised_covariance_alignment_by_subject(
+        features_by_subject,
+        test_features,
+        method=method,
+    )
+    subject_ids = tuple(features_by_subject)
+    return np.vstack([transformed_by_subject[subject_id] for subject_id in subject_ids]), transformed_test, metadata
+
+
+def _transform_unsupervised_covariance_alignment_by_subject(
+    features_by_subject: Mapping[Hashable, np.ndarray],
+    test_features: np.ndarray,
+    *,
+    method: str,
+) -> tuple[dict[Hashable, np.ndarray], np.ndarray, dict[str, Any]]:
     subject_ids = tuple(features_by_subject)
     target_stats = _covariance_stats(test_features)
     pooled_source = np.vstack([features_by_subject[subject_id] for subject_id in subject_ids])
     source_stats = _covariance_stats(pooled_source)
     estimators = {target_stats.estimator, source_stats.estimator}
-    transformed_by_subject: list[np.ndarray] = []
+    transformed_by_subject: dict[Hashable, np.ndarray] = {}
 
     if method in {"euclidean", "subject_sensor_covariance"}:
         for subject_id in subject_ids:
             stats = _covariance_stats(features_by_subject[subject_id])
             estimators.add(stats.estimator)
-            transformed_by_subject.append(_covariance_whiten(features_by_subject[subject_id], stats))
+            transformed_by_subject[subject_id] = _covariance_whiten(features_by_subject[subject_id], stats)
         transformed_test = _covariance_whiten(test_features, target_stats)
         target_transform_type = "unlabeled_target_covariance_whitening"
     elif method == "coral":
         for subject_id in subject_ids:
             stats = _covariance_stats(features_by_subject[subject_id])
             estimators.add(stats.estimator)
-            transformed_by_subject.append(_covariance_recolor(_covariance_whiten(features_by_subject[subject_id], stats), target_stats))
+            transformed_by_subject[subject_id] = _covariance_recolor(
+                _covariance_whiten(features_by_subject[subject_id], stats),
+                target_stats,
+            )
         transformed_test = np.asarray(test_features, dtype=float)
         target_transform_type = "unlabeled_target_covariance_recoloring"
     elif method == "target_baseline_covariance":
-        transformed_by_subject = [
-            _covariance_recolor(_covariance_whiten(features_by_subject[subject_id], source_stats), target_stats)
+        transformed_by_subject = {
+            subject_id: _covariance_recolor(_covariance_whiten(features_by_subject[subject_id], source_stats), target_stats)
             for subject_id in subject_ids
-        ]
+        }
         transformed_test = np.asarray(test_features, dtype=float)
         target_transform_type = "unlabeled_target_pooled_source_to_target_covariance"
     else:  # pragma: no cover - guarded by normalization
         raise ValueError(f"Unsupported unsupervised covariance alignment method: {method}.")
 
     return (
-        np.vstack(transformed_by_subject),
+        transformed_by_subject,
         transformed_test,
         {
             "alignment_uses_unlabeled_target_data": True,
@@ -1219,19 +1335,27 @@ def _effective_repetitions_per_class(
     if sample_mode != "class_repetition":
         return None
     subject_ids = tuple(labels_by_subject)
-    first_classes = np.unique(labels_by_subject[subject_ids[0]])
+    first_classes = _ordered_unique_anchor_values(labels_by_subject[subject_ids[0]])
     counts = []
     for subject_id in subject_ids:
-        classes = np.unique(labels_by_subject[subject_id])
-        if not np.array_equal(first_classes, classes):
+        classes = _ordered_unique_anchor_values(labels_by_subject[subject_id])
+        if not _same_anchor_value_set(first_classes, classes):
             raise ValueError(f"Subject {subject_id!r} does not contain the common alignment classes.")
-        counts.extend(int(np.sum(labels_by_subject[subject_id] == class_label)) for class_label in first_classes)
+        counts.extend(_count_anchor_value(labels_by_subject[subject_id], class_label) for class_label in first_classes)
     available = min(counts)
     if available < 1:
         raise ValueError("Every source subject must have at least one sample per alignment class.")
-    if config.repetition_cap is None:
-        return int(available)
-    return int(min(available, int(config.repetition_cap)))
+    repetition_cap = available if config.repetition_cap is None else int(config.repetition_cap)
+    calibration_cap = int(config.target_calibration_per_anchor) if config.target_calibrated else available
+    return int(min(available, repetition_cap, calibration_cap))
+
+
+def _source_alignment_repetition_selection(config: SourceAlignmentConfig, sample_mode: str) -> str:
+    """Return source-anchor repetition selection for class-repetition alignment."""
+
+    if sample_mode == "class_repetition" and config.target_calibrated:
+        return "first"
+    return DEFAULT_CLASS_LIMIT_SELECTION
 
 
 def _source_alignment_fit_inputs(
@@ -1254,12 +1378,11 @@ def _source_alignment_fit_inputs(
     common_anchors = _common_anchor_values(anchors_by_subject)
     if len(common_anchors) < 1:
         raise ValueError("No common source alignment anchors are shared by every source subject.")
-    common = set(common_anchors.tolist())
     fit_features: dict[Hashable, np.ndarray] = {}
     fit_anchors: dict[Hashable, np.ndarray] = {}
     used_rows = 0
     for subject_id, anchors in anchors_by_subject.items():
-        mask = np.asarray([anchor in common for anchor in anchors], dtype=bool)
+        mask = np.asarray([_contains_anchor_value(common_anchors, anchor) for anchor in anchors], dtype=bool)
         if not np.any(mask):
             raise ValueError(f"Subject {subject_id!r} has no rows after common alignment-anchor filtering.")
         fit_features[subject_id] = features_by_subject[subject_id][mask]
@@ -1279,11 +1402,81 @@ def _common_anchor_values(anchors_by_subject: Mapping[Hashable, np.ndarray]) -> 
     subject_ids = tuple(anchors_by_subject)
     if not subject_ids:
         raise ValueError("At least one source subject is required for anchor intersection.")
-    first = np.unique(anchors_by_subject[subject_ids[0]])
-    common = set(first.tolist())
-    for subject_id in subject_ids[1:]:
-        common &= set(np.unique(anchors_by_subject[subject_id]).tolist())
-    return np.asarray([anchor for anchor in first if anchor in common], dtype=object)
+    first = _ordered_unique_anchor_values(anchors_by_subject[subject_ids[0]])
+    other_unique = {
+        subject_id: _ordered_unique_anchor_values(anchors_by_subject[subject_id])
+        for subject_id in subject_ids[1:]
+    }
+    return _object_value_vector(
+        anchor for anchor in first if all(_contains_anchor_value(values, anchor) for values in other_unique.values())
+    )
+
+
+def _ordered_unique_anchor_values(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    """Return unique anchor values in first-observed order without sorting."""
+
+    vector = _anchor_value_vector(values)
+    unique: list[object] = []
+    for value in vector:
+        if not _contains_anchor_value(unique, value):
+            unique.append(value)
+    return _object_value_vector(unique)
+
+
+def _contains_anchor_value(values: Sequence[Any] | np.ndarray, target: object) -> bool:
+    return any(_anchor_values_equal(value, target) for value in _anchor_value_vector(values))
+
+
+def _anchor_mask(values: Sequence[Any] | np.ndarray, target: object) -> np.ndarray:
+    return np.asarray(
+        [_anchor_values_equal(value, target) for value in _anchor_value_vector(values)],
+        dtype=bool,
+    )
+
+
+def _count_anchor_value(values: Sequence[Any] | np.ndarray, target: object) -> int:
+    return int(np.sum(_anchor_mask(values, target)))
+
+
+def _same_anchor_value_set(left: Sequence[Any] | np.ndarray, right: Sequence[Any] | np.ndarray) -> bool:
+    left_values = _anchor_value_vector(left)
+    right_values = _anchor_value_vector(right)
+    if left_values.size != right_values.size:
+        return False
+    return all(_contains_anchor_value(right_values, value) for value in left_values) and all(
+        _contains_anchor_value(left_values, value) for value in right_values
+    )
+
+
+def _anchor_value_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    array = np.asarray(values, dtype=object)
+    if array.ndim == 0:
+        return _object_value_vector([array.item()])
+    if array.ndim == 1:
+        return array.reshape(-1)
+    if array.shape[1:] == (1,):
+        return array.reshape(array.shape[0])
+    rows = array.reshape(array.shape[0], -1)
+    return _object_value_vector(tuple(row.tolist()) for row in rows)
+
+
+def _object_value_vector(values: Iterable[object]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _anchor_values_equal(left: object, right: object) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
 
 
 def _uses_decoder_label_anchors(anchor_mode: str) -> bool:
@@ -1300,15 +1493,51 @@ def _alignment_sample_mode(anchor_mode: str) -> str:
     return "class_mean"
 
 
+def _alignment_low_rank_warning(alignment: Any) -> str:
+    """Return a human-readable warning for alignment fits with weak row rank."""
+
+    warning = getattr(alignment, "low_rank_warning", None)
+    if warning:
+        return str(warning)
+    sample_mode = str(getattr(alignment, "sample_mode", ""))
+    classes = _anchor_value_vector(getattr(alignment, "classes", []))
+    try:
+        n_rows = int(getattr(alignment, "n_alignment_rows", classes.size))
+    except (TypeError, ValueError):
+        n_rows = int(classes.size)
+    if sample_mode == "class_mean" and classes.size <= 3:
+        return (
+            f"class_mean alignment has only {classes.size} anchors; after centering, "
+            f"at most {max(n_rows - 1, 0)} common-space components are identifiable. "
+            "Use richer anchors before concluding alignment is ineffective."
+        )
+    return ""
+
+
 def _anchor_vector(values: Sequence[Any] | np.ndarray | None, *, expected_length: int, name: str) -> np.ndarray:
     if values is None:
         raise ValueError(f"{name} is required for this alignment mode.")
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _anchor_value_vector(values)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must have the same row count as the corresponding feature matrix.")
-    if any(value is None or (isinstance(value, float) and np.isnan(value)) for value in vector):
+    if any(_is_missing_anchor_value(value) for value in vector):
         raise ValueError(f"{name} contains missing values.")
     return vector
+
+
+def _is_missing_anchor_value(value: Any) -> bool:
+    """Return whether an anchor-like metadata value is missing."""
+
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in MISSING_ANCHOR_TEXT_VALUES
+    if value.__class__.__name__ in {"NAType", "NaTType"}:
+        return True
+    try:
+        return bool(np.isnan(value))
+    except (TypeError, ValueError):
+        return False
 
 
 def _component_label(value: int | float) -> int | str:
@@ -1327,7 +1556,7 @@ def _median_int_or_blank(values: Sequence[int]) -> int | float | str:
 
 
 def _preview_values(values: Sequence[Any] | np.ndarray, *, limit: int = 8) -> str:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _anchor_value_vector(values)
     preview = [str(value) for value in vector[:limit]]
     if vector.size > limit:
         preview.append("...")
@@ -1345,9 +1574,8 @@ def _estimate_alignment_rows(
         return 0, ""
     if sample_mode != "class_repetition":
         return int(common_anchors.size), ""
-    common_set = set(common_anchors.tolist())
     filtered = {
-        subject_id: np.asarray([anchor for anchor in anchors if anchor in common_set], dtype=object)
+        subject_id: _object_value_vector(anchor for anchor in anchors if _contains_anchor_value(common_anchors, anchor))
         for subject_id, anchors in anchors_by_subject.items()
     }
     try:
@@ -1366,6 +1594,7 @@ def _update_projection_anchor_availability(
     projection_anchors: Sequence[Any] | np.ndarray | None,
     common_anchors: np.ndarray,
     failures: list[str],
+    required_repetitions_per_anchor: int | None = None,
 ) -> None:
     used_key = f"{prefix}_anchor_values_used"
     rows_key = f"n_{prefix}_rows"
@@ -1376,15 +1605,34 @@ def _update_projection_anchor_availability(
     if projection_anchors is None:
         failures.append(f"{prefix}_projection_missing_anchor_values")
         return
-    vector = np.asarray(projection_anchors, dtype=object).reshape(-1)
+    vector = _anchor_value_vector(projection_anchors)
     row[rows_key] = int(vector.shape[0])
-    row[values_key] = int(np.unique(vector).size)
-    available = set(np.unique(vector).tolist())
-    missing = np.asarray([anchor for anchor in common_anchors if anchor not in available], dtype=object)
+    missing_mask = np.asarray([_is_missing_anchor_value(value) for value in vector], dtype=bool)
+    if np.any(missing_mask):
+        failures.append(f"{prefix}_projection_contains_missing_anchor_values")
+    valid_vector = vector[~missing_mask]
+    available = _ordered_unique_anchor_values(valid_vector)
+    row[values_key] = int(available.size)
+    missing = _object_value_vector(anchor for anchor in common_anchors if not _contains_anchor_value(available, anchor))
     row[missing_count_key] = int(missing.size)
     row[missing_preview_key] = _preview_values(missing)
     if missing.size:
         failures.append(f"{prefix}_subject_missing_alignment_anchors")
+    if required_repetitions_per_anchor is not None and required_repetitions_per_anchor > 1:
+        insufficient = _object_value_vector(
+            [
+                anchor
+                for anchor in common_anchors
+                if _count_anchor_value(valid_vector, anchor) < int(required_repetitions_per_anchor)
+            ]
+        )
+        if insufficient.size:
+            failures.append(f"{prefix}_subject_insufficient_alignment_anchor_repetitions")
+            detail = (
+                f"{prefix} anchors require at least {int(required_repetitions_per_anchor)} repetition(s) "
+                f"per common anchor; insufficient anchors: {_preview_values(insufficient)}"
+            )
+            row["prefit_failure_detail"] = detail
 
 
 def _mean_pairwise_anchor_row_correlation(matrices: Mapping[Hashable, np.ndarray]) -> float:
@@ -1413,6 +1661,113 @@ def _mean_pairwise_anchor_row_correlation(matrices: Mapping[Hashable, np.ndarray
     return float(np.mean(values)) if values else float("nan")
 
 
+def _source_inner_validation_type(
+    config: SourceAlignmentConfig,
+    *,
+    compute_source_inner_diagnostics: bool,
+) -> str:
+    if not compute_source_inner_diagnostics:
+        return ""
+    if config.fits_target_projection:
+        return "source_loso_nearest_centroid_target_projection"
+    if config.target_centered_group_projection:
+        return "strict_source_loso_nearest_centroid_group_projection_target_centered"
+    return "strict_source_loso_nearest_centroid_group_projection"
+
+
+def _transform_inner_heldout_subject(
+    *,
+    test_features: np.ndarray,
+    test_anchors: np.ndarray,
+    fit: _SourceAlignmentFit,
+    config: SourceAlignmentConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Transform a source-inner held-out subject with the configured target path."""
+
+    if not config.fits_target_projection:
+        target_feature_mean = np.mean(test_features, axis=0) if config.target_centered_group_projection else None
+        return fit.model.transform_group(test_features, feature_mean=target_feature_mean), np.ones(
+            test_features.shape[0],
+            dtype=bool,
+        )
+
+    evaluation_mask = np.ones(test_features.shape[0], dtype=bool)
+    projection_features = test_features
+    projection_anchors = test_anchors
+    selected_offsets_by_class = fit.alignment.selected_offsets_by_class
+    if config.target_calibrated:
+        calibration_mask = _inner_target_calibration_mask(
+            test_anchors,
+            classes=fit.alignment.classes,
+            per_anchor=config.target_calibration_per_anchor,
+            seed=config.target_calibration_seed,
+        )
+        evaluation_mask = ~calibration_mask
+        if not np.any(evaluation_mask):
+            raise ValueError("source-inner target-calibrated diagnostic left no held-out rows for scoring.")
+        projection_features = test_features[calibration_mask]
+        projection_anchors = test_anchors[calibration_mask]
+        if fit.alignment.n_repetitions_per_class is not None:
+            selected_offsets_by_class = {
+                class_position: np.arange(int(fit.alignment.n_repetitions_per_class), dtype=int)
+                for class_position, _class_label in enumerate(fit.alignment.classes)
+            }
+
+    target_anchors = _target_alignment_matrix(
+        projection_features,
+        projection_anchors,
+        classes=fit.alignment.classes,
+        config=config,
+        n_repetitions_per_class=fit.alignment.n_repetitions_per_class,
+        selected_offsets_by_class=selected_offsets_by_class,
+    )
+    scoring_features = test_features[evaluation_mask]
+    if config.method in {"procrustes", "hyperalignment"}:
+        target_projection = fit_projection_to_hyperalignment(target_anchors, template=fit.model.template)
+        return transform_with_projection(scoring_features, target_projection), evaluation_mask
+    if config.method == "mcca":
+        target_projection = fit_target_mcca_projection(
+            target_anchors,
+            fit.model,
+            regularization=config.mcca_regularization,
+        )
+        return target_projection.transform(scoring_features), evaluation_mask
+    raise ValueError(f"Unsupported source alignment method: {config.method}")
+
+
+def _inner_target_calibration_mask(
+    anchors: Sequence[Any] | np.ndarray,
+    *,
+    classes: Sequence[Any] | np.ndarray,
+    per_anchor: int,
+    seed: int,
+) -> np.ndarray:
+    """Select disjoint calibration rows for source-inner target-calibrated diagnostics."""
+
+    anchor_vector = _anchor_value_vector(anchors)
+    class_order = _anchor_value_vector(classes)
+    per_anchor = int(per_anchor)
+    if per_anchor < 1:
+        raise ValueError("alignment_target_calibration_per_anchor must be positive.")
+    calibration_mask = np.zeros(anchor_vector.shape[0], dtype=bool)
+    for class_position, class_label in enumerate(class_order):
+        positions = np.flatnonzero(_anchor_mask(anchor_vector, class_label))
+        if positions.size <= per_anchor:
+            raise ValueError(
+                "source-inner target-calibrated diagnostic needs at least "
+                f"{per_anchor + 1} held-out rows for anchor {class_label!r} so calibration rows are disjoint from scored rows."
+            )
+        selected_local = select_class_limited_indices(
+            np.zeros(positions.size, dtype=int),
+            per_anchor,
+            selection=DEFAULT_CLASS_LIMIT_SELECTION,
+            seed=seed,
+            seed_context=class_position,
+        )
+        calibration_mask[positions[selected_local]] = True
+    return calibration_mask
+
+
 def _source_inner_strict_loso_scores(
     *,
     features_by_subject: Mapping[Hashable, np.ndarray],
@@ -1424,9 +1779,10 @@ def _source_inner_strict_loso_scores(
 ) -> tuple[float, float]:
     """Compare raw vs aligned source-inner held-out-subject decoding.
 
-    The aligned side treats each source subject as target-like: the alignment
+    The aligned side treats each source subject as target-like.  The alignment
     model is fit from the remaining source subjects and the held-out source is
-    transformed only with the source-fitted group projection.
+    transformed with the same target-projection family requested by the outer
+    configuration.
     """
 
     subject_ids = tuple(features_by_subject)
@@ -1443,14 +1799,9 @@ def _source_inner_strict_loso_scores(
         test_features = features_by_subject[test_subject]
         test_labels = labels_by_subject[test_subject]
 
-        predicted_raw = _nearest_centroid_predict(train_features, train_labels, test_features)
-        if predicted_raw.size:
-            raw_predictions.extend(predicted_raw.tolist())
-            raw_truth.extend(test_labels.tolist())
-
-        if len(train_subjects) < 2:
-            continue
         try:
+            if len(train_subjects) < 2:
+                continue
             inner_fit = _fit_source_alignment_model(
                 {subject_id: features_by_subject[subject_id] for subject_id in train_subjects},
                 {subject_id: anchors_by_subject[subject_id] for subject_id in train_subjects},
@@ -1459,13 +1810,28 @@ def _source_inner_strict_loso_scores(
                 external_anchor_mode=external_anchor_mode,
             )
             aligned_train_features = np.vstack([inner_fit.transformed_by_subject[subject_id] for subject_id in train_subjects])
-            aligned_test_features = inner_fit.model.transform_group(test_features)
+            aligned_test_features, evaluation_mask = _transform_inner_heldout_subject(
+                test_features=test_features,
+                test_anchors=anchors_by_subject[test_subject],
+                fit=inner_fit,
+                config=config,
+            )
         except (ValueError, np.linalg.LinAlgError):
             continue
+        scored_test_features = test_features[evaluation_mask]
+        scored_test_labels = test_labels[evaluation_mask]
+        predicted_raw = _nearest_centroid_predict(train_features, train_labels, scored_test_features)
         predicted_aligned = _nearest_centroid_predict(aligned_train_features, train_labels, aligned_test_features)
-        if predicted_aligned.size:
+
+        # Keep raw and aligned diagnostics paired on the same scored rows.  In
+        # target-calibrated mode this excludes the held-out source rows that were
+        # used to fit the target projection, mirroring the outer disjoint target
+        # calibration protocol instead of an oracle-like all-target diagnostic.
+        if predicted_raw.size and predicted_aligned.size:
+            raw_predictions.extend(predicted_raw.tolist())
+            raw_truth.extend(scored_test_labels.tolist())
             aligned_predictions.extend(predicted_aligned.tolist())
-            aligned_truth.extend(test_labels.tolist())
+            aligned_truth.extend(scored_test_labels.tolist())
 
     raw_score = (
         _balanced_accuracy(np.asarray(raw_truth, dtype=object), np.asarray(raw_predictions, dtype=object))
@@ -1529,22 +1895,22 @@ def _source_inner_unsupervised_loso_scores(
 
 
 def _nearest_centroid_predict(train_features: np.ndarray, train_labels: np.ndarray, test_features: np.ndarray) -> np.ndarray:
-    labels = np.asarray(train_labels).reshape(-1)
-    classes = np.unique(labels)
+    labels = _anchor_value_vector(train_labels)
+    classes = _ordered_unique_anchor_values(labels)
     if len(classes) < 2:
         return np.asarray([], dtype=object)
-    centroids = np.vstack([np.mean(train_features[labels == class_label], axis=0) for class_label in classes])
+    centroids = np.vstack([np.mean(train_features[_anchor_mask(labels, class_label)], axis=0) for class_label in classes])
     distances = np.sum((test_features[:, None, :] - centroids[None, :, :]) ** 2, axis=2)
     return np.asarray(classes, dtype=object)[distances.argmin(axis=1)]
 
 
 def _balanced_accuracy(labels: np.ndarray, predictions: np.ndarray) -> float:
     recalls: list[float] = []
-    for class_label in np.unique(labels):
-        mask = labels == class_label
+    for class_label in _ordered_unique_anchor_values(labels):
+        mask = _anchor_mask(labels, class_label)
         if not np.any(mask):
             continue
-        recalls.append(float(np.mean(predictions[mask] == class_label)))
+        recalls.append(float(np.mean(_anchor_mask(predictions[mask], class_label))))
     return float(np.mean(recalls)) if recalls else float("nan")
 
 
@@ -1565,6 +1931,7 @@ __all__ = [
     "DEFAULT_ALIGNMENT_COMPONENTS",
     "DEFAULT_ALIGNMENT_REPETITION_CAP",
     "DEFAULT_ALIGNMENT_TIMES",
+    "GROUP_PROJECTION_TARGET_CENTERED",
     "ORACLE_TARGET_CALIBRATED_ALIGNMENT",
     "PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT",
     "SAME_DECODE_WINDOW_ALIGNMENT",
