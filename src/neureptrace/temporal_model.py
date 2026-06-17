@@ -294,6 +294,7 @@ def _fit_control(
     random_seed: int,
     stay_grid_size: int,
 ) -> list[dict[str, float]]:
+    n_permutations = _validate_non_negative_integer(n_permutations, name="n_permutations")
     rng = np.random.default_rng(random_seed)
     rows = []
     for _ in range(n_permutations):
@@ -324,6 +325,18 @@ def _model_row(group_values: dict[str, str], condition: str, fit: dict[str, floa
         "persistence_gain_per_observation_sd": None,
         "empirical_p_value": empirical_p_value,
     }
+
+
+def _validate_non_negative_integer(value: int, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a non-negative integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 0.0:
+        raise ValueError(f"{name} must be a non-negative integer.")
+    return int(numeric)
 
 
 def _control_row(
@@ -439,6 +452,7 @@ def fit_temporal_models(
     out_states: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """Fit sticky switching models to probability observation CSVs and controls."""
+    n_permutations = _validate_non_negative_integer(n_permutations, name="n_permutations")
     observations = read_probability_observations(observation_csvs)
     prob_columns = probability_columns(observations)
     rows = []

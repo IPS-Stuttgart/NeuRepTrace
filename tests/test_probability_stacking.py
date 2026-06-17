@@ -6,6 +6,9 @@ import pytest
 
 from neureptrace.probability_stacking import (
     DEFAULT_OUTPUT_DECODER,
+    _top_k_accuracy,
+    class_balanced_sample_weights,
+    fit_stacking_weights,
     fit_source_oof_stacking,
     main,
     stack_probability_observations,
@@ -143,6 +146,67 @@ def test_fit_source_oof_stacking_rejects_fractional_source_labels() -> None:
 
     with pytest.raises(ValueError, match="source_labels values must be integer-valued"):
         fit_source_oof_stacking(cube, [0.0, 0.5], candidates=("strong", "weak"))
+
+
+def test_stacked_top_k_accuracy_rejects_fractional_k() -> None:
+    probabilities = np.array([[0.8, 0.2], [0.4, 0.6]])
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="k must be a positive integer"):
+        _top_k_accuracy(probabilities, labels, k=1.5)
+
+    with pytest.raises(ValueError, match="k must be a positive integer"):
+        _top_k_accuracy(probabilities, labels, k=True)
+
+
+def test_fit_stacking_weights_rejects_invalid_max_iter() -> None:
+    cube = np.array(
+        [
+            [[0.9, 0.1], [0.1, 0.9]],
+            [[0.6, 0.4], [0.4, 0.6]],
+        ]
+    )
+    labels = np.array([0, 1])
+
+    for value in (0, -1, 1.5, True):
+        with pytest.raises(ValueError, match="max_iter must be a positive integer"):
+            fit_stacking_weights(cube, labels, max_iter=value)
+
+
+def test_class_balanced_sample_weights_rejects_fractional_n_classes() -> None:
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="n_classes must be a positive integer"):
+        class_balanced_sample_weights(labels, n_classes=2.5)
+
+    with pytest.raises(ValueError, match="n_classes must be a positive integer"):
+        class_balanced_sample_weights(labels, n_classes=True)
+
+
+def test_fit_stacking_weights_rejects_bool_learning_rate() -> None:
+    cube = np.array(
+        [
+            [[0.9, 0.1], [0.1, 0.9]],
+            [[0.6, 0.4], [0.4, 0.6]],
+        ]
+    )
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="learning_rate must be positive and finite"):
+        fit_stacking_weights(cube, labels, learning_rate=True)
+
+
+def test_fit_source_oof_stacking_rejects_bool_softmax_temperature() -> None:
+    cube = np.array(
+        [
+            [[0.9, 0.1], [0.1, 0.9]],
+            [[0.6, 0.4], [0.4, 0.6]],
+        ]
+    )
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="temperature must be positive and finite"):
+        fit_source_oof_stacking(cube, labels, candidates=("strong", "weak"), weighting="softmax", temperature=True)
 
 
 def test_stack_probability_observations_applies_source_weights_to_target() -> None:
