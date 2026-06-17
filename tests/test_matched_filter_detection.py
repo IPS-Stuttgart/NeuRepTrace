@@ -6,8 +6,8 @@ from neureptrace.matched_filter_detection import _score_values
 def test_predicted_class_confidence_fallback_uses_probability_suffix_labels():
     frame = pd.DataFrame(
         {
-            "prob_class_1": [0.7, 0.1, 0.3],
-            "prob_class_2": [0.3, 0.9, 0.2],
+            "prob_class_1": [0.7, 0.1, 0.6],
+            "prob_class_2": [0.3, 0.9, 0.4],
             "confidence": [0.7, 0.9, 0.6],
         }
     )
@@ -34,8 +34,8 @@ def test_predicted_class_confidence_fallback_uses_probability_suffix_labels():
 def test_predicted_class_confidence_fallback_supports_named_probability_suffixes():
     frame = pd.DataFrame(
         {
-            "prob_class_face": [0.2, 0.8],
-            "prob_class_house": [0.6, 0.1],
+            "prob_class_face": [0.4, 0.8],
+            "prob_class_house": [0.6, 0.2],
             "confidence": [0.6, 0.8],
         }
     )

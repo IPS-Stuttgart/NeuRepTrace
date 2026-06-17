@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.matched_filter_detection import (
     detect_matched_filter_stimulus_events,
@@ -81,6 +82,59 @@ def test_fit_templates_and_detect_shifted_event_with_matched_filter():
     assert events.iloc[0]["onset_time"] == 1.0
     assert events.iloc[0]["detector_method"] == "matched_filter"
     assert events.iloc[0]["peak_score"] > events.iloc[0]["score_threshold"]
+
+
+def test_matched_filter_rejects_invalid_class_probability_rows():
+    train_observations = _stream("train", event_onset=0.0)
+    train_observations.loc[0, ["prob_class_0", "prob_class_1"]] = [0.2, 0.2]
+    template_annotations = pd.DataFrame([{"stream_id": "train", "stimulus_class": "A", "onset_time": 0.0}])
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        fit_stimulus_event_templates(
+            train_observations,
+            template_annotations,
+            template_window=(0.0, 0.3),
+            template_step=0.1,
+            target_classes=["A"],
+            stream_columns=("stream_id",),
+            min_template_coverage=1.0,
+        )
+
+
+def test_matched_filter_rejects_invalid_predicted_confidence_values():
+    train_observations = _stream("train", event_onset=0.0)
+    train_observations.loc[0, "confidence"] = 1.2
+    template_annotations = pd.DataFrame([{"stream_id": "train", "stimulus_class": "A", "onset_time": 0.0}])
+
+    with pytest.raises(ValueError, match="confidence values must lie"):
+        fit_stimulus_event_templates(
+            train_observations,
+            template_annotations,
+            template_window=(0.0, 0.3),
+            template_step=0.1,
+            target_classes=["A"],
+            stream_columns=("stream_id",),
+            min_template_coverage=1.0,
+            score_mode="predicted_class_confidence",
+        )
+
+
+def test_matched_filter_rejects_invalid_probabilities_when_inferring_predicted_class():
+    train_observations = _stream("train", event_onset=0.0).drop(columns=["predicted_label", "predicted_class"])
+    train_observations.loc[0, ["prob_class_0", "prob_class_1"]] = [0.2, 0.2]
+    template_annotations = pd.DataFrame([{"stream_id": "train", "stimulus_class": "A", "onset_time": 0.0}])
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        fit_stimulus_event_templates(
+            train_observations,
+            template_annotations,
+            template_window=(0.0, 0.3),
+            template_step=0.1,
+            target_classes=["A"],
+            stream_columns=("stream_id",),
+            min_template_coverage=1.0,
+            score_mode="predicted_class_confidence",
+        )
 
 
 def test_matched_filter_scores_peak_at_event_onset():

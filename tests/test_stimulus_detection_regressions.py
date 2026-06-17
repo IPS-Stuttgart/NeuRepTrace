@@ -112,6 +112,7 @@ def test_streaming_event_indices_restart_for_each_group_stream_partition() -> No
                     "stream_id": "shared-run-id",
                     "time": 0.0,
                     "prob_class_0": 0.9,
+                    "prob_class_1": 0.1,
                     "predicted_label": 0,
                     "predicted_class": "target",
                 }
@@ -124,6 +125,7 @@ def test_streaming_event_indices_restart_for_each_group_stream_partition() -> No
                     "stream_id": "shared-run-id",
                     "time": 1.0,
                     "prob_class_0": 0.1,
+                    "prob_class_1": 0.9,
                     "predicted_label": 0,
                     "predicted_class": "target",
                 }
