@@ -21,7 +21,7 @@ from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
 
 from neureptrace.dataset_config import apply_overrides, effective_config, load_config, load_epoch_dataset_from_config
-from neureptrace.decode_from_config import _resolve_output, _section, _window_ms, _write_provenance_sidecars
+from neureptrace.decode_from_config import _bool_value, _resolve_output, _section, _window_ms, _write_provenance_sidecars
 from neureptrace.decoding import (
     make_decoder,
     make_tuning_cross_validator,
@@ -42,6 +42,8 @@ from neureptrace.mne_time_decode import (
     _apply_epoch_normalization,
     _features_for_window,
     _normalize_baseline_window,
+    _normalize_integer,
+    _normalize_positive_int,
     _probability_average,
     _top_k_accuracy,
 )
@@ -132,15 +134,25 @@ def _infer_group_column(metadata: pd.DataFrame, configured: str | None) -> str:
     raise ValueError("Could not infer LOSO group column. Set loso.group_column, e.g. 'participant' or 'subject'.")
 
 
-def _time_interval(value: Any) -> tuple[float, float] | None:
+def _finite_time_bound(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite.")
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    return parsed
+
+
+def _time_interval(value: Any, *, name: str = "time interval") -> tuple[float, float] | None:
     if value is None:
         return None
     values = _as_list(value)
     if len(values) != 2:
-        raise ValueError("Time intervals must contain exactly two entries: start and stop.")
-    start, stop = map(float, values)
+        raise ValueError(f"{name} must contain exactly two entries: start and stop.")
+    start = _finite_time_bound(values[0], name=name)
+    stop = _finite_time_bound(values[1], name=name)
     if stop < start:
-        raise ValueError("Time interval stop must be greater than or equal to start.")
+        raise ValueError(f"{name} stop must be greater than or equal to start.")
     return start, stop
 
 
@@ -530,7 +542,7 @@ def run_loso_time_decode(
     config_path = Path(config_path)
     config = apply_overrides(load_config(config_path), overrides)
     if write_provenance is not None:
-        config.setdefault("outputs", {})["provenance"] = bool(write_provenance)
+        config.setdefault("outputs", {})["provenance"] = _bool_value(write_provenance, name="write_provenance")
 
     dataset = load_epoch_dataset_from_config(config, base_dir=config_path.parent, check_files=True)
     preprocessing = _section(config, "preprocessing")
@@ -574,27 +586,53 @@ def run_loso_time_decode(
     normalization = str(preprocessing.get("normalization", "none")).strip().lower().replace("-", "_")
     normalization_scope = _normalization_scope(loso.get("normalization_scope", preprocessing.get("normalization_scope")))
     baseline_window = _normalize_baseline_window(preprocessing.get("baseline_window", DEFAULT_BASELINE_WINDOW))
-    max_iter = int(loso.get("max_iter", _section(config, "decoding").get("max_iter", 1000)))
-    tune_hyperparameters = bool(loso.get("tune_hyperparameters", False))
-    tuning_cv_splits = int(loso.get("tuning_cv_splits", 3))
+    max_iter = _normalize_positive_int(
+        loso.get("max_iter", _section(config, "decoding").get("max_iter", 1000)),
+        name="loso.max_iter",
+    )
+    tune_hyperparameters = _bool_value(loso.get("tune_hyperparameters"), name="loso.tune_hyperparameters")
+    tuning_cv_splits = _normalize_positive_int(loso.get("tuning_cv_splits", 3), name="loso.tuning_cv_splits")
     tuning_scoring = normalize_tuning_scoring(loso.get("tuning_scoring", "accuracy"))
     tuning_c_grid = parse_c_grid(loso.get("tuning_c_grid"))
-    source_select_top_k = int(loso.get("source_select_top_k", DEFAULT_SOURCE_SELECT_TOP_K))
+    source_select_top_k = _normalize_integer(
+        loso.get("source_select_top_k", DEFAULT_SOURCE_SELECT_TOP_K),
+        name="loso.source_select_top_k",
+        minimum=0,
+    )
     source_select_metric = str(loso.get("source_select_metric", "balanced_accuracy")).strip().lower().replace("-", "_")
     if source_select_metric not in LOSO_METRIC_CHOICES:
         raise ValueError(f"Unknown source_select_metric '{source_select_metric}'. Available metrics: {', '.join(LOSO_METRIC_CHOICES)}.")
-    source_select_inner_splits = int(loso.get("source_select_inner_splits", DEFAULT_SOURCE_SELECT_INNER_SPLITS))
+    source_select_inner_splits = _normalize_integer(
+        loso.get("source_select_inner_splits", DEFAULT_SOURCE_SELECT_INNER_SPLITS),
+        name="loso.source_select_inner_splits",
+        minimum=2,
+    )
 
     windows = time_windows(
         np.asarray(dataset.times, dtype=float),
         window_ms=_window_ms(preprocessing, key_ms="window_ms", key_seconds="window_size", default=20.0),
         step_ms=_window_ms(preprocessing, key_ms="step_ms", key_seconds="window_step", default=10.0),
     )
-    decode_interval = _time_interval(loso.get("decode_window", preprocessing.get("decode_window")))
+    decode_interval = _time_interval(
+        loso.get("decode_window", preprocessing.get("decode_window")),
+        name="loso.decode_window",
+    )
     windows = _select_windows_by_interval(windows, decode_interval)
-    candidate_interval = _time_interval(loso.get("source_select_window", loso.get("temporal_train_window", preprocessing.get("temporal_train_window"))))
+    if "source_select_window" in loso:
+        candidate_interval_value = loso.get("source_select_window")
+        candidate_interval_name = "loso.source_select_window"
+    elif "temporal_train_window" in loso:
+        candidate_interval_value = loso.get("temporal_train_window")
+        candidate_interval_name = "loso.temporal_train_window"
+    else:
+        candidate_interval_value = preprocessing.get("temporal_train_window")
+        candidate_interval_name = "preprocessing.temporal_train_window"
+    candidate_interval = _time_interval(candidate_interval_value, name=candidate_interval_name)
     candidate_train_windows = _select_windows_by_interval(windows, candidate_interval)
-    fixed_train_interval = _time_interval(loso.get("temporal_train_window", preprocessing.get("temporal_train_window")))
+    fixed_train_interval = _time_interval(
+        loso.get("temporal_train_window", preprocessing.get("temporal_train_window")),
+        name="loso.temporal_train_window",
+    )
     fixed_train_windows = _select_windows_by_interval(windows, fixed_train_interval) if fixed_train_interval is not None else []
 
     summary_out, observations_out, source_scores_out = _output_paths(config, config_dir=config_path.parent)
