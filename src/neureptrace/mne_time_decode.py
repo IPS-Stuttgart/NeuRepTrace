@@ -243,20 +243,36 @@ def normalize_source_time_selection(mode: str | None) -> str:
 
 
 def _normalize_pseudo_label_confidence_threshold(value: float | str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("pseudo_label_confidence_threshold must be between 0 and 1.")
     threshold = float(value)
-    if not 0.0 <= threshold <= 1.0:
+    if not np.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
         raise ValueError("pseudo_label_confidence_threshold must be between 0 and 1.")
     return threshold
 
 
 def _normalize_positive_int(value: int | str, *, name: str) -> int:
-    parsed = int(value)
-    if parsed < 1:
-        raise ValueError(f"{name} must be at least 1.")
+    return _normalize_integer(value, name=name, minimum=1)
+
+
+def _normalize_integer(value: int | str, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        parsed_float = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(parsed_float) or parsed_float % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    parsed = int(parsed_float)
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
     return parsed
 
 
 def _normalize_positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
     parsed = float(value)
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
@@ -264,6 +280,8 @@ def _normalize_positive_float(value: float | str, *, name: str) -> float:
 
 
 def _normalize_nonnegative_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be non-negative and finite.")
     parsed = float(value)
     if not np.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be non-negative and finite.")
@@ -271,6 +289,9 @@ def _normalize_nonnegative_float(value: float | str, *, name: str) -> float:
 
 
 def _normalize_unit_interval_float(value: float | str, *, name: str, include_one: bool = False) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        bracket = "[0, 1]" if include_one else "[0, 1)"
+        raise ValueError(f"{name} must be finite in {bracket}.")
     parsed = float(value)
     upper_ok = parsed <= 1.0 if include_one else parsed < 1.0
     if not np.isfinite(parsed) or parsed < 0.0 or not upper_ok:
@@ -2675,7 +2696,7 @@ def run_time_resolved_decode(
     _require_same_decode_window_alignment(alignment_config)
     requested_time_decode_backend = normalize_time_decode_backend(time_decode_backend)
     label_shuffle_control = bool(label_shuffle_control)
-    label_shuffle_seed = int(label_shuffle_seed)
+    label_shuffle_seed = _normalize_integer(label_shuffle_seed, name="label_shuffle_seed")
     pseudo_label_self_training = bool(pseudo_label_self_training)
     pseudo_label_confidence_threshold = _normalize_pseudo_label_confidence_threshold(
         pseudo_label_confidence_threshold
@@ -2705,10 +2726,13 @@ def run_time_resolved_decode(
     )
     dann_patience = _normalize_positive_int(dann_patience, name="dann_patience")
     dann_dropout = _normalize_unit_interval_float(dann_dropout, name="dann_dropout")
-    dann_random_state = int(dann_random_state)
+    dann_random_state = _normalize_integer(dann_random_state, name="dann_random_state")
     dann_device = str(dann_device)
     pseudo_label_target_alignment = pseudo_label_self_training and alignment_config.pseudo_label_target_calibrated
-    alignment_target_calibration_seed = int(alignment_target_calibration_seed)
+    alignment_target_calibration_seed = _normalize_integer(
+        alignment_target_calibration_seed,
+        name="alignment_target_calibration_seed",
+    )
     dataset_name_value = "" if dataset_name is None else str(dataset_name)
     outer_test_groups_value = _normalize_outer_test_groups(outer_test_groups)
     if requested_time_decode_backend == "mne" and normalized_temporal_train_window is not None:

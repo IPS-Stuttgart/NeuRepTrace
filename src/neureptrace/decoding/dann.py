@@ -113,11 +113,16 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         if n_classes < 2:
             raise ValueError("DANN needs at least two source classes.")
 
-        torch = _torch()
         if self.random_state is not None:
-            torch.manual_seed(int(self.random_state))
+            random_state = _integer(self.random_state, "dann_random_state")
+        else:
+            random_state = None
+
+        torch = _torch()
+        if random_state is not None:
+            torch.manual_seed(random_state)
             if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(int(self.random_state))
+                torch.cuda.manual_seed_all(random_state)
 
         hidden_units = _positive_int(self.hidden_units, "dann_hidden_units")
         embedding_dim = _positive_int(self.embedding_dim, "dann_embedding_dim")
@@ -128,19 +133,25 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         weight_decay = _nonnegative_float(self.weight_decay, "dann_weight_decay")
         domain_loss_weight = _nonnegative_float(self.domain_loss_weight, "dann_domain_loss_weight")
         dropout = _bounded_float(self.dropout, "dann_dropout", lower=0.0, upper=1.0)
+        validation_fraction = _bounded_float(
+            self.validation_fraction,
+            "dann_validation_fraction",
+            lower=0.0,
+            upper=1.0,
+        )
 
         source_indices = np.arange(y.shape[0])
         class_counts = np.bincount(y, minlength=n_classes)
         can_validate = (
-            0.0 < float(self.validation_fraction) < 1.0
+            0.0 < validation_fraction < 1.0
             and y.shape[0] >= 2 * n_classes
             and np.min(class_counts) >= 2
         )
         if can_validate:
             train_idx, validation_idx = train_test_split(
                 source_indices,
-                test_size=float(self.validation_fraction),
-                random_state=self.random_state,
+                test_size=validation_fraction,
+                random_state=random_state,
                 stratify=y,
             )
         else:
@@ -364,13 +375,27 @@ def fit_dann_predict_proba(
 
 
 def _positive_int(value: Any, name: str) -> int:
-    integer = int(value)
+    integer = _integer(value, name)
     if integer < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return integer
 
 
+def _integer(value: Any, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    return int(number)
+
+
 def _positive_float(value: Any, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
     number = float(value)
     if not np.isfinite(number) or number <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
@@ -378,6 +403,8 @@ def _positive_float(value: Any, name: str) -> float:
 
 
 def _nonnegative_float(value: Any, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be non-negative and finite.")
     number = float(value)
     if not np.isfinite(number) or number < 0.0:
         raise ValueError(f"{name} must be non-negative and finite.")
@@ -385,6 +412,8 @@ def _nonnegative_float(value: Any, name: str) -> float:
 
 
 def _bounded_float(value: Any, name: str, *, lower: float, upper: float) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite in [{lower}, {upper}).")
     number = float(value)
     if not np.isfinite(number) or number < lower or number >= upper:
         raise ValueError(f"{name} must be finite in [{lower}, {upper}).")

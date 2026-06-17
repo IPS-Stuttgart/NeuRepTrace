@@ -1,7 +1,37 @@
 import numpy as np
 import pytest
 
-from neureptrace.decoding.dann import DANN_PROTOCOL, fit_dann_predict_proba
+from neureptrace.decoding.dann import (
+    DANN_PROTOCOL,
+    _bounded_float,
+    _integer,
+    _nonnegative_float,
+    _positive_float,
+    _positive_int,
+    fit_dann_predict_proba,
+)
+
+
+def test_dann_helpers_reject_fractional_integer_parameters():
+    with pytest.raises(ValueError, match="dann_max_epochs must be an integer"):
+        _positive_int(1.5, "dann_max_epochs")
+
+    with pytest.raises(ValueError, match="dann_random_state must be an integer"):
+        _integer(13.5, "dann_random_state")
+
+
+def test_dann_helpers_reject_bool_numeric_parameters():
+    with pytest.raises(ValueError, match="dann_batch_size must be an integer"):
+        _positive_int(True, "dann_batch_size")
+
+    with pytest.raises(ValueError, match="dann_learning_rate"):
+        _positive_float(True, "dann_learning_rate")
+
+    with pytest.raises(ValueError, match="dann_weight_decay"):
+        _nonnegative_float(True, "dann_weight_decay")
+
+    with pytest.raises(ValueError, match="dann_validation_fraction"):
+        _bounded_float(True, "dann_validation_fraction", lower=0.0, upper=1.0)
 
 
 def test_fit_dann_predict_proba_marks_unlabeled_target_adaptation():

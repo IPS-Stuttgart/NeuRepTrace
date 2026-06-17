@@ -410,9 +410,9 @@ def normalize_alignment_repetition_cap(value: int | str | None) -> int | None:
             return DEFAULT_ALIGNMENT_REPETITION_CAP
         if text in {"none", "null", "all", "full"}:
             return None
-        parsed = int(text)
+        parsed = _normalize_integer(text, name="alignment_repetition_cap")
     else:
-        parsed = int(value)
+        parsed = _normalize_integer(value, name="alignment_repetition_cap")
     if parsed < 1:
         raise ValueError("alignment_repetition_cap must be positive, all, or none.")
     return parsed
@@ -423,12 +423,39 @@ def _normalize_target_calibration_per_anchor(value: int | str | None) -> int:
         return 1
     if isinstance(value, str):
         text = value.strip().lower()
-        parsed = 1 if text in {"", "default"} else int(text)
+        parsed = 1 if text in {"", "default"} else _normalize_integer(text, name="alignment_target_calibration_per_anchor")
     else:
-        parsed = int(value)
+        parsed = _normalize_integer(value, name="alignment_target_calibration_per_anchor")
     if parsed < 1:
         raise ValueError("alignment_target_calibration_per_anchor must be positive.")
     return parsed
+
+
+def _normalize_integer(value: int | str, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    integer = int(numeric)
+    if minimum is not None and integer < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    return integer
+
+
+def _normalize_nonnegative_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite and non-negative.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and non-negative.") from exc
+    if not np.isfinite(numeric) or numeric < 0.0:
+        raise ValueError(f"{name} must be finite and non-negative.")
+    return numeric
 
 
 def normalize_alignment_components(value: int | float | str | None) -> int | float:
@@ -451,7 +478,7 @@ def normalize_alignment_components(value: int | float | str | None) -> int | flo
         if parsed.is_integer():
             return int(parsed)
         raise ValueError("alignment_components must be an integer count or infinity.")
-    parsed = int(parsed)
+    parsed = _normalize_integer(parsed, name="alignment_components")
     if parsed < 1:
         raise ValueError("alignment_components must be positive.")
     return parsed
@@ -486,15 +513,18 @@ def source_alignment_config(
         same_decode_window=same_decode_window,
         target_projection=normalize_source_alignment_target_projection(target_projection),
         target_calibration_per_anchor=_normalize_target_calibration_per_anchor(target_calibration_per_anchor),
-        target_calibration_seed=int(target_calibration_seed),
-        hyperalignment_iterations=int(hyperalignment_iterations),
-        mcca_regularization=float(mcca_regularization),
+        target_calibration_seed=_normalize_integer(target_calibration_seed, name="alignment_target_calibration_seed"),
+        hyperalignment_iterations=_normalize_integer(
+            hyperalignment_iterations,
+            name="alignment_hyperalignment_iterations",
+            minimum=1,
+        ),
+        mcca_regularization=_normalize_nonnegative_float(
+            mcca_regularization,
+            name="alignment_mcca_regularization",
+        ),
         mcca_subject_pca_components=mcca_subject_components,
     )
-    if config.hyperalignment_iterations < 1:
-        raise ValueError("alignment hyperalignment_iterations must be positive.")
-    if config.mcca_regularization < 0 or not np.isfinite(config.mcca_regularization):
-        raise ValueError("alignment mcca_regularization must be finite and non-negative.")
     if _uses_unlabeled_covariance_alignment(config.method) and (
         config.fits_target_projection or config.target_centered_group_projection
     ):
