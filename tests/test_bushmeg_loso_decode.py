@@ -6,6 +6,7 @@ import pytest
 
 from neureptrace.bushmeg_loso_decode import (
     CachedSubject,
+    _average_probabilities,
     _features_for_window,
     make_source_pseudotrials,
     normalize_window_feature_mode,
@@ -41,6 +42,22 @@ def test_normalize_window_feature_mode_accepts_aliases():
 def test_normalize_window_feature_mode_rejects_unknown_values():
     with pytest.raises(ValueError, match="Unknown window feature mode"):
         normalize_window_feature_mode("definitely_not_a_feature")
+
+
+def test_average_probabilities_rejects_invalid_inputs():
+    first = np.array([[0.8, 0.2], [0.4, 0.6]], dtype=float)
+    second = np.array([[0.2, 0.2], [0.4, 0.6]], dtype=float)
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _average_probabilities([first, second], mode="log")
+
+
+def test_average_probabilities_rejects_values_above_one():
+    first = np.array([[0.8, 0.2], [0.4, 0.6]], dtype=float)
+    second = np.array([[1.2, 0.0], [0.4, 0.6]], dtype=float)
+
+    with pytest.raises(ValueError, match="must not exceed 1.0"):
+        _average_probabilities([first, second], mode="mean")
 
 
 def test_compact_window_feature_modes_have_expected_shapes():

@@ -372,6 +372,30 @@ def test_ensemble_probability_observations_rejects_fractional_true_labels() -> N
         )
 
 
+def test_ensemble_probability_observations_rejects_negative_source_probabilities() -> None:
+    observations = _source_observations()
+    observations.loc[observations["decoder"] == "logistic", "prob_class_0"] = -0.1
+    observations.loc[observations["decoder"] == "logistic", "prob_class_1"] = 1.1
+
+    with pytest.raises(ValueError, match="must be non-negative"):
+        ensemble_probability_observations(
+            observations,
+            baseline_window=(-0.25, -0.15),
+        )
+
+
+def test_ensemble_probability_observations_rejects_unnormalized_source_probabilities() -> None:
+    observations = _source_observations()
+    observations.loc[observations["decoder"] == "logistic", "prob_class_0"] = 0.2
+    observations.loc[observations["decoder"] == "logistic", "prob_class_1"] = 0.2
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        ensemble_probability_observations(
+            observations,
+            baseline_window=(-0.25, -0.15),
+        )
+
+
 def test_summarize_ensemble_metrics_returns_time_resolved_rows() -> None:
     ensemble = ensemble_probability_observations(
         _source_observations(),
@@ -417,6 +441,18 @@ def test_summarize_ensemble_metrics_rejects_fractional_true_labels() -> None:
     ensemble.loc[ensemble["time"] == -0.20, "true_label"] = 0.5
 
     with pytest.raises(ValueError, match="true_label values must be integer-valued class labels"):
+        summarize_ensemble_metrics(ensemble)
+
+
+def test_summarize_ensemble_metrics_rejects_invalid_probabilities() -> None:
+    ensemble = ensemble_probability_observations(
+        _source_observations(),
+        baseline_window=(-0.25, -0.15),
+    )
+    ensemble.loc[0, "prob_class_0"] = 0.8
+    ensemble.loc[0, "prob_class_1"] = 0.8
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
         summarize_ensemble_metrics(ensemble)
 
 

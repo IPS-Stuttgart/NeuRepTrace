@@ -20,6 +20,7 @@ DEFAULT_WEIGHTS = (0.5, 0.5)
 DEFAULT_ENSEMBLE_DECODER = "baseline_debiased_logistic_linear_svm_ensemble"
 DEFAULT_ENSEMBLE_EMISSION_MODE = "baseline_debiased_ensemble"
 DEFAULT_MIN_PROBABILITY = 1e-12
+DEFAULT_PROBABILITY_TOLERANCE = 1e-3
 DEFAULT_SCORE_MODE = "log"
 ENSEMBLE_SCORE_MODE_CHOICES = ("log", "probability", "confidence_probability", "agreement_probability", "rank")
 
@@ -93,6 +94,33 @@ def _source_temperatures(temperatures: Sequence[float] | None, n_decoders: int) 
     if any(not np.isfinite(temperature) or temperature <= 0.0 for temperature in values):
         raise ValueError("Source temperatures must be finite positive values.")
     return values
+
+
+def _validate_probability_matrix(
+    probabilities: np.ndarray,
+    *,
+    context: str,
+    probability_tolerance: float = DEFAULT_PROBABILITY_TOLERANCE,
+) -> None:
+    if probabilities.ndim != 2:
+        raise ValueError(f"{context} probabilities must be a two-dimensional array.")
+    tolerance = float(probability_tolerance)
+    if not np.isfinite(tolerance) or tolerance < 0.0:
+        raise ValueError("probability_tolerance must be finite and non-negative.")
+    if not np.isfinite(probabilities).all():
+        raise ValueError(f"Probability values for {context} must be finite.")
+    if bool((probabilities < 0.0).any()):
+        raise ValueError(f"Probability values for {context} must be non-negative.")
+    if bool((probabilities > 1.0).any()):
+        raise ValueError(f"Probability values for {context} must not exceed 1.0.")
+    row_sums = probabilities.sum(axis=1)
+    bad_rows = np.flatnonzero(np.abs(row_sums - 1.0) > tolerance)
+    if len(bad_rows):
+        examples = [float(row_sums[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            f"Probability rows for {context} must sum to 1.0 within tolerance {tolerance:g}; "
+            f"example row sums: {examples}"
+        )
 
 
 def normalize_ensemble_score_mode(score_mode: str) -> str:
@@ -221,6 +249,7 @@ def _align_probability_matrices(
     *,
     prob_columns: Sequence[str],
     alignment_columns: Sequence[str],
+    probability_tolerance: float = DEFAULT_PROBABILITY_TOLERANCE,
 ) -> tuple[pd.DataFrame, list[np.ndarray]]:
     decoders = list(sources)
     base = sources[decoders[0]].copy().reset_index(drop=True)
@@ -247,8 +276,7 @@ def _align_probability_matrices(
         if aligned.loc[:, decoder_prob_columns].isna().any().any():
             raise ValueError(f"Missing aligned probability values for decoder {decoder!r}.")
         probabilities = aligned.loc[:, decoder_prob_columns].to_numpy(dtype=float)
-        if not np.isfinite(probabilities).all():
-            raise ValueError(f"Probability values for decoder {decoder!r} must be finite.")
+        _validate_probability_matrix(probabilities, context=f"decoder {decoder!r}", probability_tolerance=probability_tolerance)
         matrices.append(probabilities)
     return base, matrices
 
@@ -382,6 +410,7 @@ def ensemble_probability_observations(
     source_baseline_debiasing: bool = False,
     output_decoder: str = DEFAULT_ENSEMBLE_DECODER,
     output_emission_mode: str = DEFAULT_ENSEMBLE_EMISSION_MODE,
+    probability_tolerance: float = DEFAULT_PROBABILITY_TOLERANCE,
 ) -> pd.DataFrame:
     """Combine calibrated decoder observation rows with baseline-debiased log-probability ensembling."""
     if len(decoders) < 2:
@@ -397,7 +426,12 @@ def ensemble_probability_observations(
     temperatures = _source_temperatures(source_temperatures, len(decoders))
     sources = _source_frames(observations, decoders=decoders, source_emission_mode=source_emission_mode)
     alignment_columns = _alignment_columns(observations, prob_columns)
-    base, probability_matrices = _align_probability_matrices(sources, prob_columns=prob_columns, alignment_columns=alignment_columns)
+    base, probability_matrices = _align_probability_matrices(
+        sources,
+        prob_columns=prob_columns,
+        alignment_columns=alignment_columns,
+        probability_tolerance=probability_tolerance,
+    )
 
     log_scores = np.zeros_like(probability_matrices[0], dtype=float)
     probability_scores = np.zeros_like(probability_matrices[0], dtype=float)
@@ -560,6 +594,11 @@ def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10
         if len(group_columns) == 1 and not isinstance(group_key, tuple):
             group_key = (group_key,)
         probabilities = group.loc[:, list(prob_columns)].to_numpy(dtype=float)
+        _validate_probability_matrix(
+            probabilities,
+            context=f"metric group {dict(zip(group_columns, group_key))}",
+            probability_tolerance=DEFAULT_PROBABILITY_TOLERANCE,
+        )
         true_label_values = _integer_label_values(group["true_label"])
         true_positions = _label_positions(true_label_values, label_values)
         prediction_positions = probabilities.argmax(axis=1)

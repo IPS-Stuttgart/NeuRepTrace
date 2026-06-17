@@ -12,8 +12,10 @@ from neureptrace.mne_time_decode import (
     _apply_class_prior_correction,
     _align_probability_columns,
     _alignment_anchor_values,
+    _combine_probability_logits,
     _filter_splits_for_outer_test_groups,
     _nearest_candidate_windows,
+    _normalize_probability_rows,
     _shuffle_training_labels,
     apply_source_probability_calibration,
     fit_source_probability_calibrator,
@@ -497,6 +499,33 @@ def test_source_time_selection_rejects_duplicate_nearest_windows():
 
     with pytest.raises(ValueError, match="collapse to duplicate decode windows"):
         _nearest_candidate_windows(windows, (0.09, 0.11))
+
+
+def test_normalize_probability_rows_rejects_values_above_one():
+    probabilities = np.asarray([[1.2, 0.0], [0.3, 0.7]], dtype=float)
+
+    with pytest.raises(ValueError, match="must not exceed 1.0"):
+        _normalize_probability_rows(probabilities)
+
+
+def test_normalize_probability_rows_rejects_unnormalized_rows():
+    probabilities = np.asarray([[0.4, 0.4], [0.3, 0.7]], dtype=float)
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        _normalize_probability_rows(probabilities)
+
+
+def test_source_time_probability_logits_rejects_invalid_cube():
+    probability_cube = np.asarray(
+        [
+            [[0.7, 0.3], [0.4, 0.4]],
+            [[0.2, 0.8], [0.6, 0.4]],
+        ],
+        dtype=float,
+    )
+
+    with pytest.raises(ValueError, match="rows must sum to 1.0"):
+        _combine_probability_logits(probability_cube, np.asarray([0.5, 0.5], dtype=float))
 
 
 def test_run_time_resolved_decode_applies_strict_alignment_with_shuffled_train_labels(tmp_path: Path, monkeypatch):
