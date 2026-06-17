@@ -141,8 +141,7 @@ def sign_flip_p_value(
         raise ValueError("Need at least two paired subjects.")
     if not np.isfinite(differences).all():
         raise ValueError("differences must contain only finite values.")
-    if n_permutations < 1:
-        raise ValueError("n_permutations must be at least 1.")
+    n_permutations = _validate_positive_permutation_count(n_permutations)
 
     observed = abs(float(differences.mean()))
     n_subjects = len(differences)
@@ -155,6 +154,18 @@ def sign_flip_p_value(
     signs = rng.choice(np.array([-1.0, 1.0]), size=(n_permutations, n_subjects))
     null_means = signs @ differences / n_subjects
     return float((1.0 + (np.abs(null_means) >= observed).sum()) / (n_permutations + 1.0))
+
+
+def _validate_positive_permutation_count(n_permutations: int) -> int:
+    if isinstance(n_permutations, (bool, np.bool_)):
+        raise ValueError("n_permutations must be a positive integer.")
+    try:
+        numeric = float(n_permutations)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_permutations must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError("n_permutations must be a positive integer.")
+    return int(numeric)
 
 
 def paired_decoder_statistics(

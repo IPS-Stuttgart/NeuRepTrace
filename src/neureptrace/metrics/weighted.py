@@ -75,10 +75,27 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
 
 
 def _validate_n_bins(n_bins: int) -> int:
-    n_bins = int(n_bins)
-    if n_bins < 1:
-        raise ValueError("n_bins must be positive")
-    return n_bins
+    if isinstance(n_bins, (bool, np.bool_)):
+        raise ValueError("n_bins must be a positive integer")
+    try:
+        numeric = float(n_bins)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_bins must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
+        raise ValueError("n_bins must be a positive integer")
+    return int(numeric)
+
+
+def _validate_k(k: int) -> int:
+    if isinstance(k, (bool, np.bool_)):
+        raise ValueError("k must be a positive integer")
+    try:
+        numeric = float(k)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("k must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
+        raise ValueError("k must be a positive integer")
+    return int(numeric)
 
 
 def weighted_brier_score_multiclass(
@@ -125,9 +142,7 @@ def weighted_top_k_accuracy(
     """Compute weighted top-k classification accuracy."""
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
-    k = int(k)
-    if k < 1:
-        raise ValueError("k must be positive")
+    k = _validate_k(k)
     if k >= probabilities.shape[1]:
         return 1.0
 

@@ -305,3 +305,34 @@ def test_confusion_category_enrichment_and_matrix_use_error_marginals():
     assert animal["count"] == 3
     assert animal["expected_count"] == 1.8
     assert animal["category_confusion_lift"] > 1.0
+
+
+def test_confusion_category_enrichment_rejects_fractional_permutation_counts():
+    predictions = pd.DataFrame(
+        {
+            "true_label": [1, 1, 2, 2],
+            "predicted_label": [1, 2, 1, 2],
+        }
+    )
+    metadata = pd.DataFrame(
+        {
+            "label": [1, 2],
+            "semantic_category": ["face", "object"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
+        confusion_category_enrichment(
+            predictions,
+            metadata_frame=metadata,
+            category_columns=("semantic_category",),
+            n_permutations=1.5,
+        )
+
+    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
+        confusion_category_enrichment(
+            predictions,
+            metadata_frame=metadata,
+            category_columns=("semantic_category",),
+            n_permutations=True,
+        )

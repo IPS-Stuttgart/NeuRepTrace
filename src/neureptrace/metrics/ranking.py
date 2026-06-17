@@ -22,12 +22,8 @@ def rank_class_scores(
     """
 
     y_true = np.asarray(y_true, dtype=object).ravel()
-    top_k = tuple(int(k) for k in top_k)
-    row_top_k = int(row_top_k)
-    if any(k < 1 for k in top_k):
-        raise ValueError("top_k values must be positive.")
-    if row_top_k < 0:
-        raise ValueError("row_top_k must be non-negative.")
+    top_k = tuple(_validate_integer(k, name="top_k", minimum=1) for k in top_k)
+    row_top_k = _validate_integer(row_top_k, name="row_top_k", minimum=0)
     if not class_column:
         raise ValueError("class_column must be non-empty.")
 
@@ -78,6 +74,22 @@ def rank_class_scores(
         "median_true_label_rank": _finite_nanmedian(true_label_ranks),
         "rows": rows,
     }
+
+
+def _validate_integer(value: object, *, name: str, minimum: int) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} values must be integers.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} values must be integers.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError(f"{name} values must be integers.")
+    integer = int(numeric)
+    if integer < int(minimum):
+        qualifier = "positive" if int(minimum) == 1 else "non-negative"
+        raise ValueError(f"{name} values must be {qualifier}.")
+    return integer
 
 
 def _empty_class_rank_result(y_true: np.ndarray, top_k: Sequence[int]) -> dict[str, object]:
