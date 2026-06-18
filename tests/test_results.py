@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from neureptrace.results import (
+    _probability_ece_by_group,
     aggregate_time_decode_csvs,
     aggregate_time_decode_results,
     build_provenance_table,
@@ -190,6 +191,23 @@ def test_summarize_metric_table_reports_participants_chance_and_scaled_values():
     assert logistic["chance_mean"] == 50.0
     assert logistic["accuracy_above_chance_count"] == 3
     assert round(float(logistic["accuracy_minus_chance_mean"]), 3) == 20.0
+
+
+def test_probability_ece_by_group_maps_nonzero_probability_labels():
+    observations = pd.DataFrame(
+        {
+            "subject": ["s1", "s1"],
+            "time": [0.184, 0.184],
+            "true_label": [10, 20],
+            "prob_class_10": [0.8, 0.2],
+            "prob_class_20": [0.2, 0.8],
+        }
+    )
+
+    ece = _probability_ece_by_group(observations, ["subject", "time"], n_bins=10)
+
+    assert ece["n_observations"].tolist() == [2]
+    assert ece["ece"].round(6).tolist() == [0.2]
 
 
 def test_peak_metric_rows_breaks_ties_toward_preferred_time():

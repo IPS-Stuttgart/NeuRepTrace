@@ -108,6 +108,27 @@ def _probability_matrix(frame: pd.DataFrame) -> np.ndarray:
     return probabilities
 
 
+def _label_values(frame: pd.DataFrame) -> tuple[int, ...]:
+    columns = probability_columns(frame)
+    suffixes = tuple(column.removeprefix("prob_class_") for column in columns)
+    if not all(suffix.isdigit() for suffix in suffixes):
+        return tuple(range(len(columns)))
+    return tuple(int(suffix) for suffix in suffixes)
+
+
+def _label_positions(labels: np.ndarray, label_values: tuple[int, ...], *, name: str) -> np.ndarray:
+    label_to_position = {int(label): position for position, label in enumerate(label_values)}
+    positions = np.full(labels.shape[0], -1, dtype=int)
+    for index, label in enumerate(labels):
+        position = label_to_position.get(int(label))
+        if position is not None:
+            positions[index] = position
+    if bool((positions < 0).any()):
+        missing = sorted(set(int(label) for label in labels if int(label) not in label_to_position))
+        raise ValueError(f"Observation table {name} values must index prob_class_* labels {list(label_values)}; missing labels: {missing[:5]}.")
+    return positions
+
+
 def _integer_array(values: pd.Series, *, name: str) -> np.ndarray:
     numeric = pd.to_numeric(values, errors="coerce")
     if numeric.isna().any():
@@ -128,7 +149,8 @@ def _label_array(frame: pd.DataFrame) -> np.ndarray:
 def _predicted_array(frame: pd.DataFrame) -> np.ndarray:
     if "predicted_label" in frame.columns:
         return _integer_array(frame["predicted_label"], name="predicted_label")
-    return _probability_matrix(frame).argmax(axis=1)
+    label_values = _label_values(frame)
+    return np.asarray([label_values[position] for position in _probability_matrix(frame).argmax(axis=1)], dtype=int)
 
 
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
@@ -137,6 +159,15 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     effective_k = min(int(k), probabilities.shape[1])
     top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
     return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
+
+
+def _top_k_accuracy_from_label_values(probabilities: np.ndarray, labels: np.ndarray, label_values: tuple[int, ...], *, k: int) -> float:
+    if len(labels) == 0:
+        return float("nan")
+    effective_k = min(int(k), probabilities.shape[1])
+    top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
+    top_labels = np.asarray(label_values, dtype=int)[top_columns]
+    return float(np.mean(np.any(top_labels == labels[:, None], axis=1)))
 
 
 def _top_k_chance(n_classes: int, *, k: int) -> float:
@@ -149,13 +180,18 @@ def _top_k_interpretation(n_classes: int, *, k: int) -> str:
 
 def _metrics_for_rows(frame: pd.DataFrame) -> dict[str, float | int | str]:
     probabilities = _probability_matrix(frame)
+    label_values = _label_values(frame)
     labels = _label_array(frame)
     predictions = _predicted_array(frame)
+    label_set = set(label_values)
     n_classes = probabilities.shape[1]
-    if bool(((labels < 0) | (labels >= n_classes)).any()):
-        raise ValueError("Observation table true_label values must index prob_class_* columns.")
-    if bool(((predictions < 0) | (predictions >= n_classes)).any()):
-        raise ValueError("Observation table predicted_label values must index prob_class_* columns.")
+    if missing_labels := sorted(set(int(label) for label in labels if int(label) not in label_set)):
+        raise ValueError(f"Observation table true_label values must index prob_class_* labels {list(label_values)}; missing labels: {missing_labels[:5]}.")
+    if missing_predictions := sorted(set(int(label) for label in predictions if int(label) not in label_set)):
+        raise ValueError(
+            f"Observation table predicted_label values must index prob_class_* labels {list(label_values)}; missing labels: {missing_predictions[:5]}."
+        )
+    label_positions = _label_positions(labels, label_values, name="true_label")
     if len(frame) == 0:
         return {
             "n_observations": 0,
@@ -173,11 +209,11 @@ def _metrics_for_rows(frame: pd.DataFrame) -> dict[str, float | int | str]:
         "n_classes": int(n_classes),
         "accuracy": float(accuracy_score(labels, predictions)),
         "balanced_accuracy": float(balanced_accuracy_score(labels, predictions)),
-        "top2_accuracy": _top_k_accuracy(probabilities, labels, k=2),
-        "top3_accuracy": _top_k_accuracy(probabilities, labels, k=3),
-        "log_loss": float(log_loss(labels, probabilities, labels=np.arange(n_classes))),
-        "brier": float(brier_score_multiclass(probabilities, labels)),
-        "ece": float(expected_calibration_error(probabilities, labels)),
+        "top2_accuracy": _top_k_accuracy_from_label_values(probabilities, labels, label_values, k=2),
+        "top3_accuracy": _top_k_accuracy_from_label_values(probabilities, labels, label_values, k=3),
+        "log_loss": float(log_loss(labels, probabilities, labels=list(label_values))),
+        "brier": float(brier_score_multiclass(probabilities, label_positions)),
+        "ece": float(expected_calibration_error(probabilities, label_positions)),
     }
 
 
@@ -362,8 +398,8 @@ def selective_coverage_summary(
     fixed = _rows_at_time(observations, time).reset_index(drop=True)
     if fixed.empty:
         raise ValueError("Cannot compute selective coverage from an empty fixed-time table.")
-    probabilities = _probability_matrix(fixed)
-    n_classes = probabilities.shape[1]
+    _probability_matrix(fixed)
+    label_values = _label_values(fixed)
     confidence = _confidence_array(fixed)
     order = np.lexsort((np.arange(len(fixed)), -confidence))
     sorted_fixed = fixed.iloc[order].reset_index(drop=True)
@@ -381,8 +417,8 @@ def selective_coverage_summary(
         metrics = _metrics_for_rows(selected)
         selected_labels = _label_array(selected)
         class_support = {
-            str(class_index): int(np.sum(selected_labels == class_index))
-            for class_index in range(n_classes)
+            str(label): int(np.sum(selected_labels == label))
+            for label in label_values
         }
         rows.append(
             {

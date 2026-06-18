@@ -53,6 +53,20 @@ def _noisy_observation_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _nonzero_label_observation_frame() -> pd.DataFrame:
+    observations = _noisy_observation_frame()
+    label_map = {0: 10, 1: 20}
+    observations["true_label"] = observations["true_label"].map(label_map)
+    observations["predicted_label"] = observations["predicted_label"].map(label_map)
+    observations["class_10"] = observations.pop("class_0")
+    observations["class_20"] = observations.pop("class_1")
+    observations = observations.rename(columns={"prob_class_0": "prob_class_10", "prob_class_1": "prob_class_20"})
+    observations["probability_true_class"] = observations["prob_class_10"]
+    observations["predicted_class"] = observations["predicted_label"].map({10: "left", 20: "right"})
+    observations["is_correct"] = observations["predicted_label"] == observations["true_label"]
+    return observations
+
+
 def test_temporal_smoothing_exports_posteriors_and_metrics(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     out_observations = tmp_path / "smoothed_observations.csv"
@@ -98,12 +112,44 @@ def test_temporal_smoothing_exports_posteriors_and_metrics(tmp_path: Path):
     assert "temporal_smoothing_stay_probability" in metrics.columns
 
 
+def test_temporal_smoothing_maps_nonzero_probability_labels(tmp_path: Path):
+    csv_path = tmp_path / "observations.csv"
+    observations = _nonzero_label_observation_frame()
+    observations.to_csv(csv_path, index=False)
+
+    smoothed, metrics = smooth_probability_observations(
+        [csv_path],
+        fit_window=(0.1, 0.5),
+        stay_grid_size=40,
+    )
+
+    noisy_time = smoothed.loc[smoothed["time"].eq(0.30)]
+    metric_row = metrics.loc[metrics["time"].eq(0.30)].iloc[0]
+
+    assert smoothed["predicted_label"].unique().tolist() == [10]
+    assert smoothed["predicted_class"].unique().tolist() == ["left"]
+    assert noisy_time["probability_true_class"].min() > 0.5
+    assert noisy_time["is_correct"].all()
+    assert metric_row["accuracy"] == 1.0
+    assert metric_row["top2_accuracy"] == 1.0
+    assert metric_row["brier"] < 0.5
+    assert metric_row["ece"] < 0.5
+
+
 def test_temporal_smoothing_metrics_reject_fractional_true_labels() -> None:
     observations = _noisy_observation_frame()
     observations["true_label"] = observations["true_label"].astype(float)
     observations.loc[0, "true_label"] = 0.5
 
     with pytest.raises(ValueError, match="true_label values must be integer-valued"):
+        metrics_from_probability_observations(observations)
+
+
+def test_temporal_smoothing_metrics_reject_nonzero_labels_missing_from_probabilities() -> None:
+    observations = _nonzero_label_observation_frame()
+    observations.loc[0, "true_label"] = 30
+
+    with pytest.raises(ValueError, match="true_label values must index prob_class_\\* labels"):
         metrics_from_probability_observations(observations)
 
 

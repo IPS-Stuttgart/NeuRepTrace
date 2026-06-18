@@ -53,7 +53,8 @@ def _class_names(frame: pd.DataFrame, prob_columns: list[str]) -> list[str]:
         if class_column in frame.columns and frame[class_column].notna().any():
             names.append(str(frame[class_column].dropna().iloc[0]))
         else:
-            names.append(str(index))
+            suffix = column.removeprefix("prob_class_")
+            names.append(suffix if suffix.isdigit() else str(index))
     return names
 
 
