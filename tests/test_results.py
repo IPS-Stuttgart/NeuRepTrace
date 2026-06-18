@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.results import (
     _probability_ece_by_group,
@@ -8,6 +10,7 @@ from neureptrace.results import (
     aggregate_time_decode_results,
     build_provenance_table,
     peak_metric_rows,
+    subject_time_metrics,
     summarize_metric_table,
 )
 
@@ -56,6 +59,72 @@ def test_aggregate_time_decode_results_weights_folds_by_test_size():
     assert aggregated["log_loss_mean"].round(3).tolist() == [2.35]
     assert aggregated["brier_mean"].round(3).tolist() == [0.235]
     assert aggregated["ece_mean"].round(3).tolist() == [0.155]
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    [
+        ("accuracy", "bad", "finite numeric"),
+        ("accuracy", np.nan, "finite numeric"),
+        ("accuracy", 1.2, "values must be in"),
+        ("log_loss", -0.1, "values must be in"),
+        ("brier", 2.5, "values must be in"),
+        ("ece", np.inf, "finite numeric"),
+        ("ece", 1.5, "values must be in"),
+    ],
+)
+def test_aggregate_time_decode_results_rejects_malformed_metric_values(column, value, message):
+    results = _result_frame("s1")
+    if isinstance(value, str):
+        results[column] = results[column].astype(object)
+    results.loc[0, column] = value
+
+    with pytest.raises(ValueError, match=message):
+        aggregate_time_decode_results(results)
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    [
+        ("subject", "", "subject"),
+        ("subject", None, "subject"),
+        ("time", "bad", "time"),
+        ("time", np.inf, "time"),
+    ],
+)
+def test_aggregate_time_decode_results_rejects_malformed_subject_time_keys(column, value, message):
+    results = _result_frame("s1")
+    if isinstance(value, str):
+        results[column] = results[column].astype(object)
+    results.loc[0, column] = value
+
+    with pytest.raises(ValueError, match=message):
+        aggregate_time_decode_results(results)
+
+
+def test_aggregate_time_decode_results_rejects_duplicate_fold_rows():
+    results = _result_frame("s1")
+    duplicate = results.iloc[[0]].copy()
+    results = pd.concat([results, duplicate], ignore_index=True)
+
+    with pytest.raises(ValueError, match="duplicate fold rows"):
+        aggregate_time_decode_results(results)
+
+
+@pytest.mark.parametrize("bad_n_test", [0, -1, 1.5, True, np.nan])
+def test_aggregate_time_decode_results_rejects_invalid_n_test(bad_n_test):
+    results = _result_frame("s1")
+    results["n_test"] = pd.Series([3, 3, 3, 3], dtype=object)
+    results.loc[0, "n_test"] = bad_n_test
+
+    with pytest.raises(ValueError, match="positive integer fold sizes"):
+        aggregate_time_decode_results(results)
+
+
+@pytest.mark.parametrize("ece_bins", [0, 1.5, True, np.nan])
+def test_subject_time_metrics_rejects_invalid_ece_bins(ece_bins):
+    with pytest.raises(ValueError, match="ece_bins must be a positive integer"):
+        subject_time_metrics(_result_frame("s1"), ece_bins=ece_bins)
 
 
 def test_aggregate_time_decode_csvs_uses_filename_as_subject(tmp_path: Path):
@@ -169,6 +238,14 @@ def test_build_provenance_table_records_config_params_and_metrics():
     assert round(float(tuned_row["selected_log_loss"]), 3) == 0.4
     assert round(float(tuned_row["selected_ece"]), 3) == 0.2
     assert round(float(tuned_row["accuracy_effect_minus_baseline"]), 3) == 0.1
+
+
+def test_build_provenance_table_rejects_nonfinite_selection_metric():
+    summary = aggregate_time_decode_results(_result_frame("s1"))
+    summary.loc[0, "accuracy_mean"] = np.inf
+
+    with pytest.raises(ValueError, match="must contain only finite values"):
+        build_provenance_table(summary, selection_metric="accuracy")
 
 
 def test_summarize_metric_table_reports_participants_chance_and_scaled_values():
