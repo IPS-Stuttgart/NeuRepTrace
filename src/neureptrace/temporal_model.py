@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -85,6 +86,56 @@ def _validate_probability_matrix(probabilities: np.ndarray) -> np.ndarray:
     return probability_array
 
 
+def _validate_integer(value: int | str, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    parsed = int(numeric)
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    return parsed
+
+
+def _validate_non_negative_integer(value: int | str, *, name: str) -> int:
+    try:
+        return _validate_integer(value, name=name, minimum=0)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a non-negative integer.") from exc
+
+
+def _validate_finite_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite.")
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    return parsed
+
+
+def _validate_time_window(value: Sequence[float] | None, *, name: str) -> tuple[float, float] | None:
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or len(value) != 2:
+        raise ValueError(f"{name} must contain exactly two finite bounds.")
+    start = _validate_finite_float(value[0], name=name)
+    stop = _validate_finite_float(value[1], name=name)
+    if stop < start:
+        raise ValueError(f"{name} stop must be greater than or equal to start.")
+    return start, stop
+
+
+def _validate_stay_probability(value: float | str) -> float:
+    probability = _validate_finite_float(value, name="stay_probability")
+    if probability < 0.0 or probability > 1.0:
+        raise ValueError("stay_probability must be between 0 and 1.")
+    return probability
+
+
 def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
     """Read held-out probability observation CSVs emitted by NeuRepTrace."""
     if not csv_paths:
@@ -96,6 +147,12 @@ def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
         missing = [column for column in ("time",) if column not in frame.columns]
         if missing:
             raise ValueError(f"{csv_path} is missing required columns: {missing}")
+        try:
+            frame["time"] = pd.to_numeric(frame["time"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{csv_path} time values must be numeric.") from exc
+        if not np.isfinite(frame["time"].to_numpy(dtype=float)).all():
+            raise ValueError(f"{csv_path} time values must be finite.")
         prob_columns = probability_columns(frame)
         _validate_probability_matrix(frame[prob_columns].to_numpy())
         if "sequence_id" not in frame.columns:
@@ -143,9 +200,10 @@ def _normalize_probabilities(probabilities: np.ndarray) -> np.ndarray:
 
 
 def _filter_time_window(frame: pd.DataFrame, time_window: tuple[float, float] | None) -> pd.DataFrame:
-    if time_window is None:
+    normalized_window = _validate_time_window(time_window, name="time_window")
+    if normalized_window is None:
         return frame.copy()
-    start, stop = time_window
+    start, stop = normalized_window
     return frame.loc[(frame["time"] >= start) & (frame["time"] <= stop)].copy()
 
 
@@ -215,7 +273,7 @@ def _logsumexp(values: np.ndarray, axis: int | None = None) -> np.ndarray:
 def _log_transition(n_states: int, stay_probability: float) -> np.ndarray:
     if n_states < 2:
         raise ValueError("Need at least two states.")
-    stay = float(np.clip(stay_probability, EPSILON, 1.0 - EPSILON))
+    stay = float(np.clip(_validate_stay_probability(stay_probability), EPSILON, 1.0 - EPSILON))
     switch = (1.0 - stay) / (n_states - 1)
     transition = np.full((n_states, n_states), switch)
     np.fill_diagonal(transition, stay)
@@ -238,13 +296,15 @@ def _total_log_likelihood(sequences: list[np.ndarray], stay_probability: float) 
 
 
 def _stay_grid(n_states: int, grid_size: int) -> np.ndarray:
-    if grid_size < 2:
-        raise ValueError("stay_grid_size must be at least 2.")
+    grid_size = _validate_integer(grid_size, name="stay_grid_size", minimum=2)
     return np.linspace(1.0 / n_states, 0.995, grid_size)
 
 
 def fit_sticky_switching_model(sequences: list[np.ndarray], *, stay_grid_size: int = 200) -> dict[str, float]:
     """Fit a sticky switching model by grid-searching the state persistence."""
+    if not sequences:
+        raise ValueError("Need at least one probability sequence for temporal modeling.")
+    sequences = [_normalize_probabilities(sequence) for sequence in sequences]
     n_states = sequences[0].shape[1]
     if any(sequence.shape[1] != n_states for sequence in sequences):
         raise ValueError("All probability sequences must have the same number of states.")
@@ -295,6 +355,8 @@ def _fit_control(
     stay_grid_size: int,
 ) -> list[dict[str, float]]:
     n_permutations = _validate_non_negative_integer(n_permutations, name="n_permutations")
+    random_seed = _validate_non_negative_integer(random_seed, name="random_seed")
+    stay_grid_size = _validate_integer(stay_grid_size, name="stay_grid_size", minimum=2)
     rng = np.random.default_rng(random_seed)
     rows = []
     for _ in range(n_permutations):
@@ -325,18 +387,6 @@ def _model_row(group_values: dict[str, str], condition: str, fit: dict[str, floa
         "persistence_gain_per_observation_sd": None,
         "empirical_p_value": empirical_p_value,
     }
-
-
-def _validate_non_negative_integer(value: int, *, name: str) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a non-negative integer.")
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a non-negative integer.") from exc
-    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 0.0:
-        raise ValueError(f"{name} must be a non-negative integer.")
-    return int(numeric)
 
 
 def _control_row(
@@ -410,6 +460,7 @@ def _viterbi_path(probabilities: np.ndarray, stay_probability: float) -> np.ndar
 
 def build_state_trace(frame: pd.DataFrame, *, stay_probability: float, class_names: list[str], prob_columns: list[str]) -> pd.DataFrame:
     """Decode posterior and Viterbi state traces for observed probability sequences."""
+    stay_probability = _validate_stay_probability(stay_probability)
     key_columns = _sequence_key_columns(frame)
     validate_unique_sequence_times(frame, key_columns)
     rows = []
@@ -452,7 +503,11 @@ def fit_temporal_models(
     out_states: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """Fit sticky switching models to probability observation CSVs and controls."""
+    effect_window = _validate_time_window(effect_window, name="effect_window")
+    baseline_window = _validate_time_window(baseline_window, name="baseline_window")
     n_permutations = _validate_non_negative_integer(n_permutations, name="n_permutations")
+    random_seed = _validate_non_negative_integer(random_seed, name="random_seed")
+    stay_grid_size = _validate_integer(stay_grid_size, name="stay_grid_size", minimum=2)
     observations = read_probability_observations(observation_csvs)
     prob_columns = probability_columns(observations)
     rows = []
