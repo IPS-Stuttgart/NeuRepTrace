@@ -1,9 +1,11 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.benchmark import BenchmarkRun
-from neureptrace.temporal_state_workflow import prepare_temporal_state_manifest, run_temporal_state_workflow
+from neureptrace.temporal_state_workflow import export_temporal_state_artifacts, prepare_temporal_state_manifest, run_temporal_state_workflow
 from neureptrace.validate_manifest import ManifestValidation
 
 
@@ -28,6 +30,26 @@ def test_prepare_temporal_state_manifest_rewrites_data_root_and_adds_decoders(tm
     assert prepared["decoder"].tolist() == ["logistic", "logistic", "linear_svm", "linear_svm"]
     assert prepared["epochs"].str.endswith("_epo.fif").all()
     assert prepared["events_csv"].str.startswith(str((tmp_path / "nod").resolve())).all()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"max_subjects": True}, "max_subjects"),
+        ({"max_subjects": 1.5}, "max_subjects"),
+        ({"expected_subjects": False}, "expected_subjects"),
+        ({"expected_subjects": 0}, "expected_subjects"),
+    ],
+)
+def test_prepare_temporal_state_manifest_rejects_malformed_subject_limits(tmp_path: Path, kwargs: dict, message: str):
+    with pytest.raises(ValueError, match=message):
+        prepare_temporal_state_manifest(
+            tmp_path / "source.csv",
+            tmp_path / "prepared.csv",
+            data_root=None,
+            decoders=("logistic",),
+            **kwargs,
+        )
 
 
 def _fake_observations(subject: str, decoder: str) -> pd.DataFrame:
@@ -157,3 +179,51 @@ def test_run_temporal_state_workflow_builds_compact_outputs_and_exports(tmp_path
     assert run.exported_artifacts
     assert not any(path.name == "state_trace.csv" for path in run.exported_artifacts)
     assert not any("observations" in path.parts for path in run.exported_artifacts)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"n_permutations": True}, "n_permutations"),
+        ({"n_permutations": -1}, "n_permutations"),
+        ({"random_seed": True}, "random_seed"),
+        ({"random_seed": -1}, "random_seed"),
+        ({"stay_grid_size": True}, "stay_grid_size"),
+        ({"stay_grid_size": 1}, "stay_grid_size"),
+        ({"posterior_threshold": True}, "posterior_threshold"),
+        ({"posterior_threshold": 1.5}, "posterior_threshold"),
+        ({"match_threshold": np.nan}, "match_threshold"),
+        ({"min_duration": True}, "min_duration"),
+        ({"min_duration": -0.01}, "min_duration"),
+        ({"max_subjects": 1.5}, "max_subjects"),
+        ({"expected_subjects": 0}, "expected_subjects"),
+        ({"resume": "sometimes"}, "resume"),
+        ({"max_export_mb": 0}, "max_export_mb"),
+    ],
+)
+def test_run_temporal_state_workflow_rejects_malformed_controls(tmp_path: Path, kwargs: dict, message: str):
+    with pytest.raises(ValueError, match=message):
+        run_temporal_state_workflow(
+            out_dir=tmp_path / "temporal_state",
+            manifest_dir=tmp_path / "paper_benchmarks",
+            task_ids=("nod_animate",),
+            decoders=("linear_svm",),
+            **kwargs,
+        )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"max_mb": True}, "max_export_mb"),
+        ({"max_mb": 0}, "max_export_mb"),
+        ({"dry_run": "sometimes"}, "dry_run"),
+    ],
+)
+def test_export_temporal_state_artifacts_rejects_malformed_controls(tmp_path: Path, kwargs: dict, message: str):
+    with pytest.raises(ValueError, match=message):
+        export_temporal_state_artifacts(
+            tmp_path / "source",
+            tmp_path / "destination",
+            **kwargs,
+        )
