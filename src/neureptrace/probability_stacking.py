@@ -56,6 +56,14 @@ _BASE_ALIGNMENT_COLUMNS = (
 )
 _METRIC_GROUP_COLUMNS = ("subject", "fold", "decoder", "emission_mode", "time", "window_start", "window_stop")
 _ROW_IDENTITY_COLUMNS = ("true_label", "true_class")
+_STACKING_METADATA_COLUMNS = (
+    "source_oof_candidates",
+    "source_oof_weights",
+    "source_oof_weighting",
+    "source_oof_pooling",
+    "source_oof_balanced_accuracy",
+    "source_oof_log_loss",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,17 +148,70 @@ def _label_positions(
     return positions
 
 
+def _clean_nonblank_strings(values: Sequence[object] | np.ndarray | pd.Series, *, name: str) -> tuple[str, ...]:
+    series = pd.Series(values)
+    if series.isna().any():
+        raise ValueError(f"{name} values must be present.")
+    cleaned = tuple(str(value).strip() for value in series)
+    if any(value == "" for value in cleaned):
+        raise ValueError(f"{name} values must not be blank.")
+    return cleaned
+
+
+def _reject_duplicate_strings(values: Sequence[str], *, name: str) -> None:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for value in values:
+        if value in seen and value not in duplicates:
+            duplicates.append(value)
+        seen.add(value)
+    if duplicates:
+        raise ValueError(f"{name} values must be unique; duplicates: {duplicates[:5]}.")
+
+
 def _candidate_order(frame: pd.DataFrame, candidate_column: str) -> tuple[str, ...]:
     if candidate_column not in frame.columns:
         raise ValueError(f"Observation table is missing candidate column {candidate_column!r}.")
-    return tuple(dict.fromkeys(frame[candidate_column].astype(str).tolist()))
+    values = _clean_nonblank_strings(frame[candidate_column], name=candidate_column)
+    return tuple(dict.fromkeys(values))
 
 
 def _normalize_candidates(candidates: Sequence[str] | None, frame: pd.DataFrame, candidate_column: str) -> tuple[str, ...]:
-    values = tuple(str(candidate) for candidate in candidates) if candidates is not None else _candidate_order(frame, candidate_column)
+    values = _clean_nonblank_strings(candidates, name="candidate") if candidates is not None else _candidate_order(frame, candidate_column)
     if not values:
         raise ValueError("At least one candidate/decoder is required for probability stacking.")
+    _reject_duplicate_strings(values, name="candidate")
     return values
+
+
+def _normalize_alignment_columns(
+    alignment_columns: Sequence[str] | None,
+    *,
+    frame: pd.DataFrame,
+    prob_columns: Sequence[str],
+    candidate_column: str,
+) -> tuple[str, ...]:
+    if alignment_columns is None:
+        return _infer_alignment_columns(frame, prob_columns, candidate_column)
+    keys = _clean_nonblank_strings(alignment_columns, name="alignment column")
+    _reject_duplicate_strings(keys, name="alignment column")
+    if candidate_column in keys:
+        raise ValueError(f"alignment columns must not include candidate column {candidate_column!r}.")
+    missing = [column for column in keys if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Observation table is missing alignment column(s): {missing[:5]}.")
+    return keys
+
+
+def _validate_alignment_key_values(frame: pd.DataFrame, keys: Sequence[str], *, candidate: str) -> None:
+    for key in keys:
+        values = frame[key]
+        missing = values.isna()
+        if values.dtype == object:
+            missing |= values.astype(str).str.strip().eq("")
+        if bool(missing.any()):
+            rows = values.index[missing].tolist()[:5]
+            raise ValueError(f"Candidate {candidate!r} has missing alignment key {key!r} at row(s) {rows}.")
 
 
 def _infer_alignment_columns(frame: pd.DataFrame, prob_columns: Sequence[str], candidate_column: str) -> tuple[str, ...]:
@@ -217,7 +278,13 @@ def _renormalize_probabilities(
     probabilities = np.asarray(values, dtype=float)
     if probabilities.ndim != 2:
         raise ValueError("Probability values must be a two-dimensional matrix.")
-    if min_probability <= 0.0 or min_probability >= 1.0:
+    if isinstance(min_probability, (bool, np.bool_)):
+        raise ValueError("min_probability must lie in (0, 1).")
+    try:
+        min_probability_value = float(min_probability)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("min_probability must lie in (0, 1).") from exc
+    if not np.isfinite(min_probability_value) or min_probability_value <= 0.0 or min_probability_value >= 1.0:
         raise ValueError("min_probability must lie in (0, 1).")
     if not np.isfinite(probabilities).all():
         raise ValueError("Probability values must be finite.")
@@ -234,11 +301,32 @@ def _renormalize_probabilities(
                 "Probability rows must sum to 1.0 within tolerance "
                 f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
             )
-    probabilities = np.clip(probabilities, float(min_probability), 1.0)
+    probabilities = np.clip(probabilities, min_probability_value, 1.0)
     row_sums = probabilities.sum(axis=1, keepdims=True)
     if np.any(row_sums <= 0.0) or not np.isfinite(row_sums).all():
         raise ValueError("Probability rows must have positive finite sums.")
     return probabilities / row_sums
+
+
+def _validate_probability_matrix(values: np.ndarray, *, context: str = "Probability values") -> np.ndarray:
+    probabilities = np.asarray(values, dtype=float)
+    if probabilities.ndim != 2:
+        raise ValueError(f"{context} must be a two-dimensional matrix.")
+    if not np.isfinite(probabilities).all():
+        raise ValueError(f"{context} must be finite.")
+    if np.any(probabilities < 0.0):
+        raise ValueError(f"{context} must be non-negative.")
+    if np.any(probabilities > 1.0):
+        raise ValueError(f"{context} must not exceed 1.0.")
+    row_sums = probabilities.sum(axis=1)
+    bad_rows = np.flatnonzero(np.abs(row_sums - 1.0) > DEFAULT_PROBABILITY_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums[index]) for index in bad_rows[:5]]
+        raise ValueError(
+            f"{context} rows must sum to 1.0 within tolerance "
+            f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
+        )
+    return probabilities
 
 
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
@@ -247,6 +335,30 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     effective_k = min(_validate_positive_integer(k, name="k"), probabilities.shape[1])
     top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
     return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
+
+
+def _top_k_accuracy_from_label_values(
+    probabilities: np.ndarray,
+    true_labels: np.ndarray,
+    label_values: Sequence[int],
+    *,
+    k: int,
+) -> float:
+    """Return top-k accuracy when probability columns use arbitrary label ids."""
+
+    probabilities = np.asarray(probabilities, dtype=float)
+    true_labels = np.asarray(true_labels, dtype=int).reshape(-1)
+    label_values_array = np.asarray(label_values, dtype=int)
+    if probabilities.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional array.")
+    if probabilities.shape[0] != true_labels.shape[0]:
+        raise ValueError("probabilities and true_labels must contain the same number of rows.")
+    if probabilities.shape[1] != label_values_array.shape[0]:
+        raise ValueError("label_values must contain one label per probability column.")
+    effective_k = min(_validate_positive_integer(k, name="k"), probabilities.shape[1])
+    top_positions = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
+    top_labels = label_values_array[top_positions]
+    return float(np.mean(np.any(top_labels == true_labels[:, None], axis=1)))
 
 
 def _validate_positive_integer(value: int, *, name: str) -> int:
@@ -321,14 +433,20 @@ def align_probability_cube(
     if require_labels and "true_label" not in observations.columns:
         raise ValueError("Observation table must contain true_label for source-OOF stacking.")
     candidates = _normalize_candidates(candidates, observations, candidate_column)
-    keys = tuple(alignment_columns) if alignment_columns is not None else _infer_alignment_columns(observations, prob_columns, candidate_column)
+    keys = _normalize_alignment_columns(
+        alignment_columns,
+        frame=observations,
+        prob_columns=prob_columns,
+        candidate_column=candidate_column,
+    )
 
     subsets: dict[str, pd.DataFrame] = {}
-    candidate_values = observations[candidate_column].astype(str)
+    candidate_values = pd.Series(_clean_nonblank_strings(observations[candidate_column], name=candidate_column), index=observations.index)
     for candidate in candidates:
         subset = observations.loc[candidate_values == candidate].copy().reset_index(drop=True)
         if subset.empty:
             raise ValueError(f"No observation rows found for candidate {candidate!r}.")
+        _validate_alignment_key_values(subset, keys, candidate=candidate)
         _check_unique_alignment(subset, keys, candidate)
         subsets[candidate] = subset
 
@@ -445,10 +563,10 @@ def fit_stacking_weights(
         raise ValueError("labels must be integer class positions compatible with probability_cube.")
     max_iter = _validate_positive_integer(max_iter, name="max_iter")
     learning_rate = _validate_positive_finite_float(learning_rate, name="learning_rate")
+    cube = np.stack([_renormalize_probabilities(candidate, min_probability=min_probability) for candidate in cube], axis=0)
     if n_candidates == 1:
         return np.ones(1, dtype=float)
 
-    cube = np.stack([_renormalize_probabilities(candidate, min_probability=min_probability) for candidate in cube], axis=0)
     true_probabilities = cube[:, np.arange(n_samples), labels]
     log_cube = np.log(cube)
     true_log_probabilities = log_cube[:, np.arange(n_samples), labels]
@@ -594,6 +712,8 @@ def fit_source_oof_stacking(
     if cube.ndim != 3:
         raise ValueError("source_probability_cube must have shape (n_candidates, n_samples, n_classes).")
     n_candidates, n_samples, n_classes = cube.shape
+    candidates = _clean_nonblank_strings(candidates, name="candidate")
+    _reject_duplicate_strings(candidates, name="candidate")
     if len(candidates) != n_candidates:
         raise ValueError("candidates must contain one name per probability-cube candidate.")
     if labels.shape[0] != n_samples:
@@ -761,32 +881,39 @@ def summarize_stacked_metrics(observations: pd.DataFrame) -> pd.DataFrame:
     for group_key, group in observations.groupby(group_columns, dropna=False, sort=True):
         if len(group_columns) == 1 and not isinstance(group_key, tuple):
             group_key = (group_key,)
-        probabilities = group.loc[:, list(prob_columns)].to_numpy(dtype=float)
+        probabilities = _validate_probability_matrix(
+            group.loc[:, list(prob_columns)].to_numpy(dtype=float),
+            context=f"Probability values for metric group {dict(zip(group_columns, group_key, strict=True))}",
+        )
         true_label_values = _integer_label_array(group["true_label"], name="true_label")
         missing_labels = sorted(set(int(label) for label in true_label_values if int(label) not in label_value_set))
         if missing_labels:
             raise ValueError(f"true_label values must index probability labels {list(label_values)}; missing labels: {missing_labels[:5]}")
+        true_positions = _label_positions(true_label_values, label_values)
         predicted_label_values = np.asarray([label_values[position] for position in probabilities.argmax(axis=1)], dtype=int)
+        group_context = dict(zip(group_columns, group_key, strict=True))
         row = dict(zip(group_columns, group_key, strict=True))
         row.update(
             {
                 "accuracy": float(accuracy_score(true_label_values, predicted_label_values)),
                 "balanced_accuracy": float(balanced_accuracy_score(true_label_values, predicted_label_values)),
-                "top2_accuracy": _top_k_accuracy(probabilities, true_label_values, k=2),
-                "top3_accuracy": _top_k_accuracy(probabilities, true_label_values, k=3),
+                "top2_accuracy": _top_k_accuracy_from_label_values(probabilities, true_label_values, label_values, k=2),
+                "top3_accuracy": _top_k_accuracy_from_label_values(probabilities, true_label_values, label_values, k=3),
                 "log_loss": float(log_loss(true_label_values, probabilities, labels=list(label_values))),
-                "brier": float(brier_score_multiclass(probabilities, true_label_values)),
-                "ece": float(expected_calibration_error(probabilities, true_label_values)),
+                "brier": float(brier_score_multiclass(probabilities, true_positions)),
+                "ece": float(expected_calibration_error(probabilities, true_positions)),
                 "n_test": int(len(group)),
                 "n_classes": int(len(prob_columns)),
-                "source_oof_candidates": str(group.iloc[0].get("source_oof_candidates", "")),
-                "source_oof_weights": str(group.iloc[0].get("source_oof_weights", "")),
-                "source_oof_weighting": str(group.iloc[0].get("source_oof_weighting", "")),
-                "source_oof_pooling": str(group.iloc[0].get("source_oof_pooling", "")),
-                "source_oof_balanced_accuracy": group.iloc[0].get("source_oof_balanced_accuracy", ""),
-                "source_oof_log_loss": group.iloc[0].get("source_oof_log_loss", ""),
             }
         )
+        for column in _STACKING_METADATA_COLUMNS:
+            if column not in group.columns:
+                row[column] = ""
+                continue
+            values = group[column].drop_duplicates()
+            if len(values) > 1:
+                raise ValueError(f"Stacking metadata column {column!r} is inconsistent within metric group {group_context}.")
+            row[column] = "" if values.empty else values.iloc[0]
         rows.append(row)
     return pd.DataFrame(rows)
 
