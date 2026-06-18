@@ -30,6 +30,8 @@ EPSILON = 1e-12
 TARGET_GROUP_COLUMNS = ("subject", "group", "outer_test_groups", "session", "fold")
 SOURCE_HASH_COLUMNS = ("preprocessing_hash", "model_hash")
 ROW_IDENTITY_COLUMNS = ("true_label", "true_class")
+PROBABILITY_TOLERANCE = 1e-6
+MISSING_TEXT_VALUES = {"", "nan", "none", "nat"}
 METRIC_PROVENANCE_COLUMNS = (
     "label_shuffle_control",
     "label_shuffle_seed",
@@ -69,6 +71,16 @@ def _normalize_rows(probabilities: np.ndarray) -> np.ndarray:
         raise ValueError("Response-window probabilities must be finite.")
     if np.any(probabilities < 0.0):
         raise ValueError("Response-window probabilities must be non-negative.")
+    if np.any(probabilities > 1.0):
+        raise ValueError("Response-window probabilities must not exceed 1.0.")
+    row_sums = probabilities.sum(axis=1, keepdims=True)
+    bad_rows = np.flatnonzero(np.abs(row_sums.reshape(-1) - 1.0) > PROBABILITY_TOLERANCE)
+    if len(bad_rows):
+        examples = [float(row_sums[index, 0]) for index in bad_rows[:5]]
+        raise ValueError(
+            "Response-window probability rows must sum to 1.0 within tolerance "
+            f"{PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
+        )
     probabilities = np.clip(probabilities, EPSILON, None)
     row_sums = probabilities.sum(axis=1, keepdims=True)
     if np.any(row_sums <= 0.0):
@@ -107,14 +119,26 @@ def _has_nonempty_values(series: pd.Series) -> bool:
     if series.dropna().empty:
         return False
     values = series.dropna().astype(str).str.strip()
-    values = values.loc[~values.str.lower().isin({"", "nan", "none", "nat"})]
+    values = values.loc[~values.str.lower().isin(MISSING_TEXT_VALUES)]
     return not values.empty
+
+
+def _nonempty_mask(series: pd.Series) -> pd.Series:
+    if series.dropna().empty:
+        return pd.Series(False, index=series.index)
+    text = series.where(~series.isna(), "").astype(str).str.strip()
+    return ~(text.str.lower().isin(MISSING_TEXT_VALUES))
 
 
 def _subject_key_column(frame: pd.DataFrame) -> str | None:
     for column in TARGET_GROUP_COLUMNS:
-        if column in frame.columns and _has_nonempty_values(frame[column]):
+        if column not in frame.columns:
+            continue
+        mask = _nonempty_mask(frame[column])
+        if bool(mask.all()):
             return column
+        if bool(mask.any()):
+            raise ValueError(f"Response-window target key column {column!r} is partially missing.")
     return None
 
 
@@ -206,6 +230,38 @@ def _integer_label_values(values: Sequence[object] | np.ndarray | pd.Series, *, 
     return labels
 
 
+def _label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
+    suffixes = tuple(column.removeprefix("prob_class_") for column in prob_columns)
+    if not all(suffix.isdigit() for suffix in suffixes):
+        return tuple(range(len(prob_columns)))
+    return tuple(int(suffix) for suffix in suffixes)
+
+
+def _label_positions(labels: np.ndarray, label_values: tuple[int, ...]) -> np.ndarray:
+    label_to_position = {int(label): position for position, label in enumerate(label_values)}
+    positions = np.full(labels.shape[0], -1, dtype=int)
+    for index, label in enumerate(labels):
+        position = label_to_position.get(int(label))
+        if position is not None:
+            positions[index] = position
+    if bool((positions < 0).any()):
+        missing = sorted(set(int(label) for label in labels if int(label) not in label_to_position))
+        raise ValueError(f"Response-window true_label values must index prob_class_* labels {list(label_values)}; missing labels: {missing[:5]}.")
+    return positions
+
+
+def _class_names(frame: pd.DataFrame, prob_columns: Sequence[str]) -> list[str]:
+    names: list[str] = []
+    for index, column in enumerate(prob_columns):
+        suffix = column.removeprefix("prob_class_")
+        class_column = f"class_{suffix}"
+        if class_column in frame.columns and frame[class_column].notna().any():
+            names.append(str(frame[class_column].dropna().iloc[0]))
+        else:
+            names.append(suffix if suffix.isdigit() else str(index))
+    return names
+
+
 def _normalized_identity_values(values: Sequence[object] | np.ndarray | pd.Series, *, column: str) -> pd.Series:
     series = pd.Series(values).reset_index(drop=True)
     if column == "true_label":
@@ -239,6 +295,7 @@ def _check_row_identity_consistency(
 
 
 def _candidate_weights(n_times: int, step: float) -> np.ndarray:
+    step = _validate_positive_finite_float(step, name="weight_grid_step")
     if n_times < 1:
         raise ValueError("Need at least one response time.")
     if n_times == 1:
@@ -253,6 +310,57 @@ def _candidate_weights(n_times: int, step: float) -> np.ndarray:
     if not weights:
         raise ValueError("Weight grid is empty; use a larger --weight-grid-step.")
     return np.unique(np.vstack(weights).round(12), axis=0)
+
+
+def _validate_positive_finite_float(value: float, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return numeric
+
+
+def _validate_positive_integer(value: int, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(numeric)
+
+
+def _normalize_response_times(response_times: Sequence[float]) -> tuple[float, ...]:
+    times = tuple(float(time) for time in response_times)
+    if not times:
+        raise ValueError("At least one response-window time is required.")
+    if not np.isfinite(np.asarray(times, dtype=float)).all():
+        raise ValueError("Response-window times must be finite.")
+    return times
+
+
+def _numeric_observation_times(observations: pd.DataFrame) -> np.ndarray:
+    if "time" not in observations.columns:
+        raise ValueError("Observation table must contain a time column.")
+    times = pd.to_numeric(observations["time"], errors="coerce").to_numpy(dtype=float)
+    if not np.isfinite(times).all():
+        raise ValueError("Observation table time values must be finite and numeric.")
+    return times
+
+
+def _validate_optional_output_time(output_time: float | None) -> float | None:
+    if output_time is None:
+        return None
+    value = float(output_time)
+    if not np.isfinite(value):
+        raise ValueError("output_time must be finite when provided.")
+    return value
 
 
 def _combine_logits(probability_cube: np.ndarray, weights: np.ndarray) -> np.ndarray:
@@ -381,14 +489,18 @@ def _response_window_rows(
     if combine not in COMBINE_CHOICES:
         raise ValueError(f"Unknown response-window combine mode '{combine}'.")
     prob_columns = list(probability_columns(observations))
-    times = _nearest_times(pd.to_numeric(observations["time"], errors="coerce").dropna().unique(), requested_times)
-    selected = observations.loc[observations["time"].astype(float).isin(times)].copy()
+    label_values = _label_values(prob_columns)
+    observation_times = _numeric_observation_times(observations)
+    times = _nearest_times(np.unique(observation_times), requested_times)
+    selected_mask = np.isin(observation_times, times)
+    selected = observations.loc[selected_mask].copy()
+    selected["__response_window_time"] = observation_times[selected_mask]
     _check_single_plain_response_source(selected)
     key_columns = _sequence_key_columns(selected)
     metadata_columns = [
         column
         for column in selected.columns
-        if column not in {*prob_columns, "time", "test_time", "window_start", "window_stop", "train_time"}
+        if column not in {*prob_columns, "time", "test_time", "window_start", "window_stop", "train_time", "__response_window_time"}
     ]
     time_labels = [_time_label(time) for time in times]
     candidates = _candidate_weights(len(times), weight_grid_step)
@@ -402,7 +514,7 @@ def _response_window_rows(
     identity_columns = _row_identity_columns(selected, prob_columns)
     protocol_columns = _source_protocol_columns(selected)
     for time in times:
-        time_frame = selected.loc[selected["time"].astype(float) == float(time)].copy()
+        time_frame = selected.loc[selected["__response_window_time"] == float(time)].copy()
         _check_unique_response_keys(time_frame, key_columns, context=f"time {time}")
         time_frame = time_frame.sort_values(key_columns).drop_duplicates(key_columns, keep="first")
         indexed = time_frame.set_index(key_columns)
@@ -433,7 +545,8 @@ def _response_window_rows(
             columns=protocol_columns,
             context=f"time {time}",
         )
-    labels = _integer_label_values(base["true_label"], n_classes=len(prob_columns))
+    labels = _integer_label_values(base["true_label"])
+    label_positions = _label_positions(labels, label_values)
     probability_cube = np.stack(
         [_normalize_rows(wide_probabilities[time].loc[common_index].to_numpy(dtype=float)) for time in times],
         axis=1,
@@ -455,7 +568,7 @@ def _response_window_rows(
             else:
                 weights, source_score = _learn_weights(
                     probability_cube[source_mask],
-                    labels[source_mask],
+                    label_positions[source_mask],
                     candidates,
                     combine=combine,
                 )
@@ -467,19 +580,15 @@ def _response_window_rows(
         predictions = probabilities.argmax(axis=1)
         for class_index, column in enumerate(prob_columns):
             target_base[column] = probabilities[:, class_index]
-        class_names = []
-        for class_index in range(len(prob_columns)):
-            class_column = f"class_{class_index}"
-            if class_column in target_base.columns and target_base[class_column].notna().any():
-                class_names.append(str(target_base[class_column].dropna().iloc[0]))
-            else:
-                class_names.append(str(class_index))
-        true_labels = _integer_label_values(target_base["true_label"], n_classes=len(prob_columns))
-        target_base["predicted_label"] = predictions.astype(int)
+        class_names = _class_names(target_base, prob_columns)
+        predicted_labels = np.asarray([label_values[position] for position in predictions], dtype=int)
+        true_labels = _integer_label_values(target_base["true_label"])
+        true_positions = _label_positions(true_labels, label_values)
+        target_base["predicted_label"] = predicted_labels
         target_base["predicted_class"] = [class_names[int(label)] for label in predictions]
-        target_base["probability_true_class"] = probabilities[np.arange(len(probabilities)), true_labels]
+        target_base["probability_true_class"] = probabilities[np.arange(len(probabilities)), true_positions]
         target_base["confidence"] = probabilities.max(axis=1)
-        target_base["is_correct"] = predictions == true_labels
+        target_base["is_correct"] = predicted_labels == true_labels
         target_base["decoder"] = OUTPUT_DECODER
         target_base["emission_mode"] = f"{OUTPUT_EMISSION_MODE}_{mode}"
         target_base["time"] = float(np.mean(times) if output_time is None else output_time)
@@ -539,15 +648,19 @@ def _decoder_source_oof_response_window_rows(
     if "decoder" not in observations.columns:
         raise ValueError("Decoder-source OOF response-window ensembling requires a decoder column.")
     prob_columns = list(probability_columns(observations))
-    times = _nearest_times(pd.to_numeric(observations["time"], errors="coerce").dropna().unique(), requested_times)
-    selected = observations.loc[observations["time"].astype(float).isin(times)].copy()
-    decoders = tuple(
-        decoder
-        for decoder in selected["decoder"].dropna().astype(str).drop_duplicates().tolist()
-        if decoder.strip()
-    )
+    label_values = _label_values(prob_columns)
+    observation_times = _numeric_observation_times(observations)
+    times = _nearest_times(np.unique(observation_times), requested_times)
+    selected_mask = np.isin(observation_times, times)
+    selected = observations.loc[selected_mask].copy()
+    selected["__response_window_time"] = observation_times[selected_mask]
+    decoder_values = selected["decoder"].where(~selected["decoder"].isna(), "").astype(str).str.strip()
+    if decoder_values.str.lower().isin(MISSING_TEXT_VALUES).any():
+        raise ValueError("Decoder-source OOF response-window ensembling requires non-blank decoder values.")
+    decoders = tuple(dict.fromkeys(decoder_values.tolist()))
     if len(decoders) < 2:
         raise ValueError("Decoder-source OOF response-window ensembling requires at least two decoder families.")
+    selected["decoder"] = decoder_values
 
     key_columns = _sequence_key_columns(selected)
     metadata_columns = [
@@ -561,6 +674,7 @@ def _decoder_source_oof_response_window_rows(
             "window_start",
             "window_stop",
             "train_time",
+            "__response_window_time",
         }
     ]
     time_labels = [_time_label(time) for time in times]
@@ -578,7 +692,7 @@ def _decoder_source_oof_response_window_rows(
         for time in times:
             time_frame = selected.loc[
                 (selected["decoder"].astype(str) == decoder)
-                & (selected["time"].astype(float) == float(time))
+                & (selected["__response_window_time"] == float(time))
             ].copy()
             if time_frame.empty:
                 raise ValueError(f"Missing observations for decoder {decoder!r} at response time {time}.")
@@ -618,7 +732,8 @@ def _decoder_source_oof_response_window_rows(
                 columns=protocol_columns,
                 context=f"decoder {decoder!r} time {time}",
             )
-    labels = _integer_label_values(base["true_label"], n_classes=len(prob_columns))
+    labels = _integer_label_values(base["true_label"])
+    label_positions = _label_positions(labels, label_values)
     decoder_probabilities = []
     for decoder in decoders:
         time_cube = np.stack(
@@ -644,7 +759,7 @@ def _decoder_source_oof_response_window_rows(
         else:
             decoder_weights, source_score = _learn_weights(
                 probability_cube[source_mask],
-                labels[source_mask],
+                label_positions[source_mask],
                 decoder_weight_candidates,
                 combine=combine,
             )
@@ -656,19 +771,15 @@ def _decoder_source_oof_response_window_rows(
         predictions = probabilities.argmax(axis=1)
         for class_index, column in enumerate(prob_columns):
             target_base[column] = probabilities[:, class_index]
-        class_names = []
-        for class_index in range(len(prob_columns)):
-            class_column = f"class_{class_index}"
-            if class_column in target_base.columns and target_base[class_column].notna().any():
-                class_names.append(str(target_base[class_column].dropna().iloc[0]))
-            else:
-                class_names.append(str(class_index))
-        true_labels = _integer_label_values(target_base["true_label"], n_classes=len(prob_columns))
-        target_base["predicted_label"] = predictions.astype(int)
+        class_names = _class_names(target_base, prob_columns)
+        predicted_labels = np.asarray([label_values[position] for position in predictions], dtype=int)
+        true_labels = _integer_label_values(target_base["true_label"])
+        true_positions = _label_positions(true_labels, label_values)
+        target_base["predicted_label"] = predicted_labels
         target_base["predicted_class"] = [class_names[int(label)] for label in predictions]
-        target_base["probability_true_class"] = probabilities[np.arange(len(probabilities)), true_labels]
+        target_base["probability_true_class"] = probabilities[np.arange(len(probabilities)), true_positions]
         target_base["confidence"] = probabilities.max(axis=1)
-        target_base["is_correct"] = predictions == true_labels
+        target_base["is_correct"] = predicted_labels == true_labels
         target_base["decoder"] = OUTPUT_DECODER
         target_base["emission_mode"] = f"{OUTPUT_EMISSION_MODE}_decoder_source_oof_nonnegative"
         target_base["time"] = float(np.mean(times) if output_time is None else output_time)
@@ -735,6 +846,10 @@ def run_response_window_ensemble(
     out_observations: Path | None = None,
     out_metrics: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    response_times = _normalize_response_times(response_times)
+    weight_grid_step = _validate_positive_finite_float(weight_grid_step, name="weight_grid_step")
+    output_time = _validate_optional_output_time(output_time)
+    smoothing_stay_grid_size = _validate_positive_integer(smoothing_stay_grid_size, name="smoothing_stay_grid_size")
     if mode == "response_window_poststimulus_forward":
         if smoothing_apply_window is None:
             smoothing_apply_window = (min(response_times), max(response_times))
@@ -752,18 +867,18 @@ def run_response_window_ensemble(
     if mode == "decoder_source_oof_nonnegative":
         ensembled = _decoder_source_oof_response_window_rows(
             observations,
-            requested_times=tuple(float(time) for time in response_times),
+            requested_times=response_times,
             combine=combine,
-            weight_grid_step=float(weight_grid_step),
+            weight_grid_step=weight_grid_step,
             output_time=output_time,
         )
     else:
         ensembled = _response_window_rows(
             observations,
-            requested_times=tuple(float(time) for time in response_times),
+            requested_times=response_times,
             mode=mode,
             combine=combine,
-            weight_grid_step=float(weight_grid_step),
+            weight_grid_step=weight_grid_step,
             output_time=output_time,
         )
     metrics = metrics_from_probability_observations(ensembled, ece_bins=ece_bins)
