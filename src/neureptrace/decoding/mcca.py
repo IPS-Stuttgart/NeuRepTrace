@@ -593,7 +593,7 @@ def _common_classes(labels_by_subject: Mapping[Hashable, np.ndarray]) -> np.ndar
 def _ordered_unique_labels(labels: Sequence | np.ndarray) -> np.ndarray:
     """Return unique labels in first-observed order without sorting."""
 
-    values = np.asarray(labels, dtype=object).reshape(-1)
+    values = _object_vector(labels)
     unique: list[object] = []
     for value in values:
         if not _contains_label(unique, value):
@@ -604,8 +604,8 @@ def _ordered_unique_labels(labels: Sequence | np.ndarray) -> np.ndarray:
 
 
 def _same_label_set(left: Sequence | np.ndarray, right: Sequence | np.ndarray) -> bool:
-    left_values = np.asarray(left, dtype=object).reshape(-1)
-    right_values = np.asarray(right, dtype=object).reshape(-1)
+    left_values = _object_vector(left)
+    right_values = _object_vector(right)
     if left_values.size != right_values.size:
         return False
     return all(_contains_label(right_values, value) for value in left_values) and all(
@@ -618,7 +618,9 @@ def _contains_label(values: Sequence | np.ndarray, target: object) -> bool:
 
 
 def _label_mask(labels: Sequence | np.ndarray, target: object) -> np.ndarray:
-    return np.asarray([_labels_equal(label, target) for label in np.asarray(labels, dtype=object).reshape(-1)], dtype=bool)
+    """Return a boolean mask using object-safe label equality."""
+
+    return np.asarray([_labels_equal(label, target) for label in _object_vector(labels)], dtype=bool)
 
 
 def _count_label(labels: Sequence | np.ndarray, target: object) -> int:
@@ -730,18 +732,24 @@ def _object_vector(values: Sequence | np.ndarray) -> np.ndarray:
     """
 
     if isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            vector = np.empty(1, dtype=object)
+            vector[0] = values.item()
+            return vector
         if values.ndim == 1:
             return values.astype(object, copy=False).reshape(-1)
         rows = [tuple(row.tolist()) for row in np.asarray(values, dtype=object).reshape(values.shape[0], -1)]
         vector = np.empty(len(rows), dtype=object)
-        vector[:] = rows
+        for index, row in enumerate(rows):
+            vector[index] = row
         return vector
     try:
         items = list(values)
     except TypeError:
         items = [values]
     vector = np.empty(len(items), dtype=object)
-    vector[:] = items
+    for index, item in enumerate(items):
+        vector[index] = item
     return vector
 
 

@@ -6,12 +6,17 @@ import pytest
 
 from neureptrace.decoding import DECODER_CHOICES, normalize_decoder_name
 from neureptrace.decoding.dann import DANNFitResult
-from neureptrace.decoding.source_alignment import SourceAlignmentResult
+from neureptrace.decoding.source_alignment import (
+    TARGET_CALIBRATED_ALIGNMENT,
+    SourceAlignmentResult,
+    source_alignment_config,
+)
 from neureptrace.mne_time_decode import (
     TIME_DECODE_DECODER_CLI_CHOICES,
     _apply_class_prior_correction,
     _align_probability_columns,
     _alignment_anchor_values,
+    _alignment_target_calibration_split,
     _combine_probability_logits,
     _filter_splits_for_outer_test_groups,
     _nearest_candidate_windows,
@@ -125,6 +130,51 @@ class PseudoLabelRecordingDecoder:
 class FakeDANNModel:
     def __init__(self, classes: np.ndarray):
         self.classes_ = np.asarray(classes)
+
+
+def _object_vector(values):
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
+    return vector
+
+
+def _count_object_value(values, target) -> int:
+    return sum(1 for value in values if value == target)
+
+
+def test_target_alignment_calibration_split_preserves_composite_anchor_values():
+    labels = np.array([0, 0, 1, 1, 0, 0])
+    anchors = _object_vector(
+        [
+            ("run-01", "stim-a"),
+            ("run-01", "stim-a"),
+            ("run-01", "stim-b"),
+            ("run-01", "stim-b"),
+            ("run-02", "stim-a"),
+            ("run-02", "stim-a"),
+        ]
+    )
+    config = source_alignment_config(
+        method="mcca",
+        target_projection=TARGET_CALIBRATED_ALIGNMENT,
+        target_calibration_per_anchor=1,
+    )
+
+    split = _alignment_target_calibration_split(
+        labels=labels,
+        test_idx=np.arange(labels.size),
+        alignment_config=config,
+        anchor_values=anchors,
+        seed=13,
+        context=("composite-anchor-test",),
+    )
+
+    assert split.calibration_indices.size == 3
+    assert split.evaluation_indices.size == 3
+    for anchor in anchors[::2]:
+        assert _count_object_value(anchors[split.calibration_indices], anchor) == 1
+        assert _count_object_value(anchors[split.evaluation_indices], anchor) == 1
 
 
 def test_mne_time_decode_rejects_fractional_integer_hyperparameters():

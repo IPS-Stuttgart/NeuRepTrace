@@ -565,6 +565,40 @@ def _test_subject_label(groups: np.ndarray | None, test_idx: np.ndarray, *, fall
     return "|".join(values)
 
 
+def _alignment_value_vector(values: Sequence[object] | np.ndarray) -> np.ndarray:
+    """Return a 1D object vector while preserving composite alignment values."""
+
+    array = np.asarray(values, dtype=object)
+    if array.ndim == 0:
+        vector = np.empty(1, dtype=object)
+        vector[0] = array.item()
+        return vector
+    if array.ndim == 1:
+        return array.reshape(-1)
+    if array.shape[1:] == (1,):
+        return array.reshape(array.shape[0])
+    rows = array.reshape(array.shape[0], -1)
+    vector = np.empty(rows.shape[0], dtype=object)
+    for index, row in enumerate(rows):
+        vector[index] = tuple(row.tolist())
+    return vector
+
+
+def _alignment_values_equal(left: object, right: object) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
+
+
+def _alignment_value_mask(values: Sequence[object] | np.ndarray, target: object) -> np.ndarray:
+    return np.asarray([_alignment_values_equal(value, target) for value in _alignment_value_vector(values)], dtype=bool)
+
+
 def _alignment_target_calibration_split(
     *,
     labels: np.ndarray,
@@ -580,13 +614,13 @@ def _alignment_target_calibration_split(
     if test_idx.size == 0:
         raise ValueError("target_calibrated_alignment requires at least one held-out target row.")
 
-    target_values = labels[test_idx] if anchor_values is None else np.asarray(anchor_values, dtype=object)[test_idx]
-    target_values = np.asarray(target_values, dtype=object).reshape(-1)
+    anchor_source = labels if anchor_values is None else anchor_values
+    target_values = _alignment_value_vector(anchor_source)[test_idx]
     per_anchor = int(alignment_config.target_calibration_per_anchor)
     calibration_mask = np.zeros(test_idx.shape[0], dtype=bool)
     anchor_order = pd.Series(target_values).drop_duplicates().tolist()
     for anchor_position, anchor in enumerate(anchor_order):
-        positions = np.flatnonzero(target_values == anchor)
+        positions = np.flatnonzero(_alignment_value_mask(target_values, anchor))
         if positions.size <= per_anchor:
             raise ValueError(
                 "target_calibrated_alignment needs at least "
