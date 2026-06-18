@@ -7,6 +7,83 @@ import numpy as np
 import pandas as pd
 
 CONTROL_CONDITIONS = ("baseline_window", "shuffled_time", "shuffled_label")
+REQUIRED_COLUMNS = {
+    "decoder",
+    "emission_mode",
+    "condition",
+    "persistence_gain_per_observation",
+    "empirical_p_value",
+    "best_stay_probability",
+}
+REQUIRED_CONDITIONS = ("observed_effect",)
+PAIRED_EMISSION_MODES = ("calibrated", "uncalibrated")
+
+
+def _coerce_finite_numeric_column(frame: pd.DataFrame, column: str) -> None:
+    try:
+        frame[column] = pd.to_numeric(frame[column])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{column} values must be numeric.") from exc
+    if not np.isfinite(frame[column].to_numpy(dtype=float)).all():
+        raise ValueError(f"{column} values must be finite.")
+
+
+def _validate_optional_unit_interval_column(frame: pd.DataFrame, column: str) -> None:
+    present = frame[column].notna()
+    if not present.any():
+        return
+    try:
+        frame.loc[present, column] = pd.to_numeric(frame.loc[present, column])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{column} values must be numeric.") from exc
+    values = frame.loc[present, column].to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError(f"{column} values must be finite.")
+    if np.any((values < 0.0) | (values > 1.0)):
+        raise ValueError(f"{column} values must be between 0 and 1.")
+
+
+def _validate_temporal_summary(summary: pd.DataFrame) -> pd.DataFrame:
+    missing = sorted(REQUIRED_COLUMNS.difference(summary.columns))
+    if missing:
+        raise ValueError(f"Temporal-model summary is missing required columns: {missing}")
+    if summary.empty:
+        raise ValueError("Temporal-model summary must contain at least one row.")
+
+    validated = summary.copy()
+    key_columns = ["decoder", "emission_mode", "condition"]
+    if validated[key_columns].isna().any().any():
+        raise ValueError("Temporal-model summary decoder, emission_mode, and condition values cannot be missing.")
+    for column in key_columns:
+        validated[column] = validated[column].astype(str)
+        blank = validated[column].str.strip() == ""
+        if blank.any():
+            raise ValueError(f"Temporal-model summary {column} values cannot be blank.")
+
+    _coerce_finite_numeric_column(validated, "persistence_gain_per_observation")
+    _validate_optional_unit_interval_column(validated, "empirical_p_value")
+    _validate_optional_unit_interval_column(validated, "best_stay_probability")
+    shuffled_mask = validated["condition"].isin(("shuffled_time", "shuffled_label"))
+    if validated.loc[shuffled_mask, "empirical_p_value"].isna().any():
+        raise ValueError("empirical_p_value values must be finite for shuffled control rows.")
+    observed_mask = validated["condition"] == "observed_effect"
+    if validated.loc[observed_mask, "best_stay_probability"].isna().any():
+        raise ValueError("best_stay_probability values must be finite for observed_effect rows.")
+
+    duplicate_mask = validated.duplicated(key_columns, keep=False)
+    if duplicate_mask.any():
+        examples = validated.loc[duplicate_mask, key_columns].drop_duplicates().head(5).to_dict("records")
+        raise ValueError(f"Temporal-model summary contains duplicate decoder/emission/condition rows: {examples}")
+    return validated
+
+
+def _validate_emission_mode_frame(frame: pd.DataFrame, *, decoder: str, emission_mode: str) -> None:
+    conditions = set(frame["condition"])
+    missing_required = sorted(set(REQUIRED_CONDITIONS).difference(conditions))
+    if missing_required:
+        raise ValueError(f"Decoder '{decoder}' emission_mode '{emission_mode}' is missing required condition(s): {missing_required}")
+    if not any(condition in conditions for condition in CONTROL_CONDITIONS):
+        raise ValueError(f"Decoder '{decoder}' emission_mode '{emission_mode}' has no control condition rows.")
 
 
 def _condition_value(frame: pd.DataFrame, condition: str, column: str) -> float:
@@ -49,16 +126,15 @@ def summarize_emission_mode(frame: pd.DataFrame) -> dict[str, float]:
 
 def compare_emission_modes(summary: pd.DataFrame) -> pd.DataFrame:
     """Compare calibrated and uncalibrated temporal-model evidence by decoder."""
-    required = {"decoder", "emission_mode", "condition", "persistence_gain_per_observation"}
-    missing = sorted(required.difference(summary.columns))
-    if missing:
-        raise ValueError(f"Temporal-model summary is missing required columns: {missing}")
+    summary = _validate_temporal_summary(summary)
 
     rows = []
     for decoder, decoder_frame in summary.groupby("decoder", sort=True):
         modes = {mode: frame for mode, frame in decoder_frame.groupby("emission_mode", sort=True)}
-        if "calibrated" not in modes or "uncalibrated" not in modes:
+        if not all(mode in modes for mode in PAIRED_EMISSION_MODES):
             continue
+        for emission_mode in PAIRED_EMISSION_MODES:
+            _validate_emission_mode_frame(modes[emission_mode], decoder=str(decoder), emission_mode=emission_mode)
         calibrated = summarize_emission_mode(modes["calibrated"])
         uncalibrated = summarize_emission_mode(modes["uncalibrated"])
         delta_control_margin = calibrated["control_margin"] - uncalibrated["control_margin"]
