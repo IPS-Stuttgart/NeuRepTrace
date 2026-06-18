@@ -16,7 +16,15 @@ from pandas.errors import EmptyDataError
 
 from neureptrace.benchmark import run_benchmark_manifest
 from neureptrace.decoding import DECODER_CLI_CHOICES, normalize_decoder_name
+from neureptrace.decode_from_config import _bool_value
 from neureptrace.emission_compare import compare_temporal_summary
+from neureptrace.mne_time_decode import (
+    _normalize_integer,
+    _normalize_nonnegative_float,
+    _normalize_positive_float,
+    _normalize_positive_int,
+    _normalize_unit_interval_float,
+)
 from neureptrace.plot_time_decode import plot_time_decode_results
 from neureptrace.semantic_stages import analyze_semantic_stages
 from neureptrace.temporal_model import fit_temporal_models
@@ -116,6 +124,16 @@ def _normal_decoders(decoders: tuple[str, ...] | list[str]) -> tuple[str, ...]:
     return tuple(normalize_decoder_name(decoder) for decoder in decoders)
 
 
+def _optional_positive_int(value: int | str | None, *, name: str) -> int | None:
+    if value is None:
+        return None
+    return _normalize_positive_int(value, name=name)
+
+
+def _normalize_stay_grid_size(value: int | str) -> int:
+    return _normalize_integer(value, name="stay_grid_size", minimum=2)
+
+
 def _selected_tasks(task_ids: tuple[str, ...] | list[str] | None) -> tuple[TemporalStateTask, ...]:
     tasks_by_id = {task.task_id: task for task in DEFAULT_TASKS}
     if task_ids is None:
@@ -143,13 +161,13 @@ def prepare_temporal_state_manifest(
     expected_subjects: int | None = 19,
 ) -> pd.DataFrame:
     """Prepare a task manifest with runner-local data paths and decoder rows."""
+    max_subjects = _optional_positive_int(max_subjects, name="max_subjects")
+    expected_subjects = _optional_positive_int(expected_subjects, name="expected_subjects")
     manifest = pd.read_csv(source_manifest)
     if "subject" not in manifest.columns:
         raise ValueError(f"{source_manifest} is missing a subject column.")
 
     if max_subjects is not None:
-        if max_subjects < 1:
-            raise ValueError("max_subjects must be positive.")
         keep_subjects = list(dict.fromkeys(manifest["subject"].astype(str)))[:max_subjects]
         manifest = manifest.loc[manifest["subject"].astype(str).isin(keep_subjects)].copy()
 
@@ -459,6 +477,8 @@ def export_temporal_state_artifacts(
     dry_run: bool = False,
 ) -> list[Path]:
     """Copy compact temporal-state artifacts to the compact export directory."""
+    max_mb = _normalize_positive_float(max_mb, name="max_export_mb")
+    dry_run = _bool_value(dry_run, name="dry_run")
     source_dir = source_dir.resolve()
     destination_dir = destination_dir.resolve()
     artifacts = _collect_compact_artifacts(source_dir)
@@ -502,6 +522,25 @@ def run_temporal_state_workflow(
     command_line: str = "python -m neureptrace.temporal_state_workflow",
 ) -> TemporalStateWorkflowRun:
     """Run the reproducible calibration-aware NOD temporal-state workflow."""
+    n_permutations = _normalize_integer(n_permutations, name="n_permutations", minimum=0)
+    random_seed = _normalize_integer(random_seed, name="random_seed", minimum=0)
+    stay_grid_size = _normalize_stay_grid_size(stay_grid_size)
+    posterior_threshold = _normalize_unit_interval_float(
+        posterior_threshold,
+        name="posterior_threshold",
+        include_one=True,
+    )
+    match_threshold = _normalize_unit_interval_float(
+        match_threshold,
+        name="match_threshold",
+        include_one=True,
+    )
+    min_duration = _normalize_nonnegative_float(min_duration, name="min_duration")
+    max_subjects = _optional_positive_int(max_subjects, name="max_subjects")
+    expected_subjects = _optional_positive_int(expected_subjects, name="expected_subjects")
+    resume = _bool_value(resume, name="resume")
+    max_export_mb = _normalize_positive_float(max_export_mb, name="max_export_mb")
+
     repo_root = _repo_root()
     manifest_dir = manifest_dir.resolve() if manifest_dir is not None else _default_manifest_dir(repo_root)
     out_dir = out_dir.resolve()
