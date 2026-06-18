@@ -50,6 +50,15 @@ WEIGHT_COLUMN = "n_test"
 DEFAULT_ECE_BINS = 10
 PROVENANCE_METRICS = ("accuracy", "log_loss", "brier", "ece")
 LOWER_IS_BETTER_METRICS = {"log_loss", "brier", "ece"}
+METRIC_BOUNDS = {
+    "accuracy": (0.0, 1.0),
+    "balanced_accuracy": (0.0, 1.0),
+    "top2_accuracy": (0.0, 1.0),
+    "top3_accuracy": (0.0, 1.0),
+    "brier": (0.0, 2.0),
+    "ece": (0.0, 1.0),
+    "log_loss": (0.0, None),
+}
 GROUP_COLUMN_DEFAULTS = {
     "emission_mode": "calibrated",
     "feature_preprocessor": "none",
@@ -250,6 +259,65 @@ def _selected_metric_columns(metric_columns: Sequence[str] | str | None = None) 
     return selected_metric_columns
 
 
+def _validate_positive_integer(value: int, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(numeric)
+
+
+def _coerce_finite_metric_columns(results: pd.DataFrame, metric_columns: Sequence[str]) -> pd.DataFrame:
+    coerced = results.copy()
+    for metric in metric_columns:
+        values = pd.to_numeric(coerced[metric], errors="coerce")
+        if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
+            raise ValueError(f"Metric column '{metric}' must contain finite numeric values.")
+        bounds = METRIC_BOUNDS.get(metric)
+        if bounds is not None:
+            lower, upper = bounds
+            if (values < lower).any() or (upper is not None and (values > upper).any()):
+                interval = f"[{lower:g}, {upper:g}]" if upper is not None else f">= {lower:g}"
+                raise ValueError(f"Metric column '{metric}' values must be in {interval}.")
+        coerced[metric] = values.astype(float)
+    return coerced
+
+
+def _coerce_positive_count_column(results: pd.DataFrame, column: str) -> pd.Series:
+    if results[column].map(lambda value: isinstance(value, (bool, np.bool_))).any():
+        raise ValueError(f"Column '{column}' must contain positive integer fold sizes.")
+    values = pd.to_numeric(results[column], errors="coerce")
+    numeric = values.to_numpy(dtype=float)
+    if values.isna().any() or not np.isfinite(numeric).all() or (numeric <= 0.0).any() or not np.equal(numeric, np.rint(numeric)).all():
+        raise ValueError(f"Column '{column}' must contain positive integer fold sizes.")
+    return values.astype(float)
+
+
+def _validate_subject_time_keys(results: pd.DataFrame) -> None:
+    if "subject" in results.columns:
+        subject = results["subject"]
+        if subject.isna().any() or subject.astype(str).str.strip().eq("").any():
+            raise ValueError("Results column 'subject' must be present and non-blank.")
+    if "time" in results.columns:
+        time = pd.to_numeric(results["time"], errors="coerce")
+        if time.isna().any() or not np.isfinite(time.to_numpy(dtype=float)).all():
+            raise ValueError("Results column 'time' must contain finite numeric values.")
+
+
+def _validate_unique_fold_rows(results: pd.DataFrame, group_columns: Sequence[str]) -> None:
+    if "fold" not in results.columns:
+        return
+    key_columns = [*group_columns, "fold"]
+    duplicated = results.duplicated(subset=key_columns, keep=False)
+    if bool(duplicated.any()):
+        examples = results.loc[duplicated, key_columns].head(5).to_dict("records")
+        raise ValueError(f"Results contain duplicate fold rows for {key_columns}: {examples}")
+
+
 def _mean_across_folds(
     results: pd.DataFrame,
     group_columns: list[str],
@@ -261,20 +329,24 @@ def _mean_across_folds(
     missing = [column for column in selected_metric_columns if column not in results.columns]
     if missing:
         raise ValueError(f"Results are missing metric columns: {missing}")
+    missing_group_columns = [column for column in group_columns if column not in results.columns]
+    if missing_group_columns:
+        raise ValueError(f"Results are missing group columns: {missing_group_columns}")
 
+    results = _coerce_finite_metric_columns(results, selected_metric_columns)
+    _validate_subject_time_keys(results)
+    _validate_unique_fold_rows(results, group_columns)
     if WEIGHT_COLUMN not in results.columns:
-        return results.groupby(group_columns, as_index=False)[selected_metric_columns].mean()
+        return results.groupby(group_columns, as_index=False, dropna=False)[selected_metric_columns].mean()
 
     weighted = results.copy()
-    weights = pd.to_numeric(weighted[WEIGHT_COLUMN], errors="coerce")
-    if weights.isna().any() or not np.isfinite(weights).all() or (weights <= 0).any():
-        raise ValueError(f"Column '{WEIGHT_COLUMN}' must contain positive finite fold sizes.")
+    weights = _coerce_positive_count_column(weighted, WEIGHT_COLUMN)
     weighted["__fold_weight"] = weights.astype(float)
 
     weighted_columns = []
     denominator_columns = []
     for metric in selected_metric_columns:
-        values = pd.to_numeric(weighted[metric], errors="coerce")
+        values = weighted[metric].astype(float)
         weighted_column = f"__weighted_{metric}"
         denominator_column = f"__weight_{metric}"
         weighted[weighted_column] = values * weighted["__fold_weight"]
@@ -283,7 +355,7 @@ def _mean_across_folds(
         denominator_columns.append(denominator_column)
 
     aggregate_columns = [*weighted_columns, *denominator_columns]
-    grouped = weighted.groupby(group_columns, as_index=False)[aggregate_columns].sum()
+    grouped = weighted.groupby(group_columns, as_index=False, dropna=False)[aggregate_columns].sum()
     for metric, weighted_column, denominator_column in zip(
         selected_metric_columns, weighted_columns, denominator_columns
     ):
@@ -392,12 +464,10 @@ def _expected_observation_counts(results: pd.DataFrame, group_columns: list[str]
     if WEIGHT_COLUMN not in results.columns:
         return None
 
-    weights = pd.to_numeric(results[WEIGHT_COLUMN], errors="coerce")
-    if weights.isna().any() or not np.isfinite(weights).all() or (weights <= 0).any():
-        raise ValueError(f"Column '{WEIGHT_COLUMN}' must contain positive finite fold sizes.")
+    weights = _coerce_positive_count_column(results, WEIGHT_COLUMN)
     weighted = results.copy()
     weighted["__expected_observations"] = weights.astype(float)
-    return weighted.groupby(group_columns, as_index=False)["__expected_observations"].sum()
+    return weighted.groupby(group_columns, as_index=False, dropna=False)["__expected_observations"].sum()
 
 
 def _replace_ece_from_observations(
@@ -482,8 +552,7 @@ def subject_time_metrics(
     missing = [column for column in ("subject", "time", *selected_metric_columns) if column not in results.columns]
     if missing:
         raise ValueError(f"Results are missing required columns: {missing}")
-    if ece_bins < 1:
-        raise ValueError("ece_bins must be positive")
+    ece_bins = _validate_positive_integer(ece_bins, name="ece_bins")
 
     results = _normalize_emission_mode(results)
     group_columns = [column for column in SUMMARY_GROUP_COLUMNS if column in results.columns]
@@ -508,8 +577,11 @@ def _best_summary_row(frame: pd.DataFrame, selection_metric: str) -> pd.Series:
     if selection_column not in frame.columns:
         raise ValueError(f"Summary is missing selection metric column '{selection_column}'.")
     values = pd.to_numeric(frame[selection_column], errors="coerce")
-    if values.notna().sum() == 0:
+    finite = np.isfinite(values.to_numpy(dtype=float))
+    if not bool(finite.any()):
         raise ValueError(f"Selection metric column '{selection_column}' contains no finite values.")
+    if not bool(finite.all()):
+        raise ValueError(f"Selection metric column '{selection_column}' must contain only finite values.")
     index = values.idxmin() if selection_metric in LOWER_IS_BETTER_METRICS else values.idxmax()
     return frame.loc[index]
 
@@ -680,7 +752,7 @@ def aggregate_time_decode_results(
     group_columns = [column for column in SUMMARY_GROUP_COLUMNS if column in subject_time.columns]
     aggregate_keys = [*group_columns, "time"]
 
-    grouped = subject_time.groupby(aggregate_keys, as_index=False)
+    grouped = subject_time.groupby(aggregate_keys, as_index=False, dropna=False)
     aggregated = grouped[list(METRIC_COLUMNS)].mean()
     n_subjects = grouped["subject"].nunique().rename(columns={"subject": "n_subjects"})
     aggregated = aggregated.merge(n_subjects, on=aggregate_keys)
