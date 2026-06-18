@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from neureptrace.emission_compare import compare_emission_modes, compare_temporal_summary
 
@@ -56,3 +58,67 @@ def test_compare_temporal_summary_writes_csv_and_report(tmp_path: Path):
     assert out_report.exists()
     assert report is not None and "calibrated probabilities produce cleaner" in report
     assert comparison["preferred_emission_mode"].tolist() == ["calibrated"]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda frame: frame.drop(columns=["empirical_p_value"]), "missing required columns"),
+        (lambda frame: frame.iloc[0:0], "at least one row"),
+        (lambda frame: frame.assign(decoder=[None, *frame["decoder"].iloc[1:].tolist()]), "cannot be missing"),
+        (lambda frame: frame.assign(emission_mode=["", *frame["emission_mode"].iloc[1:].tolist()]), "emission_mode values cannot be blank"),
+        (lambda frame: frame.assign(condition=["", *frame["condition"].iloc[1:].tolist()]), "condition values cannot be blank"),
+    ],
+)
+def test_compare_emission_modes_rejects_malformed_structure(mutate, message: str):
+    with pytest.raises(ValueError, match=message):
+        compare_emission_modes(mutate(_temporal_summary()))
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    [
+        ("persistence_gain_per_observation", "high", "persistence_gain_per_observation values must be numeric"),
+        ("persistence_gain_per_observation", np.inf, "persistence_gain_per_observation values must be finite"),
+        ("empirical_p_value", "small", "empirical_p_value values must be numeric"),
+        ("empirical_p_value", np.nan, "empirical_p_value values must be finite"),
+        ("empirical_p_value", 1.2, "empirical_p_value values must be between 0 and 1"),
+        ("best_stay_probability", "sticky", "best_stay_probability values must be numeric"),
+        ("best_stay_probability", np.inf, "best_stay_probability values must be finite"),
+        ("best_stay_probability", -0.1, "best_stay_probability values must be between 0 and 1"),
+    ],
+)
+def test_compare_emission_modes_rejects_malformed_numeric_values(column: str, value, message: str):
+    summary = _temporal_summary()
+    if isinstance(value, str):
+        summary[column] = summary[column].astype(object)
+    row = summary.index[summary["condition"] == "shuffled_time"][0] if column == "empirical_p_value" else 0
+    summary.loc[row, column] = value
+
+    with pytest.raises(ValueError, match=message):
+        compare_emission_modes(summary)
+
+
+def test_compare_emission_modes_rejects_duplicate_condition_rows():
+    summary = pd.concat([_temporal_summary(), _temporal_summary().iloc[[0]]], ignore_index=True)
+
+    with pytest.raises(ValueError, match="duplicate decoder/emission/condition rows"):
+        compare_emission_modes(summary)
+
+
+@pytest.mark.parametrize(
+    ("drop_condition", "message"),
+    [
+        ("observed_effect", "missing required condition"),
+        ("baseline_window", "has no control condition rows"),
+    ],
+)
+def test_compare_emission_modes_rejects_missing_required_evidence(drop_condition: str, message: str):
+    summary = _temporal_summary()
+    mask = ~((summary["emission_mode"] == "calibrated") & (summary["condition"] == drop_condition))
+    if drop_condition == "baseline_window":
+        mask &= ~((summary["emission_mode"] == "calibrated") & summary["condition"].isin(["shuffled_time", "shuffled_label"]))
+    summary = summary.loc[mask].reset_index(drop=True)
+
+    with pytest.raises(ValueError, match=message):
+        compare_emission_modes(summary)
