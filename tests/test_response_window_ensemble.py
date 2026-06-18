@@ -90,6 +90,30 @@ def _toy_decoder_observations() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _nonzero_label_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    label_map = {0: 10, 1: 20, 2: 30}
+    observations = frame.copy()
+    observations["true_label"] = observations["true_label"].map(label_map)
+    observations["predicted_label"] = observations["predicted_label"].map(label_map)
+    observations["true_class"] = observations["true_label"].map(lambda label: f"class-{label}")
+    observations["predicted_class"] = observations["predicted_label"].map(lambda label: f"class-{label}")
+    observations["class_10"] = observations.pop("class_0")
+    observations["class_20"] = observations.pop("class_1")
+    observations["class_30"] = observations.pop("class_2")
+    observations = observations.rename(
+        columns={
+            "prob_class_0": "prob_class_10",
+            "prob_class_1": "prob_class_20",
+            "prob_class_2": "prob_class_30",
+        }
+    )
+    observations["probability_true_class"] = observations.apply(
+        lambda row: row[f"prob_class_{int(row['true_label'])}"],
+        axis=1,
+    )
+    return observations
+
+
 def test_response_window_uniform_logit_ensemble_writes_metrics(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     _toy_observations().to_csv(csv_path, index=False)
@@ -109,6 +133,18 @@ def test_response_window_uniform_logit_ensemble_writes_metrics(tmp_path: Path):
     assert ensembled["response_window_mode"].unique().tolist() == ["uniform"]
     assert ensembled["response_window_actual_times"].unique().tolist() == ["0.088|0.136|0.184|0.232|0.28"]
     assert metrics["decoder"].unique().tolist() == ["poststimulus_response_window_logit_ensemble"]
+    assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
+
+
+def test_response_window_maps_nonzero_probability_labels(tmp_path: Path):
+    csv_path = tmp_path / "observations.csv"
+    _nonzero_label_observations(_toy_observations()).to_csv(csv_path, index=False)
+
+    ensembled, metrics = run_response_window_ensemble([csv_path], mode="uniform")
+
+    assert set(ensembled["predicted_label"].unique()) <= {10, 20, 30}
+    assert ensembled["predicted_class"].str.startswith("class-").all()
+    assert ensembled["probability_true_class"].between(0.0, 1.0).all()
     assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
 
 
@@ -187,6 +223,63 @@ def test_plain_response_window_rejects_invalid_probabilities(tmp_path: Path, col
 
     with pytest.raises(ValueError, match=message):
         run_response_window_ensemble([csv_path], mode="uniform")
+
+
+@pytest.mark.parametrize(
+    ("values", "message"),
+    [
+        ([1.2, 0.1, 0.1], "must not exceed 1.0"),
+        ([0.3, 0.3, 0.3], "must sum to 1.0"),
+    ],
+)
+def test_plain_response_window_rejects_malformed_probability_rows(tmp_path: Path, values: list[float], message: str):
+    observations = _toy_observations()
+    observations.loc[0, ["prob_class_0", "prob_class_1", "prob_class_2"]] = values
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
+def test_plain_response_window_rejects_nonnumeric_time_rows(tmp_path: Path):
+    observations = _toy_observations()
+    observations["time"] = observations["time"].astype(object)
+    observations.loc[0, "time"] = "bad"
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="time values must be numeric"):
+        run_response_window_ensemble([csv_path], mode="uniform")
+
+
+def test_response_window_rejects_partial_subject_key_values(tmp_path: Path):
+    observations = _toy_observations()
+    observations.loc[0, "subject"] = ""
+    csv_path = tmp_path / "observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="target key column 'subject' is partially missing"):
+        run_response_window_ensemble([csv_path], mode="source_oof_nonnegative")
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"response_times": ()}, "At least one response-window time"),
+        ({"response_times": (np.nan,)}, "times must be finite"),
+        ({"weight_grid_step": 0.0}, "weight_grid_step must be positive"),
+        ({"weight_grid_step": True}, "weight_grid_step must be positive"),
+        ({"output_time": np.inf}, "output_time must be finite"),
+        ({"smoothing_stay_grid_size": True}, "smoothing_stay_grid_size must be a positive integer"),
+    ],
+)
+def test_response_window_rejects_invalid_public_controls(tmp_path: Path, kwargs: dict[str, object], message: str):
+    csv_path = tmp_path / "observations.csv"
+    _toy_observations().to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        run_response_window_ensemble([csv_path], mode="uniform", **kwargs)
 
 
 def test_plain_response_window_rejects_label_mismatch_across_times(tmp_path: Path):
@@ -376,6 +469,36 @@ def test_response_window_can_learn_decoder_family_weights_from_source_subjects(t
     assert all(weight >= 0.5 for weight in strong_weights)
     assert ensembled["response_window_source_score"].replace("", np.nan).notna().all()
     assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
+
+
+def test_decoder_response_window_maps_nonzero_probability_labels(tmp_path: Path):
+    csv_path = tmp_path / "decoder_observations.csv"
+    _nonzero_label_observations(_toy_decoder_observations()).to_csv(csv_path, index=False)
+
+    ensembled, metrics = run_response_window_ensemble(
+        [csv_path],
+        response_times=(0.088, 0.136),
+        mode="decoder_source_oof_nonnegative",
+        weight_grid_step=0.5,
+    )
+
+    assert set(ensembled["predicted_label"].unique()) <= {10, 20, 30}
+    assert ensembled["probability_true_class"].between(0.0, 1.0).all()
+    assert metrics["balanced_accuracy"].between(0.0, 1.0).all()
+
+
+def test_decoder_response_window_rejects_blank_decoder_values(tmp_path: Path):
+    observations = _toy_decoder_observations()
+    observations.loc[0, "decoder"] = " "
+    csv_path = tmp_path / "decoder_observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match="non-blank decoder values"):
+        run_response_window_ensemble(
+            [csv_path],
+            response_times=(0.088, 0.136),
+            mode="decoder_source_oof_nonnegative",
+        )
 
 
 def test_decoder_response_window_model_hash_depends_on_source_hashes(tmp_path: Path):
