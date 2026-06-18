@@ -1,8 +1,10 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 
-from neureptrace.semantic_stages import analyze_semantic_stages, posterior_columns, read_state_traces
+from neureptrace.semantic_stages import analyze_semantic_stages, detect_stable_stages, posterior_columns, read_state_traces
 
 
 def _state_trace_frame() -> pd.DataFrame:
@@ -59,6 +61,42 @@ def test_read_state_traces_detects_posterior_columns(tmp_path: Path):
     assert traces["source_file"].unique().tolist() == ["state_trace.csv"]
 
 
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    [
+        ("time", "late", "time values must be numeric"),
+        ("time", float("inf"), "time values must be finite"),
+        ("posterior_state_0", "high", "posterior_state_0 values must be numeric"),
+        ("posterior_state_0", float("nan"), "posterior_state_0 values must be finite"),
+        ("posterior_state_0", -0.1, "non-negative"),
+        ("posterior_state_0", 1.2, "must not exceed 1.0"),
+        ("viterbi_posterior", "high", "viterbi_posterior values must be numeric"),
+        ("viterbi_posterior", float("nan"), "viterbi_posterior values must be finite"),
+        ("viterbi_posterior", 1.2, "viterbi_posterior values must be between 0 and 1"),
+    ],
+)
+def test_read_state_traces_rejects_malformed_numeric_values(tmp_path: Path, column: str, value, message: str):
+    state_csv = tmp_path / "state_trace.csv"
+    frame = _state_trace_frame()
+    if isinstance(value, str):
+        frame[column] = frame[column].astype(object)
+    frame.loc[0, column] = value
+    frame.to_csv(state_csv, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        read_state_traces([state_csv])
+
+
+def test_read_state_traces_rejects_unnormalized_posterior_rows(tmp_path: Path):
+    state_csv = tmp_path / "state_trace.csv"
+    frame = _state_trace_frame()
+    frame.loc[0, ["posterior_state_0", "posterior_state_1"]] = [0.2, 0.2]
+    frame.to_csv(state_csv, index=False)
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        read_state_traces([state_csv])
+
+
 def test_analyze_semantic_stages_detects_category_conditioned_segments(tmp_path: Path):
     state_csv = tmp_path / "state_trace.csv"
     time_csv = tmp_path / "stage_time.csv"
@@ -103,3 +141,65 @@ def test_analyze_semantic_stages_keeps_emission_modes_distinct(tmp_path: Path):
     assert set(time_summary["emission_mode"]) == {"calibrated", "uncalibrated"}
     assert set(stages["emission_mode"]) == {"calibrated", "uncalibrated"}
     assert len(stages) == 4
+
+
+def test_analyze_semantic_stages_rejects_unmapped_true_classes(tmp_path: Path):
+    state_csv = tmp_path / "state_trace.csv"
+    frame = _state_trace_frame()
+    frame.loc[frame["true_class"] == "animate", "true_class"] = "animal"
+    frame.to_csv(state_csv, index=False)
+
+    with pytest.raises(ValueError, match="true_class values are not represented"):
+        analyze_semantic_stages([state_csv])
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"posterior_threshold": True}, "posterior_threshold"),
+        ({"posterior_threshold": 1.5}, "posterior_threshold"),
+        ({"match_threshold": np.nan}, "match_threshold"),
+        ({"match_threshold": -0.1}, "match_threshold"),
+        ({"min_duration": True}, "min_duration"),
+        ({"min_duration": -0.01}, "min_duration"),
+    ],
+)
+def test_analyze_semantic_stages_rejects_malformed_controls(tmp_path: Path, kwargs: dict, message: str):
+    state_csv = tmp_path / "state_trace.csv"
+    _state_trace_frame().to_csv(state_csv, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        analyze_semantic_stages([state_csv], **kwargs)
+
+
+def test_detect_stable_stages_rejects_missing_required_columns():
+    with pytest.raises(ValueError, match="time_summary is missing required columns"):
+        detect_stable_stages(pd.DataFrame({"time": [0.1]}))
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    [
+        ("time", "late", "time values must be numeric"),
+        ("posterior_true_class_mean", float("inf"), "posterior_true_class_mean values must be finite"),
+        ("viterbi_match_rate", np.nan, "viterbi_match_rate values must be finite"),
+    ],
+)
+def test_detect_stable_stages_rejects_malformed_time_summary_values(column: str, value, message: str):
+    time_summary = pd.DataFrame(
+        {
+            "decoder": ["logistic"],
+            "emission_mode": ["calibrated"],
+            "true_class": ["animate"],
+            "time": [0.1],
+            "posterior_true_class_mean": [0.8],
+            "viterbi_match_rate": [0.9],
+            "n_sequences": [3],
+        }
+    )
+    if isinstance(value, str):
+        time_summary[column] = time_summary[column].astype(object)
+    time_summary.loc[0, column] = value
+
+    with pytest.raises(ValueError, match=message):
+        detect_stable_stages(time_summary)

@@ -7,7 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from neureptrace.temporal_model import sequence_key_columns, validate_unique_sequence_times
+from neureptrace.mne_time_decode import _normalize_nonnegative_float, _normalize_unit_interval_float
+from neureptrace.temporal_model import _validate_probability_matrix, sequence_key_columns, validate_unique_sequence_times
 
 STAGE_GROUP_COLUMNS = ("decoder", "emission_mode")
 
@@ -36,6 +37,41 @@ def posterior_columns(frame: pd.DataFrame) -> list[str]:
     return sorted(columns, key=sort_key)
 
 
+def _coerce_finite_numeric_column(frame: pd.DataFrame, column: str, *, source: Path | None = None) -> None:
+    prefix = f"{source} " if source is not None else ""
+    try:
+        frame[column] = pd.to_numeric(frame[column])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{prefix}{column} values must be numeric.") from exc
+    if not np.isfinite(frame[column].to_numpy(dtype=float)).all():
+        raise ValueError(f"{prefix}{column} values must be finite.")
+
+
+def _validate_posterior_frame(frame: pd.DataFrame, columns: list[str], *, source: Path | None = None) -> None:
+    for column in columns:
+        _coerce_finite_numeric_column(frame, column, source=source)
+    _validate_probability_matrix(frame[columns].to_numpy())
+    if "viterbi_posterior" in frame.columns:
+        _coerce_finite_numeric_column(frame, "viterbi_posterior", source=source)
+        values = frame["viterbi_posterior"].to_numpy(dtype=float)
+        if np.any((values < 0.0) | (values > 1.0)):
+            prefix = f"{source} " if source is not None else ""
+            raise ValueError(f"{prefix}viterbi_posterior values must be between 0 and 1.")
+
+
+def _normalize_stage_controls(
+    *,
+    posterior_threshold: float,
+    match_threshold: float,
+    min_duration: float,
+) -> tuple[float, float, float]:
+    return (
+        _normalize_unit_interval_float(posterior_threshold, name="posterior_threshold", include_one=True),
+        _normalize_unit_interval_float(match_threshold, name="match_threshold", include_one=True),
+        _normalize_nonnegative_float(min_duration, name="min_duration"),
+    )
+
+
 def _state_names(frame: pd.DataFrame, columns: list[str]) -> list[str]:
     names = []
     for index, column in enumerate(columns):
@@ -58,7 +94,9 @@ def read_state_traces(csv_paths: list[Path]) -> pd.DataFrame:
         missing = [column for column in ("time", "viterbi_class") if column not in frame.columns]
         if missing:
             raise ValueError(f"{csv_path} is missing required columns: {missing}")
-        posterior_columns(frame)
+        _coerce_finite_numeric_column(frame, "time", source=csv_path)
+        columns = posterior_columns(frame)
+        _validate_posterior_frame(frame, columns, source=csv_path)
         if "subject" not in frame.columns:
             frame["subject"] = csv_path.stem
         if "decoder" not in frame.columns:
@@ -105,6 +143,12 @@ def _add_true_class_alignment(frame: pd.DataFrame, columns: list[str], state_nam
     aligned["sequence_key"] = _sequence_keys(aligned)
     aligned["viterbi_matches_true_class"] = aligned["viterbi_class"].astype(str) == aligned["true_class"].astype(str)
     aligned["posterior_true_class"] = np.nan
+
+    observed_classes = set(aligned["true_class"].dropna().astype(str))
+    known_states = set(map(str, state_names))
+    unknown_classes = sorted(observed_classes - known_states)
+    if unknown_classes:
+        raise ValueError(f"true_class values are not represented in state labels: {unknown_classes}.")
 
     for state_name, posterior_column in zip(state_names, columns, strict=True):
         mask = aligned["true_class"].astype(str) == state_name
@@ -235,6 +279,18 @@ def detect_stable_stages(
     min_duration: float = 0.04,
 ) -> pd.DataFrame:
     """Detect contiguous semantic stages from a category-conditioned time summary."""
+    posterior_threshold, match_threshold, min_duration = _normalize_stage_controls(
+        posterior_threshold=posterior_threshold,
+        match_threshold=match_threshold,
+        min_duration=min_duration,
+    )
+    required_columns = {"true_class", "time", "posterior_true_class_mean", "viterbi_match_rate", "n_sequences"}
+    missing = sorted(required_columns - set(time_summary.columns))
+    if missing:
+        raise ValueError(f"time_summary is missing required columns: {missing}")
+    time_summary = time_summary.copy()
+    for column in ("time", "posterior_true_class_mean", "viterbi_match_rate"):
+        _coerce_finite_numeric_column(time_summary, column)
     rows = []
     group_columns = [*_stage_group_columns(time_summary), "true_class"]
     for keys, group in time_summary.sort_values("time").groupby(group_columns, sort=True):
@@ -282,6 +338,11 @@ def build_stage_report(
     min_duration: float,
 ) -> str:
     """Build a compact Markdown report for the semantic-stage question."""
+    posterior_threshold, match_threshold, min_duration = _normalize_stage_controls(
+        posterior_threshold=posterior_threshold,
+        match_threshold=match_threshold,
+        min_duration=min_duration,
+    )
     lines = [
         "# NeuRepTrace Semantic Stage Report",
         "",
@@ -359,6 +420,11 @@ def analyze_semantic_stages(
     out_report: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
     """Analyze whether category-conditioned state traces form stable temporal stages."""
+    posterior_threshold, match_threshold, min_duration = _normalize_stage_controls(
+        posterior_threshold=posterior_threshold,
+        match_threshold=match_threshold,
+        min_duration=min_duration,
+    )
     state_traces = read_state_traces(state_trace_csvs)
     time_summary, _ = summarize_category_timecourse(state_traces)
     stages = detect_stable_stages(
