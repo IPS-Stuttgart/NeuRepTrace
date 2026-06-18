@@ -173,6 +173,28 @@ def test_fit_stacking_weights_rejects_invalid_max_iter() -> None:
             fit_stacking_weights(cube, labels, max_iter=value)
 
 
+def test_fit_stacking_weights_validates_single_candidate_probabilities() -> None:
+    cube = np.array([[[0.8, 0.8], [0.1, 0.9]]])
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        fit_stacking_weights(cube, labels)
+
+
+def test_fit_stacking_weights_rejects_invalid_min_probability() -> None:
+    cube = np.array(
+        [
+            [[0.9, 0.1], [0.1, 0.9]],
+            [[0.6, 0.4], [0.4, 0.6]],
+        ]
+    )
+    labels = np.array([0, 1])
+
+    for value in (0.0, np.nan, True, "bad"):
+        with pytest.raises(ValueError, match="min_probability must lie"):
+            fit_stacking_weights(cube, labels, min_probability=value)
+
+
 def test_class_balanced_sample_weights_rejects_fractional_n_classes() -> None:
     labels = np.array([0, 1])
 
@@ -207,6 +229,19 @@ def test_fit_source_oof_stacking_rejects_bool_softmax_temperature() -> None:
 
     with pytest.raises(ValueError, match="temperature must be positive and finite"):
         fit_source_oof_stacking(cube, labels, candidates=("strong", "weak"), weighting="softmax", temperature=True)
+
+
+def test_fit_source_oof_stacking_rejects_duplicate_candidate_names() -> None:
+    cube = np.array(
+        [
+            [[0.9, 0.1], [0.1, 0.9]],
+            [[0.6, 0.4], [0.4, 0.6]],
+        ]
+    )
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="candidate values must be unique"):
+        fit_source_oof_stacking(cube, labels, candidates=("same", "same"))
 
 
 def test_stack_probability_observations_applies_source_weights_to_target() -> None:
@@ -295,6 +330,47 @@ def test_stack_probability_observations_rejects_unnormalized_probability_rows() 
         stack_probability_observations(source, target, weighting="stacked", max_iter=120)
 
 
+def test_stack_probability_observations_rejects_blank_candidate_values() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    source.loc[0, "decoder"] = " "
+
+    with pytest.raises(ValueError, match="decoder values must not be blank"):
+        stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+
+def test_stack_probability_observations_rejects_duplicate_explicit_candidates() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+
+    with pytest.raises(ValueError, match="candidate values must be unique"):
+        stack_probability_observations(source, target, candidates=("weak", "weak"), weighting="stacked", max_iter=120)
+
+
+def test_stack_probability_observations_rejects_bad_alignment_columns() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+
+    with pytest.raises(ValueError, match="alignment column values must be unique"):
+        stack_probability_observations(source, target, alignment_columns=("sample_index", "sample_index"))
+
+    with pytest.raises(ValueError, match="missing alignment column"):
+        stack_probability_observations(source, target, alignment_columns=("missing_key",))
+
+    with pytest.raises(ValueError, match="must not include candidate column"):
+        stack_probability_observations(source, target, alignment_columns=("decoder",))
+
+
+def test_stack_probability_observations_rejects_missing_alignment_key_values() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    source["sample_index"] = source["sample_index"].astype(object)
+    source.loc[(source["decoder"] == "weak") & (source["sample_index"] == 0), "sample_index"] = ""
+
+    with pytest.raises(ValueError, match="missing alignment key"):
+        stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+
 def test_stack_probability_observations_rejects_source_label_mismatch_with_custom_alignment_keys() -> None:
     source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
     target = _observation_rows(subject="target", labels=[0, 1, 0])
@@ -337,6 +413,52 @@ def test_summarize_stacked_metrics_rejects_fractional_true_labels() -> None:
     stacked.loc[0, "true_label"] = 0.5
 
     with pytest.raises(ValueError, match="true_label values must be integer-valued"):
+        summarize_stacked_metrics(stacked)
+
+
+def test_summarize_stacked_metrics_rejects_invalid_probabilities() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    stacked = stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+    stacked.loc[0, ["prob_class_0", "prob_class_1"]] = [0.8, 0.8]
+
+    with pytest.raises(ValueError, match="must sum to 1.0"):
+        summarize_stacked_metrics(stacked)
+
+
+def test_summarize_stacked_metrics_maps_nonzero_class_labels_to_positions() -> None:
+    observations = pd.DataFrame(
+        {
+            "subject": ["s1", "s1"],
+            "fold": [0, 0],
+            "decoder": ["stacked", "stacked"],
+            "emission_mode": ["source_oof_stacked", "source_oof_stacked"],
+            "time": [0.184, 0.184],
+            "window_start": [0.16, 0.16],
+            "window_stop": [0.20, 0.20],
+            "true_label": [10, 20],
+            "prob_class_10": [0.8, 0.2],
+            "prob_class_20": [0.2, 0.8],
+        }
+    )
+
+    metrics = summarize_stacked_metrics(observations)
+
+    assert metrics["balanced_accuracy"].tolist() == [1.0]
+    assert metrics["top2_accuracy"].tolist() == [1.0]
+    assert metrics["brier"].tolist() == pytest.approx([0.08])
+    assert metrics["ece"].tolist() == pytest.approx([0.2])
+
+
+def test_summarize_stacked_metrics_rejects_inconsistent_source_metadata() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    stacked = stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+    same_group = stacked.index[stacked["fold"] == 0].tolist()
+    stacked.loc[same_group[0], "source_oof_weights"] = "1|0"
+    stacked.loc[same_group[1], "source_oof_weights"] = "0|1"
+
+    with pytest.raises(ValueError, match="source_oof_weights"):
         summarize_stacked_metrics(stacked)
 
 
