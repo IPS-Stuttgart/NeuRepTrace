@@ -40,6 +40,23 @@ def _toy_observations() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _nonzero_label_observations() -> pd.DataFrame:
+    observations = _toy_observations()
+    label_map = {0: 10, 1: 20, 2: 30}
+    observations["true_label"] = observations["true_label"].map(label_map)
+    observations["predicted_label"] = observations["predicted_label"].map(label_map)
+    observations["true_class"] = observations["true_label"].map(lambda label: f"class_{label}")
+    observations["predicted_class"] = observations["predicted_label"].map(lambda label: f"class_{label}")
+    observations = observations.rename(
+        columns={
+            "prob_class_0": "prob_class_10",
+            "prob_class_1": "prob_class_20",
+            "prob_class_2": "prob_class_30",
+        }
+    )
+    return observations
+
+
 def test_loso_observation_diagnostics_writes_subject_confusion_and_class_tables(tmp_path: Path):
     observations_csv = tmp_path / "observations.csv"
     stage_summary_csv = tmp_path / "stage_summary.csv"
@@ -90,6 +107,27 @@ def test_loso_observation_diagnostics_writes_subject_confusion_and_class_tables(
     assert quality.loc[0, "fixed_balanced_minus_chance"].round(6) == round(5 / 6 - 1 / 3, 6)
     assert quality.loc[0, "subjects_fixed_above_chance"] == 2
     assert quality.loc[0, "top3_interpretation"] == "automatic_ceiling"
+
+
+def test_loso_observation_diagnostics_maps_nonzero_probability_labels(tmp_path: Path):
+    observations_csv = tmp_path / "observations.csv"
+    out_dir = tmp_path / "diagnostics"
+    _nonzero_label_observations().to_csv(observations_csv, index=False)
+
+    paths = write_loso_observation_diagnostics(
+        observations_csv,
+        out_dir=out_dir,
+        best_time=0.184,
+    )
+
+    quality = pd.read_csv(paths["quality_summary"])
+    selective = pd.read_csv(paths["selective_coverage"])
+    confusion = pd.read_csv(paths["confusion_matrix"])
+
+    assert quality.loc[0, "fixed_balanced_accuracy"].round(6) == round(5 / 6, 6)
+    assert quality.loc[0, "fixed_top2_accuracy"] == 1.0
+    assert '"10":2' in selective.loc[selective["coverage_target"] == 1.0, "selected_class_support"].iloc[0]
+    assert int(confusion.loc[(confusion["true_class"] == "class_30") & (confusion["predicted_class"] == "class_20"), "count"].iloc[0]) == 1
 
 
 def test_loso_observation_diagnostics_tolerates_missing_stage_summary(tmp_path: Path):

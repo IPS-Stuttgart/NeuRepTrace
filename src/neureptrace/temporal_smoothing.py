@@ -129,20 +129,41 @@ def _smoothed_emission_mode(base_mode: object, suffix: str) -> str:
     return f"{base}_{suffix}"
 
 
-def _numeric_labels(frame: pd.DataFrame, n_classes: int) -> np.ndarray:
+def _label_values(prob_columns: list[str]) -> tuple[int, ...]:
+    suffixes = tuple(column.removeprefix("prob_class_") for column in prob_columns)
+    if not all(suffix.isdigit() for suffix in suffixes):
+        return tuple(range(len(prob_columns)))
+    return tuple(int(suffix) for suffix in suffixes)
+
+
+def _numeric_label_values(frame: pd.DataFrame, label_values: tuple[int, ...]) -> np.ndarray:
     if "true_label" not in frame.columns:
         raise ValueError("Temporal smoothing metrics require a true_label column.")
     labels = pd.to_numeric(frame["true_label"], errors="coerce")
     if labels.isna().any():
         raise ValueError("true_label must be numeric and non-missing.")
-    label_values = labels.to_numpy(dtype=float)
-    rounded = np.rint(label_values)
-    if not bool(np.isclose(label_values, rounded, rtol=0.0, atol=1.0e-12).all()):
+    raw_label_values = labels.to_numpy(dtype=float)
+    rounded = np.rint(raw_label_values)
+    if not bool(np.isclose(raw_label_values, rounded, rtol=0.0, atol=1.0e-12).all()):
         raise ValueError("true_label values must be integer-valued.")
     labels_array = rounded.astype(int)
-    if bool(((labels_array < 0) | (labels_array >= n_classes)).any()):
-        raise ValueError("true_label values must index prob_class_* columns.")
+    label_set = set(label_values)
+    if missing := sorted(set(int(label) for label in labels_array if int(label) not in label_set)):
+        raise ValueError(f"true_label values must index prob_class_* labels {list(label_values)}; missing labels: {missing[:5]}.")
     return labels_array
+
+
+def _label_positions(labels: np.ndarray, label_values: tuple[int, ...]) -> np.ndarray:
+    label_to_position = {int(label): position for position, label in enumerate(label_values)}
+    positions = np.full(labels.shape[0], -1, dtype=int)
+    for index, label in enumerate(labels):
+        position = label_to_position.get(int(label))
+        if position is not None:
+            positions[index] = position
+    if bool((positions < 0).any()):
+        missing = sorted(set(int(label) for label in labels if int(label) not in label_to_position))
+        raise ValueError(f"true_label values must index prob_class_* labels {list(label_values)}; missing labels: {missing[:5]}.")
+    return positions
 
 
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
@@ -151,6 +172,15 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     effective_k = min(int(k), probabilities.shape[1])
     top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
     return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
+
+
+def _top_k_accuracy_from_label_values(probabilities: np.ndarray, labels: np.ndarray, label_values: tuple[int, ...], *, k: int) -> float:
+    if len(labels) == 0:
+        return float("nan")
+    effective_k = min(int(k), probabilities.shape[1])
+    top_columns = np.argsort(probabilities, axis=1)[:, ::-1][:, :effective_k]
+    top_labels = np.asarray(label_values, dtype=int)[top_columns]
+    return float(np.mean(np.any(top_labels == labels[:, None], axis=1)))
 
 
 def _logsumexp(values: np.ndarray, axis: int | None = None) -> np.ndarray:
@@ -231,6 +261,8 @@ def _with_posterior_columns(
     smoothed = sequence_frame.copy()
     posterior = _normalize_probabilities(posterior)
     predictions = posterior.argmax(axis=1)
+    label_values = _label_values(prob_columns)
+    predicted_labels = np.asarray([label_values[position] for position in predictions], dtype=int)
 
     smoothed.loc[:, prob_columns] = posterior
     if "emission_mode" in smoothed.columns:
@@ -240,13 +272,14 @@ def _with_posterior_columns(
         smoothed["base_emission_mode"] = ""
         smoothed["emission_mode"] = emission_suffix
 
-    smoothed["predicted_label"] = predictions.astype(int)
+    smoothed["predicted_label"] = predicted_labels
     smoothed["predicted_class"] = [class_names[int(index)] for index in predictions]
     smoothed["confidence"] = posterior.max(axis=1)
     if "true_label" in smoothed.columns:
-        labels = _numeric_labels(smoothed, posterior.shape[1])
-        smoothed["probability_true_class"] = posterior[np.arange(len(smoothed)), labels]
-        smoothed["is_correct"] = predictions == labels
+        labels = _numeric_label_values(smoothed, label_values)
+        label_positions = _label_positions(labels, label_values)
+        smoothed["probability_true_class"] = posterior[np.arange(len(smoothed)), label_positions]
+        smoothed["is_correct"] = predicted_labels == labels
 
     smoothed["temporal_smoothing_method"] = smoothing_method
     smoothed["temporal_smoothing_stay_probability"] = float(stay_probability)
@@ -288,7 +321,8 @@ def metrics_from_probability_observations(observations: pd.DataFrame, *, ece_bin
 
     prob_columns = probability_columns(observations)
     n_classes = len(prob_columns)
-    labels = _numeric_labels(observations, n_classes)
+    label_values = _label_values(prob_columns)
+    labels = _numeric_label_values(observations, label_values)
     working = observations.copy()
     working["true_label"] = labels
     for column in prob_columns:
@@ -305,17 +339,19 @@ def metrics_from_probability_observations(observations: pd.DataFrame, *, ece_bin
         row = _group_values(group_columns, key)
         probabilities = _normalize_probabilities(group[prob_columns].to_numpy(dtype=float))
         group_labels = group["true_label"].to_numpy(dtype=int)
+        group_positions = _label_positions(group_labels, label_values)
         predictions = probabilities.argmax(axis=1)
+        predicted_labels = np.asarray([label_values[position] for position in predictions], dtype=int)
         class_names = _class_names(group, prob_columns)
         row.update(
             {
-                "accuracy": accuracy_score(group_labels, predictions),
-                "balanced_accuracy": balanced_accuracy_score(group_labels, predictions),
-                "top2_accuracy": _top_k_accuracy(probabilities, group_labels, k=2),
-                "top3_accuracy": _top_k_accuracy(probabilities, group_labels, k=3),
-                "log_loss": log_loss(group_labels, probabilities, labels=np.arange(n_classes)),
-                "brier": brier_score_multiclass(probabilities, group_labels),
-                "ece": expected_calibration_error(probabilities, group_labels, n_bins=ece_bins),
+                "accuracy": accuracy_score(group_labels, predicted_labels),
+                "balanced_accuracy": balanced_accuracy_score(group_labels, predicted_labels),
+                "top2_accuracy": _top_k_accuracy_from_label_values(probabilities, group_labels, label_values, k=2),
+                "top3_accuracy": _top_k_accuracy_from_label_values(probabilities, group_labels, label_values, k=3),
+                "log_loss": log_loss(group_labels, probabilities, labels=list(label_values)),
+                "brier": brier_score_multiclass(probabilities, group_positions),
+                "ece": expected_calibration_error(probabilities, group_positions, n_bins=ece_bins),
                 "n_test": int(len(group)),
                 "n_classes": int(n_classes),
                 "class_names": "|".join(map(str, class_names)),

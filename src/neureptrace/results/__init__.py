@@ -320,6 +320,26 @@ def _prepare_observations_for_subject_time(
     return prepared
 
 
+def _label_values_from_probability_columns(prob_columns: list[str]) -> tuple[int, ...]:
+    suffixes = tuple(column.removeprefix("prob_class_") for column in prob_columns)
+    if not all(suffix.isdigit() for suffix in suffixes):
+        return tuple(range(len(prob_columns)))
+    return tuple(int(suffix) for suffix in suffixes)
+
+
+def _label_positions(labels: np.ndarray, label_values: tuple[int, ...]) -> np.ndarray:
+    label_to_position = {int(label): position for position, label in enumerate(label_values)}
+    positions = np.full(labels.shape[0], -1, dtype=int)
+    for index, label in enumerate(labels):
+        position = label_to_position.get(int(label))
+        if position is not None:
+            positions[index] = position
+    if bool((positions < 0).any()):
+        missing = sorted(set(int(label) for label in labels if int(label) not in label_to_position))
+        raise ValueError(f"Probability-observation true_label values must index prob_class_* labels {list(label_values)}; missing labels: {missing[:5]}.")
+    return positions
+
+
 def _probability_ece_by_group(observations: pd.DataFrame, group_columns: list[str], *, n_bins: int) -> pd.DataFrame:
     """Compute ECE from pooled probability observations within each subject/time group."""
     prob_columns = list(probability_columns(observations))
@@ -346,9 +366,9 @@ def _probability_ece_by_group(observations: pd.DataFrame, group_columns: list[st
     if not bool(np.isclose(label_values, rounded_labels, rtol=0.0, atol=1.0e-12).all()):
         raise ValueError("Probability-observation true_label values must be integer-valued.")
     working["true_label"] = rounded_labels.astype(int)
+    probability_label_values = _label_values_from_probability_columns(prob_columns)
     labels = working["true_label"].to_numpy(dtype=int)
-    if bool(((labels < 0) | (labels >= len(prob_columns))).any()):
-        raise ValueError("Probability-observation true_label values must index prob_class_* columns.")
+    _label_positions(labels, probability_label_values)
     probabilities = working[prob_columns].to_numpy(dtype=float)
     if not np.isfinite(probabilities).all():
         raise ValueError("Probability-observation columns must be finite.")
@@ -360,8 +380,9 @@ def _probability_ece_by_group(observations: pd.DataFrame, group_columns: list[st
         row = dict(zip(group_columns, group_key))
         probabilities = group[prob_columns].to_numpy(dtype=float)
         labels = group["true_label"].to_numpy(dtype=int)
+        label_positions = _label_positions(labels, probability_label_values)
         row["n_observations"] = int(len(group))
-        row["ece"] = expected_calibration_error(probabilities, labels, n_bins=n_bins)
+        row["ece"] = expected_calibration_error(probabilities, label_positions, n_bins=n_bins)
         rows.append(row)
 
     return pd.DataFrame(rows)
