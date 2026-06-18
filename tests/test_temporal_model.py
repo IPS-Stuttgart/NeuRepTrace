@@ -1,9 +1,10 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from neureptrace.temporal_model import fit_temporal_models, probability_columns, read_probability_observations
+from neureptrace.temporal_model import build_state_trace, fit_sticky_switching_model, fit_temporal_models, probability_columns, read_probability_observations
 
 
 def _observation_frame() -> pd.DataFrame:
@@ -85,6 +86,26 @@ def test_read_probability_observations_rejects_unnormalized_probability_rows(tmp
         read_probability_observations([csv_path])
 
 
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("late", "time values must be numeric"),
+        (float("nan"), "time values must be finite"),
+        (float("inf"), "time values must be finite"),
+    ],
+)
+def test_read_probability_observations_rejects_malformed_time_values(tmp_path: Path, value, message: str):
+    csv_path = tmp_path / "invalid_time_observations.csv"
+    frame = _observation_frame()
+    if isinstance(value, str):
+        frame["time"] = frame["time"].astype(object)
+    frame.loc[0, "time"] = value
+    frame.to_csv(csv_path, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        read_probability_observations([csv_path])
+
+
 def test_fit_temporal_models_compares_observed_to_controls(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     summary_path = tmp_path / "temporal_summary.csv"
@@ -131,3 +152,63 @@ def test_fit_temporal_models_rejects_invalid_permutation_counts(tmp_path: Path):
                 n_permutations=value,
                 stay_grid_size=30,
             )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"effect_window": [True, 0.4]}, "effect_window"),
+        ({"effect_window": (0.4, 0.1)}, "effect_window"),
+        ({"effect_window": (0.1, float("inf"))}, "effect_window"),
+        ({"baseline_window": [np.nan, 0.0]}, "baseline_window"),
+        ({"baseline_window": (0.0, -0.1)}, "baseline_window"),
+        ({"random_seed": True}, "random_seed"),
+        ({"random_seed": -1}, "random_seed"),
+        ({"random_seed": 1.5}, "random_seed"),
+        ({"stay_grid_size": True}, "stay_grid_size"),
+        ({"stay_grid_size": 1}, "stay_grid_size"),
+        ({"stay_grid_size": 30.5}, "stay_grid_size"),
+    ],
+)
+def test_fit_temporal_models_rejects_malformed_controls(tmp_path: Path, kwargs: dict, message: str):
+    csv_path = tmp_path / "observations.csv"
+    _observation_frame().to_csv(csv_path, index=False)
+    params = {
+        "effect_window": (0.1, 0.4),
+        "baseline_window": (-0.1, 0.0),
+        "n_permutations": 3,
+        "random_seed": 7,
+        "stay_grid_size": 30,
+    }
+    params.update(kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        fit_temporal_models(
+            [csv_path],
+            **params,
+        )
+
+
+@pytest.mark.parametrize(
+    ("sequences", "message"),
+    [
+        ([], "Need at least one probability sequence"),
+        ([np.asarray([0.5, 0.5])], "shape"),
+    ],
+)
+def test_fit_sticky_switching_model_rejects_malformed_sequences(sequences, message: str):
+    with pytest.raises(ValueError, match=message):
+        fit_sticky_switching_model(sequences, stay_grid_size=10)
+
+
+@pytest.mark.parametrize("stay_probability", [True, float("nan"), -0.1, 1.1])
+def test_build_state_trace_rejects_malformed_stay_probability(stay_probability):
+    frame = _observation_frame().iloc[:6].copy()
+
+    with pytest.raises(ValueError, match="stay_probability"):
+        build_state_trace(
+            frame,
+            stay_probability=stay_probability,
+            class_names=["left", "right"],
+            prob_columns=["prob_class_0", "prob_class_1"],
+        )
