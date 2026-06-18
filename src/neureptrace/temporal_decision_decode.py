@@ -15,11 +15,20 @@ from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.preprocessing import LabelEncoder
 
 from neureptrace.dataset_config import apply_overrides, effective_config, load_config, load_epoch_dataset_from_config
-from neureptrace.decode_from_config import _resolve_output, _section, _window_ms, _write_provenance_sidecars
+from neureptrace.decode_from_config import _bool_value, _resolve_output, _section, _window_ms, _write_provenance_sidecars
 from neureptrace.decoding import make_decoder, normalize_decoder_name, normalize_emission_mode, normalize_feature_preprocessor, normalize_pca_components, predict_emission_probabilities, time_windows
 from neureptrace.io.dataset import EpochDataset
 from neureptrace.metrics import brier_score_multiclass, expected_calibration_error
-from neureptrace.mne_time_decode import DEFAULT_BASELINE_WINDOW, _align_probability_columns, _features_for_window, _normalize_baseline_window, _top_k_accuracy, normalize_epoch_normalization
+from neureptrace.mne_time_decode import (
+    DEFAULT_BASELINE_WINDOW,
+    _align_probability_columns,
+    _features_for_window,
+    _normalize_baseline_window,
+    _normalize_positive_float,
+    _normalize_positive_int,
+    _top_k_accuracy,
+    normalize_epoch_normalization,
+)
 from neureptrace.mne_time_decode_foldlocal import _normalize_epoch_data_for_fold
 from neureptrace.observations import ProbabilityObservationTable, stable_hash
 
@@ -42,10 +51,38 @@ def _pair(value: Any, *, name: str) -> tuple[float, float] | None:
         return None
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 2:
         raise ValueError(f"{name} must contain exactly two numbers.")
-    start, stop = map(float, value)
+    start = _finite_float(value[0], name=name)
+    stop = _finite_float(value[1], name=name)
     if stop < start:
         raise ValueError(f"{name} stop must be greater than or equal to start.")
     return start, stop
+
+
+def _finite_float(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite.")
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    return parsed
+
+
+def _normalize_min_probability(value: Any) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("min_probability must lie in (0, 1).")
+    parsed = float(value)
+    if not np.isfinite(parsed) or parsed <= 0.0 or parsed >= 1.0:
+        raise ValueError("min_probability must lie in (0, 1).")
+    return parsed
+
+
+def _normalize_aggregation(mode: str) -> str:
+    normalized = str(mode).strip().lower().replace("-", "_")
+    if normalized in {"log", "log_mean", "geometric_mean"}:
+        return "log_mean"
+    if normalized in {"mean", "arithmetic_mean", "probability", "probability_mean"}:
+        return "mean"
+    raise ValueError("aggregation must be one of: log_mean, geometric_mean, mean, arithmetic_mean.")
 
 
 def _decoders(value: Sequence[str] | str | None) -> tuple[str, ...]:
@@ -59,8 +96,12 @@ def _decoders(value: Sequence[str] | str | None) -> tuple[str, ...]:
 
 
 def _windows(times: np.ndarray, *, window_ms: float, step_ms: float, tmin: Any, tmax: Any, decision_window: tuple[float, float] | None) -> list[TimeWindow]:
-    lower = -np.inf if tmin is None else float(tmin)
-    upper = np.inf if tmax is None else float(tmax)
+    window_ms = _normalize_positive_float(window_ms, name="window_ms")
+    step_ms = _normalize_positive_float(step_ms, name="step_ms")
+    lower = -np.inf if tmin is None else _finite_float(tmin, name="tmin")
+    upper = np.inf if tmax is None else _finite_float(tmax, name="tmax")
+    if upper < lower:
+        raise ValueError("tmax must be greater than or equal to tmin.")
     windows = [window for window in time_windows(times, window_ms=window_ms, step_ms=step_ms) if lower <= window[2] <= upper]
     if decision_window is not None:
         eps = 1.0e-12
@@ -73,9 +114,8 @@ def _windows(times: np.ndarray, *, window_ms: float, step_ms: float, tmin: Any, 
 def _combine(probabilities: Sequence[np.ndarray], *, mode: str, min_probability: float) -> np.ndarray:
     if not probabilities:
         raise ValueError("At least one probability matrix is required for temporal decision aggregation.")
-    min_probability = float(min_probability)
-    if not np.isfinite(min_probability) or min_probability <= 0.0 or min_probability >= 1.0:
-        raise ValueError("min_probability must lie in (0, 1).")
+    min_probability = _normalize_min_probability(min_probability)
+    aggregation = _normalize_aggregation(mode)
     stack = np.stack(probabilities, axis=0)
     if stack.ndim != 3:
         raise ValueError("Temporal decision probabilities must have shape (n_sources, n_samples, n_classes).")
@@ -93,7 +133,7 @@ def _combine(probabilities: Sequence[np.ndarray], *, mode: str, min_probability:
             "Temporal decision probability rows must sum to 1.0 within tolerance "
             f"{DEFAULT_PROBABILITY_TOLERANCE:g}; example row sums: {examples}"
         )
-    if mode.lower().replace("-", "_") in {"log", "log_mean", "geometric_mean"}:
+    if aggregation == "log_mean":
         scores = np.mean(np.log(np.clip(stack, min_probability, 1.0)), axis=0)
         scores -= scores.max(axis=1, keepdims=True)
         combined = np.exp(np.clip(scores, -745.0, 0.0))
@@ -161,6 +201,11 @@ def run_temporal_decision_decode_dataset(dataset: EpochDataset, *, label_column:
     pca_components_value = _components(feature_preprocessor_name, pca_components)
     normalization_name = normalize_epoch_normalization(normalization)
     baseline_window_value = _normalize_baseline_window(baseline_window)
+    max_iter = _normalize_positive_int(max_iter, name="max_iter")
+    calibration_bins = _normalize_positive_int(calibration_bins, name="calibration_bins")
+    aggregation = _normalize_aggregation(aggregation)
+    min_probability = _normalize_min_probability(min_probability)
+    test_window = _pair(test_window, name="test_window")
     decision_windows = _windows(dataset.times, window_ms=window_ms, step_ms=step_ms, tmin=tmin, tmax=tmax, decision_window=test_window)
     split_id = "leave-one-group-out"
     preprocessing_hash = stable_hash({"dataset": dataset.name, "label_column": label_column, "group_column": group_column, "window_ms": window_ms, "step_ms": step_ms, "test_window": test_window, "feature_preprocessor": feature_preprocessor_name, "pca_components": pca_components_value, "normalization": normalization_name, "baseline_window": baseline_window_value})
@@ -229,7 +274,7 @@ def run_temporal_decision_decode_from_config(config_path: str | Path, *, overrid
     config_path = Path(config_path)
     config = apply_overrides(load_config(config_path), overrides)
     if write_provenance is not None:
-        config.setdefault("outputs", {})["provenance"] = bool(write_provenance)
+        config.setdefault("outputs", {})["provenance"] = _bool_value(write_provenance, name="write_provenance")
     dataset = load_epoch_dataset_from_config(config, base_dir=config_path.parent, check_files=True)
     preprocessing = _section(config, "preprocessing")
     decoding = _section(config, "decoding") or _section(config, "workflow")
@@ -247,16 +292,19 @@ def run_temporal_decision_decode_from_config(config_path: str | Path, *, overrid
         window_ms=_window_ms(preprocessing, key_ms="window_ms", key_seconds="window_size", default=100.0),
         step_ms=_window_ms(preprocessing, key_ms="step_ms", key_seconds="window_step", default=25.0),
         test_window=_pair(temporal.get("test_window", temporal.get("decision_window")), name="temporal_decision.test_window"),
-        max_iter=int(temporal.get("max_iter", decoding.get("max_iter", 1000))),
+        max_iter=_normalize_positive_int(temporal.get("max_iter", decoding.get("max_iter", 1000)), name="temporal_decision.max_iter"),
         emission_mode=temporal.get("emission_mode", decoding.get("emission_mode", "calibrated")),
         feature_preprocessor=temporal.get("feature_preprocessor", decoding.get("feature_preprocessor", preprocessing.get("feature_preprocessor", "none"))),
         pca_components=temporal.get("pca_components", decoding.get("pca_components", preprocessing.get("pca_components"))),
         normalization=temporal.get("normalization", preprocessing.get("normalization", "none")),
         baseline_window=tuple(baseline_window) if baseline_window is not None else None,
         aggregation=temporal.get("aggregation", "log_mean"),
-        min_probability=float(temporal.get("min_probability", 1e-12)),
+        min_probability=_normalize_min_probability(temporal.get("min_probability", 1e-12)),
         observation_out_path=observations_out,
-        calibration_bins=int(temporal.get("calibration_bins", decoding.get("calibration_bins", 10))),
+        calibration_bins=_normalize_positive_int(
+            temporal.get("calibration_bins", decoding.get("calibration_bins", 10)),
+            name="temporal_decision.calibration_bins",
+        ),
     )
     _write_provenance_sidecars(config, config_path=config_path, config_dir=config_path.parent, output_paths=[path for path in (summary_out, observations_out) if path is not None])
     return results
