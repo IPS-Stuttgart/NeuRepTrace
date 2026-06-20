@@ -11,6 +11,7 @@ from neureptrace.bushmeg_category2_autoencoder_loso import (
 )
 
 
+# Workflow trigger: 2026-06-20T16:05:00Z.
 def test_category2_autoencoder_protocol_uses_unlabeled_target_features() -> None:
     rng = np.random.default_rng(13)
     x_source = np.vstack([rng.normal(loc=class_idx, scale=0.2, size=(8, 12)) for class_idx in range(3)])
