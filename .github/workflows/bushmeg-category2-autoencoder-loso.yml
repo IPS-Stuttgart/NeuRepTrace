@@ -2,6 +2,12 @@ name: BUSH-MEG Category 2 autoencoder LOSO
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - workflow-triggers/bushmeg_category2_autoencoder_loso.txt
+      - .github/workflows/bushmeg-category2-autoencoder-loso.yml
   push:
     branches:
       - feature/category2-ae-latent-loso
