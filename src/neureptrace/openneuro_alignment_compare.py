@@ -21,6 +21,12 @@ CLASS_REPETITION_ANCHOR = "class_repetition"
 STRICT_TARGET_PROJECTION = "group_projection"
 TARGET_CALIBRATED_TARGET_PROJECTION = "target_calibrated_alignment"
 ORACLE_TARGET_PROJECTION = "oracle_target_calibrated_alignment"
+PSEUDO_LABEL_TARGET_PROJECTION = "pseudo_label_target_calibrated_alignment"
+NON_STRICT_TARGET_PROJECTIONS = {
+    TARGET_CALIBRATED_TARGET_PROJECTION,
+    ORACLE_TARGET_PROJECTION,
+    PSEUDO_LABEL_TARGET_PROJECTION,
+}
 ANCHOR_COMPARISON_COLUMNS = [
     "dataset",
     "alignment_method",
@@ -122,22 +128,14 @@ def _max(frame: pd.DataFrame, column: str) -> float | str:
 def _compact_unique(frame: pd.DataFrame, column: str) -> str:
     if column not in frame.columns:
         return ""
-    values = [
-        str(value).strip()
-        for value in frame[column].dropna()
-        if str(value).strip()
-    ]
+    values = [str(value).strip() for value in frame[column].dropna() if str(value).strip()]
     return "|".join(dict.fromkeys(values))
 
 
 def _single_unique(frame: pd.DataFrame, column: str, *, artifact: str) -> str:
     if column not in frame.columns:
         return ""
-    values = [
-        str(value).strip()
-        for value in frame[column].dropna()
-        if str(value).strip()
-    ]
+    values = [str(value).strip() for value in frame[column].dropna() if str(value).strip()]
     unique = list(dict.fromkeys(values))
     if len(unique) > 1:
         raise ValueError(f"Artifact {artifact!r} has inconsistent {column!r} values: {unique}")
@@ -219,10 +217,7 @@ def _select_metric(summary: pd.DataFrame, *, metric: str, fixed_time: float | No
 
 def _alignment_diagnostic_summary(diagnostics: pd.DataFrame) -> dict[str, Any]:
     if diagnostics.empty:
-        return {
-            "alignment_diagnostics_present": False,
-            "alignment_diagnostics_rows": 0,
-        }
+        return {"alignment_diagnostics_present": False, "alignment_diagnostics_rows": 0}
     collapse = (
         diagnostics["uses_channel_projection_collapse"].map(_as_bool)
         if "uses_channel_projection_collapse" in diagnostics.columns
@@ -276,27 +271,22 @@ def _alignment_diagnostic_summary(diagnostics: pd.DataFrame) -> dict[str, Any]:
         "diagnostic_target_transform_type": _compact_unique(diagnostics, "target_transform_type"),
         "diagnostic_anchor_row_correlation_before_median": before,
         "diagnostic_anchor_row_correlation_after_median": after,
-        "diagnostic_anchor_row_correlation_gain_median": (
-            ""
-            if before == "" or after == ""
-            else float(after) - float(before)
-        ),
+        "diagnostic_anchor_row_correlation_gain_median": "" if before == "" or after == "" else float(after) - float(before),
         "diagnostic_source_inner_decoding_before_median": inner_before,
         "diagnostic_source_inner_decoding_after_median": inner_after,
         "diagnostic_source_inner_decoding_gain_median": (
-            ""
-            if inner_before == "" or inner_after == ""
-            else float(inner_after) - float(inner_before)
+            "" if inner_before == "" or inner_after == "" else float(inner_after) - float(inner_before)
         ),
     }
 
 
-def summarize_alignment_variant(
-    output_dir: str | Path,
-    *,
-    metric: str = "balanced_accuracy",
-    fixed_time: float | None = None,
-) -> dict[str, Any]:
+def _target_projection_valid_for_benchmark(target_projection: str) -> bool:
+    """Return whether an alignment projection can enter strict benchmark comparisons."""
+
+    return target_projection not in NON_STRICT_TARGET_PROJECTIONS
+
+
+def summarize_alignment_variant(output_dir: str | Path, *, metric: str = "balanced_accuracy", fixed_time: float | None = None) -> dict[str, Any]:
     """Summarize one OpenNeuro output directory as an alignment variant row."""
 
     output = Path(output_dir)
@@ -328,9 +318,10 @@ def summarize_alignment_variant(
     )
     oracle = target_projection == ORACLE_TARGET_PROJECTION
     target_calibrated = target_projection == TARGET_CALIBRATED_TARGET_PROJECTION
+    pseudo_label_target_calibrated = target_projection == PSEUDO_LABEL_TARGET_PROJECTION
     explicit_valid_text = _single_unique(summary, "alignment_valid_for_benchmark", artifact=artifact_name)
     explicit_valid = None if explicit_valid_text == "" else _as_bool(explicit_valid_text)
-    projection_valid = bool(not oracle and not target_calibrated)
+    projection_valid = _target_projection_valid_for_benchmark(target_projection)
     valid_for_benchmark = projection_valid if explicit_valid is None else bool(projection_valid and explicit_valid)
     row = {
         "output_dir": output.as_posix(),
@@ -350,6 +341,7 @@ def summarize_alignment_variant(
         "alignment_target_projection": target_projection,
         "alignment_target_calibrated": target_calibrated,
         "alignment_oracle_target_calibrated": oracle,
+        "alignment_pseudo_label_target_calibrated": pseudo_label_target_calibrated,
         "alignment_valid_for_benchmark": valid_for_benchmark,
         "identity_anchor": anchor_mode in IDENTITY_ANCHOR_MODES,
         "class_repetition_anchor": anchor_mode == CLASS_REPETITION_ANCHOR,
@@ -361,16 +353,8 @@ def summarize_alignment_variant(
     return row
 
 
-def build_variant_summary(
-    output_dirs: Sequence[str | Path],
-    *,
-    metric: str = "balanced_accuracy",
-    fixed_time: float | None = None,
-) -> pd.DataFrame:
-    rows = [
-        summarize_alignment_variant(output_dir, metric=metric, fixed_time=fixed_time)
-        for output_dir in output_dirs
-    ]
+def build_variant_summary(output_dirs: Sequence[str | Path], *, metric: str = "balanced_accuracy", fixed_time: float | None = None) -> pd.DataFrame:
+    rows = [summarize_alignment_variant(output_dir, metric=metric, fixed_time=fixed_time) for output_dir in output_dirs]
     return pd.DataFrame(rows)
 
 
@@ -379,17 +363,11 @@ def _best_row(frame: pd.DataFrame) -> pd.Series:
 
 
 def _valid_strict_rows(group: pd.DataFrame) -> pd.DataFrame:
-    return group[
-        (group["alignment_target_projection"] == STRICT_TARGET_PROJECTION)
-        & (group["alignment_valid_for_benchmark"].map(_as_bool))
-    ]
+    return group[(group["alignment_target_projection"] == STRICT_TARGET_PROJECTION) & (group["alignment_valid_for_benchmark"].map(_as_bool))]
 
 
 def _valid_raw_rows(group: pd.DataFrame) -> pd.DataFrame:
-    return group[
-        group["alignment_method"].isin(["", "none"])
-        & (group["alignment_valid_for_benchmark"].map(_as_bool))
-    ]
+    return group[group["alignment_method"].isin(["", "none"]) & (group["alignment_valid_for_benchmark"].map(_as_bool))]
 
 
 def build_anchor_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
@@ -484,10 +462,7 @@ def build_target_calibrated_comparison(variants: pd.DataFrame, *, min_delta: flo
     rows: list[dict[str, Any]] = []
     raw_groups = {
         group_values: group
-        for group_values, group in _valid_raw_rows(variants).groupby(
-            ["dataset", "selection_metric"],
-            dropna=False,
-        )
+        for group_values, group in _valid_raw_rows(variants).groupby(["dataset", "selection_metric"], dropna=False)
     }
     group_columns = ["dataset", "alignment_method", "alignment_anchor_mode", "selection_metric"]
     for group_values, group in variants.groupby(group_columns, dropna=False):
@@ -500,11 +475,7 @@ def build_target_calibrated_comparison(variants: pd.DataFrame, *, min_delta: flo
         target_row = _best_row(target_rows)
         strict_row = _best_row(strict_rows) if not strict_rows.empty else None
         raw_row = _best_row(raw_rows) if not raw_rows.empty else None
-        delta_vs_strict = (
-            ""
-            if strict_row is None
-            else float(target_row["selection_score"]) - float(strict_row["selection_score"])
-        )
+        delta_vs_strict = "" if strict_row is None else float(target_row["selection_score"]) - float(strict_row["selection_score"])
         delta_vs_raw = "" if raw_row is None else float(target_row["selection_score"]) - float(raw_row["selection_score"])
         if delta_vs_strict == "":
             decision = "target_calibrated_without_strict_pair"
@@ -603,13 +574,7 @@ def build_alignment_debug_note(
     ]
     if fixed_time is not None:
         lines.append(f"- Requested fixed time: `{fixed_time}`")
-    lines.extend(
-        [
-            f"- Variant artifacts: `{len(variants)}`",
-            "",
-            "## Alignment Versus Raw",
-        ]
-    )
+    lines.extend(["", f"- Variant artifacts: `{len(variants)}`", "", "## Alignment Versus Raw"])
     if raw_comparison.empty:
         lines.append("No matched raw/no-alignment versus alignment pairs were available.")
     else:
@@ -620,12 +585,7 @@ def build_alignment_debug_note(
                 f"delta={row.score_delta_alignment_minus_raw:.4g}, "
                 f"best aligned=`{row.best_alignment_method}/{row.best_alignment_anchor_mode}`."
             )
-    lines.extend(
-        [
-            "",
-            "## Anchor Semantics",
-        ]
-    )
+    lines.extend(["", "## Anchor Semantics"])
     if anchor_comparison.empty:
         lines.append("No matched class-repetition versus true-identity anchor pairs were available.")
     else:
