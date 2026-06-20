@@ -1,0 +1,84 @@
+schema_version: neureptrace.dataset.v1
+
+paths:
+    base: cwd
+
+dataset:
+    name: bush_meg
+    type: fieldtrip_mat
+    root: ${BUSH_MEG_DATA_DIR}
+    participant_file: "Part{participant}Data.mat"
+    variable: data
+    channel_type: mag
+    fields:
+        trial: trial
+        time: time
+        label: label
+        trialinfo: trialinfo
+        sensor_geometry: grad
+
+participants:
+    ids: "1-4,6,8,9,10,13-27"
+
+validation:
+    trim_channel_labels_to_data: true
+    channel_policy: exact
+
+metadata:
+    columns:
+        - name: stimulus_class
+          index: 0
+        - name: condition
+          index: 1
+          optional: true
+
+preprocessing:
+    # Same response-window crop/normalization family as the source-only
+    # response-window C baseline.  The target subject is then additionally used
+    # only as unlabeled X_t for the autoencoder reconstruction objective.
+    tmin: -0.35
+    tmax: 0.35
+    normalization: subject_baseline_whiten
+    baseline_window: [-0.35, -0.05]
+    window_size: 0.100
+
+decoding:
+    label_column: stimulus_class
+    group_column: participant
+    max_iter: 2000
+
+source_loso:
+    group_column: participant
+
+category2_autoencoder_loso:
+    # Protocol 2: train representation with X_s + unlabeled X_t, then train the
+    # latent classifier with y_s only.  y_t is used only for final metrics.
+    temporal_bins: 4
+    feature_kind: evoked_dct
+    window_centers: [0.088, 0.136, 0.184, 0.232, 0.280]
+    window_size: 0.100
+    autoencoder: linear_pca
+    latent_dim: 64
+    feature_scaling: standard
+    classifier_c: 1.0
+    classifier_class_weight: balanced
+    classifier_max_iter: 2000
+    random_seed: 13
+
+    # Optional nonlinear sklearn MLP autoencoder settings when
+    # autoencoder: mlp is selected.
+    mlp_activation: relu
+    mlp_alpha: 0.0001
+    mlp_learning_rate_init: 0.001
+    mlp_max_iter: 200
+    mlp_batch_size: auto
+    mlp_early_stopping: false
+    mlp_validation_fraction: 0.10
+    mlp_tol: 0.0001
+
+outputs:
+    base_dir: results/{dataset}/category2_autoencoder_loso
+    category2_autoencoder_loso_summary_csv: category2_autoencoder_loso_summary.csv
+    category2_autoencoder_loso_predictions_csv: category2_autoencoder_loso_predictions.csv
+    provenance: true
+    hash_input_files: true
