@@ -53,6 +53,8 @@ def _oracle_projection_fit_name(config: Any, existing: object = "") -> str:
     if text.startswith("oracle_target_"):
         return text
     method = str(getattr(config, "method", ""))
+    if method == "contrastive" or "contrastive" in text:
+        return "oracle_target_contrastive_ridge_projection"
     if method == "mcca" or "ridge_least_squares" in text:
         return "oracle_target_template_ridge_least_squares"
     if method in {"procrustes", "hyperalignment"} or "procrustes" in text:
