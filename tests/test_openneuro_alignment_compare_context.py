@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import pandas as pd
 
 from neureptrace.openneuro_alignment_compare import build_raw_alignment_comparison, build_variant_summary
@@ -71,5 +72,5 @@ def test_raw_alignment_comparison_does_not_mix_subject_sets_or_shuffle_runs(tmp_
     assert comparison["best_alignment_artifact"].tolist() == ["aligned-real-six"]
     assert comparison.loc[0, "raw_artifact"] == "raw-six"
     assert comparison.loc[0, "subjects"] == "1-6"
-    assert comparison.loc[0, "label_shuffle_control"] is False
-    assert float(comparison.loc[0, "score_delta_alignment_minus_raw"]) == 0.05
+    assert bool(comparison.loc[0, "label_shuffle_control"]) is False
+    assert float(comparison.loc[0, "score_delta_alignment_minus_raw"]) == pytest.approx(0.05)
