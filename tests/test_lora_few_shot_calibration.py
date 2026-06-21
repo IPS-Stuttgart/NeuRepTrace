@@ -4,7 +4,7 @@ import pytest
 torch = pytest.importorskip("torch")
 torch.set_num_threads(1)
 
-from neureptrace.decoding.lora_few_shot import (
+from neureptrace.decoding.lora_few_shot import (  # noqa: E402
     LORA_FEW_SHOT_CALIBRATION_CATEGORY,
     LORA_FEW_SHOT_CALIBRATION_PROTOCOL,
     LoRAFewShotTargetCalibrationSplit,
