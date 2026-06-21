@@ -37,4 +37,3 @@ def _static_metadata_with_pseudo_label_benchmark_guard(
 
 
 _core.SourceAlignmentConfig.static_metadata = _static_metadata_with_pseudo_label_benchmark_guard
-SourceAlignmentConfig.static_metadata = _static_metadata_with_pseudo_label_benchmark_guard

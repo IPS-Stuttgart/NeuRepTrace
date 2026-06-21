@@ -953,7 +953,7 @@ def test_pseudo_label_target_calibrated_alignment_marks_pseudo_labels(method, ta
     assert result.metadata["alignment_target_labels_used"] is False
     assert result.metadata["alignment_target_pseudo_labels_used"] is True
     assert result.metadata["alignment_target_anchor_values_used"] is True
-    assert result.metadata["alignment_valid_for_benchmark"] is True
+    assert result.metadata["alignment_valid_for_benchmark"] is False
     assert result.metadata["alignment_protocol"] == PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT
     assert result.diagnostics["target_transform_type"] == target_transform_type
     assert result.diagnostics["uses_unlabeled_target_data"] is True
