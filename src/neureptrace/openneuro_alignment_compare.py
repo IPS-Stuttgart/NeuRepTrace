@@ -27,11 +27,23 @@ NON_STRICT_TARGET_PROJECTIONS = {
     ORACLE_TARGET_PROJECTION,
     PSEUDO_LABEL_TARGET_PROJECTION,
 }
-ANCHOR_COMPARISON_COLUMNS = [
+# Comparisons must only match rows produced by the same evaluation context.  A
+# previous version grouped only by dataset/metric, which could pair a 3-subject
+# smoke alignment run with a 6-subject raw baseline, or mix real and shuffle
+# artifacts, producing misleading alignment deltas.
+COMPARISON_CONTEXT_COLUMNS = [
     "dataset",
+    "mode",
+    "subjects",
+    "runs",
+    "label_shuffle_control",
+    "label_shuffle_seed",
+    "selection_metric",
+]
+ANCHOR_COMPARISON_COLUMNS = [
+    *COMPARISON_CONTEXT_COLUMNS,
     "alignment_method",
     "alignment_target_projection",
-    "selection_metric",
     "class_repetition_artifact",
     "class_repetition_value",
     "best_identity_anchor_mode",
@@ -43,10 +55,9 @@ ANCHOR_COMPARISON_COLUMNS = [
     "interpretation",
 ]
 ORACLE_COMPARISON_COLUMNS = [
-    "dataset",
+    *COMPARISON_CONTEXT_COLUMNS,
     "alignment_method",
     "alignment_anchor_mode",
-    "selection_metric",
     "strict_artifact",
     "strict_value",
     "oracle_artifact",
@@ -57,10 +68,9 @@ ORACLE_COMPARISON_COLUMNS = [
     "interpretation",
 ]
 TARGET_CALIBRATED_COMPARISON_COLUMNS = [
-    "dataset",
+    *COMPARISON_CONTEXT_COLUMNS,
     "alignment_method",
     "alignment_anchor_mode",
-    "selection_metric",
     "strict_artifact",
     "strict_value",
     "target_calibrated_artifact",
@@ -74,8 +84,7 @@ TARGET_CALIBRATED_COMPARISON_COLUMNS = [
     "interpretation",
 ]
 RAW_COMPARISON_COLUMNS = [
-    "dataset",
-    "selection_metric",
+    *COMPARISON_CONTEXT_COLUMNS,
     "raw_artifact",
     "raw_value",
     "best_alignment_artifact",
@@ -149,6 +158,19 @@ def _first_nonempty(*values: Any) -> str:
             if text:
                 return text
     return ""
+
+
+def _manifest_value(manifest: dict[str, Any], key: str, default: str = "") -> str:
+    value = manifest.get(key, default)
+    if value is None:
+        return default
+    return str(value)
+
+
+def _manifest_bool_value(manifest: dict[str, Any], key: str, default: bool = False) -> bool:
+    if key not in manifest:
+        return default
+    return _as_bool(manifest.get(key))
 
 
 def _output_dir_from_summary(summary_path: Path) -> Path:
@@ -328,10 +350,12 @@ def summarize_alignment_variant(output_dir: str | Path, *, metric: str = "balanc
         "artifact_name": artifact_name,
         "github_run_id": manifest.get("github_run_id", ""),
         "dataset": _first_nonempty(manifest.get("dataset", ""), _compact_unique(summary, "dataset")),
-        "mode": manifest.get("mode", ""),
-        "subjects": manifest.get("subjects", ""),
-        "runs": manifest.get("runs", ""),
+        "mode": _manifest_value(manifest, "mode"),
+        "subjects": _manifest_value(manifest, "subjects"),
+        "runs": _manifest_value(manifest, "runs"),
         "n_subjects": manifest.get("n_subjects", ""),
+        "label_shuffle_control": _manifest_bool_value(manifest, "label_shuffle_control", default=False),
+        "label_shuffle_seed": _manifest_value(manifest, "label_shuffle_seed"),
         "alignment_method": method,
         "alignment_anchor_mode": anchor_mode,
         "alignment_anchor_column": _first_nonempty(
@@ -370,15 +394,23 @@ def _valid_raw_rows(group: pd.DataFrame) -> pd.DataFrame:
     return group[group["alignment_method"].isin(["", "none"]) & (group["alignment_valid_for_benchmark"].map(_as_bool))]
 
 
+def _groupby_context(frame: pd.DataFrame, extra_columns: Sequence[str] = ()): 
+    group_columns = [*COMPARISON_CONTEXT_COLUMNS, *extra_columns]
+    return group_columns, frame.groupby(group_columns, dropna=False)
+
+
 def build_anchor_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -> pd.DataFrame:
     """Compare true identity anchors against class_repetition within matched groups."""
 
     if variants.empty:
         return pd.DataFrame(columns=ANCHOR_COMPARISON_COLUMNS)
     rows: list[dict[str, Any]] = []
-    group_columns = ["dataset", "alignment_method", "alignment_target_projection", "selection_metric"]
     benchmark_variants = _valid_strict_rows(variants)
-    for group_values, group in benchmark_variants.groupby(group_columns, dropna=False):
+    group_columns, grouped = _groupby_context(
+        benchmark_variants,
+        ["alignment_method", "alignment_target_projection"],
+    )
+    for group_values, group in grouped:
         group_map = dict(zip(group_columns, group_values, strict=False))
         class_rows = group[group["alignment_anchor_mode"] == CLASS_REPETITION_ANCHOR]
         identity_rows = group[group["alignment_anchor_mode"].isin(IDENTITY_ANCHOR_MODES)]
@@ -419,8 +451,8 @@ def build_oracle_comparison(variants: pd.DataFrame, *, min_delta: float = 0.0) -
     if variants.empty:
         return pd.DataFrame(columns=ORACLE_COMPARISON_COLUMNS)
     rows: list[dict[str, Any]] = []
-    group_columns = ["dataset", "alignment_method", "alignment_anchor_mode", "selection_metric"]
-    for group_values, group in variants.groupby(group_columns, dropna=False):
+    group_columns, grouped = _groupby_context(variants, ["alignment_method", "alignment_anchor_mode"])
+    for group_values, group in grouped:
         group_map = dict(zip(group_columns, group_values, strict=False))
         strict_rows = _valid_strict_rows(group)
         oracle_rows = group[group["alignment_target_projection"] == ORACLE_TARGET_PROJECTION]
@@ -462,16 +494,17 @@ def build_target_calibrated_comparison(variants: pd.DataFrame, *, min_delta: flo
     rows: list[dict[str, Any]] = []
     raw_groups = {
         group_values: group
-        for group_values, group in _valid_raw_rows(variants).groupby(["dataset", "selection_metric"], dropna=False)
+        for group_values, group in _valid_raw_rows(variants).groupby(COMPARISON_CONTEXT_COLUMNS, dropna=False)
     }
-    group_columns = ["dataset", "alignment_method", "alignment_anchor_mode", "selection_metric"]
-    for group_values, group in variants.groupby(group_columns, dropna=False):
+    group_columns, grouped = _groupby_context(variants, ["alignment_method", "alignment_anchor_mode"])
+    for group_values, group in grouped:
         group_map = dict(zip(group_columns, group_values, strict=False))
         target_rows = group[group["alignment_target_projection"] == TARGET_CALIBRATED_TARGET_PROJECTION]
         if target_rows.empty:
             continue
         strict_rows = _valid_strict_rows(group)
-        raw_rows = raw_groups.get((group_map["dataset"], group_map["selection_metric"]), pd.DataFrame())
+        raw_key = tuple(group_map[column] for column in COMPARISON_CONTEXT_COLUMNS)
+        raw_rows = raw_groups.get(raw_key, pd.DataFrame())
         target_row = _best_row(target_rows)
         strict_row = _best_row(strict_rows) if not strict_rows.empty else None
         raw_row = _best_row(raw_rows) if not raw_rows.empty else None
@@ -514,8 +547,8 @@ def build_raw_alignment_comparison(variants: pd.DataFrame, *, min_delta: float =
     if variants.empty:
         return pd.DataFrame(columns=RAW_COMPARISON_COLUMNS)
     rows: list[dict[str, Any]] = []
-    group_columns = ["dataset", "selection_metric"]
-    for group_values, group in variants.groupby(group_columns, dropna=False):
+    group_columns, grouped = _groupby_context(variants)
+    for group_values, group in grouped:
         group_map = dict(zip(group_columns, group_values, strict=False))
         raw_rows = _valid_raw_rows(group)
         aligned_rows = group[
