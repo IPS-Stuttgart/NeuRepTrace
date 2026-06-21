@@ -168,7 +168,10 @@ def select_few_shot_target_calibration_split(
     """
 
     label_vector = _as_1d_object_array(labels, name="labels")
-    indices = np.arange(label_vector.shape[0], dtype=int) if target_indices is None else np.asarray(target_indices, dtype=int).reshape(-1)
+    if target_indices is None:
+        indices = np.arange(label_vector.shape[0], dtype=int)
+    else:
+        indices = np.asarray(target_indices, dtype=int).reshape(-1)
     if indices.size == 0:
         raise ValueError("few-shot target calibration requires at least one target row.")
     if np.any(indices < 0) or np.any(indices >= label_vector.shape[0]):
@@ -326,11 +329,8 @@ def fit_few_shot_target_calibrated_decoder(
     )
     model.fit(fit_features, fit_labels)
 
-    class_order = (
-        np.asarray(classes, dtype=object).reshape(-1)
-        if classes is not None
-        else np.unique(np.concatenate([source_label_vector, target_label_vector]).astype(object))
-    )
+    observed_class_labels = np.concatenate([source_label_vector, calibration_labels]).astype(object)
+    class_order = np.asarray(classes, dtype=object).reshape(-1) if classes is not None else np.unique(observed_class_labels)
     probabilities = _align_probability_columns(
         predict_emission_probabilities(
             model,
