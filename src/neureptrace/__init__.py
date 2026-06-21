@@ -18,6 +18,7 @@ from neureptrace import (  # noqa: E402
     _observation_schema_probability_patch,
     _source_alignment_anchor_patch,
     _source_alignment_contrastive_patch,
+    _source_alignment_optimal_transport_patch,
     _source_alignment_pseudo_calibration_patch,
 )
 
@@ -32,5 +33,6 @@ _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
+_source_alignment_optimal_transport_patch.install()
 _mne_alignment_calibration_anchor_patch.install()
 _source_alignment_contrastive_patch.install()
