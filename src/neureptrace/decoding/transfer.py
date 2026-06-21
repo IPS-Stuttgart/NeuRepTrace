@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +12,11 @@ from neureptrace.decoding.classifiers import (
     train_classifier,
     train_gradient_boosting,
     train_lasso_logistic,
+)
+from neureptrace.decoding.generative_augmentation import (
+    GenerativeAugmentationConfig,
+    augment_training_features,
+    generative_augmentation_config as make_generative_augmentation_config,
 )
 from neureptrace.decoding.windowed import (
     WindowedDecodingResult,
@@ -105,8 +110,15 @@ def cross_validate_feature_decoding(
     random_state: int | None = None,
     fit_model: Callable[[np.ndarray, np.ndarray], Any] | None = None,
     null_label: int | float = 0,
+    generative_augmentation: GenerativeAugmentationConfig | Mapping[str, Any] | None = None,
 ) -> CrossValidationResult:
-    """Run contiguous-fold decoding on precomputed stimulus/null feature matrices."""
+    """Run contiguous-fold decoding on precomputed stimulus/null feature matrices.
+
+    ``generative_augmentation`` is applied inside each training fold only.  The
+    cross-validation helper therefore supports strict source-only feature
+    synthesis, but not target-style or target-calibrated augmentation because no
+    separate target set is available in this legacy fold layout.
+    """
 
     stimulus_features = _feature_matrix(stimulus_features, name="stimulus_features")
     labels = _label_vector(
@@ -136,6 +148,11 @@ def cross_validate_feature_decoding(
         test_mask = (augmented_folds == fold) & (augmented_labels != null_label)
         train_features = features[train_mask]
         train_labels = augmented_labels[train_mask]
+        train_features, train_labels = _apply_generative_augmentation(
+            train_features,
+            train_labels,
+            generative_augmentation=generative_augmentation,
+        )
         test_features = features[test_mask]
 
         if classifier in BINARY_ONE_VS_REST_CLASSIFIERS:
@@ -168,6 +185,7 @@ def cross_validate_feature_decoding(
     )
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def evaluate_feature_transfer(
     train_features: Sequence[Sequence[float]] | np.ndarray,
     train_labels: Sequence | np.ndarray,
@@ -184,14 +202,32 @@ def evaluate_feature_transfer(
     train_window: tuple[float, float] | None = None,
     n_permutations: int = 0,
     permutation_rng: np.random.Generator | None = None,
+    generative_augmentation: GenerativeAugmentationConfig | Mapping[str, Any] | None = None,
+    generative_target_features: Sequence[Sequence[float]] | np.ndarray | None = None,
+    generative_target_calibration_features: Sequence[Sequence[float]] | np.ndarray | None = None,
+    generative_target_calibration_labels: Sequence | np.ndarray | None = None,
 ) -> WindowedDecodingResult:
-    """Train on one feature matrix and score transfer to a validation matrix."""
+    """Train on one feature matrix and score transfer to a validation matrix.
+
+    Target-style augmentation is transductive and must be requested explicitly by
+    passing unlabeled ``generative_target_features``.  Labeled target calibration
+    must use the disjoint ``generative_target_calibration_*`` arguments, never
+    ``validation_labels``.
+    """
 
     train_features, train_labels = append_null_class_features(
         train_features,
         train_labels,
         train_null_features,
         null_label=null_label,
+    )
+    train_features, train_labels = _apply_generative_augmentation(
+        train_features,
+        train_labels,
+        generative_augmentation=generative_augmentation,
+        target_features=generative_target_features,
+        target_calibration_features=generative_target_calibration_features,
+        target_calibration_labels=generative_target_calibration_labels,
     )
     return score_windowed_decoding(
         train_features,
@@ -204,6 +240,33 @@ def evaluate_feature_transfer(
         n_permutations=n_permutations,
         permutation_rng=permutation_rng,
     )
+
+
+def _apply_generative_augmentation(
+    train_features: np.ndarray,
+    train_labels: np.ndarray,
+    *,
+    generative_augmentation: GenerativeAugmentationConfig | Mapping[str, Any] | None,
+    target_features: Sequence[Sequence[float]] | np.ndarray | None = None,
+    target_calibration_features: Sequence[Sequence[float]] | np.ndarray | None = None,
+    target_calibration_labels: Sequence | np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if generative_augmentation is None:
+        return train_features, train_labels
+    config = (
+        generative_augmentation
+        if isinstance(generative_augmentation, GenerativeAugmentationConfig)
+        else make_generative_augmentation_config(**dict(generative_augmentation))
+    )
+    augmented = augment_training_features(
+        train_features,
+        train_labels,
+        config=config,
+        target_features=target_features,
+        target_calibration_features=target_calibration_features,
+        target_calibration_labels=target_calibration_labels,
+    )
+    return augmented.features, augmented.labels
 
 
 def _fit_model(
