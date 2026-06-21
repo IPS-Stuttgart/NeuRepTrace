@@ -18,6 +18,7 @@ nav:
     - Migrating from PyMEGDec: migrating-from-pymegdec.md
     - PyMEGDec Upstreaming: pymegdec-upstreaming.md
     - Transfer from Config: transfer-from-config.md
+    - Foundation Model Features: foundation-model-features.md
     - Benchmarking: benchmarking.md
     - Examples: examples.md
     - API Overview: api-overview.md
