@@ -837,7 +837,12 @@ def fit_semi_supervised_lora_few_shot_decoder(
             unlabeled_blocks.append(extra)
     target_unlabeled = np.vstack(unlabeled_blocks) if unlabeled_blocks else None
 
-    class_order = np.asarray(classes, dtype=object).reshape(-1) if classes is not None else np.unique(np.concatenate([source_label_vector, target_label_vector[calibration_indices]]).astype(object))
+    if classes is not None:
+        class_order = np.asarray(classes, dtype=object).reshape(-1)
+    else:
+        class_order = np.unique(
+            np.concatenate([source_label_vector, target_label_vector[calibration_indices]]).astype(object)
+        )
     model = SemiSupervisedLoRAFewShotClassifier(random_state=seed_value, **model_kwargs)
     model.fit(
         source_matrix,
