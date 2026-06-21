@@ -9,6 +9,10 @@ from sklearn.model_selection import train_test_split
 
 
 DANN_PROTOCOL = "unlabeled_target_domain_adversarial"
+MMD_PROTOCOL = "unlabeled_target_mmd"
+CONDITIONAL_MMD_PROTOCOL = "unlabeled_target_conditional_mmd"
+DANN_MMD_PROTOCOL = "unlabeled_target_domain_adversarial_mmd"
+DANN_CONDITIONAL_MMD_PROTOCOL = "unlabeled_target_domain_adversarial_conditional_mmd"
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,10 +49,13 @@ def _torch():
 
 
 class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
-    """Small domain-adversarial neural network for category-2 adaptation.
+    """Small category-2 neural decoder with adversarial and MMD adaptation.
 
     ``fit`` uses source labels and unlabeled target features. Target labels are
-    intentionally not accepted by this estimator.
+    intentionally not accepted by this estimator. Setting ``mmd_loss_weight`` or
+    ``conditional_mmd_loss_weight`` enables marginal or class-conditional maximum
+    mean discrepancy losses on the learned embedding, respectively. Conditional
+    MMD uses source labels and target softmax probabilities, not target labels.
     """
 
     def __init__(
@@ -60,6 +67,10 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-4,
         domain_loss_weight: float = 0.1,
+        mmd_loss_weight: float = 0.0,
+        conditional_mmd_loss_weight: float = 0.0,
+        mmd_kernel_mul: float = 2.0,
+        mmd_kernel_num: int = 5,
         validation_fraction: float = 0.1,
         patience: int = 10,
         dropout: float = 0.1,
@@ -74,6 +85,10 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.domain_loss_weight = domain_loss_weight
+        self.mmd_loss_weight = mmd_loss_weight
+        self.conditional_mmd_loss_weight = conditional_mmd_loss_weight
+        self.mmd_kernel_mul = mmd_kernel_mul
+        self.mmd_kernel_num = mmd_kernel_num
         self.validation_fraction = validation_fraction
         self.patience = patience
         self.dropout = dropout
@@ -132,6 +147,13 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         learning_rate = _positive_float(self.learning_rate, "dann_learning_rate")
         weight_decay = _nonnegative_float(self.weight_decay, "dann_weight_decay")
         domain_loss_weight = _nonnegative_float(self.domain_loss_weight, "dann_domain_loss_weight")
+        mmd_loss_weight = _nonnegative_float(self.mmd_loss_weight, "dann_mmd_loss_weight")
+        conditional_mmd_loss_weight = _nonnegative_float(
+            self.conditional_mmd_loss_weight,
+            "dann_conditional_mmd_loss_weight",
+        )
+        mmd_kernel_mul = _positive_float(self.mmd_kernel_mul, "dann_mmd_kernel_mul")
+        mmd_kernel_num = _positive_int(self.mmd_kernel_num, "dann_mmd_kernel_num")
         dropout = _bounded_float(self.dropout, "dann_dropout", lower=0.0, upper=1.0)
         validation_fraction = _bounded_float(
             self.validation_fraction,
@@ -184,7 +206,7 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         source_tensor = torch.as_tensor(x_source, dtype=torch.float32, device=device)
         source_label_tensor = torch.as_tensor(y, dtype=torch.long, device=device)
         target_tensor = torch.as_tensor(x_target, dtype=torch.float32, device=device)
-        rng = np.random.default_rng(self.random_state)
+        rng = np.random.default_rng(random_state)
         best_loss = np.inf
         best_state = None
         patience_left = patience
@@ -206,25 +228,48 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
                 batch_target = target_tensor[target_batch]
 
                 optimizer.zero_grad(set_to_none=True)
-                source_class_logits, source_domain_logits = model(
+                source_class_logits, source_domain_logits, source_embedding = model(
                     batch_source,
                     grl_scale=1.0,
                 )
-                _, target_domain_logits = model(batch_target, grl_scale=1.0)
+                target_class_logits, target_domain_logits, target_embedding = model(batch_target, grl_scale=1.0)
                 class_loss = class_loss_fn(source_class_logits, batch_source_labels)
-                source_domain_labels = torch.zeros(source_domain_logits.shape[0], dtype=torch.long, device=device)
-                target_domain_labels = torch.ones(target_domain_logits.shape[0], dtype=torch.long, device=device)
-                domain_loss = 0.5 * (
-                    domain_loss_fn(source_domain_logits, source_domain_labels)
-                    + domain_loss_fn(target_domain_logits, target_domain_labels)
-                )
-                loss = class_loss + domain_loss_weight * domain_loss
+                loss = class_loss
+
+                if domain_loss_weight > 0.0:
+                    source_domain_labels = torch.zeros(source_domain_logits.shape[0], dtype=torch.long, device=device)
+                    target_domain_labels = torch.ones(target_domain_logits.shape[0], dtype=torch.long, device=device)
+                    domain_loss = 0.5 * (
+                        domain_loss_fn(source_domain_logits, source_domain_labels)
+                        + domain_loss_fn(target_domain_logits, target_domain_labels)
+                    )
+                    loss = loss + domain_loss_weight * domain_loss
+
+                if mmd_loss_weight > 0.0:
+                    loss = loss + mmd_loss_weight * _mmd_loss(
+                        source_embedding,
+                        target_embedding,
+                        kernel_mul=mmd_kernel_mul,
+                        kernel_num=mmd_kernel_num,
+                    )
+
+                if conditional_mmd_loss_weight > 0.0:
+                    loss = loss + conditional_mmd_loss_weight * _conditional_mmd_loss(
+                        source_embedding,
+                        target_embedding,
+                        batch_source_labels,
+                        target_class_logits,
+                        n_classes=n_classes,
+                        kernel_mul=mmd_kernel_mul,
+                        kernel_num=mmd_kernel_num,
+                    )
+
                 loss.backward()
                 optimizer.step()
 
             model.eval()
             with torch.no_grad():
-                validation_logits, _ = model(source_tensor[validation_idx], grl_scale=0.0)
+                validation_logits, _, _ = model(source_tensor[validation_idx], grl_scale=0.0)
                 validation_loss = float(
                     class_loss_fn(validation_logits, source_label_tensor[validation_idx]).detach().cpu()
                 )
@@ -247,6 +292,11 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         self.best_source_validation_loss_ = float(best_loss)
         self.source_rows_ = int(x_source.shape[0])
         self.target_rows_ = int(x_target.shape[0])
+        self.domain_loss_weight_ = float(domain_loss_weight)
+        self.mmd_loss_weight_ = float(mmd_loss_weight)
+        self.conditional_mmd_loss_weight_ = float(conditional_mmd_loss_weight)
+        self.mmd_kernel_mul_ = float(mmd_kernel_mul)
+        self.mmd_kernel_num_ = int(mmd_kernel_num)
         return self
 
     def decision_function(self, features: np.ndarray) -> np.ndarray:
@@ -270,13 +320,32 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
         x = torch.as_tensor(np.asarray(features, dtype=np.float32), device=self.device_)
         self.model_.eval()
         with torch.no_grad():
-            logits, _ = self.model_(x, grl_scale=0.0)
+            logits, _, _ = self.model_(x, grl_scale=0.0)
         return logits.detach().cpu().numpy()
 
+    def _protocol(self) -> str:
+        domain = float(getattr(self, "domain_loss_weight_", self.domain_loss_weight)) > 0.0
+        marginal = float(getattr(self, "mmd_loss_weight_", self.mmd_loss_weight)) > 0.0
+        conditional = float(getattr(self, "conditional_mmd_loss_weight_", self.conditional_mmd_loss_weight)) > 0.0
+        if domain and conditional:
+            return DANN_CONDITIONAL_MMD_PROTOCOL
+        if domain and marginal:
+            return DANN_MMD_PROTOCOL
+        if conditional:
+            return CONDITIONAL_MMD_PROTOCOL
+        if marginal:
+            return MMD_PROTOCOL
+        return DANN_PROTOCOL
+
     def metadata(self) -> dict[str, Any]:
+        domain_loss_weight = float(getattr(self, "domain_loss_weight_", self.domain_loss_weight))
+        mmd_loss_weight = float(getattr(self, "mmd_loss_weight_", self.mmd_loss_weight))
+        conditional_mmd_loss_weight = float(
+            getattr(self, "conditional_mmd_loss_weight_", self.conditional_mmd_loss_weight)
+        )
         return {
             "dann_adaptation": True,
-            "dann_protocol": DANN_PROTOCOL,
+            "dann_protocol": self._protocol(),
             "dann_uses_target_features": True,
             "dann_uses_target_labels": False,
             "dann_valid_for_benchmark": True,
@@ -287,7 +356,12 @@ class TorchDANNClassifier(ClassifierMixin, BaseEstimator):
             "dann_batch_size": int(self.batch_size),
             "dann_learning_rate": float(self.learning_rate),
             "dann_weight_decay": float(self.weight_decay),
-            "dann_domain_loss_weight": float(self.domain_loss_weight),
+            "dann_domain_loss_weight": domain_loss_weight,
+            "dann_mmd_adaptation": bool(mmd_loss_weight > 0.0 or conditional_mmd_loss_weight > 0.0),
+            "dann_mmd_loss_weight": mmd_loss_weight,
+            "dann_conditional_mmd_loss_weight": conditional_mmd_loss_weight,
+            "dann_mmd_kernel_mul": float(getattr(self, "mmd_kernel_mul_", self.mmd_kernel_mul)),
+            "dann_mmd_kernel_num": int(getattr(self, "mmd_kernel_num_", self.mmd_kernel_num)),
             "dann_patience": int(self.patience),
             "dann_dropout": float(self.dropout),
             "dann_source_rows": int(getattr(self, "source_rows_", 0)),
@@ -332,9 +406,119 @@ class _DANNModule:
                 class_logits = self.class_head(embedding)
                 reversed_embedding = _GradientReverse.apply(embedding, float(grl_scale))
                 domain_logits = self.domain_head(reversed_embedding)
-                return class_logits, domain_logits
+                return class_logits, domain_logits, embedding
 
         return Module()
+
+
+def _mmd_kernel_matrix(source_embedding, target_embedding, *, kernel_mul: float, kernel_num: int):
+    torch = _torch()
+    combined = torch.cat([source_embedding, target_embedding], dim=0)
+    squared_distances = torch.cdist(combined, combined, p=2).pow(2)
+    n_total = int(combined.shape[0])
+    if n_total > 1:
+        bandwidth = squared_distances.detach().sum() / float(max(n_total * n_total - n_total, 1))
+    else:
+        bandwidth = torch.as_tensor(1.0, dtype=combined.dtype, device=combined.device)
+    bandwidth = torch.clamp(bandwidth, min=1e-6)
+    center = int(kernel_num) // 2
+    kernels = torch.zeros_like(squared_distances)
+    for index in range(int(kernel_num)):
+        scale = bandwidth * (float(kernel_mul) ** float(index - center))
+        kernels = kernels + torch.exp(-squared_distances / torch.clamp(scale, min=1e-6))
+    return kernels
+
+
+def _mmd_loss(source_embedding, target_embedding, *, kernel_mul: float, kernel_num: int):
+    n_source = int(source_embedding.shape[0])
+    kernels = _mmd_kernel_matrix(
+        source_embedding,
+        target_embedding,
+        kernel_mul=kernel_mul,
+        kernel_num=kernel_num,
+    )
+    k_ss = kernels[:n_source, :n_source].mean()
+    k_tt = kernels[n_source:, n_source:].mean()
+    k_st = kernels[:n_source, n_source:].mean()
+    return k_ss + k_tt - 2.0 * k_st
+
+
+def _weighted_mmd_loss(
+    source_embedding,
+    target_embedding,
+    source_weights,
+    target_weights,
+    *,
+    kernel_mul: float,
+    kernel_num: int,
+):
+    n_source = int(source_embedding.shape[0])
+    kernels = _mmd_kernel_matrix(
+        source_embedding,
+        target_embedding,
+        kernel_mul=kernel_mul,
+        kernel_num=kernel_num,
+    )
+    source_weights = source_weights.reshape(-1).to(dtype=source_embedding.dtype, device=source_embedding.device)
+    target_weights = target_weights.reshape(-1).to(dtype=target_embedding.dtype, device=target_embedding.device)
+    source_weights = source_weights / _clamp_min_tensor(source_weights.sum(), source_embedding)
+    target_weights = target_weights / _clamp_min_tensor(target_weights.sum(), target_embedding)
+    k_ss = kernels[:n_source, :n_source]
+    k_tt = kernels[n_source:, n_source:]
+    k_st = kernels[:n_source, n_source:]
+    return (
+        (source_weights[:, None] * k_ss * source_weights[None, :]).sum()
+        + (target_weights[:, None] * k_tt * target_weights[None, :]).sum()
+        - 2.0 * (source_weights[:, None] * k_st * target_weights[None, :]).sum()
+    )
+
+
+def _clamp_min_tensor(value, reference):
+    torch = _torch()
+    return torch.clamp(value, min=torch.as_tensor(1e-6, dtype=reference.dtype, device=reference.device))
+
+
+def _conditional_mmd_loss(
+    source_embedding,
+    target_embedding,
+    source_labels,
+    target_logits,
+    *,
+    n_classes: int,
+    kernel_mul: float,
+    kernel_num: int,
+):
+    torch = _torch()
+    source_membership = torch.nn.functional.one_hot(source_labels, num_classes=int(n_classes)).to(
+        dtype=source_embedding.dtype,
+        device=source_embedding.device,
+    )
+    target_membership = torch.softmax(target_logits, dim=1).to(dtype=target_embedding.dtype, device=target_embedding.device)
+    zero = source_embedding.sum() * 0.0
+    loss = zero
+    total_weight = 0.0
+    n_source = max(int(source_embedding.shape[0]), 1)
+    n_target = max(int(target_embedding.shape[0]), 1)
+    for class_index in range(int(n_classes)):
+        source_weights = source_membership[:, class_index]
+        target_weights = target_membership[:, class_index]
+        source_mass = float(source_weights.detach().sum().cpu())
+        target_mass = float(target_weights.detach().sum().cpu())
+        if source_mass <= 1e-6 or target_mass <= 1e-6:
+            continue
+        class_weight = 0.5 * (source_mass / float(n_source) + target_mass / float(n_target))
+        loss = loss + class_weight * _weighted_mmd_loss(
+            source_embedding,
+            target_embedding,
+            source_weights,
+            target_weights,
+            kernel_mul=kernel_mul,
+            kernel_num=kernel_num,
+        )
+        total_weight += class_weight
+    if total_weight <= 0.0:
+        return zero
+    return loss / float(total_weight)
 
 
 def fit_dann_predict_proba(
@@ -349,6 +533,10 @@ def fit_dann_predict_proba(
     learning_rate: float = 1e-3,
     weight_decay: float = 1e-4,
     domain_loss_weight: float = 0.1,
+    mmd_loss_weight: float = 0.0,
+    conditional_mmd_loss_weight: float = 0.0,
+    mmd_kernel_mul: float = 2.0,
+    mmd_kernel_num: int = 5,
     validation_fraction: float = 0.1,
     patience: int = 10,
     dropout: float = 0.1,
@@ -363,6 +551,10 @@ def fit_dann_predict_proba(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         domain_loss_weight=domain_loss_weight,
+        mmd_loss_weight=mmd_loss_weight,
+        conditional_mmd_loss_weight=conditional_mmd_loss_weight,
+        mmd_kernel_mul=mmd_kernel_mul,
+        mmd_kernel_num=mmd_kernel_num,
         validation_fraction=validation_fraction,
         patience=patience,
         dropout=dropout,
