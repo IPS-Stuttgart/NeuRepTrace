@@ -1,4 +1,4 @@
-"""Patch pseudo-label target-calibrated class-repetition alignment caps.
+"""Patch pseudo-label target-calibrated class-repetition alignment metadata.
 
 ``pseudo_label_target_calibrated_alignment`` uses target calibration rows just like
 ``target_calibrated_alignment``; the only difference is that the row labels are
@@ -7,6 +7,11 @@ cap the source anchor repetitions to ``alignment_target_calibration_per_anchor``
 Otherwise source fits can request many repetitions per anchor while the target
 pseudo-calibration matrix contains only a small pseudo-labeled calibration subset,
 causing target projection failures or misleading availability diagnostics.
+
+The same protocol also uses target rows, so it must not be marked as benchmark
+valid or strict source-only in ``SourceAlignmentConfig.static_metadata``.  This
+runtime patch keeps those semantics correct until the compatibility shim can be
+folded into ``decoding.source_alignment`` directly.
 """
 
 from __future__ import annotations
@@ -27,6 +32,22 @@ _FINDER_MARKER = "_neureptrace_source_alignment_pseudo_calibration_finder"
 def _patch_source_alignment(source_alignment: ModuleType) -> None:
     if getattr(source_alignment, _PATCH_MARKER, False):
         return
+
+    original_static_metadata = source_alignment.SourceAlignmentConfig.static_metadata
+
+    def static_metadata(config) -> dict:
+        metadata = dict(original_static_metadata(config))
+        if getattr(config, "pseudo_label_target_calibrated", False):
+            metadata["alignment_strict_source_only"] = False
+            metadata["alignment_uses_unlabeled_target_data"] = True
+            metadata["alignment_valid_for_benchmark"] = False
+            metadata["alignment_valid_for_strict_source_only"] = False
+            metadata["alignment_protocol"] = source_alignment.PSEUDO_LABEL_TARGET_CALIBRATED_ALIGNMENT
+            metadata["alignment_protocol_note"] = (
+                "uses target features with classifier-generated pseudo labels; "
+                "category-2 transductive adaptation; not valid for strict benchmark comparisons"
+            )
+        return metadata
 
     def _effective_repetitions_per_class(
         labels_by_subject: Mapping[Hashable, np.ndarray],
@@ -66,6 +87,7 @@ def _patch_source_alignment(source_alignment: ModuleType) -> None:
             return "first"
         return source_alignment.DEFAULT_CLASS_LIMIT_SELECTION
 
+    source_alignment.SourceAlignmentConfig.static_metadata = static_metadata
     source_alignment._effective_repetitions_per_class = _effective_repetitions_per_class
     source_alignment._source_alignment_repetition_selection = _source_alignment_repetition_selection
     setattr(source_alignment, _PATCH_MARKER, True)
