@@ -103,7 +103,7 @@ def test_unlabeled_calibration_alignment_requires_source_calibration_for_each_so
     data = _calibration_protocol_fixture(seed=321)
     source_mask = data["subjects"] != "s2"
     target_mask = data["subjects"] == "s2"
-    source_calibration_mask = data["calibration_subjects"] == "s0"
+    source_calibration_mask = data["calibration_subjects"] != "s1"
     target_calibration_mask = data["calibration_subjects"] == "s2"
 
     with pytest.raises(ValueError, match="Every source decoding subject must have calibration-run rows"):
