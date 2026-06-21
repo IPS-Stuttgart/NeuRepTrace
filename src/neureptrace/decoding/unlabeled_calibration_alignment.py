@@ -14,7 +14,7 @@ source-only/category 1 and not supervised target calibration/category 3.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -272,14 +272,16 @@ def align_train_test_with_unlabeled_calibration(
 
 
 def _target_anchor_matrix(target_calibration_matrix: np.ndarray, target_anchor_vector: np.ndarray, *, alignment: Any) -> np.ndarray:
+    repetition_selection = alignment.repetition_selection if alignment.repetition_selection is not None else DEFAULT_CLASS_LIMIT_SELECTION
+    repetition_seed = alignment.repetition_seed if alignment.repetition_seed is not None else DEFAULT_CLASS_LIMIT_SEED
     return class_alignment_matrix(
         target_calibration_matrix,
         target_anchor_vector,
         classes=alignment.classes,
         sample_mode=alignment.sample_mode,
         n_repetitions_per_class=alignment.n_repetitions_per_class,
-        repetition_selection=alignment.repetition_selection or DEFAULT_CLASS_LIMIT_SELECTION,
-        repetition_seed=alignment.repetition_seed or DEFAULT_CLASS_LIMIT_SEED,
+        repetition_selection=repetition_selection,
+        repetition_seed=repetition_seed,
         selected_offsets_by_class=alignment.selected_offsets_by_class,
     )
 
@@ -401,7 +403,7 @@ def _reject_missing_anchors(values: np.ndarray, *, name: str) -> None:
             missing.append(index)
         elif isinstance(value, str) and value.strip().lower() in {"", "na", "n/a", "nan", "none", "null", "<na>", "<nat>", "nat"}:
             missing.append(index)
-        elif isinstance(value, float) and np.isnan(value):
+        elif isinstance(value, (float, np.floating)) and np.isnan(value):
             missing.append(index)
     if missing:
         preview = ", ".join(str(index) for index in missing[:5])
