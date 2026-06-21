@@ -47,6 +47,19 @@ splitter is deterministic for a fixed seed and context, selects the same number
 of calibration rows per target class, and rejects folds where a class would have
 no evaluation rows left.
 
+## Semi-supervised LoRA/meta-learning variant
+
+For a stronger Protocol 3 neural baseline, use
+`neureptrace.decoding.semi_supervised_lora_few_shot`.  That module pretrains a
+source model, optionally meta-learns a LoRA adapter initialization from
+source-subject episodes, and then adapts only LoRA adapters plus the configured
+classifier-head subset on the labeled target calibration rows.  It can also use
+unlabeled target features through entropy/consistency losses, while still
+rejecting target evaluation labels during fitting.
+
+See `docs/semi_supervised_lora_few_shot.md` for protocol metadata and reporting
+requirements.
+
 ## Reporting hygiene
 
 Report the following metadata columns whenever this helper is used:
