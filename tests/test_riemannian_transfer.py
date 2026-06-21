@@ -6,7 +6,6 @@ import pytest
 from neureptrace.decoding.riemannian import (
     align_covariances_to_identity,
     fit_predict_riemannian_transfer,
-    log_euclidean_mean,
     riemannian_dispersion,
     riemannian_procrustes_transfer_features,
     riemannian_tangent_transfer_features,
