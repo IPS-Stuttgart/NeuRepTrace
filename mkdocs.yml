@@ -21,6 +21,7 @@ nav:
     - Foundation Model Features: foundation-model-features.md
     - Benchmarking: benchmarking.md
     - Few-shot Target Calibration: few_shot_target_calibration.md
+    - Semi-supervised LoRA Few-shot: semi_supervised_lora_few_shot.md
     - Examples: examples.md
     - API Overview: api-overview.md
     - Reference:
@@ -31,6 +32,7 @@ nav:
           - Dataset Specs: reference/dataset-spec.md
           - Decoding: reference/decoding.md
           - Reconstruction Encoder: reference/reconstruction-encoder.md
+          - Riemannian Procrustes: reference/riemannian-procrustes.md
           - Emission Compare: reference/emission-compare.md
           - Inference: reference/inference.md
           - Metadata: reference/metadata.md

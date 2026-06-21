@@ -3,13 +3,15 @@ import pytest
 
 from neureptrace.decoding.source_domain_generalization import (
     SOURCE_ADVERSARIAL_PROTOCOL,
+    SOURCE_GROUP_DRO_PROTOCOL,
     fit_source_adversarial_predict_proba,
+    fit_source_domain_generalization_predict_proba,
+    normalize_source_domain_generalization_strategy,
 )
 
 
-def test_fit_source_adversarial_predict_proba_marks_source_only_protocol():
-    pytest.importorskip("torch")
-    rng = np.random.default_rng(13)
+def _toy_source_problem(seed=13):
+    rng = np.random.default_rng(seed)
     labels = np.tile(np.repeat([0, 1], 6), 3)
     domains = np.repeat(["sub-01", "sub-02", "sub-03"], 12)
     class_signal = np.where(labels == 0, -1.0, 1.0).reshape(-1, 1)
@@ -23,6 +25,12 @@ def test_fit_source_adversarial_predict_proba_marks_source_only_protocol():
         ]
     )
     test_features = rng.normal(size=(7, source_features.shape[1]))
+    return source_features, labels, domains, test_features
+
+
+def test_fit_source_adversarial_predict_proba_marks_source_only_protocol():
+    pytest.importorskip("torch")
+    source_features, labels, domains, test_features = _toy_source_problem()
 
     result = fit_source_adversarial_predict_proba(
         source_features=source_features,
@@ -46,6 +54,67 @@ def test_fit_source_adversarial_predict_proba_marks_source_only_protocol():
     assert result.metadata["source_adversarial_valid_for_benchmark"] is True
     assert result.metadata["source_adversarial_source_domains"] == 3
     assert result.metadata["source_adversarial_test_rows"] == 7
+    assert result.metadata["source_adversarial_source_validation_mode"] == "heldout_source_domain"
+    assert result.metadata["source_domain_generalization_protocol"] == SOURCE_ADVERSARIAL_PROTOCOL
+    assert result.metadata["source_domain_generalization_uses_target_features"] is False
+
+
+def test_fit_group_dro_predict_proba_marks_source_only_protocol():
+    pytest.importorskip("torch")
+    source_features, labels, domains, test_features = _toy_source_problem(seed=17)
+
+    result = fit_source_domain_generalization_predict_proba(
+        strategy="group-dro",
+        source_features=source_features,
+        source_labels=labels,
+        source_domains=domains,
+        test_features=test_features,
+        hidden_units=8,
+        embedding_dim=4,
+        max_epochs=4,
+        batch_size=8,
+        patience=2,
+        group_dro_eta=0.1,
+        random_state=11,
+        device="cpu",
+    )
+
+    assert result.probabilities.shape == (7, 2)
+    np.testing.assert_allclose(result.probabilities.sum(axis=1), 1.0, atol=1e-6)
+    assert result.metadata["source_domain_generalization"] is True
+    assert result.metadata["source_domain_generalization_strategy"] == "group_dro"
+    assert result.metadata["source_domain_generalization_protocol"] == SOURCE_GROUP_DRO_PROTOCOL
+    assert result.metadata["source_domain_generalization_uses_target_features"] is False
+    assert result.metadata["source_domain_generalization_uses_target_labels"] is False
+    assert result.metadata["source_domain_generalization_valid_for_benchmark"] is True
+    assert result.metadata["source_domain_generalization_validation_mode"] == "heldout_source_domain"
+    assert result.metadata["group_dro_source_domains"] == 3
+    assert result.metadata["group_dro_final_group_weights"]
+
+
+def test_source_domain_generalization_erm_uses_same_protocol_contract():
+    pytest.importorskip("torch")
+    source_features, labels, domains, test_features = _toy_source_problem(seed=19)
+
+    result = fit_source_domain_generalization_predict_proba(
+        strategy="neural-erm",
+        source_features=source_features,
+        source_labels=labels,
+        source_domains=domains,
+        test_features=test_features,
+        hidden_units=8,
+        embedding_dim=4,
+        max_epochs=3,
+        batch_size=8,
+        patience=2,
+        random_state=3,
+        device="cpu",
+    )
+
+    assert result.probabilities.shape == (7, 2)
+    assert result.metadata["source_domain_generalization_strategy"] == "erm"
+    assert result.metadata["source_domain_generalization_uses_target_features"] is False
+    assert result.metadata["source_domain_generalization_uses_target_labels"] is False
 
 
 def test_source_adversarial_rejects_target_feature_dimension_mismatch():
@@ -84,3 +153,11 @@ def test_source_adversarial_rejects_missing_source_domain():
             max_epochs=1,
             device="cpu",
         )
+
+
+def test_normalize_source_domain_generalization_strategy_aliases():
+    assert normalize_source_domain_generalization_strategy("source-adversarial") == "subject_adversarial"
+    assert normalize_source_domain_generalization_strategy("groupdro") == "group_dro"
+    assert normalize_source_domain_generalization_strategy("source-erm") == "erm"
+    with pytest.raises(ValueError, match="Unknown source-domain generalization strategy"):
+        normalize_source_domain_generalization_strategy("target-adaptive")

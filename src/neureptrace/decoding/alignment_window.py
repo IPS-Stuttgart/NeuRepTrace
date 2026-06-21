@@ -273,19 +273,28 @@ def _label_vector(
     Python sequences of tuple labels such as ``[(run, stimulus), ...]`` should be
     treated as one label per trial row; converting them with ``np.asarray`` can
     make a rectangular 2D object array and silently decouple label count from the
-    feature-row count.  Build the object vector via assignment from ``list`` so
-    each row label stays atomic.
+    feature-row count.  Normalize single-column arrays to scalar labels while
+    preserving wider row metadata as atomic tuple labels.
     """
 
-    if isinstance(values, np.ndarray) and values.ndim == 1:
-        vector = values.astype(object, copy=False).reshape(-1)
+    if isinstance(values, np.ndarray):
+        array = values.astype(object, copy=False)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            return array.reshape(-1)
+        elif array.shape[1:] == (1,):
+            return array.reshape(array.shape[0])
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            items = [tuple(row.tolist()) for row in rows]
     else:
         try:
             items = list(values)
         except TypeError:
             items = [values]
-        vector = np.empty(len(items), dtype=object)
-        vector[:] = items
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
     if vector.shape[0] != int(expected_length):
         context = "" if participant is None else f" for participant {participant}"
         raise ValueError(
