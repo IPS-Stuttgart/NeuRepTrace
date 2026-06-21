@@ -705,7 +705,11 @@ def test_oracle_target_calibrated_alignment_is_debug_upper_bound(method):
     assert oracle.metadata["alignment_debug_upper_bound"] is True
     assert oracle.metadata["alignment_valid_for_benchmark"] is False
     assert oracle.metadata["alignment_target_labels_used"] is True
-    assert oracle.metadata["alignment_protocol_note"] == "debug upper bound only; not valid for benchmark"
+    assert (
+        oracle.metadata["alignment_protocol_note"]
+        == "uses scored held-out target labels or anchors to fit the target projection; "
+        "debug upper bound only; not valid for benchmark claims"
+    )
 
 
 def test_oracle_target_calibrated_alignment_accepts_target_anchor_values():
@@ -757,7 +761,10 @@ def test_source_inner_diagnostics_follow_target_projection_for_oracle_alignment(
         compute_source_inner_diagnostics=True,
     )
 
-    assert oracle.diagnostics["source_inner_validation_type"] == "source_loso_nearest_centroid_target_projection"
+    assert (
+        oracle.diagnostics["source_inner_validation_type"]
+        == "source_loso_nearest_centroid_oracle_target_projection_same_rows"
+    )
     assert np.isfinite(oracle.diagnostics["source_inner_raw_balanced_accuracy"])
     assert np.isfinite(oracle.diagnostics["source_inner_aligned_balanced_accuracy"])
 

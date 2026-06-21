@@ -113,3 +113,25 @@ def test_anchor_availability_preserves_composite_oracle_target_anchor_values() -
     assert row["n_common_source_anchors"] == 2
     assert row["target_missing_common_anchor_count"] == 0
     assert row["n_target_anchor_values"] == 2
+
+
+def test_anchor_availability_counts_missing_composite_target_anchors_as_one_anchor() -> None:
+    _features, labels, subjects, anchors = _composite_anchor_fixture()
+
+    row = source_alignment_anchor_availability(
+        train_labels=labels,
+        train_subject_ids=subjects,
+        train_anchor_values=anchors,
+        target_anchor_values=[anchors[0]],
+        config=source_alignment_config(
+            method="mcca",
+            anchor_mode="stimulus_id_mean",
+            target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
+        ),
+    )
+
+    assert row["prefit_status"] == "likely_fit_failure"
+    assert row["n_common_source_anchors"] == 2
+    assert row["n_target_anchor_values"] == 1
+    assert row["target_missing_common_anchor_count"] == 1
+    assert "stim-b" in row["target_missing_common_anchor_values_preview"]

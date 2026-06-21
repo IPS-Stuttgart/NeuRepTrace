@@ -21,6 +21,7 @@ nav:
     - Foundation Model Features: foundation-model-features.md
     - Benchmarking: benchmarking.md
     - Few-shot Target Calibration: few_shot_target_calibration.md
+    - Semi-supervised LoRA Few-shot: semi_supervised_lora_few_shot.md
     - Examples: examples.md
     - API Overview: api-overview.md
     - Reference:
