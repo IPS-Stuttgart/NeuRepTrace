@@ -8,4 +8,3 @@ alignment behavior and provenance flags.
 """
 
 from neureptrace.decoding.source_alignment import *  # noqa: F403
-from neureptrace.decoding.source_alignment import __all__  # re-export the canonical public API
