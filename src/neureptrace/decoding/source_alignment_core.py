@@ -224,13 +224,7 @@ class SourceAlignmentConfig:
         target_centered = self.target_centered_group_projection
         uses_unlabeled_target = bool(unsupervised or target_centered or pseudo_label_target_calibrated)
         valid_for_strict_source_only = bool(not oracle and not target_calibrated and not uses_unlabeled_target)
-        valid_for_benchmark = bool(
-            not oracle
-            and not target_calibrated
-            and not pseudo_label_target_calibrated
-            and not unsupervised
-            and not target_centered
-        )
+        valid_for_benchmark = bool(not oracle and not target_calibrated and not unsupervised and not target_centered)
         return {
             "alignment_method": self.method,
             "alignment_anchor_mode": self.anchor_mode,
