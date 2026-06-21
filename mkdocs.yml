@@ -28,6 +28,7 @@ nav:
           - Covariance Features: reference/covariance-features.md
           - Dataset Specs: reference/dataset-spec.md
           - Decoding: reference/decoding.md
+          - Reconstruction Encoder: reference/reconstruction-encoder.md
           - Emission Compare: reference/emission-compare.md
           - Inference: reference/inference.md
           - Metadata: reference/metadata.md
