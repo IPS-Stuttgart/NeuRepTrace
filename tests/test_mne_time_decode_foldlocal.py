@@ -205,7 +205,8 @@ def test_foldlocal_accepts_oracle_target_calibrated_alignment(tmp_path: Path, mo
     assert results["alignment_debug_upper_bound"].unique().tolist() == [True]
     assert results["alignment_valid_for_benchmark"].unique().tolist() == [False]
     assert results["alignment_protocol_note"].unique().tolist() == [
-        "debug upper bound only; not valid for benchmark"
+        "uses scored held-out target labels or anchors to fit the target projection; "
+        "debug upper bound only; not valid for benchmark claims"
     ]
     assert observations["alignment_target_projection"].unique().tolist() == ["oracle_target_calibrated_alignment"]
     assert observations["alignment_valid_for_benchmark"].unique().tolist() == [False]

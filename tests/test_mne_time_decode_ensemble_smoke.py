@@ -352,7 +352,10 @@ def test_logistic_svm_ensemble_marks_oracle_alignment_nonbenchmark(tmp_path, mon
     assert results["alignment_oracle_target_calibrated"].unique().tolist() == [True]
     assert results["alignment_debug_upper_bound"].unique().tolist() == [True]
     assert results["alignment_valid_for_benchmark"].unique().tolist() == [False]
-    assert results["alignment_protocol_note"].unique().tolist() == ["debug upper bound only; not valid for benchmark"]
+    assert results["alignment_protocol_note"].unique().tolist() == [
+        "uses scored held-out target labels or anchors to fit the target projection; "
+        "debug upper bound only; not valid for benchmark claims"
+    ]
 
 
 def test_logistic_svm_ensemble_does_not_reuse_stale_alignment_sidecars(tmp_path, monkeypatch):
