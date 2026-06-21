@@ -18,7 +18,9 @@ nav:
     - Migrating from PyMEGDec: migrating-from-pymegdec.md
     - PyMEGDec Upstreaming: pymegdec-upstreaming.md
     - Transfer from Config: transfer-from-config.md
+    - Foundation Model Features: foundation-model-features.md
     - Benchmarking: benchmarking.md
+    - Few-shot Target Calibration: few_shot_target_calibration.md
     - Examples: examples.md
     - API Overview: api-overview.md
     - Reference:
@@ -28,6 +30,7 @@ nav:
           - Covariance Features: reference/covariance-features.md
           - Dataset Specs: reference/dataset-spec.md
           - Decoding: reference/decoding.md
+          - Reconstruction Encoder: reference/reconstruction-encoder.md
           - Emission Compare: reference/emission-compare.md
           - Inference: reference/inference.md
           - Metadata: reference/metadata.md

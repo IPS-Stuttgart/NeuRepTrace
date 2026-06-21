@@ -12,6 +12,11 @@ The same protocol also uses target rows, so it must not be marked as benchmark
 valid or strict source-only in ``SourceAlignmentConfig.static_metadata``.  This
 runtime patch keeps those semantics correct until the compatibility shim can be
 folded into ``decoding.source_alignment`` directly.
+
+The source-inner diagnostic path must mirror the same disjoint calibration
+protocol.  Otherwise pseudo-label target projection diagnostics fit the held-out
+source projection on all held-out rows and score those same rows, which is an
+oracle-like diagnostic that can overstate pseudo-label alignment quality.
 """
 
 from __future__ import annotations
@@ -27,6 +32,10 @@ import numpy as np
 _TARGET_MODULE = "neureptrace.decoding.source_alignment"
 _PATCH_MARKER = "_neureptrace_source_alignment_pseudo_calibration_patch_installed"
 _FINDER_MARKER = "_neureptrace_source_alignment_pseudo_calibration_finder"
+
+
+def _is_target_projection_calibration_mode(config) -> bool:
+    return bool(config.target_calibrated or getattr(config, "pseudo_label_target_calibrated", False))
 
 
 def _patch_source_alignment(source_alignment: ModuleType) -> None:
@@ -73,7 +82,7 @@ def _patch_source_alignment(source_alignment: ModuleType) -> None:
         repetition_cap = available if config.repetition_cap is None else int(config.repetition_cap)
         calibration_cap = (
             int(config.target_calibration_per_anchor)
-            if config.target_calibrated or getattr(config, "pseudo_label_target_calibrated", False)
+            if _is_target_projection_calibration_mode(config)
             else available
         )
         return int(min(available, repetition_cap, calibration_cap))
@@ -81,15 +90,81 @@ def _patch_source_alignment(source_alignment: ModuleType) -> None:
     def _source_alignment_repetition_selection(config, sample_mode: str) -> str:
         """Return source-anchor repetition selection for class-repetition alignment."""
 
-        if sample_mode == "class_repetition" and (
-            config.target_calibrated or getattr(config, "pseudo_label_target_calibrated", False)
-        ):
+        if sample_mode == "class_repetition" and _is_target_projection_calibration_mode(config):
             return "first"
         return source_alignment.DEFAULT_CLASS_LIMIT_SELECTION
 
     source_alignment.SourceAlignmentConfig.static_metadata = static_metadata
+
+    def _transform_inner_heldout_subject(
+        *,
+        test_features: np.ndarray,
+        test_anchors: np.ndarray,
+        fit,
+        config,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Transform a source-inner held-out subject with disjoint target calibration.
+
+        Pseudo-label target calibration receives pseudo-labeled target calibration
+        rows in the outer protocol.  Source-inner diagnostics should therefore
+        reserve disjoint held-out source rows for fitting the target projection and
+        score only the remaining rows, matching the target-calibrated diagnostic
+        path instead of fitting and scoring on the same held-out rows.
+        """
+
+        if not config.fits_target_projection:
+            target_feature_mean = np.mean(test_features, axis=0) if config.target_centered_group_projection else None
+            return fit.model.transform_group(test_features, feature_mean=target_feature_mean), np.ones(
+                test_features.shape[0],
+                dtype=bool,
+            )
+
+        evaluation_mask = np.ones(test_features.shape[0], dtype=bool)
+        projection_features = test_features
+        projection_anchors = test_anchors
+        selected_offsets_by_class = fit.alignment.selected_offsets_by_class
+        if _is_target_projection_calibration_mode(config):
+            calibration_mask = source_alignment._inner_target_calibration_mask(
+                test_anchors,
+                classes=fit.alignment.classes,
+                per_anchor=config.target_calibration_per_anchor,
+                seed=config.target_calibration_seed,
+            )
+            evaluation_mask = ~calibration_mask
+            if not np.any(evaluation_mask):
+                raise ValueError("source-inner target-calibrated diagnostic left no held-out rows for scoring.")
+            projection_features = test_features[calibration_mask]
+            projection_anchors = test_anchors[calibration_mask]
+            if fit.alignment.n_repetitions_per_class is not None:
+                selected_offsets_by_class = {
+                    class_position: np.arange(int(fit.alignment.n_repetitions_per_class), dtype=int)
+                    for class_position, _class_label in enumerate(fit.alignment.classes)
+                }
+
+        target_anchors = source_alignment._target_alignment_matrix(
+            projection_features,
+            projection_anchors,
+            classes=fit.alignment.classes,
+            config=config,
+            n_repetitions_per_class=fit.alignment.n_repetitions_per_class,
+            selected_offsets_by_class=selected_offsets_by_class,
+        )
+        scoring_features = test_features[evaluation_mask]
+        if config.method in {"procrustes", "hyperalignment"}:
+            target_projection = source_alignment.fit_projection_to_hyperalignment(target_anchors, template=fit.model.template)
+            return source_alignment.transform_with_projection(scoring_features, target_projection), evaluation_mask
+        if config.method == "mcca":
+            target_projection = source_alignment.fit_target_mcca_projection(
+                target_anchors,
+                fit.model,
+                regularization=config.mcca_regularization,
+            )
+            return target_projection.transform(scoring_features), evaluation_mask
+        raise ValueError(f"Unsupported source alignment method: {config.method}")
+
     source_alignment._effective_repetitions_per_class = _effective_repetitions_per_class
     source_alignment._source_alignment_repetition_selection = _source_alignment_repetition_selection
+    source_alignment._transform_inner_heldout_subject = _transform_inner_heldout_subject
     setattr(source_alignment, _PATCH_MARKER, True)
 
 
