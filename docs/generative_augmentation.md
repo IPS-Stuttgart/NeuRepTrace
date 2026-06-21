@@ -1,50 +1,59 @@
 # Generative augmentation protocols
 
-NeuRepTrace supports lightweight feature-space generative augmentation for fold-local
-decoding experiments through `neureptrace.decoding.generative_augmentation`.  The
-implementation is intentionally dependency-light: it samples class-conditional
-Gaussian feature rows after feature extraction, rather than training a neural GAN
-or diffusion model inside every LOSO fold.
+NeuRepTrace supports feature-space generative augmentation for fold-local decoding experiments through `neureptrace.decoding.generative_augmentation`.
 
-The same API exposes three protocol-explicit modes:
+The original Gaussian modes remain dependency-light baselines. The new `*_gan` and `*_diffusion` modes train fold-local neural generators on extracted feature matrices and require the optional `torch` extra. These models synthesize feature rows, not raw MEG time series, and must be fitted inside each LOSO fold to avoid leakage.
 
-| Method | Uses source \(X_s, y_s\)? | Uses target \(X_t\)? | Uses target labels? | Protocol |
-| --- | --- | --- | --- | --- |
-| `source_gaussian` | yes | no | no | Category 1: strict source-only augmentation |
-| `target_style_gaussian` | yes | yes, unlabeled | no | Category 2: unlabeled target-adaptive augmentation |
-| `target_calibrated_gaussian` | yes | calibration subset | calibration subset only | Category 3: supervised/calibrated augmentation |
+## Protocol categories
 
-`target_labels` are rejected by the augmentation API.  Category-3 experiments must
-pass a disjoint calibration subset through `target_calibration_features` and
-`target_calibration_labels`; scored target labels should never be passed into the
-augmentation step.
+| Method | Target data use | Target label use | Protocol |
+| --- | --- | --- | --- |
+| `source_gaussian` | no | no | Category 1: strict source-only augmentation |
+| `source_gan` | no | no | Category 1: strict source-only augmentation |
+| `source_diffusion` | no | no | Category 1: strict source-only augmentation |
+| `target_style_gaussian` | unlabeled target features | no | Category 2: unlabeled target-adaptive augmentation |
+| `target_style_gan` | unlabeled target features | no | Category 2: unlabeled target-adaptive augmentation |
+| `target_style_diffusion` | unlabeled target features | no | Category 2: unlabeled target-adaptive augmentation |
+| `target_calibrated_gaussian` | disjoint calibration subset | calibration subset only | Category 3: supervised/calibrated augmentation |
+| `target_calibrated_gan` | disjoint calibration subset | calibration subset only | Category 3: supervised/calibrated augmentation |
+| `target_calibrated_diffusion` | disjoint calibration subset | calibration subset only | Category 3: supervised/calibrated augmentation |
 
-## Direct feature-matrix use
+`target_labels` are rejected by the augmentation API. Category-3 experiments must pass a disjoint calibration subset through `target_calibration_features` and `target_calibration_labels`; scored target labels should never be passed into the augmentation step.
+
+## Neural generator controls
+
+The following options apply to `*_gan` and `*_diffusion` methods.
+
+| Option | Meaning |
+| --- | --- |
+| `neural_epochs` | Fold-local training epochs for the generator. |
+| `neural_hidden_dim` | Width of the generator, discriminator, or denoiser MLP. |
+| `neural_batch_size` | Mini-batch size, capped at the current fold's row count. |
+| `neural_learning_rate` | Adam learning rate. |
+| `gan_latent_dim` | Latent noise dimension for conditional GAN methods. |
+| `gan_discriminator_steps` | Discriminator updates per GAN mini-batch. |
+| `diffusion_steps` | Number of DDPM-style denoising steps for diffusion methods. |
+
+All neural modes standardize the current fold's generator-training features before training and unstandardize synthetic rows afterward. Category-2 target-style methods then apply unlabeled mean/covariance matching to the generated rows. Category-3 calibrated neural modes train on source rows plus disjoint target calibration rows, then shift generated class means toward calibration class means according to `target_calibration_weight`.
+
+## Minimal examples
+
+Source-only GAN augmentation:
 
 ```python
-from neureptrace.decoding.generative_augmentation import (
-    augment_training_features,
-    generative_augmentation_config,
-)
-
 config = generative_augmentation_config(
-    method="source_gaussian",
+    method="source_gan",
     synthetic_per_class=8,
+    neural_epochs=200,
     random_state=13,
 )
-
 augmented = augment_training_features(train_features, train_labels, config=config)
-model.fit(augmented.features, augmented.labels)
 ```
 
-For a category-2 target-style run, pass unlabeled target features explicitly:
+Target-style diffusion augmentation:
 
 ```python
-config = generative_augmentation_config(
-    method="target_style_gaussian",
-    synthetic_per_class=8,
-)
-
+config = generative_augmentation_config(method="target_style_diffusion", synthetic_per_class=8)
 augmented = augment_training_features(
     train_features,
     train_labels,
@@ -53,19 +62,10 @@ augmented = augment_training_features(
 )
 ```
 
-This is a transductive/adaptive protocol if `unlabeled_target_features` are the
-held-out evaluation batch.  For online deployment, use a separate unlabeled
-calibration block and freeze the synthetic augmentation setup before scoring.
-
-For category-3 few-shot calibration:
+Few-shot calibrated GAN augmentation:
 
 ```python
-config = generative_augmentation_config(
-    method="target_calibrated_gaussian",
-    synthetic_per_class=8,
-    target_calibration_weight=0.5,
-)
-
+config = generative_augmentation_config(method="target_calibrated_gan", synthetic_per_class=8)
 augmented = augment_training_features(
     train_features,
     train_labels,
@@ -75,39 +75,6 @@ augmented = augment_training_features(
 )
 ```
 
-## Transfer helper integration
+`evaluate_feature_transfer` can run Category 2 or Category 3 protocols when the target or calibration arrays are supplied explicitly through the existing `generative_target_features`, `generative_target_calibration_features`, and `generative_target_calibration_labels` arguments.
 
-`cross_validate_feature_decoding` accepts source-only generative augmentation:
-
-```python
-cross_validate_feature_decoding(
-    stimulus_features,
-    labels,
-    generative_augmentation={
-        "method": "source_gaussian",
-        "synthetic_per_class": 4,
-        "random_state": 13,
-    },
-)
-```
-
-`evaluate_feature_transfer` can also run category-2 or category-3 protocols when
-the target/calibration arrays are supplied explicitly:
-
-```python
-evaluate_feature_transfer(
-    train_features,
-    train_labels,
-    validation_features,
-    validation_labels,
-    generative_augmentation={
-        "method": "target_style_gaussian",
-        "synthetic_per_class": 4,
-    },
-    generative_target_features=unlabeled_target_features,
-)
-```
-
-The returned augmentation metadata records the method, synthetic row count, and
-protocol category when using `augment_training_features` directly or
-`make_generative_augmented_fit_model`.
+The returned augmentation metadata records the method, synthetic row count, protocol category, and whether a neural generator was used.
