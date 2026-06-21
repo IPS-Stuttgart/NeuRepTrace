@@ -822,13 +822,19 @@ def align_train_test_features(
                 if config.target_calibrated or config.pseudo_label_target_calibrated
                 else target_anchor_vector
             )
+            target_selected_offsets_by_class = alignment.selected_offsets_by_class
+            if (config.target_calibrated or config.pseudo_label_target_calibrated) and alignment.n_repetitions_per_class is not None:
+                target_selected_offsets_by_class = {
+                    class_position: np.arange(int(alignment.n_repetitions_per_class), dtype=int)
+                    for class_position, _class_label in enumerate(alignment.classes)
+                }
             target_anchors = _target_alignment_matrix(
                 projection_features,
                 projection_anchors,
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
-                selected_offsets_by_class=alignment.selected_offsets_by_class,
+                selected_offsets_by_class=target_selected_offsets_by_class,
             )
             target_projection = fit_projection_to_hyperalignment(target_anchors, template=model.template)
             transformed_test = transform_with_projection(test_matrix, target_projection)
@@ -861,13 +867,19 @@ def align_train_test_features(
                 if config.target_calibrated or config.pseudo_label_target_calibrated
                 else target_anchor_vector
             )
+            target_selected_offsets_by_class = alignment.selected_offsets_by_class
+            if (config.target_calibrated or config.pseudo_label_target_calibrated) and alignment.n_repetitions_per_class is not None:
+                target_selected_offsets_by_class = {
+                    class_position: np.arange(int(alignment.n_repetitions_per_class), dtype=int)
+                    for class_position, _class_label in enumerate(alignment.classes)
+                }
             target_anchors = _target_alignment_matrix(
                 projection_features,
                 projection_anchors,
                 classes=alignment.classes,
                 config=config,
                 n_repetitions_per_class=alignment.n_repetitions_per_class,
-                selected_offsets_by_class=alignment.selected_offsets_by_class,
+                selected_offsets_by_class=target_selected_offsets_by_class,
             )
             target_projection = fit_target_mcca_projection(
                 target_anchors,
@@ -895,6 +907,8 @@ def align_train_test_features(
     else:  # pragma: no cover - guarded by normalization
         raise ValueError(f"Unsupported source alignment method: {config.method}")
     n_alignment_rows = int(next(iter(fit.anchor_before.values())).shape[0])
+    if not np.isfinite(source_inner_aligned_ba):
+        source_inner_raw_ba = float("nan")
     source_inner_gain = (
         source_inner_aligned_ba - source_inner_raw_ba
         if np.isfinite(source_inner_aligned_ba) and np.isfinite(source_inner_raw_ba)
@@ -1376,7 +1390,11 @@ def _effective_repetitions_per_class(
     if available < 1:
         raise ValueError("Every source subject must have at least one sample per alignment class.")
     repetition_cap = available if config.repetition_cap is None else int(config.repetition_cap)
-    calibration_cap = int(config.target_calibration_per_anchor) if config.target_calibrated else available
+    calibration_cap = (
+        int(config.target_calibration_per_anchor)
+        if config.target_calibrated or config.pseudo_label_target_calibrated
+        else available
+    )
     return int(min(available, repetition_cap, calibration_cap))
 
 
@@ -1725,7 +1743,7 @@ def _transform_inner_heldout_subject(
     projection_features = test_features
     projection_anchors = test_anchors
     selected_offsets_by_class = fit.alignment.selected_offsets_by_class
-    if config.target_calibrated:
+    if config.target_calibrated or config.pseudo_label_target_calibrated:
         calibration_mask = _inner_target_calibration_mask(
             test_anchors,
             classes=fit.alignment.classes,

@@ -7,7 +7,9 @@ import paths used by existing scripts/tests.
 
 from __future__ import annotations
 
+import sys as _sys
 from importlib import import_module as _import_module
+from types import ModuleType as _ModuleType
 from typing import Any as _Any
 
 _core = _import_module("neureptrace.decoding.source_alignment_core")
@@ -37,3 +39,13 @@ def _static_metadata_with_pseudo_label_benchmark_guard(
 
 
 _core.SourceAlignmentConfig.static_metadata = _static_metadata_with_pseudo_label_benchmark_guard
+
+
+class _SourceAlignmentModule(_ModuleType):
+    def __setattr__(self, name: str, value: _Any) -> None:
+        super().__setattr__(name, value)
+        if hasattr(_core, name):
+            setattr(_core, name, value)
+
+
+_sys.modules[__name__].__class__ = _SourceAlignmentModule
