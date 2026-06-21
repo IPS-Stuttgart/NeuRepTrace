@@ -1,0 +1,4 @@
+Trigger Category 2 autoencoder LOSO validation workflows.
+
+Last trigger: 2026-06-20T15:52:00Z
+Commit purpose: rerun existing GitHub Actions workflows after adding the Category 2 autoencoder LOSO implementation and smoke test.
