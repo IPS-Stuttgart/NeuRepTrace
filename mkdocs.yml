@@ -20,6 +20,7 @@ nav:
     - Transfer from Config: transfer-from-config.md
     - Foundation Model Features: foundation-model-features.md
     - Benchmarking: benchmarking.md
+    - Few-shot Target Calibration: few_shot_target_calibration.md
     - Examples: examples.md
     - API Overview: api-overview.md
     - Reference:
