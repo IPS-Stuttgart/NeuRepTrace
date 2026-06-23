@@ -8,6 +8,18 @@ available to the alignment transform.
 Do not mix these rows into Protocol-1 strict source-only or Protocol-2
 zero-label target-adaptive leaderboards.
 
+## Supported oracle alignment methods
+
+The runner can execute the same upper-bound target-projection protocol for:
+
+- `procrustes`
+- `hyperalignment`
+- `mcca`
+- `contrastive`
+
+All four methods use the same explicit `--include-oracle` safety gate and the
+same Protocol-4 metadata tags.
+
 ## Example
 
 ```bash
@@ -16,7 +28,7 @@ export BUSH_MEG_DATA_DIR=/path/to/Bush_MEG-Data/MEG-Data
 poetry run neureptrace-bushmeg-protocol4-oracle \
   configs/bush_meg/protocol4_oracle_response_window_c.yml \
   --include-oracle \
-  --methods procrustes,hyperalignment,mcca \
+  --methods procrustes,hyperalignment,mcca,contrastive \
   --out-dir results/bush_meg/protocol4_oracle_response_window_c
 ```
 

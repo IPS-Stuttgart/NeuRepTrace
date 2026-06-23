@@ -17,6 +17,9 @@ def test_protocol4_oracle_requires_explicit_gate(tmp_path: Path):
 
 def test_protocol4_method_normalization_and_overrides():
     assert oracle.normalize_oracle_alignment_method("m-cca") == "mcca"
+    assert oracle.normalize_oracle_alignment_method("contrastive-subject-alignment") == "contrastive"
+    assert "contrastive" in oracle.DEFAULT_PROTOCOL4_METHODS
+
     overrides = oracle.protocol4_oracle_overrides("hyper-alignment", components=12, repetition_cap=None)
 
     assert "source_loso.alignment_method=hyperalignment" in overrides
@@ -25,10 +28,15 @@ def test_protocol4_method_normalization_and_overrides():
     assert "source_loso.alignment_components=12" in overrides
     assert not any(item.startswith("source_loso.alignment_repetition_cap=") for item in overrides)
 
+    contrastive_overrides = oracle.protocol4_oracle_overrides("supervised-contrastive", components=8)
+    assert "source_loso.alignment_method=contrastive" in contrastive_overrides
+
 
 def test_protocol4_metadata_marks_debug_upper_bound():
-    metadata = oracle.protocol4_metadata("procrustes")
+    metadata = oracle.protocol4_metadata("contrastive")
 
+    assert metadata["method"] == "oracle_target_calibrated_contrastive"
+    assert metadata["alignment_method"] == "contrastive"
     assert metadata["protocol_category"] == 4
     assert metadata["uses_target_data"] is True
     assert metadata["uses_target_labels_for_fitting"] is True
@@ -91,22 +99,24 @@ def test_protocol4_runner_writes_enriched_outputs(tmp_path: Path, monkeypatch):
     outputs = oracle.run_bushmeg_protocol4_oracle(
         tmp_path / "config.yml",
         include_oracle=True,
-        methods="procrustes,mcca",
+        methods="procrustes,mcca,contrastive",
         out_dir=tmp_path / "oracle",
         overrides=["decoding.max_iter=5"],
     )
 
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert all("source_loso.alignment_target_projection=oracle_target_calibrated_alignment" in call["overrides"] for call in calls)
     assert calls[0]["overrides"][0] == "decoding.max_iter=5"
-    assert outputs["summary"]["protocol_category"].tolist() == [4, 4]
-    assert outputs["summary"]["debug_upper_bound"].tolist() == [True, True]
-    assert outputs["method_metadata"]["status"].tolist() == ["evaluated", "evaluated"]
+    assert "source_loso.alignment_method=contrastive" in calls[2]["overrides"]
+    assert outputs["summary"]["protocol_category"].tolist() == [4, 4, 4]
+    assert outputs["summary"]["debug_upper_bound"].tolist() == [True, True, True]
+    assert outputs["method_metadata"]["status"].tolist() == ["evaluated", "evaluated", "evaluated"]
+    assert outputs["method_metadata"]["method"].tolist()[-1] == "oracle_target_calibrated_contrastive"
 
     summary_csv = pd.read_csv(tmp_path / "oracle" / "summary.csv")
     metadata_csv = pd.read_csv(tmp_path / "oracle" / "method_metadata.csv")
     predictions_csv = pd.read_csv(tmp_path / "oracle" / "predictions.csv")
 
-    assert summary_csv["valid_for_zero_calibration"].tolist() == [False, False]
-    assert metadata_csv["uses_target_labels_for_fitting"].tolist() == [True, True]
+    assert summary_csv["valid_for_zero_calibration"].tolist() == [False, False, False]
+    assert metadata_csv["uses_target_labels_for_fitting"].tolist() == [True, True, True]
     assert predictions_csv["protocol_name"].unique().tolist() == ["oracle_target_calibrated_alignment"]
