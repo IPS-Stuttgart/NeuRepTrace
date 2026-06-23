@@ -20,7 +20,7 @@ import pandas as pd
 from neureptrace.bushmeg_source_loso import run_bushmeg_source_loso
 from neureptrace.decoding.source_alignment import ORACLE_TARGET_CALIBRATED_ALIGNMENT
 
-ORACLE_ALIGNMENT_METHODS = ("procrustes", "hyperalignment", "mcca")
+ORACLE_ALIGNMENT_METHODS = ("procrustes", "hyperalignment", "mcca", "contrastive")
 ORACLE_METHOD_ALIASES = {
     "ha": "hyperalignment",
     "hyper": "hyperalignment",
@@ -32,6 +32,12 @@ ORACLE_METHOD_ALIASES = {
     "sumcor_mcca": "mcca",
     "m_cca": "mcca",
     "m-cca": "mcca",
+    "contrast": "contrastive",
+    "contrastive_alignment": "contrastive",
+    "contrastive_subject_alignment": "contrastive",
+    "subject_contrastive_alignment": "contrastive",
+    "supervised_contrastive": "contrastive",
+    "supervised_contrastive_alignment": "contrastive",
 }
 DEFAULT_PROTOCOL4_METHODS = ORACLE_ALIGNMENT_METHODS
 PROTOCOL4_NAME = "oracle_target_calibrated_alignment"
