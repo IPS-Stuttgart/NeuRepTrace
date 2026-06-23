@@ -53,7 +53,8 @@ decoding:
 source_loso:
     # Protocol 4 is a debug upper bound. The dedicated
     # neureptrace-bushmeg-protocol4-oracle command overrides the alignment
-    # method for each requested oracle method and requires --include-oracle.
+    # method for each requested oracle method (procrustes, hyperalignment, mcca,
+    # or contrastive) and requires --include-oracle.
     group_column: participant
     selection_metric: balanced_accuracy
     alignment_method: procrustes
