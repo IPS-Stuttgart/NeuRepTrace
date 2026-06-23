@@ -1,0 +1,90 @@
+schema_version: neureptrace.dataset.v1
+
+paths:
+    base: cwd
+
+dataset:
+    name: bush_meg
+    type: fieldtrip_mat
+    root: ${BUSH_MEG_DATA_DIR}
+    participant_file: "Part{participant}Data.mat"
+    variable: data
+    channel_type: mag
+    fields:
+        trial: trial
+        time: time
+        label: label
+        trialinfo: trialinfo
+        sensor_geometry: grad
+
+participants:
+    ids: "1-4,6,8,9,10,13-27"
+
+validation:
+    trim_channel_labels_to_data: true
+    channel_policy: exact
+
+metadata:
+    columns:
+        - name: stimulus_class
+          index: 0
+        - name: condition
+          index: 1
+          optional: true
+
+preprocessing:
+    tmin: -0.35
+    tmax: 0.35
+    normalization: subject_baseline_whiten
+    baseline_window: [-0.35, -0.05]
+    feature_preprocessor: pca
+    pca_components: 96
+    window_size: 0.100
+
+decoding:
+    label_column: stimulus_class
+    group_column: participant
+    classifier: multinomial-logistic
+    emission_mode: uncalibrated
+    max_iter: 2000
+    label_shuffle_control: false
+    label_shuffle_seed: 13
+
+source_loso:
+    # Protocol 4 is a debug upper bound. The dedicated
+    # neureptrace-bushmeg-protocol4-oracle command overrides the alignment
+    # method for each requested oracle method and requires --include-oracle.
+    group_column: participant
+    selection_metric: balanced_accuracy
+    alignment_method: procrustes
+    alignment_anchor_mode: class_mean
+    alignment_target_projection: oracle_target_calibrated_alignment
+    alignment_components: 64
+    alignment_repetition_cap: 16
+    candidate_grid:
+        temporal_bins: [4]
+        feature_kinds:
+            - evoked_dct
+        decoders:
+            - multinomial-logistic
+            - linear_svm
+        emission_modes:
+            - uncalibrated
+        feature_preprocessors:
+            - pca
+        pca_components: [64]
+        c_grid: [1.0]
+        window_combines:
+            - log_probability_mean
+        window_sets:
+            - name: response_window_c
+              centers: [0.088, 0.136, 0.184, 0.232, 0.280]
+              window_size: 0.100
+
+outputs:
+    base_dir: results/{dataset}/protocol4_oracle_response_window_c
+    source_loso_summary_csv: protocol4_oracle_response_window_c_summary.csv
+    source_loso_inner_cv_csv: protocol4_oracle_response_window_c_inner_cv.csv
+    source_loso_predictions_csv: protocol4_oracle_response_window_c_predictions.csv
+    provenance: true
+    hash_input_files: true
