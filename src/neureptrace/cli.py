@@ -21,6 +21,7 @@ COMMAND_MODULES = {
     "bushmeg-supervised-lowrank-loso": "neureptrace.bushmeg_supervised_lowrank_loso",
     "bushmeg-diagnostics": "neureptrace.bushmeg_diagnostics",
     "bushmeg-loso-decode": "neureptrace.bushmeg_loso_decode",
+    "bushmeg-protocol4-oracle": "neureptrace.bushmeg_protocol4_oracle",
     "check": "neureptrace.doctor",
     "continuous-stimulus-scan": "neureptrace.continuous_stimulus_scan",
     "dataset": "neureptrace.dataset_spec_cli",
