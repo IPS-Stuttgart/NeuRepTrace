@@ -10,7 +10,6 @@ silently refer to different repetition offsets.
 
 from __future__ import annotations
 
-import importlib
 import importlib.abc
 import importlib.machinery
 import sys
