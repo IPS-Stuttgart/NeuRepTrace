@@ -53,6 +53,27 @@ def test_rank_class_scores_matches_nan_class_labels() -> None:
     assert result["rows"][0]["true_label_score"] == pytest.approx(0.9)
 
 
+def test_rank_class_scores_preserves_tuple_class_labels() -> None:
+    classes = [("run1", "cat"), ("run1", "dog")]
+    result = rank_class_scores(
+        np.array(
+            [
+                [0.1, 0.9],
+                [0.8, 0.2],
+            ]
+        ),
+        classes,
+        [("run1", "dog"), ("run1", "cat")],
+        top_k=(1,),
+        row_top_k=1,
+    )
+
+    np.testing.assert_array_equal(result["true_label_ranks"], np.array([1.0, 1.0]))
+    assert result["top_k_accuracy"] == {1: pytest.approx(1.0)}
+    assert result["rows"][0]["rank1_class"] == ("run1", "dog")
+    assert result["rows"][0]["true_label_score"] == pytest.approx(0.9)
+
+
 @pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])
 def test_rank_class_scores_rejects_nonfinite_scores(bad_value: float) -> None:
     scores = np.array([[0.5, bad_value]])

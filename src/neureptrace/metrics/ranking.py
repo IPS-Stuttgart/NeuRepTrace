@@ -77,7 +77,24 @@ def rank_class_scores(
 
 
 def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object)
+    if isinstance(values, np.ndarray):
+        vector = values.astype(object, copy=False)
+        if vector.ndim == 0:
+            return vector.reshape(1)
+        if vector.ndim != 1:
+            raise ValueError(f"{name} must be one-dimensional.")
+        return vector
+
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+
+    if any(isinstance(item, tuple) for item in items):
+        vector = np.empty(len(items), dtype=object)
+        vector[:] = items
+    else:
+        vector = np.asarray(items, dtype=object)
     if vector.ndim == 0:
         return vector.reshape(1)
     if vector.ndim != 1:
