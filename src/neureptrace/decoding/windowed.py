@@ -342,9 +342,9 @@ def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: s
 
 
 def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(labels).ravel()
+    vector = np.asarray(labels)
     if vector.ndim != 1:
         raise ValueError(f"{name} must be one-dimensional.")
-    if len(vector) != expected_length:
-        raise ValueError(f"{name} length must match feature rows: {len(vector)} != {expected_length}.")
+    if vector.shape[0] != expected_length:
+        raise ValueError(f"{name} length must match feature rows: {vector.shape[0]} != {expected_length}.")
     return vector
