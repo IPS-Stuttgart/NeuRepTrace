@@ -62,6 +62,14 @@ def _validate_positive_integer(value: object, name: str) -> int:
     return int(numeric)
 
 
+def _labels_contain_boolean(labels: np.ndarray) -> bool:
+    if np.issubdtype(labels.dtype, np.bool_):
+        return True
+    if labels.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in labels.ravel())
+    return False
+
+
 def validate_probability_inputs(
     probabilities: np.ndarray,
     labels: np.ndarray | None = None,
@@ -106,6 +114,8 @@ def validate_probability_inputs(
         raise ValueError("labels must have shape (n_samples,)")
     if probabilities.shape[0] != labels.shape[0]:
         raise ValueError("probabilities and labels must contain the same samples")
+    if _labels_contain_boolean(labels):
+        raise ValueError("labels must contain integer class indices")
     if not np.issubdtype(labels.dtype, np.integer):
         if not np.all(np.equal(labels, np.asarray(labels, dtype=int))):
             raise ValueError("labels must contain integer class indices")
