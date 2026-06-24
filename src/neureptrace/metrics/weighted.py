@@ -31,7 +31,7 @@ def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_sample
         Expected number of samples.
     """
     try:
-        raw_weights = np.asarray(sample_weight)
+        raw_weights = np.asarray(sample_weight, dtype=object)
     except (TypeError, ValueError) as exc:
         raise ValueError("sample_weight must have shape (n_samples,)") from exc
     if _weights_contain_boolean(raw_weights):
