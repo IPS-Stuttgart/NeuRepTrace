@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import importlib
-
 __all__ = ["__version__"]
 __version__ = "0.1.1"
 
 from . import (  # noqa: E402
+    _alignment_window_config_patch,
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_source_loso_prototype_patch,
     _dataset_config_participant_patch,
@@ -33,6 +32,7 @@ from . import (  # noqa: E402
     _source_alignment_pseudo_repetition_patch,
 )
 
+_alignment_window_config_patch.install()
 _dataset_config_participant_patch.install()
 _metadata_column_validation_patch.install()
 _event_detection_extensions.install()
@@ -66,7 +66,8 @@ _source_alignment_contrastive_patch.install()
 # Load source_alignment through the contrastive finder first, then apply the oracle
 # wrapper to the loaded module. Otherwise the later oracle finder can mask the
 # contrastive finder and leave method="contrastive" unregistered at runtime.
-importlib.import_module("neureptrace.decoding.source_alignment")
+from .decoding import source_alignment as _source_alignment  # noqa: F401,E402
+
 _source_alignment_oracle_patch.install()
 _source_alignment_target_calibration_offsets_patch.install()
 _source_alignment_cli_choices_patch.install()
