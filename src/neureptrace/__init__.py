@@ -10,6 +10,7 @@ __version__ = "0.1.1"
 from . import (  # noqa: E402
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_source_loso_prototype_patch,
+    _confusion_metadata_lookup_patch,
     _dataset_config_participant_patch,
     _decoding_adaptive_calibration,
     _decoding_c_grid_patch,
@@ -35,6 +36,7 @@ from . import (  # noqa: E402
 
 _dataset_config_participant_patch.install()
 _metadata_column_validation_patch.install()
+_confusion_metadata_lookup_patch.install()
 _event_detection_extensions.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
