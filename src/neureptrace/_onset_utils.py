@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import glob
-from pathlib import Path
+import numbers
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -162,11 +163,33 @@ def validate_detection_options(
     min_consecutive: int = 1,
     min_duration: float | None = None,
 ) -> None:
-    if threshold_quantile is not None and not 0.0 <= threshold_quantile <= 1.0:
-        raise ValueError("threshold_quantile must be between 0 and 1.")
+    if threshold_quantile is not None:
+        threshold_quantile_value = _validate_real_number(threshold_quantile, name="threshold_quantile")
+        if not 0.0 <= threshold_quantile_value <= 1.0:
+            raise ValueError("threshold_quantile must be between 0 and 1.")
     if threshold_method is not None and threshold_methods is not None and threshold_method not in threshold_methods:
         raise ValueError(f"threshold_method must be one of {threshold_methods}.")
-    if min_consecutive < 1:
-        raise ValueError("min_consecutive must be at least 1.")
-    if min_duration is not None and min_duration < 0:
-        raise ValueError("min_duration must be non-negative when provided.")
+    _validate_integer(min_consecutive, name="min_consecutive", minimum=1)
+    if min_duration is not None:
+        min_duration_value = _validate_real_number(min_duration, name="min_duration")
+        if min_duration_value < 0:
+            raise ValueError("min_duration must be non-negative when provided.")
+
+
+def _validate_real_number(value: object, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, numbers.Real):
+        raise ValueError(f"{name} must be a real-valued number.")
+    numeric = float(value)
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be finite.")
+    return numeric
+
+
+def _validate_integer(value: object, *, name: str, minimum: int) -> int:
+    numeric = _validate_real_number(value, name=name)
+    if not numeric.is_integer():
+        raise ValueError(f"{name} must be an integer.")
+    integer = int(numeric)
+    if integer < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    return integer
