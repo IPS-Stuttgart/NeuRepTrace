@@ -263,6 +263,8 @@ def _numeric_column_values(frame: pd.DataFrame, column: str) -> np.ndarray:
 
 
 def _positive_int(value: object) -> int | None:
+    if _is_boolean_scalar(value):
+        return None
     try:
         parsed = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -273,11 +275,17 @@ def _positive_int(value: object) -> int | None:
 
 
 def _positive_float(value: object) -> float | None:
+    if _is_boolean_scalar(value):
+        return None
     try:
         parsed = float(value)
     except (TypeError, ValueError, OverflowError):
         return None
     return parsed if np.isfinite(parsed) and parsed > 0.0 else None
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    return isinstance(value, (bool, np.bool_))
 
 
 def _nanmean(values: object) -> float:
