@@ -11,7 +11,7 @@ checkpoints are reshaped, frozen, pooled, and probed inside fold-local decoding 
 The built-in family names are:
 
 | Family | Decoder alias after registration | Conservative defaults | Typical use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `generic` | `foundation-linear-probe` | `pooling="flatten"`, `input_layout="auto"` | Any project-local encoder or exported TorchScript module. |
 | `bendr` | `bendr-linear-probe` | `pooling="mean_time"`, `input_layout="channels_first"` | BENDR-style backbones consuming `batch x channels x time`. |
 | `labram` | `labram-linear-probe` | `pooling="cls"`, `input_layout="channels_first"` | LaBraM-style transformer exports with class-token embeddings. |
@@ -88,7 +88,7 @@ preferred for reproducible decoding runs.
 Common input controls:
 
 | Parameter | Meaning |
-|---|---|
+| --- | --- |
 | `input_shape` | Reshape each flattened feature row before encoder inference. |
 | `input_layout="channels_first"` | Keep `batch x channels x time`. |
 | `input_layout="time_first"` | Convert `batch x channels x time` to `batch x time x channels`. |
@@ -100,7 +100,7 @@ Common input controls:
 Common output controls:
 
 | Parameter | Meaning |
-|---|---|
+| --- | --- |
 | `output_key` | Select a key from dictionary outputs, including dotted or slash paths. |
 | `output_attribute` | Select an attribute from HuggingFace-like output objects. |
 | `output_index` | Select an index from tuple/list outputs after key/attribute selection. |
