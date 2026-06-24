@@ -210,6 +210,17 @@ def _transform_unsupervised_covariance_alignment_by_subject(
     )
 
 
+def _legacy_public_names() -> list[str]:
+    """Return the public names that legacy ``import *`` would expose."""
+
+    explicit_all = getattr(_legacy, "__all__", None)
+    if explicit_all is not None:
+        names = list(explicit_all)
+    else:
+        names = [name for name in vars(_legacy) if not name.startswith("_")]
+    return list(dict.fromkeys((*names, "RIEMANNIAN_PROCRUSTES_METHOD")))
+
+
 def _install_patches() -> None:
     _legacy.RIEMANNIAN_PROCRUSTES_METHOD = RIEMANNIAN_PROCRUSTES_METHOD
     _legacy.SOURCE_ALIGNMENT_UNSUPERVISED_METHODS = tuple(
@@ -224,7 +235,7 @@ def _install_patches() -> None:
     _legacy._transform_riemannian_procrustes_alignment_by_subject = _transform_riemannian_procrustes_alignment_by_subject
     _legacy._riemannian_procrustes_feature_stats = _riemannian_procrustes_feature_stats
     _legacy._riemannian_procrustes_transform_to_target = _riemannian_procrustes_transform_to_target
-    _legacy.__all__ = list(dict.fromkeys((*getattr(_legacy, "__all__", ()), "RIEMANNIAN_PROCRUSTES_METHOD")))
+    _legacy.__all__ = _legacy_public_names()
 
 
 _install_patches()
