@@ -7,7 +7,7 @@ import importlib
 __all__ = ["__version__"]
 __version__ = "0.1.1"
 
-from neureptrace import (  # noqa: E402
+from . import (  # noqa: E402
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_source_loso_prototype_patch,
     _dataset_config_participant_patch,
@@ -17,6 +17,7 @@ from neureptrace import (  # noqa: E402
     _decoding_probability_patch,
     _decoding_regularization_patch,
     _event_detection_extensions,
+    _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
@@ -45,6 +46,7 @@ _observation_schema_label_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _reconstruction_encoder_config_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
+_mcca_repetition_count_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
 _source_alignment_pseudo_repetition_patch.install()
@@ -54,7 +56,7 @@ _mne_pseudo_alignment_fallback_validity_patch.install()
 _nll_eps_validation_patch.install()
 _sample_weight_validation_patch.install()
 
-from neureptrace import (  # noqa: E402
+from . import (  # noqa: E402
     _source_alignment_cli_choices_patch,
     _source_alignment_contrastive_patch,
     _source_alignment_target_calibration_offsets_patch,
