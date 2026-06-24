@@ -23,7 +23,10 @@ def test_contrastive_and_oracle_source_alignment_patches_compose_in_fresh_interp
         import neureptrace
 
         sa = importlib.import_module("neureptrace.decoding.source_alignment")
+        mne_time_decode = importlib.import_module("neureptrace.mne_time_decode")
         assert sa.normalize_source_alignment_method("contrastive-subject-alignment") == "contrastive"
+        assert "contrastive" in sa.SOURCE_ALIGNMENT_METHODS
+        assert "contrastive" in mne_time_decode.SOURCE_ALIGNMENT_RUN_METHODS
 
         cfg = sa.source_alignment_config(
             method="contrastive",
