@@ -43,6 +43,16 @@ def test_select_few_shot_target_calibration_split_is_balanced_and_disjoint():
     assert {int(label): int(np.count_nonzero(labels[split_a.evaluation_indices] == label)) for label in np.unique(labels)} == {0: 2, 1: 2, 2: 2}
 
 
+def test_select_few_shot_target_calibration_split_rejects_invalid_target_indices():
+    labels = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2])
+
+    with pytest.raises(ValueError, match="target_indices.*boolean"):
+        select_few_shot_target_calibration_split(labels, target_indices=np.array([True, False, True, False, True, False, True, False, True]))
+
+    with pytest.raises(ValueError, match="target_indices.*integer row indices"):
+        select_few_shot_target_calibration_split(labels, target_indices=[0.0, 1.5, 3.0, 4.0, 6.0, 7.0])
+
+
 def test_select_few_shot_target_calibration_split_rejects_if_no_evaluation_rows_remain():
     labels = np.array([0, 1, 0, 1])
 
