@@ -1,4 +1,4 @@
-"""Normalize reconstruction-encoder boolean config values consistently."""
+"""Normalize reconstruction-encoder config values consistently."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_reconstruction_encoder_config_patch_installed"
+_HIDDEN_UNITS_PATCH_MARKER = "_neureptrace_reconstruction_hidden_units_patch_installed"
 
 
 def _normalize_bool(value: Any, *, name: str) -> bool:
@@ -28,6 +29,26 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise ValueError(f"{name} must be a boolean value.")
 
 
+def _install_hidden_units_normalizer(reconstruction_encoder: Any) -> None:
+    original = reconstruction_encoder._normalize_hidden_units
+    if getattr(original, _HIDDEN_UNITS_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def _normalize_hidden_units(value: Any) -> tuple[int, ...]:
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError("hidden_units must be an integer or sequence of integers.")
+        if isinstance(value, (float, np.floating)):
+            return (reconstruction_encoder._normalize_integer(value, name="hidden_units", minimum=1),)
+        try:
+            return original(value)
+        except TypeError as exc:
+            raise ValueError("hidden_units must be an integer or sequence of integers.") from exc
+
+    setattr(_normalize_hidden_units, _HIDDEN_UNITS_PATCH_MARKER, True)
+    reconstruction_encoder._normalize_hidden_units = _normalize_hidden_units
+
+
 def install() -> None:
     """Patch user-facing reconstruction config parsing."""
 
@@ -35,6 +56,7 @@ def install() -> None:
     if getattr(reconstruction_encoder, _PATCH_MARKER, False):
         return
 
+    _install_hidden_units_normalizer(reconstruction_encoder)
     original = reconstruction_encoder.reconstruction_encoder_config
 
     @wraps(original)
