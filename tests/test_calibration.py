@@ -178,3 +178,15 @@ def test_build_calibration_report_writes_markdown(tmp_path: Path):
 
     assert "# NeuRepTrace Calibration Report" in report
     assert "| logistic | 5 | 0.060 | 0.470 | 0.660 | 0.600 |" in report
+
+
+def test_build_calibration_report_defaults_decoder_for_emission_only_summary(tmp_path: Path):
+    summary_csv = tmp_path / "summary.csv"
+    frame = _summary_frame().drop(columns="decoder")
+    frame["emission_mode"] = "calibrated"
+    frame.to_csv(summary_csv, index=False)
+
+    report = build_calibration_report(summary_csv, effect_window=(0.1, 0.2))
+
+    assert "| Decoder | Emission mode |" in report
+    assert "| overall | calibrated | 5 | 0.090 | 0.495 | 0.700 | 0.605 |" in report
