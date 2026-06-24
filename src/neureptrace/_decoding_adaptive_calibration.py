@@ -19,6 +19,21 @@ def _normalize_sample_weight(sample_weight, *, n_rows: int) -> np.ndarray | None
     return weights
 
 
+def _validate_cv(value: object) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("Calibration cv must be an integer at least 2.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Calibration cv must be an integer at least 2.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError("Calibration cv must be an integer at least 2.")
+    requested = int(numeric)
+    if requested < 2:
+        raise ValueError("Calibration cv must be an integer at least 2.")
+    return requested
+
+
 def _fit_with_optional_sample_weight(model, features, labels, sample_weight=None):
     """Fit an estimator and route sample weights through sklearn pipelines.
 
@@ -55,9 +70,7 @@ class AdaptiveCalibratedClassifierCV(ClassifierMixin, BaseEstimator):
         classes, counts = np.unique(labels_array, return_counts=True)
         if classes.shape[0] < 2:
             raise ValueError("Calibration requires at least two classes.")
-        requested = int(self.cv)
-        if requested < 2:
-            raise ValueError("Calibration cv must be at least 2.")
+        requested = _validate_cv(self.cv)
         min_count = int(counts.min())
         self.classes_ = classes
         self.requested_calibration_cv_ = requested
