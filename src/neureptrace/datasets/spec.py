@@ -276,6 +276,29 @@ def _validate_participant_section(spec: Mapping[str, Any]) -> list[str]:
     return messages
 
 
+def _validate_role_section(spec: Mapping[str, Any]) -> list[str]:
+    messages: list[str] = []
+    roles = spec.get("roles")
+    if roles is None:
+        return messages
+    if not isinstance(roles, Mapping):
+        return ["roles section must be a mapping when present"]
+
+    files = _file_templates(spec, allow_missing=True)
+    for role, value in roles.items():
+        if _missing(role):
+            messages.append("roles contains an empty role name")
+        if isinstance(value, Mapping):
+            file_role = value.get("file_role", role)
+        else:
+            file_role = value
+        if _missing(file_role):
+            messages.append(f"roles.{role}.file_role is missing")
+        elif files and str(file_role) not in files:
+            messages.append(f"roles.{role}.file_role='{file_role}' is not defined in participants.files")
+    return messages
+
+
 def _participant_ids(spec: Mapping[str, Any]) -> tuple[str, ...]:
     participants = _mapping(spec, "participants")
     ids = participants.get("ids")
