@@ -36,7 +36,17 @@ def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_sample
     return weights
 
 
+def _labels_contain_boolean(labels: np.ndarray) -> bool:
+    if np.issubdtype(labels.dtype, np.bool_):
+        return True
+    if labels.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in labels.ravel())
+    return False
+
+
 def _coerce_label_indices(labels: np.ndarray) -> np.ndarray:
+    if _labels_contain_boolean(labels):
+        raise ValueError("labels must contain integer class indices")
     if np.issubdtype(labels.dtype, np.integer):
         return labels.astype(int, copy=False)
 
