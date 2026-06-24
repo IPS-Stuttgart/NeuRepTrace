@@ -21,6 +21,7 @@ from . import (  # noqa: E402
     _decoding_probability_patch,
     _decoding_regularization_patch,
     _event_detection_extensions,
+    _few_shot_split_validation_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
     _mne_alignment_calibration_anchor_patch,
@@ -45,6 +46,7 @@ _metadata_column_validation_patch.install()
 _confusion_metadata_lookup_patch.install()
 _confusion_permutation_seed_patch.install()
 _event_detection_extensions.install()
+_few_shot_split_validation_patch.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
@@ -73,9 +75,9 @@ from . import (  # noqa: E402
 )
 
 _source_alignment_contrastive_patch.install()
-# Load source_alignment through the contrastive finder first, then apply the oracle
-# wrapper to the loaded module. Otherwise the later oracle finder can mask the
-# contrastive finder and leave method="contrastive" unregistered at runtime.
+# Import source_alignment here so registered extension hooks compose in order.
+# The contrastive extension must load before the later source-alignment wrapper.
+# This keeps the method registration visible at runtime.
 importlib.import_module("neureptrace.decoding.source_alignment")
 _source_alignment_oracle_patch.install()
 _source_alignment_target_calibration_offsets_patch.install()
