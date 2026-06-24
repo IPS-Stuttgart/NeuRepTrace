@@ -46,6 +46,9 @@ def select_class_limited_indices(
     if max_per_class is None:
         return np.arange(labels.shape[0], dtype=int)
 
+    if isinstance(max_per_class, (bool, np.bool_)):
+        raise ValueError("max_per_class must be positive or None.")
+
     max_per_class = int(max_per_class)
     if max_per_class <= 0:
         raise ValueError("max_per_class must be positive or None.")
@@ -122,6 +125,8 @@ def normalize_class_limit_seed(value: int | str | None) -> int | None:
 
     if value is None or value == "":
         return None
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("seed must be a non-negative integer or None.")
     seed = int(value)
     if seed < 0:
         raise ValueError("seed must be non-negative or None.")
@@ -140,12 +145,18 @@ def _seed_context_values(seed_context: int | Iterable[int] | None) -> list[int]:
     if seed_context is None:
         return []
     if isinstance(seed_context, (str, bytes)) or np.isscalar(seed_context):
-        values = [int(seed_context)]
+        values = [_normalize_seed_context_value(seed_context)]
     else:
         try:
-            values = [int(value) for value in seed_context]
+            values = [_normalize_seed_context_value(value) for value in seed_context]
         except TypeError:
-            values = [int(seed_context)]
+            values = [_normalize_seed_context_value(seed_context)]
     if any(value < 0 for value in values):
         raise ValueError("seed_context values must be non-negative.")
     return values
+
+
+def _normalize_seed_context_value(value: object) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("seed_context values must be non-negative integers.")
+    return int(value)
