@@ -1,5 +1,6 @@
 import numpy as np
 
+import neureptrace.decoding.source_alignment as source_alignment
 from neureptrace.decoding.source_alignment import (
     RIEMANNIAN_PROCRUSTES_METHOD,
     _transform_unsupervised_covariance_alignment_by_subject,
@@ -33,6 +34,15 @@ def _dispersion(features: np.ndarray) -> float:
     centered = features - np.mean(features, axis=0)
     covariance = centered.T @ centered / max(1, features.shape[0] - 1)
     return float(np.sqrt(np.trace(covariance) / features.shape[1]))
+
+
+def test_source_alignment_package_all_keeps_legacy_public_exports():
+    exports = set(source_alignment.__all__)
+
+    assert "align_train_test_features" in exports
+    assert "source_alignment_config" in exports
+    assert "SOURCE_ALIGNMENT_METHODS" in exports
+    assert "RIEMANNIAN_PROCRUSTES_METHOD" in exports
 
 
 def test_riemannian_procrustes_aliases_are_category2_methods():
