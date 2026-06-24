@@ -66,6 +66,24 @@ def test_rank_class_scores_rejects_duplicate_classes() -> None:
         rank_class_scores([[0.8, 0.2]], ["target", "target"], ["target"])
 
 
+def test_rank_class_scores_rejects_multidimensional_y_true() -> None:
+    with pytest.raises(ValueError, match="y_true must be one-dimensional"):
+        rank_class_scores(
+            np.array([[0.9, 0.1], [0.2, 0.8]]),
+            ["target", "distractor"],
+            np.array([["target"], ["distractor"]]),
+        )
+
+
+def test_rank_class_scores_rejects_multidimensional_classes() -> None:
+    with pytest.raises(ValueError, match="classes must be one-dimensional"):
+        rank_class_scores(
+            np.array([[0.9, 0.1]]),
+            np.array([["target", "distractor"]]),
+            ["target"],
+        )
+
+
 def test_rank_class_scores_allows_empty_class_axis() -> None:
     result = rank_class_scores(np.empty((2, 0)), [], ["a", "b"], top_k=(1,))
 
