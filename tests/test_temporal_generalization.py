@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from neureptrace.decoding import make_decoder
 from neureptrace.decoding.temporal_generalization import (
@@ -100,3 +101,27 @@ def test_summarize_temporal_generalization_matrix_groups_rows():
             "is_diagonal": False,
         }
     ]
+
+
+@pytest.mark.parametrize("invalid", [True, np.bool_(False), 1.5, np.nan])
+def test_temporal_generalization_rejects_invalid_center_decimals(invalid):
+    with pytest.raises(ValueError, match="center_decimals"):
+        compute_temporal_generalization_matrix(
+            [_window(0.0, [-1.0, 1.0], [0, 1])],
+            [_window(0.0, [-1.0, 1.0], [0, 1])],
+            fit_model=lambda window: window,
+            predict_labels=lambda _model, window: window.labels,
+            center_decimals=invalid,
+        )
+
+
+@pytest.mark.parametrize("invalid", [True, np.bool_(False), np.nan, -0.1, 1.1])
+def test_temporal_generalization_rejects_invalid_chance_accuracy(invalid):
+    with pytest.raises(ValueError, match="chance_accuracy"):
+        compute_temporal_generalization_matrix(
+            [_window(0.0, [-1.0, 1.0], [0, 1])],
+            [_window(0.0, [-1.0, 1.0], [0, 1])],
+            fit_model=lambda window: window,
+            predict_labels=lambda _model, window: window.labels,
+            chance_accuracy=invalid,
+        )
