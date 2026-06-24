@@ -63,10 +63,22 @@ def test_select_class_limited_indices_accepts_mixed_hashable_labels():
 def test_select_class_limited_indices_validates_inputs():
     with pytest.raises(ValueError, match="max_per_class"):
         select_class_limited_indices([1, 2], 0)
+    with pytest.raises(ValueError, match="max_per_class"):
+        select_class_limited_indices([1, 2], 1.5)
+    with pytest.raises(ValueError, match="max_per_class"):
+        select_class_limited_indices([1, 2], True)
     with pytest.raises(ValueError, match="selection"):
         select_class_limited_indices([1, 2], 1, selection="middle")
     with pytest.raises(ValueError, match="seed"):
         normalize_class_limit_seed(-1)
+    with pytest.raises(ValueError, match="seed"):
+        normalize_class_limit_seed(1.5)
+    with pytest.raises(ValueError, match="seed"):
+        normalize_class_limit_seed(True)
+    with pytest.raises(ValueError, match="seed_context"):
+        select_class_limited_indices([1, 1, 1], 1, seed_context=1.25)
+    with pytest.raises(ValueError, match="seed_context"):
+        select_class_limited_indices([1, 1, 1], 1, seed_context=[0, True])
 
 
 def test_class_limit_normalizers_accept_aliases_and_empty_seed():
@@ -74,3 +86,4 @@ def test_class_limit_normalizers_accept_aliases_and_empty_seed():
     assert normalize_class_limit_selection("first") == "first"
     assert normalize_class_limit_seed(7) == 7
     assert normalize_class_limit_seed("") is None
+    assert normalize_class_limit_seed("  ") is None
