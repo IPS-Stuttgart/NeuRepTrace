@@ -28,6 +28,10 @@ DEFAULT_BAND_FEATURE_OUTPUTS = (
 )
 
 
+def _is_bool_like(value: object) -> bool:
+    return isinstance(value, (bool, np.bool_))
+
+
 @dataclass(frozen=True)
 class BandFeatureWindow:
     """Named time window in seconds for oscillatory feature extraction."""
@@ -42,8 +46,9 @@ class BandFeatureWindow:
 
 
 def _normalize_axis(axis: int, ndim: int) -> int:
-    if not isinstance(axis, int):
+    if _is_bool_like(axis) or not isinstance(axis, (int, np.integer)):
         raise ValueError("axis must be an integer.")
+    axis = int(axis)
     if axis < 0:
         axis += ndim
     if axis < 0 or axis >= ndim:
@@ -64,9 +69,48 @@ def _validate_signal_time_axis(signal, time_vector, *, time_axis: int = -1) -> t
     return signal, time_vector, sampling_rate_from_time_axis(time_vector), time_axis
 
 
+def _window_endpoint_message(name: str, *, allow_negative_infinity: bool = False, allow_positive_infinity: bool = False) -> str:
+    if allow_negative_infinity:
+        expected = "finite or -inf"
+    elif allow_positive_infinity:
+        expected = "finite or inf"
+    else:
+        expected = "finite"
+    return f"window {name} must be {expected}."
+
+
+def _normalize_window_endpoint(
+    value: object,
+    *,
+    name: str,
+    allow_negative_infinity: bool = False,
+    allow_positive_infinity: bool = False,
+) -> float:
+    message = _window_endpoint_message(
+        name,
+        allow_negative_infinity=allow_negative_infinity,
+        allow_positive_infinity=allow_positive_infinity,
+    )
+    if _is_bool_like(value):
+        raise ValueError(message)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if np.isfinite(numeric):
+        return numeric
+    if allow_negative_infinity and np.isneginf(numeric):
+        return numeric
+    if allow_positive_infinity and np.isposinf(numeric):
+        return numeric
+    raise ValueError(message)
+
+
 def _normalize_window(window, *, default_name: str = "window") -> BandFeatureWindow:
     if isinstance(window, BandFeatureWindow):
-        normalized = window
+        name = str(window.name)
+        start = window.start
+        stop = window.stop
     elif isinstance(window, Mapping):
         name = str(window.get("name", default_name))
         try:
@@ -74,20 +118,24 @@ def _normalize_window(window, *, default_name: str = "window") -> BandFeatureWin
             stop = window["stop"]
         except KeyError as exc:
             raise ValueError("window mappings must contain 'start' and 'stop'.") from exc
-        normalized = BandFeatureWindow(name, float(start), float(stop))
     else:
         values = tuple(window)
         if len(values) == 2:
-            normalized = BandFeatureWindow(default_name, float(values[0]), float(values[1]))
+            name = default_name
+            start = values[0]
+            stop = values[1]
         elif len(values) == 3:
-            normalized = BandFeatureWindow(str(values[0]), float(values[1]), float(values[2]))
+            name = str(values[0])
+            start = values[1]
+            stop = values[2]
         else:
             raise ValueError("windows must be BandFeatureWindow objects, mappings, (start, stop), or (name, start, stop).")
 
-    if not np.isfinite(normalized.start) and not np.isneginf(normalized.start):
-        raise ValueError("window start must be finite or -inf.")
-    if not np.isfinite(normalized.stop) and not np.isposinf(normalized.stop):
-        raise ValueError("window stop must be finite or inf.")
+    normalized = BandFeatureWindow(
+        name,
+        _normalize_window_endpoint(start, name="start", allow_negative_infinity=True),
+        _normalize_window_endpoint(stop, name="stop", allow_positive_infinity=True),
+    )
     if normalized.start >= normalized.stop:
         raise ValueError("time_window start must be before stop.")
     return normalized
