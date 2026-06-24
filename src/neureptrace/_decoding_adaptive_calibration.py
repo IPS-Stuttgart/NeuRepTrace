@@ -8,14 +8,24 @@ from sklearn.base import BaseEstimator, ClassifierMixin, clone
 _MARKER = "_neureptrace_adaptive_calibration_installed"
 
 
+def _sample_weight_has_boolean_values(sample_weight) -> bool:
+    values = np.asarray(sample_weight, dtype=object).reshape(-1)
+    return any(isinstance(value, (bool, np.bool_)) for value in values)
+
+
 def _normalize_sample_weight(sample_weight, *, n_rows: int) -> np.ndarray | None:
     if sample_weight is None:
         return None
-    weights = np.asarray(sample_weight, dtype=float).reshape(-1)
+    if _sample_weight_has_boolean_values(sample_weight):
+        raise ValueError("sample_weight must contain finite non-negative numeric values, not booleans.")
+    try:
+        weights = np.asarray(sample_weight, dtype=float).reshape(-1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("sample_weight must contain finite non-negative numeric values.") from exc
     if weights.shape[0] != int(n_rows):
         raise ValueError("sample_weight must contain one weight per label.")
     if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
-        raise ValueError("sample_weight must contain finite non-negative values.")
+        raise ValueError("sample_weight must contain finite non-negative numeric values.")
     return weights
 
 
