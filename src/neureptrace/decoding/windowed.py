@@ -295,6 +295,8 @@ def _normalize_pca_components(components_pca: int | float | str | None, features
 
     if components_pca is None:
         return None
+    if isinstance(components_pca, (bool, np.bool_)):
+        raise ValueError(_pca_components_error_message())
     if isinstance(components_pca, str):
         normalized = components_pca.strip().lower()
         if normalized in {"", "all", "inf", "infinity", "none"}:
