@@ -276,29 +276,6 @@ def _validate_participant_section(spec: Mapping[str, Any]) -> list[str]:
     return messages
 
 
-def _validate_role_section(spec: Mapping[str, Any]) -> list[str]:
-    messages: list[str] = []
-    roles = spec.get("roles")
-    if roles is None:
-        return messages
-    if not isinstance(roles, Mapping):
-        return ["roles section must be a mapping when present"]
-
-    files = _file_templates(spec, allow_missing=True)
-    for role, value in roles.items():
-        if _missing(role):
-            messages.append("roles contains an empty role name")
-        if isinstance(value, Mapping):
-            file_role = value.get("file_role", role)
-        else:
-            file_role = value
-        if _missing(file_role):
-            messages.append(f"roles.{role}.file_role is missing")
-        elif files and str(file_role) not in files:
-            messages.append(f"roles.{role}.file_role='{file_role}' is not defined in participants.files")
-    return messages
-
-
 def _participant_ids(spec: Mapping[str, Any]) -> tuple[str, ...]:
     participants = _mapping(spec, "participants")
     ids = participants.get("ids")
@@ -364,12 +341,20 @@ def _resolve_path(value: str | os.PathLike[str], *, base_dir: Path) -> Path:
     return path.resolve()
 
 
+def _reject_boolean_participant_identifier(value: Any) -> None:
+    if isinstance(value, bool):
+        raise ValueError("participants.ids must not contain boolean identifiers")
+
+
 def _expand_participant_token(token: Any) -> list[str]:
+    _reject_boolean_participant_identifier(token)
     if isinstance(token, Mapping):
         if "range" in token:
             return _expand_range_value(token["range"])
         if "id" in token:
-            return [str(token["id"])]
+            identifier = token["id"]
+            _reject_boolean_participant_identifier(identifier)
+            return [str(identifier)]
         raise ValueError(f"Unsupported participant token mapping: {token}")
 
     if isinstance(token, int):
@@ -384,10 +369,14 @@ def _expand_participant_token(token: Any) -> list[str]:
 
 
 def _expand_range_value(value: Any) -> list[str]:
+    _reject_boolean_participant_identifier(value)
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         if len(value) != 2:
             raise ValueError(f"Participant range sequences must contain exactly two values: {value}")
-        return _range_ids(str(value[0]), str(value[1]))
+        start, stop = value
+        _reject_boolean_participant_identifier(start)
+        _reject_boolean_participant_identifier(stop)
+        return _range_ids(str(start), str(stop))
 
     text = str(value).strip()
     match = _RANGE_PATTERN.match(text)
