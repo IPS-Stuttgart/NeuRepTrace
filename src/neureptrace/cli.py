@@ -15,6 +15,7 @@ COMMAND_MODULES = {
     "benchmark": "neureptrace.benchmark",
     "bushmeg-artifact-diff": "neureptrace.bushmeg_artifact_diff",
     "bushmeg-data": "neureptrace.bushmeg_data",
+    "bushmeg-category2-autoencoder-loso": "neureptrace.bushmeg_category2_autoencoder_loso",
     "bushmeg-covariance-loso": "neureptrace.bushmeg_covariance_loso",
     "bushmeg-source-loso": "neureptrace.bushmeg_source_loso",
     "bushmeg-source-loso-ensemble": "neureptrace.bushmeg_source_loso_ensemble",

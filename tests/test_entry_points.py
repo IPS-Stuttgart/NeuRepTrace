@@ -67,3 +67,10 @@ def test_emission_compare_entry_points_are_exposed():
 
     assert scripts["neureptrace-emission-compare"] == "neureptrace.emission_compare:main"
     assert COMMAND_MODULES["emission-compare"] == "neureptrace.emission_compare"
+
+
+def test_bushmeg_category2_autoencoder_entry_points_are_exposed():
+    scripts = _poetry_scripts()
+
+    assert scripts["neureptrace-bushmeg-category2-autoencoder-loso"] == "neureptrace.bushmeg_category2_autoencoder_loso:main"
+    assert COMMAND_MODULES["bushmeg-category2-autoencoder-loso"] == "neureptrace.bushmeg_category2_autoencoder_loso"
