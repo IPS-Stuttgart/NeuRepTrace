@@ -21,7 +21,7 @@ def rank_class_scores(
     rank summaries are undefined and returned as ``NaN``.
     """
 
-    y_true = np.asarray(y_true, dtype=object).ravel()
+    y_true = _label_vector(y_true, name="y_true")
     top_k = tuple(_validate_integer(k, name="top_k", minimum=1) for k in top_k)
     row_top_k = _validate_integer(row_top_k, name="row_top_k", minimum=0)
     if not class_column:
@@ -31,7 +31,7 @@ def rank_class_scores(
         return _empty_class_rank_result(y_true, top_k)
 
     score_matrix = np.asarray(scores, dtype=float)
-    class_order = np.asarray(classes, dtype=object).ravel()
+    class_order = _label_vector(classes, name="classes")
     if score_matrix.ndim != 2:
         raise ValueError("scores must be a two-dimensional matrix.")
     if score_matrix.shape[0] != y_true.shape[0]:
@@ -74,6 +74,15 @@ def rank_class_scores(
         "median_true_label_rank": _finite_nanmedian(true_label_ranks),
         "rows": rows,
     }
+
+
+def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
+    vector = np.asarray(values, dtype=object)
+    if vector.ndim == 0:
+        return vector.reshape(1)
+    if vector.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional.")
+    return vector
 
 
 def _validate_integer(value: object, *, name: str, minimum: int) -> int:
