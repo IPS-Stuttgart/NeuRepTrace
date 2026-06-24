@@ -28,6 +28,7 @@ from . import (  # noqa: E402
     _nll_eps_validation_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
+    _paired_stats_tie_patch,
     _reconstruction_encoder_config_patch,
     _sample_weight_validation_patch,
     _response_window_time_validation_patch,
@@ -65,6 +66,7 @@ _mne_pseudo_alignment_fallback_validity_patch.install()
 _nll_eps_validation_patch.install()
 _sample_weight_validation_patch.install()
 _response_window_time_validation_patch.install()
+_paired_stats_tie_patch.install()
 
 from . import (  # noqa: E402
     _source_alignment_cli_choices_patch,
