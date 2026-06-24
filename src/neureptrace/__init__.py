@@ -43,6 +43,7 @@ _source_alignment_optimal_transport_patch.install()
 _mne_alignment_calibration_anchor_patch.install()
 
 from neureptrace import (  # noqa: E402
+    _source_alignment_cli_choices_patch,
     _source_alignment_contrastive_patch,
     _source_alignment_target_calibration_offsets_patch,
 )
@@ -54,3 +55,4 @@ _source_alignment_contrastive_patch.install()
 importlib.import_module("neureptrace.decoding.source_alignment")
 _source_alignment_oracle_patch.install()
 _source_alignment_target_calibration_offsets_patch.install()
+_source_alignment_cli_choices_patch.install()
