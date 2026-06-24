@@ -2,9 +2,12 @@
 
 YAML booleans are instances of integer-like scalar types in Python.  Without an
 explicit guard, values such as ``latent_dim: true`` or ``classifier_c: true`` are
-silently coerced to ``1``/``1.0``.  That turns misspecified configs into valid but
-unintended BUSH-MEG Category-2 autoencoder runs.  This patch preserves the
-existing parser surface while rejecting boolean values before numeric coercion.
+silently coerced to ``1``/``1.0``.  Fractional integer controls can also be
+silently truncated by ``int(...)``; for example, ``temporal_bins: 1.5`` becomes
+``1``.  That turns misspecified configs into valid but unintended BUSH-MEG
+Category-2 autoencoder runs.  This patch preserves the existing parser surface
+while rejecting boolean values and fractional integer controls before numeric
+coercion.
 """
 
 from __future__ import annotations
@@ -26,6 +29,14 @@ def _is_boolean_scalar(value: Any) -> bool:
     return isinstance(value, (bool, np.bool_))
 
 
+def _is_fractional_integer_value(value: Any) -> bool:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return bool(np.isfinite(number) and number % 1.0 != 0.0)
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
@@ -34,7 +45,7 @@ def _patch_module(module: ModuleType) -> None:
     original_positive_float = module._positive_float
 
     def _positive_int(value: Any, *, name: str, minimum: int = 1) -> int:
-        if _is_boolean_scalar(value):
+        if _is_boolean_scalar(value) or _is_fractional_integer_value(value):
             raise ValueError(f"{name} must be an integer.")
         return original_positive_int(value, name=name, minimum=minimum)
 
@@ -82,7 +93,7 @@ class _Category2AutoencoderConfigPatchFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Install boolean-value validation for the Category-2 autoencoder config."""
+    """Install boolean and fractional-integer validation for the Category-2 autoencoder config."""
 
     loaded = sys.modules.get(_TARGET_MODULE)
     if loaded is not None:
