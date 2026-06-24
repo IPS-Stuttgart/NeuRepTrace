@@ -75,6 +75,9 @@ from . import (  # noqa: E402
 )
 
 _source_alignment_contrastive_patch.install()
+# Import source_alignment here so registered extension hooks compose in order.
+# The contrastive extension must load before the later source-alignment wrapper.
+# This keeps the method registration visible at runtime.
 importlib.import_module("neureptrace.decoding.source_alignment")
 _source_alignment_oracle_patch.install()
 _source_alignment_target_calibration_offsets_patch.install()
