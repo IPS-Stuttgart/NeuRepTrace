@@ -13,6 +13,7 @@ from . import (  # noqa: E402
     _bushmeg_source_loso_prototype_patch,
     _confusion_metadata_lookup_patch,
     _confusion_permutation_seed_patch,
+    _correlation_prototype_sample_weight_patch,
     _dataset_config_participant_patch,
     _dataset_name_config_patch,
     _decoding_adaptive_calibration,
@@ -44,6 +45,7 @@ _dataset_name_config_patch.install()
 _metadata_column_validation_patch.install()
 _confusion_metadata_lookup_patch.install()
 _confusion_permutation_seed_patch.install()
+_correlation_prototype_sample_weight_patch.install()
 _event_detection_extensions.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
