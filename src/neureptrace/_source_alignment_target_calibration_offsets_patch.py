@@ -5,12 +5,13 @@ last installed hook is the one that sees a future ``decoding.source_alignment``
 import first, so this final patch explicitly applies the earlier source-alignment
 patches in the intended order before adding its own guardrail.
 
-The guardrail fixes target-calibrated class-repetition projections.  Source fits
-may select arbitrary source repetition offsets, but separately prepared target
-calibration matrices are local calibration subsets.  Reusing source repetition
-offsets on those calibration rows can index outside the available target
-calibration repetitions or silently pick the wrong rows.  For calibrated target
-projection modes we therefore use offsets local to the calibration matrix.
+The guardrail fixes target-calibrated and oracle class-repetition projections.
+Source fits may select arbitrary source repetition offsets, but separately
+prepared target calibration matrices and held-out oracle target matrices are
+local target rows.  Reusing source repetition offsets on those rows can index
+outside the available target repetitions or silently pick the wrong rows.  For
+those target projection modes we therefore use offsets local to the target
+matrix.
 """
 
 from __future__ import annotations
@@ -62,7 +63,11 @@ def _calibrated_projection_repetition_offsets(
 
     if n_repetitions_per_class is None:
         return selected_offsets_by_class
-    if not bool(getattr(config, "target_calibrated", False) or getattr(config, "pseudo_label_target_calibrated", False)):
+    if not bool(
+        getattr(config, "target_calibrated", False)
+        or getattr(config, "pseudo_label_target_calibrated", False)
+        or getattr(config, "oracle_target_calibrated", False)
+    ):
         return selected_offsets_by_class
 
     repetitions = int(n_repetitions_per_class)

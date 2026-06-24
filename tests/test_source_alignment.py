@@ -789,11 +789,7 @@ def test_target_class_repetition_alignment_reuses_source_offsets():
         features,
         labels,
         classes=np.array([0, 1]),
-        config=source_alignment_config(
-            method="mcca",
-            anchor_mode="class_repetition",
-            target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
-        ),
+        config=source_alignment_config(method="mcca", anchor_mode="class_repetition"),
         n_repetitions_per_class=2,
         selected_offsets_by_class=selected_offsets,
     )
@@ -804,11 +800,7 @@ def test_target_class_repetition_alignment_reuses_source_offsets():
             features,
             labels,
             classes=np.array([0, 1]),
-            config=source_alignment_config(
-                method="mcca",
-                anchor_mode="class_repetition",
-                target_projection=ORACLE_TARGET_CALIBRATED_ALIGNMENT,
-            ),
+            config=source_alignment_config(method="mcca", anchor_mode="class_repetition"),
             n_repetitions_per_class=2,
             selected_offsets_by_class={0: np.array([1, 9]), 1: np.array([0, 2])},
         )
