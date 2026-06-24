@@ -83,7 +83,9 @@ def _patch_source_alignment(source_alignment: ModuleType) -> None:
         return original_normalize_method(method)
 
     def _uses_unlabeled_covariance_alignment(method: str) -> bool:
-        return method in _OT_METHODS or bool(original_uses_unlabeled(method))
+        if _normalize_ot_method(method) in _OT_METHODS:
+            return True
+        return bool(original_uses_unlabeled(method))
 
     def _transform_unsupervised_covariance_alignment_by_subject(
         features_by_subject: Mapping[Hashable, np.ndarray],

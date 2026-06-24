@@ -3,6 +3,7 @@ import pytest
 
 from neureptrace.decoding.source_alignment import (
     _transform_unsupervised_covariance_alignment_by_subject,
+    _uses_unlabeled_covariance_alignment,
     align_train_test_features,
     normalize_source_alignment_method,
     source_alignment_anchor_availability,
@@ -30,11 +31,13 @@ def _shifted_domains():
         "wasserstein",
         "sinkhorn",
         "sinkhorn_ot",
+        "sinkhorn_transport",
         "barycentric_transport",
     ],
 )
 def test_optimal_transport_alignment_aliases(alias):
     assert normalize_source_alignment_method(alias) == "sinkhorn_transport"
+    assert _uses_unlabeled_covariance_alignment(alias) is True
 
 
 def test_sinkhorn_transport_alignment_is_unlabeled_category2():
