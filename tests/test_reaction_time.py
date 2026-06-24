@@ -31,6 +31,19 @@ def test_load_reaction_time_csv_converts_one_based_trials(tmp_path: Path):
     ]
 
 
+@pytest.mark.parametrize("trial_index_base", [False, True])
+def test_load_reaction_time_csv_rejects_boolean_trial_index_base(tmp_path: Path, trial_index_base: bool):
+    csv_path = tmp_path / "rt.csv"
+    csv_path.write_text(
+        "participant,dataset,trial,rt\n"
+        "2,main,1,0.41\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="trial_index_base must be one of"):
+        load_reaction_time_csv(csv_path, ReactionTimeCsvConfig(trial_index_base=trial_index_base))
+
+
 @pytest.mark.parametrize("trial_value", ["1.5", "nan", "inf", ""])
 def test_load_reaction_time_csv_rejects_invalid_trial_values(tmp_path: Path, trial_value: str):
     csv_path = tmp_path / "rt.csv"
