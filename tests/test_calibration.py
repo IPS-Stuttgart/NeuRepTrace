@@ -33,6 +33,33 @@ def test_summarize_calibration_metrics_orders_by_effect_ece():
     assert summary["best_ece_time"].tolist() == [0.15, 0.15]
 
 
+@pytest.mark.parametrize(
+    "bad_window",
+    [
+        True,
+        "0.1,0.2",
+        (False, 0.2),
+        (0.1, np.bool_(True)),
+        (0.1, np.inf),
+        (0.2, 0.1),
+        (0.1,),
+        (0.1, 0.2, 0.3),
+    ],
+)
+def test_summarize_calibration_metrics_rejects_malformed_time_windows(bad_window):
+    with pytest.raises(ValueError, match="effect_window"):
+        summarize_calibration_metrics(_summary_frame(), effect_window=bad_window)
+
+
+def test_build_calibration_report_normalizes_numeric_window_endpoints(tmp_path: Path):
+    summary_csv = tmp_path / "summary.csv"
+    _summary_frame().to_csv(summary_csv, index=False)
+
+    report = build_calibration_report(summary_csv, effect_window=("0.1", "0.2"))
+
+    assert "- Effect window: 0.100 to 0.200 s" in report
+
+
 def test_summarize_calibration_metrics_rejects_non_finite_values():
     frame = _summary_frame()
     frame.loc[0, "log_loss_mean"] = np.inf

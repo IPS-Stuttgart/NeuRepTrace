@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +45,34 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
         else:
             paths.append(Path(pattern))
     return paths
+
+
+def _validate_time_window(window: Sequence[object], *, name: str) -> tuple[float, float]:
+    if isinstance(window, (str, bytes)):
+        raise ValueError(f"{name} must contain exactly two finite numeric endpoints.")
+    try:
+        values = tuple(window)
+    except TypeError as exc:
+        raise ValueError(f"{name} must contain exactly two finite numeric endpoints.") from exc
+    if len(values) != 2:
+        raise ValueError(f"{name} must contain exactly two finite numeric endpoints.")
+
+    endpoints: list[float] = []
+    for value in values:
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(f"{name} endpoints must be finite numeric values, not booleans.")
+        try:
+            endpoint = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} endpoints must be finite numeric values.") from exc
+        if not np.isfinite(endpoint):
+            raise ValueError(f"{name} endpoints must be finite numeric values.")
+        endpoints.append(endpoint)
+
+    start, stop = endpoints
+    if stop < start:
+        raise ValueError(f"{name} stop must be greater than or equal to start.")
+    return start, stop
 
 
 def _window_mean(frame: pd.DataFrame, column: str, start: float, stop: float) -> float:
@@ -108,6 +137,8 @@ def summarize_calibration_metrics(
     effect_window: tuple[float, float] = (0.1, 0.8),
 ) -> pd.DataFrame:
     """Summarize accuracy and calibration metrics over benchmark time windows."""
+    baseline_window = _validate_time_window(baseline_window, name="baseline_window")
+    effect_window = _validate_time_window(effect_window, name="effect_window")
     summary = _validate_calibration_summary(summary)
 
     group_columns = _present_group_columns(summary)
@@ -290,6 +321,8 @@ def build_calibration_report(
     effect_window: tuple[float, float] = (0.1, 0.8),
 ) -> str:
     """Build a Markdown report that foregrounds calibration metrics."""
+    baseline_window = _validate_time_window(baseline_window, name="baseline_window")
+    effect_window = _validate_time_window(effect_window, name="effect_window")
     summary = summarize_calibration_metrics(
         pd.read_csv(summary_csv),
         baseline_window=baseline_window,
