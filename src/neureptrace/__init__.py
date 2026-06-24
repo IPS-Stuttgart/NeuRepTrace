@@ -8,6 +8,7 @@ __all__ = ["__version__"]
 __version__ = "0.1.1"
 
 from . import (  # noqa: E402
+    _alignment_window_config_patch,
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_source_loso_prototype_patch,
     _confusion_metadata_lookup_patch,
@@ -34,6 +35,7 @@ from . import (  # noqa: E402
     _source_alignment_pseudo_repetition_patch,
 )
 
+_alignment_window_config_patch.install()
 _dataset_config_participant_patch.install()
 _metadata_column_validation_patch.install()
 _confusion_metadata_lookup_patch.install()
