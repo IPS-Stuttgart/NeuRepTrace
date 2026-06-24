@@ -9,6 +9,7 @@ import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Any
 
@@ -191,9 +192,28 @@ def _validate_schema_version(spec: Mapping[str, Any]) -> list[str]:
     version = spec.get("schema_version")
     if version is None:
         messages.append("schema_version is missing")
-    elif int(version) != SUPPORTED_SCHEMA_VERSION:
+        return messages
+
+    parsed_version = _parse_schema_version(version)
+    if parsed_version is None:
+        messages.append(f"schema_version must be an integer value; got {version!r}")
+    elif parsed_version != SUPPORTED_SCHEMA_VERSION:
         messages.append(f"unsupported schema_version={version}; expected {SUPPORTED_SCHEMA_VERSION}")
     return messages
+
+
+def _parse_schema_version(version: Any) -> int | None:
+    if isinstance(version, bool):
+        return None
+    if isinstance(version, Integral):
+        return int(version)
+    if isinstance(version, Real) and float(version).is_integer():
+        return int(version)
+    if isinstance(version, str):
+        text = version.strip()
+        if text.isdigit():
+            return int(text)
+    return None
 
 
 def _validate_dataset_section(spec: Mapping[str, Any], *, base_dir: Path, check_exists: bool) -> list[str]:
