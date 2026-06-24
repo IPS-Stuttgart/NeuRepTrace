@@ -24,6 +24,7 @@ from neureptrace import (  # noqa: E402
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
     _reconstruction_encoder_config_patch,
+    _sample_weight_validation_patch,
     _source_alignment_anchor_patch,
     _source_alignment_optimal_transport_patch,
     _source_alignment_oracle_patch,
@@ -51,6 +52,7 @@ _source_alignment_optimal_transport_patch.install()
 _mne_alignment_calibration_anchor_patch.install()
 _mne_pseudo_alignment_fallback_validity_patch.install()
 _nll_eps_validation_patch.install()
+_sample_weight_validation_patch.install()
 
 from neureptrace import (  # noqa: E402
     _source_alignment_cli_choices_patch,
