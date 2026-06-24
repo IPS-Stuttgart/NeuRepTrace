@@ -16,3 +16,6 @@ def check_validate_sample_weight_requires_numeric_scalars() -> None:
         assert "numeric weights" in str(exc)
     else:
         raise AssertionError("expected sample-weight validation to fail")
+
+
+test_validate_sample_weight_requires_numeric_scalars = check_validate_sample_weight_requires_numeric_scalars
