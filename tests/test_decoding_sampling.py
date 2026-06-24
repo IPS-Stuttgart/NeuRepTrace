@@ -69,6 +69,19 @@ def test_select_class_limited_indices_validates_inputs():
         normalize_class_limit_seed(-1)
 
 
+def test_select_class_limited_indices_rejects_bool_numeric_inputs():
+    with pytest.raises(ValueError, match="max_per_class"):
+        select_class_limited_indices([1, 2], True)
+    with pytest.raises(ValueError, match="seed"):
+        normalize_class_limit_seed(True)
+    with pytest.raises(ValueError, match="seed"):
+        normalize_class_limit_seed(np.bool_(True))
+    with pytest.raises(ValueError, match="seed_context"):
+        select_class_limited_indices([1, 1, 1], 1, seed_context=True)
+    with pytest.raises(ValueError, match="seed_context"):
+        select_class_limited_indices([1, 1, 1], 1, seed_context=[0, np.bool_(False)])
+
+
 def test_class_limit_normalizers_accept_aliases_and_empty_seed():
     assert normalize_class_limit_selection("random") == "random"
     assert normalize_class_limit_selection("first") == "first"
