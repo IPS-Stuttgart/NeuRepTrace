@@ -12,6 +12,14 @@ from collections.abc import Iterable
 import numpy as np
 
 
+def _weights_contain_boolean(weights: np.ndarray) -> bool:
+    if np.issubdtype(weights.dtype, np.bool_):
+        return True
+    if weights.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in weights.ravel())
+    return False
+
+
 def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_samples: int) -> np.ndarray:
     """Return validated non-negative per-sample weights.
 
@@ -22,7 +30,16 @@ def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_sample
     n_samples:
         Expected number of samples.
     """
-    weights = np.asarray(sample_weight, dtype=float)
+    try:
+        raw_weights = np.asarray(sample_weight)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("sample_weight must have shape (n_samples,)") from exc
+    if _weights_contain_boolean(raw_weights):
+        raise ValueError("sample_weight must contain numeric weights, not boolean values")
+    try:
+        weights = raw_weights.astype(float, copy=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("sample_weight must contain numeric weights") from exc
     if weights.ndim != 1:
         raise ValueError("sample_weight must have shape (n_samples,)")
     if weights.shape[0] != n_samples:
