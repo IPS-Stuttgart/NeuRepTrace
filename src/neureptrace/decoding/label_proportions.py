@@ -78,9 +78,9 @@ def normalize_label_proportions(
         class_order = tuple(target_proportions.keys()) if classes is None else tuple(classes)
         if not class_order:
             raise ValueError("classes must contain at least one class when target_proportions is a mapping.")
-        values = np.asarray([target_proportions.get(class_label, 0.0) for class_label in class_order], dtype=float)
+        values = _proportion_values_to_float_array([target_proportions.get(class_label, 0.0) for class_label in class_order])
     else:
-        values = np.asarray(target_proportions, dtype=float).reshape(-1)
+        values = _proportion_values_to_float_array(target_proportions)
         class_order = tuple(range(values.size)) if classes is None else tuple(classes)
         if len(class_order) != values.size:
             raise ValueError(
@@ -322,6 +322,16 @@ def _lookup_block_proportions(
         if default_proportions is not None:
             return default_proportions
         raise KeyError(f"Missing target label proportions for block {block!r}.") from None
+
+
+def _proportion_values_to_float_array(values: Any) -> np.ndarray:
+    raw = np.asarray(values, dtype=object).reshape(-1)
+    if any(isinstance(value, (bool, np.bool_)) for value in raw):
+        raise ValueError("target_proportions must be numeric counts or proportions, not boolean flags.")
+    try:
+        return raw.astype(float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("target_proportions must be finite and non-negative.") from exc
 
 
 def _base_metadata(
