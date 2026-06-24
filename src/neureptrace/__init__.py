@@ -8,6 +8,7 @@ __all__ = ["__version__"]
 __version__ = "0.1.1"
 
 from neureptrace import (  # noqa: E402
+    _bushmeg_all_protocols_subject_loader_patch,
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_source_loso_prototype_patch,
     _dataset_config_participant_patch,
@@ -45,6 +46,7 @@ _observation_schema_label_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _reconstruction_encoder_config_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
+_bushmeg_all_protocols_subject_loader_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
 _source_alignment_pseudo_repetition_patch.install()
