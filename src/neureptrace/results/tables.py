@@ -42,7 +42,7 @@ def summarize_metric_table(
     working = frame.copy()
     working[value_column] = pd.to_numeric(working[value_column], errors="coerce") * scale
     if chance_column is not None:
-        working[chance_column] = pd.to_numeric(working[chance_column], errors="coerce") * scale
+        working[chance_column] = _numeric_without_booleans(working[chance_column]) * scale
 
     rows: list[dict[str, object]] = []
     for group_key, group in _iter_groups(working, group_columns):
@@ -189,6 +189,12 @@ def _series_summary(values: pd.Series, *, zero_singleton_dispersion: bool) -> tu
 def _finite_array(values: object) -> np.ndarray:
     parsed = pd.to_numeric(pd.Series(values), errors="coerce").to_numpy(dtype=float)
     return parsed[np.isfinite(parsed)]
+
+
+def _numeric_without_booleans(values: object) -> pd.Series:
+    series = pd.Series(values)
+    boolean_mask = series.map(_is_boolean_scalar)
+    return pd.to_numeric(series.mask(boolean_mask), errors="coerce")
 
 
 def _scaled_or_nan(value: object, scale: float) -> float:
