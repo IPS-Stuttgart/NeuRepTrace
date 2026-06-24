@@ -46,9 +46,7 @@ def select_class_limited_indices(
     if max_per_class is None:
         return np.arange(labels.shape[0], dtype=int)
 
-    max_per_class = int(max_per_class)
-    if max_per_class <= 0:
-        raise ValueError("max_per_class must be positive or None.")
+    max_per_class = _normalize_integer(max_per_class, name="max_per_class", minimum=1)
     selection = normalize_class_limit_selection(selection)
 
     if selection == "first":
@@ -117,15 +115,27 @@ def normalize_class_limit_selection(value: str) -> str:
     return normalized
 
 
+def _normalize_integer(value, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    integer = int(number)
+    if minimum is not None and integer < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    return integer
+
+
 def normalize_class_limit_seed(value: int | str | None) -> int | None:
     """Normalize a deterministic class-limit seed value."""
 
-    if value is None or value == "":
+    if value is None or (isinstance(value, str) and value.strip() == ""):
         return None
-    seed = int(value)
-    if seed < 0:
-        raise ValueError("seed must be non-negative or None.")
-    return seed
+    return _normalize_integer(value, name="seed", minimum=0)
 
 
 def _class_limit_rng(seed: int | str | None, seed_context: int | Iterable[int] | None):
@@ -140,12 +150,8 @@ def _seed_context_values(seed_context: int | Iterable[int] | None) -> list[int]:
     if seed_context is None:
         return []
     if isinstance(seed_context, (str, bytes)) or np.isscalar(seed_context):
-        values = [int(seed_context)]
-    else:
-        try:
-            values = [int(value) for value in seed_context]
-        except TypeError:
-            values = [int(seed_context)]
-    if any(value < 0 for value in values):
-        raise ValueError("seed_context values must be non-negative.")
-    return values
+        return [_normalize_integer(seed_context, name="seed_context", minimum=0)]
+    try:
+        return [_normalize_integer(value, name="seed_context", minimum=0) for value in seed_context]
+    except TypeError:
+        return [_normalize_integer(seed_context, name="seed_context", minimum=0)]
