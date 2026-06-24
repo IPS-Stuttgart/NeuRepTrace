@@ -2689,7 +2689,7 @@ def _run_protocol3_few_shot_method(
                 protocol3=protocol3,
             )
 
-        result = run_bushmeg_protocol3_fold_adapter(
+        run_bushmeg_protocol3_fold_adapter(
             source_features=source_features,
             source_labels=train_labels,
             source_subject_ids=source_subject_ids,
@@ -3017,7 +3017,6 @@ def _method_availability(
 ) -> tuple[bool, str]:
     reasons: list[str] = []
     settings = dict(settings or {})
-    heavy = bool(settings.get("heavy", False))
     enabled = bool(settings.get("enabled", True))
     smoke_enabled = bool(settings.get("smoke_enabled", False))
     if not enabled and not include_heavy:
