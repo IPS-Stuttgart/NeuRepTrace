@@ -17,6 +17,7 @@ from neureptrace import (  # noqa: E402
     _decoding_probability_patch,
     _decoding_regularization_patch,
     _event_detection_extensions,
+    _few_shot_target_index_patch,
     _metadata_column_validation_patch,
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
@@ -39,6 +40,7 @@ _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
 _decoding_grouped_cv_patch.install()
 _decoding_probability_patch.install()
+_few_shot_target_index_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
