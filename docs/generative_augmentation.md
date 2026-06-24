@@ -34,7 +34,11 @@ The following options apply to `*_gan` and `*_diffusion` methods.
 | `gan_discriminator_steps` | Discriminator updates per GAN mini-batch. |
 | `diffusion_steps` | Number of DDPM-style denoising steps for diffusion methods. |
 
-All neural modes standardize the current fold's generator-training features before training and unstandardize synthetic rows afterward. Category-2 target-style methods then apply unlabeled mean/covariance matching to the generated rows. Category-3 calibrated neural modes train on source rows plus disjoint target calibration rows, then shift generated class means toward calibration class means according to `target_calibration_weight`.
+All neural modes standardize the current fold's generator-training features before training and
+unstandardize synthetic rows afterward. Category-2 target-style methods then apply unlabeled
+mean/covariance matching to the generated rows. Category-3 calibrated neural modes train on source
+rows plus disjoint target calibration rows, then shift generated class means toward calibration class
+means according to `target_calibration_weight`.
 
 ## Minimal examples
 
