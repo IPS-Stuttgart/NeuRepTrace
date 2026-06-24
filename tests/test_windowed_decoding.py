@@ -95,7 +95,7 @@ def test_fit_window_model_accepts_fractional_pca_variance_ratio():
     assert model_bundle.explained_variance_percent >= 90.0
 
 
-@pytest.mark.parametrize("components_pca", [0, 0.0, 1.5, -1, np.nan, "not-a-pca-value"])
+@pytest.mark.parametrize("components_pca", [0, 0.0, 1.5, -1, np.nan, True, False, np.bool_(True), np.bool_(False), "not-a-pca-value"])
 def test_fit_window_model_rejects_invalid_pca_components(components_pca):
     with pytest.raises(ValueError, match="components_pca must be"):
         fit_window_model(
