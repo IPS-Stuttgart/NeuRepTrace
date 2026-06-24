@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
@@ -139,19 +140,27 @@ def _participants(value: Any) -> list[int]:
     return [participant for participant in participants if participant not in excluded]
 
 
+def _raise_boolean_participant() -> None:
+    raise ValueError("Participant identifiers must not be booleans.")
+
+
 def _participant_values(value: Any) -> list[int]:
     if value is None:
         return []
-    if isinstance(value, int):
-        return [value]
+    if isinstance(value, bool):
+        _raise_boolean_participant()
+    if isinstance(value, Integral):
+        return [int(value)]
     if isinstance(value, str):
         tokens = [token.strip() for token in value.replace(";", ",").split(",") if token.strip()]
         return _participant_values(tokens)
     if isinstance(value, Iterable):
         participants: list[int] = []
         for item in value:
-            if isinstance(item, int):
-                participants.append(item)
+            if isinstance(item, bool):
+                _raise_boolean_participant()
+            if isinstance(item, Integral):
+                participants.append(int(item))
                 continue
             token = str(item).strip()
             match = _PARTICIPANT_RANGE_RE.match(token)
