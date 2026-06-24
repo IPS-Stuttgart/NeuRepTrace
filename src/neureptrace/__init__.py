@@ -21,6 +21,7 @@ from . import (  # noqa: E402
     _decoding_probability_patch,
     _decoding_regularization_patch,
     _event_detection_extensions,
+    _mcca_component_count_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
     _mne_alignment_calibration_anchor_patch,
@@ -55,6 +56,7 @@ _observation_schema_label_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _reconstruction_encoder_config_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
+_mcca_component_count_patch.install()
 _mcca_repetition_count_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
