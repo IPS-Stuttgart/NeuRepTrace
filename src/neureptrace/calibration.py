@@ -115,7 +115,8 @@ def summarize_calibration_metrics(
     rows = []
     for keys, frame in group_items:
         key_values = keys if isinstance(keys, tuple) else (keys,)
-        group_values = dict(zip(group_columns, key_values, strict=True)) if group_columns else {"decoder": "overall"}
+        group_values = dict(zip(group_columns, key_values, strict=True)) if group_columns else {}
+        group_values.setdefault("decoder", "overall")
         effect = frame[(frame["time"] >= effect_window[0]) & (frame["time"] <= effect_window[1])]
         if effect.empty:
             raise ValueError(f"No time points found in effect window [{effect_window[0]}, {effect_window[1]}].")
