@@ -73,6 +73,26 @@ class _Category2AutoencoderConfigPatchLoader(importlib.abc.Loader):
         self.wrapped_loader.exec_module(module)
         _patch_module(module)
 
+    def get_code(self, fullname: str):
+        """Delegate code loading so ``python -m`` execution remains supported."""
+
+        get_code = getattr(self.wrapped_loader, "get_code", None)
+        if get_code is None:
+            raise ImportError(f"Loader for {fullname!r} does not provide executable code.")
+        return get_code(fullname)
+
+    def get_source(self, fullname: str):
+        get_source = getattr(self.wrapped_loader, "get_source", None)
+        if get_source is None:
+            return None
+        return get_source(fullname)
+
+    def is_package(self, fullname: str) -> bool:
+        is_package = getattr(self.wrapped_loader, "is_package", None)
+        if is_package is None:
+            return False
+        return bool(is_package(fullname))
+
 
 class _Category2AutoencoderConfigPatchFinder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname: str, path, target=None):  # type: ignore[override]
