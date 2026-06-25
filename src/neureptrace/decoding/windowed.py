@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.metrics import balanced_accuracy_score
 
+from neureptrace._object_label_utils import label_accuracy, label_counts, values_equal
 from neureptrace.decoding.classifiers import prediction_scores
 
 
@@ -98,7 +98,11 @@ def predict_window_model(
     """Predict labels and confidence-like scores for a precomputed feature window."""
 
     transformed_features = transform_window_features(model_bundle, features)
-    predictions = np.asarray(model_bundle.model.predict(transformed_features))
+    predictions = _prediction_vector(
+        model_bundle.model.predict(transformed_features),
+        expected_length=transformed_features.shape[0],
+        name="predictions",
+    )
     scores = prediction_scores(model_bundle.model, transformed_features)
     return predictions, scores
 
@@ -134,7 +138,7 @@ def score_windowed_decoding(
         train_window=train_window,
     )
     predictions, scores = predict_window_model(model_bundle, validation_features)
-    accuracy = float(np.mean(predictions == validation_labels)) if len(validation_labels) else np.nan
+    accuracy = label_accuracy(validation_labels, predictions)
     balanced_accuracy = _balanced_accuracy(predictions, validation_labels)
 
     permutation_accuracy = np.array([], dtype=float)
@@ -229,8 +233,12 @@ def permutation_score_curves(
         permuted_train_labels = np.array(train_labels, copy=True)
         permutation_rng.shuffle(permuted_train_labels)
         model = fit_model(train_features, permuted_train_labels)
-        predictions = np.asarray(model.predict(validation_features))
-        permuted_accuracy.append(float(np.mean(predictions == validation_labels)))
+        predictions = _prediction_vector(
+            model.predict(validation_features),
+            expected_length=validation_features.shape[0],
+            name="predictions",
+        )
+        permuted_accuracy.append(label_accuracy(validation_labels, predictions))
         permuted_balanced_accuracy.append(_balanced_accuracy(predictions, validation_labels))
     return np.asarray(permuted_accuracy, dtype=float), np.asarray(permuted_balanced_accuracy, dtype=float)
 
@@ -256,12 +264,103 @@ def _validate_permutation_count(n_permutations: int) -> int:
     return int(numeric)
 
 
+def _object_vector(values: Iterable[object]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _is_composite_label(value: object) -> bool:
+    if isinstance(value, np.ndarray):
+        return value.ndim > 0
+    return isinstance(value, (list, tuple))
+
+
+def _as_atomic_label(value: object) -> object:
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            return array.item()
+        return tuple(array.reshape(-1).tolist())
+    if isinstance(value, list):
+        return tuple(value)
+    return value
+
+
+def _sequence_atomic_vector(values: Sequence | np.ndarray) -> np.ndarray | None:
+    if isinstance(values, np.ndarray):
+        return None
+    items = list(values)
+    if not items or not any(_is_composite_label(value) for value in items):
+        return None
+    return _object_vector(_as_atomic_label(value) for value in items)
+
+
+def _row_atomic_vector(array: np.ndarray, *, name: str) -> np.ndarray:
+    if array.ndim == 0:
+        return np.asarray([array.item()])
+    if array.ndim == 1:
+        return array.copy()
+    if 1 in array.shape:
+        raise ValueError(f"{name} must be one-dimensional.")
+    rows = np.asarray(array, dtype=object).reshape(array.shape[0], -1)
+    return _object_vector(tuple(row.tolist()) for row in rows)
+
+
+def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    vector = _sequence_atomic_vector(labels)
+    if vector is None:
+        try:
+            array = np.asarray(labels)
+        except ValueError:
+            vector = _object_vector(_as_atomic_label(value) for value in labels)
+        else:
+            vector = _row_atomic_vector(array, name=name)
+    if vector.shape[0] != expected_length:
+        raise ValueError(f"{name} length must match feature rows: {vector.shape[0]} != {expected_length}.")
+    return vector
+
+
+def _prediction_vector(predictions: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    vector = _sequence_atomic_vector(predictions)
+    if vector is None:
+        try:
+            array = np.asarray(predictions)
+        except ValueError:
+            vector = _object_vector(_as_atomic_label(value) for value in predictions)
+        else:
+            if array.ndim == 0:
+                vector = np.asarray([array.item()])
+            elif array.ndim == 1:
+                vector = array.copy()
+            elif 1 in array.shape:
+                vector = array.reshape(-1).copy()
+            else:
+                rows = np.asarray(array, dtype=object).reshape(array.shape[0], -1)
+                vector = _object_vector(tuple(row.tolist()) for row in rows)
+    if vector.shape[0] != expected_length:
+        raise ValueError(f"{name} length must match feature rows: {vector.shape[0]} != {expected_length}.")
+    return vector
+
+
+def _label_equal_mask(labels: Sequence | np.ndarray, label: object) -> np.ndarray:
+    return np.asarray([values_equal(value, label) for value in labels], dtype=bool)
+
+
 def _balanced_accuracy(predictions: Sequence | np.ndarray, labels: Sequence | np.ndarray) -> float:
-    labels = np.asarray(labels).ravel()
-    predictions = np.asarray(predictions).ravel()
+    labels = _label_vector(labels, expected_length=len(labels), name="labels")
+    predictions = _prediction_vector(predictions, expected_length=len(labels), name="predictions")
     if labels.size == 0:
         return np.nan
-    return float(balanced_accuracy_score(labels, predictions))
+    label_values, _counts = label_counts(labels)
+    recalls = []
+    for label in label_values:
+        mask = _label_equal_mask(labels, label)
+        if np.any(mask):
+            recalls.append(label_accuracy(labels[mask], predictions[mask]))
+    return float(np.mean(recalls)) if recalls else np.nan
 
 
 def _fit_pca_transform(
@@ -339,12 +438,3 @@ def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: s
     if matrix.shape[1] == 0:
         raise ValueError(f"{name} must contain at least one column.")
     return matrix
-
-
-def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(labels)
-    if vector.ndim != 1:
-        raise ValueError(f"{name} must be one-dimensional.")
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"{name} length must match feature rows: {vector.shape[0]} != {expected_length}.")
-    return vector
