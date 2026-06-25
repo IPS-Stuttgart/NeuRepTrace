@@ -259,7 +259,7 @@ def fit_precomputed_foundation_probe(
 
     train_ids = tuple(np.asarray(train_row_ids, dtype=object).reshape(-1).tolist())
     test_ids = tuple(np.asarray(test_row_ids, dtype=object).reshape(-1).tolist())
-    labels = np.asarray(train_labels, dtype=object).reshape(-1)
+    labels = _label_vector(train_labels)
     if labels.shape[0] != len(train_ids):
         raise ValueError(f"train_labels must contain one value per train row id: {labels.shape[0]} != {len(train_ids)}.")
     if labels.shape[0] < 1 or np.unique(labels).shape[0] < 2:
@@ -329,6 +329,18 @@ def normalize_feature_fit_scope(value: str | None) -> str:
     if normalized not in FEATURE_FIT_SCOPES:
         raise ValueError(f"Unknown feature_fit_scope {value!r}. Available scopes: {', '.join(FEATURE_FIT_SCOPES)}.")
     return normalized
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+    if any(isinstance(item, tuple) for item in items):
+        vector = np.empty(len(items), dtype=object)
+        vector[:] = items
+        return vector
+    return np.asarray(items).reshape(-1)
 
 
 def _load_npz_features(path: Path, *, features_key: str, row_id_key: str, allow_pickle: bool) -> tuple[np.ndarray, tuple[Any, ...], tuple[str, ...]]:
