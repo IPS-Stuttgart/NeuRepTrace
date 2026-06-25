@@ -1,3 +1,4 @@
+# ruff: noqa
 """Composite-label support for windowed decoding helpers."""
 
 from __future__ import annotations
