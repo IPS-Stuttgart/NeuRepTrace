@@ -93,15 +93,32 @@ def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
     except TypeError:
         items = [values]
 
-    if any(isinstance(item, tuple) for item in items):
-        vector = np.empty(len(items), dtype=object)
-        vector[:] = items
+    if _contains_composite_label(items):
+        vector = _object_vector(items)
     else:
         vector = np.asarray(items, dtype=object)
     if vector.ndim == 0:
         return vector.reshape(1)
     if vector.ndim != 1:
         raise ValueError(f"{name} must be one-dimensional.")
+    return vector
+
+
+def _contains_composite_label(items: Sequence[object]) -> bool:
+    return any(_is_composite_label(item) for item in items)
+
+
+def _is_composite_label(value: object) -> bool:
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.ndarray):
+        return value.ndim != 0
+    return isinstance(value, (tuple, list, dict))
+
+
+def _object_vector(items: Sequence[object]) -> np.ndarray:
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
     return vector
 
 
@@ -160,7 +177,16 @@ def _class_labels_equal(left, right) -> bool:
     left = _as_python_scalar(left)
     right = _as_python_scalar(right)
     try:
-        if bool(left == right):
+        comparison = left == right
+    except (TypeError, ValueError):
+        comparison = False
+    if isinstance(comparison, np.ndarray):
+        try:
+            return bool(np.all(comparison))
+        except (TypeError, ValueError):
+            return False
+    try:
+        if bool(comparison):
             return True
     except (TypeError, ValueError):
         pass

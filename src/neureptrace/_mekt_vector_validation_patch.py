@@ -1,9 +1,17 @@
-"""Runtime patch for MEKT label and domain vector validation."""
+"""Runtime patch for MEKT label, domain, and pseudo-label vector validation.
+
+The MEKT implementation historically normalized several public vector-like inputs
+with ``reshape(-1)`` or by checking only the first array dimension.  That could
+turn malformed matrix-shaped labels into apparently valid per-row labels, or let
+matrix-shaped domain arrays reach later NumPy masking operations.  This patch
+keeps genuine vectors accepted, including single-row/single-column CLI vectors,
+while rejecting true matrices at the public boundary.
+"""
 
 from __future__ import annotations
 
 import importlib.abc
-import importlib.util
+import importlib.machinery
 import sys
 from collections.abc import Hashable
 from functools import wraps
@@ -18,8 +26,11 @@ _FINDER_MARKER = "_neureptrace_mekt_vector_validation_finder"
 
 
 def _object_array(items: list[Any]) -> np.ndarray:
+    if not any(isinstance(item, tuple) for item in items):
+        return np.asarray(items)
     vector = np.empty(len(items), dtype=object)
-    vector[:] = items
+    for index, item in enumerate(items):
+        vector[index] = item
     return vector
 
 
@@ -80,7 +91,12 @@ def _patch_module(module: ModuleType) -> None:
         source_domains: Any = None,
         epsilon: float = module.DEFAULT_RIEMANNIAN_EPSILON,
     ) -> Any:
-        return original_centroid(source_covariances, target_covariances, source_domains=_normalize_optional_vector(source_domains, name="source_domains"), epsilon=epsilon)
+        return original_centroid(
+            source_covariances,
+            target_covariances,
+            source_domains=_normalize_optional_vector(source_domains, name="source_domains"),
+            epsilon=epsilon,
+        )
 
     @wraps(original_transfer)
     def mekt_transfer_features(source_covariances: Any, source_labels: Any, target_covariances: Any, **kwargs: Any) -> Any:
@@ -156,7 +172,7 @@ class _MektVectorValidationPatchFinder(importlib.abc.MetaPathFinder):
 
         try:
             sys.meta_path.remove(self)
-            spec = importlib.util.find_spec(fullname)
+            spec = importlib.machinery.PathFinder.find_spec(fullname, path)
         finally:
             if self not in sys.meta_path:
                 sys.meta_path.insert(0, self)
