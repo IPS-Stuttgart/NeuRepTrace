@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -11,6 +11,69 @@ from neureptrace.decoding.generative_augmentation import GenerativeAugmentationC
 
 _INSTALLED = False
 _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING = None
+_ORIGINAL_LABEL_VECTOR = None
+
+
+def _object_vector(values: Iterable[object]) -> np.ndarray:
+    """Build a one-dimensional object array without expanding tuple/list values."""
+
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _numeric_array(labels: Sequence | np.ndarray) -> np.ndarray | None:
+    """Return a numeric ndarray view when NumPy can represent labels numerically."""
+
+    try:
+        array = np.asarray(labels)
+    except ValueError:
+        return None
+    return array if np.issubdtype(array.dtype, np.number) else None
+
+
+def _atomic_label_vector(labels: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    """Normalize labels while preserving one tuple/list-valued label per row."""
+
+    numeric = _numeric_array(labels)
+    array = np.asarray(labels, dtype=object)
+    if array.ndim == 0:
+        vector = _object_vector([array.item()])
+    elif array.ndim == 1:
+        vector = numeric.reshape(-1) if numeric is not None and numeric.ndim == 1 else array.reshape(-1)
+    elif 1 in array.shape:
+        vector = numeric.reshape(-1) if numeric is not None and 1 in numeric.shape else array.reshape(-1)
+    else:
+        rows = array.reshape(array.shape[0], -1)
+        vector = _object_vector(tuple(row.tolist()) for row in rows)
+    if len(vector) != expected_length:
+        raise ValueError(f"{name} length must match feature rows: {len(vector)} != {expected_length}.")
+    return vector
+
+
+def _values_equal(left: object, right: object) -> bool:
+    """Compare possibly composite labels without leaking array-valued equality."""
+
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
+
+
+def _ordered_unique(values: Sequence | np.ndarray) -> np.ndarray:
+    """Return stable unique values without sorting heterogeneous object labels."""
+
+    unique: list[object] = []
+    for value in values:
+        if not any(_values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return _object_vector(unique)
 
 
 def _needs_object_predictions(labels: np.ndarray) -> bool:
@@ -28,13 +91,15 @@ def _coerced_null_label(null_label: object, labels: np.ndarray) -> object:
 def install() -> None:
     """Install the object-label-safe cross-validation wrapper once."""
 
-    global _INSTALLED, _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING
+    global _INSTALLED, _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING, _ORIGINAL_LABEL_VECTOR
     if _INSTALLED:
         return
 
     from neureptrace.decoding import transfer
 
     _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING = transfer.cross_validate_feature_decoding
+    _ORIGINAL_LABEL_VECTOR = transfer._label_vector
+    transfer._label_vector = _atomic_label_vector
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
     def _cross_validate_feature_decoding(
@@ -81,7 +146,8 @@ def install() -> None:
 
         predictions = np.empty(n_trials, dtype=object)
         predictions[:] = None
-        class_labels = np.asarray(sorted(np.unique(label_vector)), dtype=object)
+        class_labels = _ordered_unique(label_vector)
+        fallback_label = class_labels[0] if len(class_labels) else null_label_value
         for fold in range(1, n_folds + 1):
             train_mask = augmented_folds != fold
             test_mask = (augmented_folds == fold) & (augmented_labels != null_label_value)
@@ -113,7 +179,7 @@ def install() -> None:
                 fold_predictions, _ = transfer.predict_window_model(model_bundle, test_features)
             predictions[fold_ids == fold] = fold_predictions
 
-        predictions = transfer.replace_null_class_predictions(predictions, null_label=null_label_value)
+        predictions = transfer.replace_null_class_predictions(predictions, null_label=null_label_value, fallback_label=fallback_label)
         accuracy = float(np.mean(label_vector == predictions)) if len(label_vector) else np.nan
         return transfer.CrossValidationResult(accuracy=accuracy, predictions=predictions, fold_ids=fold_ids)
 
