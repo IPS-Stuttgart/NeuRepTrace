@@ -23,6 +23,7 @@ def _summary_frame() -> pd.DataFrame:
 @pytest.mark.parametrize("column", ["time", "accuracy_mean", "log_loss_mean", "brier_mean", "ece_mean", "n_subjects"])
 def test_summarize_calibration_metrics_rejects_boolean_numeric_columns(column: str):
     frame = _summary_frame()
+    frame[column] = frame[column].astype(object)
     frame.loc[0, column] = True
 
     with pytest.raises(ValueError, match=f"boolean values in numeric column '{column}'"):
@@ -43,6 +44,7 @@ def test_aggregate_reliability_bins_rejects_boolean_numeric_columns(tmp_path: Pa
             "confidence": [0.6],
         }
     )
+    frame[column] = frame[column].astype(object)
     frame.loc[0, column] = True
     frame.to_csv(path, index=False)
 
