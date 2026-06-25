@@ -134,6 +134,32 @@ def test_mixstyle_class_conditional_path_runs_with_sparse_label_domain_cells() -
     assert np.all(np.isfinite(result.features))
 
 
+def test_mixstyle_preserves_composite_labels_and_domains() -> None:
+    features, _, _ = _toy_sources()
+    labels = [("a", "left"), ("b", "right"), ("a", "left"), ("a", "left"), ("b", "right"), ("a", "left")]
+    domains = [("s1", "run-a"), ("s1", "run-a"), ("s1", "run-a"), ("s2", "run-b"), ("s2", "run-b"), ("s2", "run-b")]
+
+    result = augment_source_mixstyle(
+        features,
+        labels,
+        domains,
+        augmentations_per_row=1,
+        class_conditional=True,
+        domain_pairing="nearest",
+        random_state=11,
+    )
+
+    assert result.features.shape == (12, 2)
+    assert result.labels.shape == (12,)
+    assert result.domains.shape == (12,)
+    assert result.labels[:6].tolist() == labels
+    assert result.labels[6:].tolist() == labels
+    assert result.domains[:6].tolist() == domains
+    assert all(str(domain).startswith("mixstyle:") for domain in result.domains[6:].tolist())
+    assert result.metadata["source_mixstyle_n_classes"] == 2
+    assert result.metadata["source_mixstyle_n_domains"] == 2
+
+
 def test_mixstyle_from_config_mapping() -> None:
     features, labels, domains = _toy_sources()
     cfg = {"augmentations_per_row": 1, "alpha": 0.5, "random_state": 2, "domain_pairing": "random"}
