@@ -134,6 +134,43 @@ def test_mixstyle_class_conditional_path_runs_with_sparse_label_domain_cells() -
     assert np.all(np.isfinite(result.features))
 
 
+def test_mixstyle_preserves_tuple_labels_atomically() -> None:
+    features = np.asarray([[0.0, 0.0], [1.0, 0.5], [10.0, 10.0], [11.0, 10.5]], dtype=float)
+    labels = [("face", "left"), ("house", "right"), ("face", "left"), ("house", "right")]
+    domains = np.asarray(["s1", "s1", "s2", "s2"], dtype=object)
+
+    result = augment_source_mixstyle(features, labels, domains, augmentations_per_row=1, random_state=3)
+
+    assert result.labels.shape == (8,)
+    assert result.labels[:4].tolist() == labels
+    assert result.labels[4:].tolist() == labels
+    assert result.metadata["source_mixstyle_n_classes"] == 2
+    assert all(isinstance(label, tuple) for label in result.labels.tolist())
+
+
+def test_mixstyle_preserves_tuple_domains_in_class_conditional_stats() -> None:
+    features = np.asarray([[0.0, 0.0], [1.0, 0.5], [10.0, 10.0], [11.0, 10.5]], dtype=float)
+    labels = [("face", "left"), ("house", "right"), ("face", "left"), ("house", "right")]
+    domains = [("s1", "run1"), ("s1", "run1"), ("s2", "run1"), ("s2", "run1")]
+
+    result = augment_source_mixstyle(
+        features,
+        labels,
+        domains,
+        augmentations_per_row=1,
+        class_conditional=True,
+        domain_pairing="nearest",
+        random_state=3,
+    )
+
+    assert result.features.shape == (8, 2)
+    assert result.labels.tolist() == labels + labels
+    assert result.domains[:4].tolist() == domains
+    assert result.metadata["source_mixstyle_n_domains"] == 2
+    assert result.metadata["source_mixstyle_n_classes"] == 2
+    assert np.all(np.isfinite(result.features))
+
+
 def test_mixstyle_from_config_mapping() -> None:
     features, labels, domains = _toy_sources()
     cfg = {"augmentations_per_row": 1, "alpha": 0.5, "random_state": 2, "domain_pairing": "random"}
