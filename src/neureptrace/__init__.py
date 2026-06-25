@@ -30,7 +30,6 @@ from . import (  # noqa: E402
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
     _kernel_mean_matching_bool_validation_patch,
-    _label_proportion_tuple_prediction_patch,
     _lora_few_shot_tuple_subject_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
@@ -59,6 +58,7 @@ from . import (  # noqa: E402
     _source_selection_class_balance_patch,
     _source_selection_composite_ids_patch,
     _source_selection_temperature_patch,
+    _transfer_cross_validation_label_patch,
     _tuple_label_calibration_split_patch,
 )
 
@@ -74,7 +74,6 @@ _event_detection_extensions.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
-_label_proportion_tuple_prediction_patch.install()
 _lora_few_shot_tuple_subject_patch.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
@@ -110,6 +109,7 @@ _source_mixstyle_tuple_labels_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_temperature_patch.install()
+_transfer_cross_validation_label_patch.install()
 _tuple_label_calibration_split_patch.install()
 
 from . import (  # noqa: E402
