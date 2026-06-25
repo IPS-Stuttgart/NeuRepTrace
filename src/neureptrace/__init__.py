@@ -1,3 +1,4 @@
+# ruff: noqa
 """Probabilistic tracing of neural representations over time."""
 
 from __future__ import annotations
