@@ -39,12 +39,16 @@ def install() -> None:
         if not resolved.data_path.is_file():
             raise FileNotFoundError(f"Feature CSV not found: {resolved.data_path}")
         frame = pd.read_csv(resolved.data_path)
-        metadata = pd.read_csv(resolved.metadata_path) if resolved.metadata_path is not None and resolved.metadata_path.is_file() else None
+        metadata = None
+        if resolved.metadata_path is not None and resolved.metadata_path.is_file():
+            metadata = pd.read_csv(resolved.metadata_path)
         labels = None
         if resolved.label_column is not None and resolved.label_column in frame.columns:
             labels = frame[resolved.label_column].to_numpy()
 
-        metadata_columns = _unique_present_columns((resolved.label_column, resolved.group_column), frame)
+        metadata_columns = _unique_present_columns(
+            (resolved.label_column, resolved.group_column), frame
+        )
         if metadata is None and metadata_columns:
             metadata = frame.loc[:, metadata_columns].copy()
         feature_frame = frame.drop(columns=metadata_columns) if metadata_columns else frame
