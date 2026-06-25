@@ -410,9 +410,7 @@ def _fit_subject_prewhitener(
     eigenvalues = (singular_values**2) / max(centered.shape[0] - 1, 1)
     keep = eigenvalues > rank_tolerance
     if subject_pca_components is not None and subject_pca_components != float("inf"):
-        max_rank = int(subject_pca_components)
-        if max_rank < 1:
-            raise ValueError("subject_pca_components must be positive, infinity, or None.")
+        max_rank = _requested_subject_pca_components(subject_pca_components)
         keep_indices = np.flatnonzero(keep)[:max_rank]
     else:
         keep_indices = np.flatnonzero(keep)
@@ -690,6 +688,21 @@ def _requested_component_count(n_components: int | float) -> int:
     if requested < 1:
         raise ValueError("n_components must be a positive integer component count or infinity.")
     return requested
+
+
+def _requested_subject_pca_components(subject_pca_components: int | float) -> int:
+    if isinstance(subject_pca_components, (bool, np.bool_)):
+        raise ValueError("subject_pca_components must be positive, infinity, or None.")
+    try:
+        value = float(subject_pca_components)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("subject_pca_components must be positive, infinity, or None.") from exc
+    if not np.isfinite(value) or not value.is_integer():
+        raise ValueError("subject_pca_components must be positive, infinity, or None.")
+    max_rank = int(value)
+    if max_rank < 1:
+        raise ValueError("subject_pca_components must be positive, infinity, or None.")
+    return max_rank
 
 
 def _normalize_sample_mode(sample_mode: str) -> str:
