@@ -52,6 +52,19 @@ def test_cross_validate_feature_decoding_replaces_all_null_predictions():
     assert result.accuracy == 0.5
 
 
+def test_cross_validate_feature_decoding_uses_observed_numeric_label_for_all_null_fallback():
+    result = cross_validate_feature_decoding(
+        np.array([[-2.0], [1.0], [-1.0], [2.0]]),
+        np.array([2, 3, 2, 3]),
+        n_folds=2,
+        components_pca=float("inf"),
+        fit_model=lambda _features, _labels: _ConstantClassifier(0),
+    )
+
+    assert result.predictions.tolist() == [2.0, 2.0, 2.0, 2.0]
+    assert result.accuracy == 0.5
+
+
 def test_cross_validate_feature_decoding_preserves_string_labels():
     result = cross_validate_feature_decoding(
         np.array([[-2.0], [1.0], [-1.0], [2.0]]),
@@ -59,6 +72,20 @@ def test_cross_validate_feature_decoding_preserves_string_labels():
         n_folds=2,
         components_pca=float("inf"),
         fit_model=lambda _features, _labels: _ConstantClassifier("left"),
+    )
+
+    assert result.predictions.dtype == object
+    assert result.predictions.tolist() == ["left", "left", "left", "left"]
+    assert result.accuracy == 0.5
+
+
+def test_cross_validate_feature_decoding_uses_observed_string_label_for_all_null_fallback():
+    result = cross_validate_feature_decoding(
+        np.array([[-2.0], [1.0], [-1.0], [2.0]]),
+        np.array(["left", "right", "left", "right"], dtype=object),
+        n_folds=2,
+        components_pca=float("inf"),
+        fit_model=lambda _features, _labels: _ConstantClassifier(0),
     )
 
     assert result.predictions.dtype == object
