@@ -670,6 +670,8 @@ def _check_subject_keys(features_by_subject, labels_by_subject) -> None:
 
 
 def _requested_component_count(n_components: int | float) -> int:
+    if isinstance(n_components, (bool, np.bool_)):
+        raise ValueError("n_components must be a positive integer component count or infinity.")
     if n_components == float("inf"):
         return np.iinfo(np.int32).max
 
