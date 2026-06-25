@@ -57,9 +57,14 @@ def label_equal_mask(values: Sequence | np.ndarray, label: object) -> np.ndarray
 def assign_masked(array: np.ndarray, mask: np.ndarray, value: object) -> None:
     """Assign one possibly composite label value to each selected element."""
 
+    mask = np.asarray(mask, dtype=bool)
     if array.dtype == object:
-        for index in np.flatnonzero(mask):
-            array[index] = value
+        if mask.shape == array.shape:
+            flat_values = array.reshape(-1)
+            for index in np.flatnonzero(mask.reshape(-1)):
+                flat_values[index] = value
+        else:
+            array[mask] = value
         return
     array[mask] = value
 
@@ -69,6 +74,25 @@ def _object_vector(values: Sequence[object]) -> np.ndarray:
     for index, value in enumerate(values):
         vector[index] = value
     return vector
+
+
+def _object_array_copy(values: np.ndarray) -> np.ndarray:
+    object_values = np.empty(values.shape, dtype=object)
+    object_values[...] = values
+    return object_values
+
+
+def _ensure_assignable(array: np.ndarray, mask: np.ndarray, value: object) -> np.ndarray:
+    """Promote to object dtype when NumPy cannot store the replacement label."""
+
+    if array.dtype == object:
+        return array
+    try:
+        trial = array.copy()
+        trial[np.asarray(mask, dtype=bool)] = value
+    except (TypeError, ValueError, OverflowError):
+        return _object_array_copy(array)
+    return array
 
 
 def label_counts(values: Sequence | np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -96,10 +120,13 @@ def replace_null_class_predictions(predictions: Sequence | np.ndarray, *, null_l
         return repaired
     non_null = repaired[~null_mask]
     if len(non_null) == 0:
+        repaired = _ensure_assignable(repaired, null_mask, fallback_label)
         assign_masked(repaired, null_mask, fallback_label)
         return repaired
     nonzero_labels, counts = label_counts(non_null)
-    assign_masked(repaired, null_mask, nonzero_labels[int(np.argmin(counts))])
+    replacement = nonzero_labels[int(np.argmin(counts))]
+    repaired = _ensure_assignable(repaired, null_mask, replacement)
+    assign_masked(repaired, null_mask, replacement)
     return repaired
 
 
