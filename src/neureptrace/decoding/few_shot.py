@@ -111,6 +111,8 @@ def _normalize_index_vector(values: Sequence[int] | np.ndarray, *, name: str) ->
     array = np.asarray(values)
     if array.ndim == 0:
         array = array.reshape(1)
+    if array.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional.")
     flat = array.reshape(-1)
     if flat.dtype == np.bool_ or any(isinstance(value, (bool, np.bool_)) for value in flat.tolist()):
         raise ValueError(f"{name} must contain integer row indices, not booleans or a boolean mask.")
