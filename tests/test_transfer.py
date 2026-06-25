@@ -17,6 +17,17 @@ class _ConstantClassifier:
         return np.full(features.shape[0], self.label)
 
 
+class _ObjectConstantClassifier:
+    def __init__(self, label):
+        self.label = label
+
+    def predict(self, features):
+        predictions = np.empty(features.shape[0], dtype=object)
+        for index in range(features.shape[0]):
+            predictions[index] = self.label
+        return predictions
+
+
 def test_sequential_fold_ids_matches_legacy_contiguous_assignment():
     assert sequential_fold_ids(4, 2).tolist() == [1, 1, 2, 2]
     assert sequential_fold_ids(5, 5).tolist() == [1, 2, 3, 4, 5]
@@ -63,6 +74,34 @@ def test_cross_validate_feature_decoding_preserves_string_labels():
 
     assert result.predictions.dtype == object
     assert result.predictions.tolist() == ["left", "left", "left", "left"]
+    assert result.accuracy == 0.5
+
+
+def test_cross_validate_feature_decoding_replaces_object_null_predictions_with_observed_label():
+    result = cross_validate_feature_decoding(
+        np.array([[-2.0], [1.0], [-1.0], [2.0]]),
+        np.array(["left", "right", "left", "right"], dtype=object),
+        n_folds=2,
+        components_pca=float("inf"),
+        fit_model=lambda _features, _labels: _ConstantClassifier(0),
+    )
+
+    assert result.predictions.dtype == object
+    assert result.predictions.tolist() == ["left", "left", "left", "left"]
+    assert result.accuracy == 0.5
+
+
+def test_cross_validate_feature_decoding_treats_tuple_rows_as_atomic_labels():
+    result = cross_validate_feature_decoding(
+        np.array([[-2.0], [1.0], [-1.0], [2.0]]),
+        [("left", "seen"), ("right", "seen"), ("left", "seen"), ("right", "seen")],
+        n_folds=2,
+        components_pca=float("inf"),
+        fit_model=lambda _features, _labels: _ObjectConstantClassifier(("left", "seen")),
+    )
+
+    assert result.predictions.dtype == object
+    assert result.predictions.tolist() == [("left", "seen"), ("left", "seen"), ("left", "seen"), ("left", "seen")]
     assert result.accuracy == 0.5
 
 
