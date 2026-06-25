@@ -1,9 +1,14 @@
-"""Runtime guardrail for M-CCA repetition-count parsing.
+"""Runtime guardrails for M-CCA configuration parsing.
 
 Boolean scalars are integer-like in Python and NumPy.  Without an explicit
 check, values such as ``n_repetitions_per_class=True`` are silently treated as
 ``1`` by the M-CCA class-repetition alignment helpers.  That can turn a YAML or
 programmatic type error into a valid but unintended alignment/calibration run.
+
+The source-alignment and category-2 config builders also expose
+``mcca_subject_pca_components`` as an optional nested dimensionality-reduction
+setting.  Empty, ``none``, and ``null`` string values should behave like
+``None`` rather than being parsed as explicit component requests.
 """
 
 from __future__ import annotations
@@ -20,9 +25,12 @@ import numpy as np
 _TARGET_MODULES = {
     "neureptrace.decoding.mcca",
     "neureptrace.decoding.mcca_target",
+    "neureptrace.decoding.source_alignment",
+    "neureptrace.decoding.unlabeled_calibration_alignment",
 }
 _PATCH_MARKER = "_neureptrace_mcca_repetition_count_patch_installed"
 _FINDER_MARKER = "_neureptrace_mcca_repetition_count_finder"
+_DISABLED_COMPONENT_TEXT_VALUES = {"", "none", "null"}
 
 
 def _is_boolean_scalar(value: Any) -> bool:
@@ -32,6 +40,29 @@ def _is_boolean_scalar(value: Any) -> bool:
 def _reject_boolean_repetition_count(value: Any) -> None:
     if _is_boolean_scalar(value):
         raise ValueError("n_repetitions_per_class must be a positive integer or None, not a boolean value.")
+
+
+def _normalize_optional_component_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in _DISABLED_COMPONENT_TEXT_VALUES:
+        return None
+    return value
+
+
+def _patch_optional_component_config(module: ModuleType, function_name: str) -> None:
+    original_config = getattr(module, function_name)
+
+    @wraps(original_config)
+    def config_builder(*args: Any, **kwargs: Any) -> Any:
+        if "mcca_subject_pca_components" in kwargs:
+            kwargs = dict(kwargs)
+            kwargs["mcca_subject_pca_components"] = _normalize_optional_component_value(
+                kwargs["mcca_subject_pca_components"]
+            )
+        return original_config(*args, **kwargs)
+
+    setattr(module, function_name, config_builder)
 
 
 def _patch_mcca(module: ModuleType) -> None:
@@ -70,6 +101,10 @@ def _patch_module(module: ModuleType) -> None:
         _patch_mcca(module)
     elif module.__name__ == "neureptrace.decoding.mcca_target":
         _patch_mcca_target(module)
+    elif module.__name__ == "neureptrace.decoding.source_alignment":
+        _patch_optional_component_config(module, "source_alignment_config")
+    elif module.__name__ == "neureptrace.decoding.unlabeled_calibration_alignment":
+        _patch_optional_component_config(module, "unlabeled_calibration_alignment_config")
     else:  # pragma: no cover - guarded by finder/install targets
         return
     setattr(module, _PATCH_MARKER, True)
@@ -109,7 +144,7 @@ class _MCCARepetitionCountPatchFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Install boolean-value validation for public M-CCA repetition counts."""
+    """Install validation and normalization for public M-CCA config values."""
 
     for module_name in _TARGET_MODULES:
         loaded = sys.modules.get(module_name)

@@ -153,6 +153,9 @@ _source_alignment_contrastive_patch.install()
 # The contrastive extension must load before the later source-alignment wrapper.
 # This keeps the method registration visible at runtime.
 importlib.import_module("neureptrace.decoding.source_alignment")
+# Re-apply after the forced import because the winning source-alignment hook can
+# bypass generic M-CCA guardrails that were installed before the module existed.
+_mcca_repetition_count_patch.install()
 _source_alignment_oracle_patch.install()
 _source_alignment_target_calibration_offsets_patch.install()
 _source_alignment_cli_choices_patch.install()
