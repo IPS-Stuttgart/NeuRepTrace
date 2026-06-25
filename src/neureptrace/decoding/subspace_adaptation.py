@@ -265,9 +265,20 @@ def _source_weights(n_rows: int, *, labels: np.ndarray | None, class_balance: bo
     classes = tuple(dict.fromkeys(labels.tolist()))
     weights = np.zeros(n_rows, dtype=float)
     for class_label in classes:
-        mask = labels == class_label
+        mask = _object_mask(labels, class_label)
         weights[mask] = 1.0 / (float(len(classes)) * float(np.count_nonzero(mask)))
     return weights / float(np.sum(weights))
+
+
+def _object_mask(values: np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_object_equal(value, target) for value in values.tolist()], dtype=bool)
+
+
+def _object_equal(left: Any, right: Any) -> bool:
+    result = left == right
+    if isinstance(result, np.ndarray):
+        return bool(np.array_equal(left, right))
+    return bool(result)
 
 
 def _weighted_mean_gap(source: np.ndarray, target: np.ndarray, *, source_weights: np.ndarray, target_weights: np.ndarray) -> float:
