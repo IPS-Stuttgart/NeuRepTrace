@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from . import _mixstyle_composite_ids_patch
+
 _PATCH_MARKER = "_neureptrace_source_mixstyle_tuple_labels_patch_installed"
 
 
@@ -71,6 +73,7 @@ def _domain_equal_mask(domains: np.ndarray, domain: Hashable) -> np.ndarray:
 def install() -> None:
     """Patch MixStyle label/domain handling for composite source identifiers."""
 
+    _mixstyle_composite_ids_patch.install()
     source_mixstyle = importlib.import_module("neureptrace.decoding.source_mixstyle")
     original_augment = source_mixstyle.augment_source_domains_mixstyle
     if getattr(original_augment, _PATCH_MARKER, False):
