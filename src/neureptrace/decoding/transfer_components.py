@@ -182,7 +182,8 @@ def fit_transfer_component_classifier(
     if target_labels is not None:
         raise ValueError("TCA classification does not accept target_labels; target labels must be reserved for scoring.")
     labels = _label_vector(source_labels, expected_length=_feature_matrix(source_features, name="source_features").shape[0], name="source_labels")
-    if np.unique(labels).shape[0] < 2:
+    encoded_labels, label_classes = _encode_atomic_labels(labels)
+    if label_classes.shape[0] < 2:
         raise ValueError("source_labels must contain at least two classes.")
     tca = fit_transfer_component_features(source_features=source_features, target_features=target_features, config=config)
     weights = None if sample_weight is None else np.asarray(sample_weight, dtype=float).reshape(-1)
@@ -198,21 +199,24 @@ def fit_transfer_component_classifier(
         random_state=13,
     )
     fit_kwargs = {} if weights is None else {"sample_weight": weights}
-    model.fit(tca.source_features, labels, **fit_kwargs)
-    predictions = np.asarray(model.predict(tca.target_features))
+    model.fit(tca.source_features, encoded_labels, **fit_kwargs)
+    predictions = _decode_label_codes(np.asarray(model.predict(tca.target_features)), label_classes)
     probabilities = _predict_probabilities_or_none(model, tca.target_features)
+    encoded_classes = np.asarray(getattr(model, "classes_", np.arange(label_classes.shape[0])), dtype=int)
+    classes = _decode_label_codes(encoded_classes, label_classes)
     metadata = {
         **tca.metadata,
         "transfer_component_classifier": type(model).__name__,
         "transfer_component_classifier_uses_source_labels": True,
         "transfer_component_classifier_uses_target_labels": False,
+        "transfer_component_classifier_label_encoding": "atomic_integer",
     }
     return TransferComponentClassificationResult(
         source_features=tca.source_features,
         target_features=tca.target_features,
         predictions=predictions,
         probabilities=probabilities,
-        classes=np.asarray(getattr(model, "classes_", np.unique(labels))),
+        classes=classes,
         classifier=model,
         tca=tca,
         metadata=metadata,
@@ -411,15 +415,95 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
     if isinstance(values, np.ndarray) and values.dtype == object and values.ndim == 1:
-        vector = values.reshape(-1)
+        items = [_atomic_label_value(value) for value in values.reshape(-1).tolist()]
     else:
-        items = list(values)
-        vector = np.empty(len(items), dtype=object)
-        for index, value in enumerate(items):
-            vector[index] = value
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            raise ValueError(f"{name} must contain one value per source row.")
+        if array.ndim == 1:
+            items = [_atomic_label_value(value) for value in array.reshape(-1).tolist()]
+        elif array.ndim == 2 and array.shape[1] == 1:
+            items = [_atomic_label_value(value) for value in array[:, 0].tolist()]
+        elif array.ndim == 2 and array.shape[0] == 1 and array.shape[1] == expected_length:
+            items = [_atomic_label_value(value) for value in array.reshape(-1).tolist()]
+        elif array.ndim == 2:
+            items = [_atomic_label_value(tuple(row.tolist())) for row in array]
+        else:
+            raise ValueError(f"{name} must be a one-dimensional label vector or a row-wise composite-label matrix.")
+    vector = _object_vector(items)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per source row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _atomic_label_value(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _atomic_label_value(value.item())
+        return tuple(_atomic_label_value(item) for item in value.tolist())
+    if isinstance(value, list):
+        return tuple(_atomic_label_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_atomic_label_value(item) for item in value)
+    return value
+
+
+def _object_vector(items: Sequence[Any]) -> np.ndarray:
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _encode_atomic_labels(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    key_to_index: dict[Any, int] = {}
+    classes: list[Any] = []
+    encoded = np.empty(labels.shape[0], dtype=int)
+    for index, label in enumerate(labels):
+        key = _label_key(label)
+        if key not in key_to_index:
+            key_to_index[key] = len(classes)
+            classes.append(label)
+        encoded[index] = key_to_index[key]
+    return encoded, _object_vector(classes)
+
+
+def _decode_label_codes(codes: np.ndarray, classes: np.ndarray) -> np.ndarray:
+    code_array = np.asarray(codes)
+    decoded = np.empty(code_array.size, dtype=object)
+    for index, code in enumerate(code_array.reshape(-1)):
+        class_index = _integer_code(code)
+        if class_index < 0 or class_index >= classes.shape[0]:
+            raise ValueError(f"Classifier returned an unknown encoded class {code!r}.")
+        decoded[index] = classes[class_index]
+    return decoded.reshape(code_array.shape)
+
+
+def _integer_code(value: Any) -> int:
+    numeric = float(value)
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError(f"Classifier returned a non-integer encoded class {value!r}.")
+    return int(numeric)
+
+
+def _label_key(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return _label_key(value.item())
+    if isinstance(value, np.ndarray):
+        return ("ndarray", tuple(_label_key(item) for item in value.tolist()))
+    if isinstance(value, Mapping):
+        return ("mapping", tuple(sorted((_label_key(key), _label_key(item)) for key, item in value.items())))
+    if isinstance(value, list):
+        return ("list", tuple(_label_key(item) for item in value))
+    if isinstance(value, tuple):
+        return ("tuple", tuple(_label_key(item) for item in value))
+    try:
+        hash(value)
+    except TypeError:
+        return ("repr", repr(value))
+    return ("scalar", value)
 
 
 def _normalize_components(value: int | str) -> int | str:
