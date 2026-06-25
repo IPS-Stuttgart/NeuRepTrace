@@ -30,6 +30,7 @@ from . import (  # noqa: E402
     _few_shot_tuple_labels_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
+    _mixstyle_composite_values_patch,
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
     _nll_eps_validation_patch,
@@ -91,6 +92,7 @@ _source_alignment_times_validation_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
+_mixstyle_composite_values_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_temperature_patch.install()
