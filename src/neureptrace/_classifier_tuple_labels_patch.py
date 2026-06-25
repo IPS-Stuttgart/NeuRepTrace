@@ -68,6 +68,10 @@ def _label_mask(labels: np.ndarray, target: object) -> np.ndarray:
     return np.asarray([_labels_equal(label, target) for label in labels], dtype=bool)
 
 
+def _zero_weight_classes(labels: np.ndarray, classes: np.ndarray, weights: np.ndarray) -> list[object]:
+    return [class_label for class_label in classes if float(weights[_label_mask(labels, class_label)].sum()) <= 0.0]
+
+
 def _unique_labels_and_inverse(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     try:
         classes, inverse = np.unique(labels, return_inverse=True)
@@ -130,6 +134,12 @@ def install() -> None:
                 raise ValueError("sample_weight must contain one weight per feature row.")
             if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
                 raise ValueError("sample_weight must contain finite non-negative values.")
+            unsupported_classes = _zero_weight_classes(label_vector, classes, weights)
+            if unsupported_classes:
+                raise ValueError(
+                    "sample_weight must assign positive total weight to every class; "
+                    f"zero-weight classes: {unsupported_classes!r}."
+                )
             self.prototypes_ = np.vstack(
                 [
                     np.average(
