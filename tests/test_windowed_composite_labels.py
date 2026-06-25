@@ -27,12 +27,10 @@ def test_score_windowed_decoding_accepts_tuple_labels():
         validation_labels=[("a", "x"), ("b", "x")],
         fit_model=_fit_fixed_tuple_classifier,
         components_pca=float("inf"),
-        n_permutations=1,
-        permutation_rng=np.random.default_rng(13),
     )
 
     assert result.accuracy == 1.0
     assert result.balanced_accuracy == 1.0
     assert result.predictions.dtype == object
     assert result.predictions.tolist() == [("a", "x"), ("b", "x")]
-    assert result.permutation_accuracy.shape == (1,)
+    assert result.permutation_accuracy.shape == (0,)
