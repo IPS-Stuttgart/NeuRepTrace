@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -13,29 +13,62 @@ _INSTALLED = False
 _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING = None
 
 
-def _sorted_label_values(labels: np.ndarray) -> np.ndarray:
-    """Return the deterministic label order used by the transfer decoders."""
+def _object_vector(values: Iterable[object]) -> np.ndarray:
+    """Build a one-dimensional object array without expanding tuple/list values."""
 
-    values = sorted(np.unique(labels))
-    if labels.dtype == object:
-        return np.asarray(values, dtype=object)
-    return np.asarray(values)
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _values_equal(left: object, right: object) -> bool:
+    """Compare possibly composite labels without leaking array-valued equality."""
+
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
+
+
+def _ordered_unique(values: Sequence | np.ndarray) -> np.ndarray:
+    """Return stable unique values without sorting heterogeneous object labels."""
+
+    unique: list[object] = []
+    for value in values:
+        if not any(_values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return _object_vector(unique)
+
+
+def _observed_label_values(labels: np.ndarray) -> np.ndarray:
+    """Return deterministic observed labels while preserving composite objects."""
+
+    if np.issubdtype(labels.dtype, np.number):
+        return np.asarray(sorted(np.unique(labels)))
+    return _ordered_unique(labels)
 
 
 def _label_space_mask(predictions: np.ndarray, label_values: np.ndarray) -> np.ndarray:
     """Return a mask of predictions that belong to the observed non-null labels."""
 
-    valid = np.zeros(predictions.shape, dtype=bool)
-    for label in label_values:
-        valid |= predictions == label
-    return valid
+    return np.asarray(
+        [any(_values_equal(prediction, label) for label in label_values) for prediction in predictions],
+        dtype=bool,
+    )
 
 
 def _all_same(values: np.ndarray) -> bool:
     if values.size == 0:
         return False
     flat = values.reshape(-1)
-    return bool(np.all(flat == flat[0]))
+    first = flat[0]
+    return all(_values_equal(value, first) for value in flat)
 
 
 def _repair_degenerate_out_of_space_predictions(predictions: np.ndarray, label_values: np.ndarray) -> np.ndarray:
@@ -113,7 +146,7 @@ def install() -> None:
         )
         predictions = _repair_degenerate_out_of_space_predictions(
             result.predictions,
-            _sorted_label_values(label_vector),
+            _observed_label_values(label_vector),
         )
         accuracy = float(np.mean(label_vector == predictions)) if len(label_vector) else np.nan
         return transfer.CrossValidationResult(accuracy=accuracy, predictions=predictions, fold_ids=result.fold_ids)
