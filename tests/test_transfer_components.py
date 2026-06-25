@@ -87,3 +87,17 @@ def test_transfer_components_support_composite_source_labels() -> None:
 
     assert result.predictions.shape == (6,)
     assert result.metadata["transfer_component_classifier_uses_target_labels"] is False
+    assert result.metadata["transfer_component_classifier_label_encoding"] == "atomic_integer"
+    assert set(result.classes.tolist()) == {("left", 1), ("right", 2)}
+    assert all(isinstance(prediction, tuple) for prediction in result.predictions)
+
+
+def test_transfer_components_support_numpy_object_matrix_composite_labels() -> None:
+    source, _labels, target = _toy_data()
+    labels = np.asarray([("left", 1), ("left", 1), ("left", 1), ("right", 2), ("right", 2), ("right", 2)], dtype=object)
+
+    result = fit_transfer_component_classifier(source_features=source, source_labels=labels, target_features=target, config={"n_components": 1})
+
+    assert result.classes.shape == (2,)
+    assert set(result.classes.tolist()) == {("left", 1), ("right", 2)}
+    assert all(isinstance(prediction, tuple) for prediction in result.predictions)
