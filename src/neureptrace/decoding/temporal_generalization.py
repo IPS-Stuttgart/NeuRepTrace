@@ -39,6 +39,9 @@ def compute_temporal_generalization_matrix(
     loading data and constructing ``TemporalFeatureWindow`` objects.
     """
 
+    center_decimals = _validate_center_decimals(center_decimals)
+    fixed_chance_accuracy = _validate_chance_accuracy(chance_accuracy)
+
     if not train_windows:
         raise ValueError("Need at least one train window.")
     if not test_windows:
@@ -60,7 +63,7 @@ def compute_temporal_generalization_matrix(
                     f"for test window {test_window.center}: {len(predictions)} != {len(labels)}."
                 )
             accuracy = float(np.mean(predictions == labels)) if len(labels) else np.nan
-            chance = _chance_accuracy(chance_accuracy, labels)
+            chance = _chance_accuracy(fixed_chance_accuracy, labels)
             rows.append(
                 {
                     **base_metadata,
@@ -145,6 +148,32 @@ def _validate_window_labels(window: TemporalFeatureWindow, *, role: str) -> None
         raise ValueError(f"{role} window labels must be one-dimensional.")
     if len(labels) == 0:
         raise ValueError(f"{role} window labels must not be empty.")
+
+
+def _validate_center_decimals(value: Any) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("center_decimals must be an integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("center_decimals must be an integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError("center_decimals must be an integer.")
+    return int(numeric)
+
+
+def _validate_chance_accuracy(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("chance_accuracy must be a finite probability in [0, 1].")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("chance_accuracy must be a finite probability in [0, 1].") from exc
+    if not np.isfinite(numeric) or numeric < 0.0 or numeric > 1.0:
+        raise ValueError("chance_accuracy must be a finite probability in [0, 1].")
+    return numeric
 
 
 def _center_key(center: float, decimals: int) -> float:
