@@ -38,6 +38,7 @@ from . import (  # noqa: E402
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
     _reconstruction_encoder_config_patch,
+    _reconstruction_tuple_labels_patch,
     _response_window_time_validation_patch,
     _riemannian_vector_validation_patch,
     _sample_weight_validation_patch,
@@ -80,6 +81,7 @@ _bushmeg_category2_autoencoder_config_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
 _reconstruction_encoder_config_patch.install()
+_reconstruction_tuple_labels_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
 _mcca_repetition_count_patch.install()
 _source_alignment_anchor_patch.install()
@@ -95,8 +97,8 @@ _riemannian_vector_validation_patch.install()
 _source_alignment_times_validation_patch.install()
 _source_domain_generalization_composite_patch.install()
 _source_free_standardize_target_patch.install()
-_source_free_tuple_labels_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
+_source_free_tuple_labels_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_temperature_patch.install()
