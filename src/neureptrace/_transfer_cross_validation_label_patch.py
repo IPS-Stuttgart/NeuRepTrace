@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
@@ -94,6 +95,11 @@ def _coerced_null_label(null_label: object, labels: np.ndarray) -> object:
     """Match append_null_class_features' label dtype coercion for null rows."""
 
     return np.asarray([null_label], dtype=labels.dtype)[0]
+
+
+def _install_null_fallback_patch() -> None:
+    null_fallback_patch = importlib.import_module("neureptrace._transfer_null_fallback_patch")
+    null_fallback_patch.install()
 
 
 def install() -> None:
@@ -226,4 +232,5 @@ def install() -> None:
     _cross_validate_feature_decoding.__name__ = _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING.__name__
     _cross_validate_feature_decoding.__doc__ = _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING.__doc__
     transfer.cross_validate_feature_decoding = _cross_validate_feature_decoding
+    _install_null_fallback_patch()
     _INSTALLED = True

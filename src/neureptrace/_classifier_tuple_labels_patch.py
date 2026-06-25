@@ -22,7 +22,7 @@ def _object_vector(values: Sequence[Any]) -> np.ndarray:
 def _atomic_label_vector(labels: Sequence[Any] | np.ndarray) -> np.ndarray:
     """Return a 1-D label vector without expanding tuple/list labels.
 
-    NumPy turns ``[("a", 1), ("b", 2)]`` into a two-dimensional array.  For
+    NumPy turns ``[("a", 1), ("b", 2)]`` into a two-dimensional array. For
     classifier labels each row is one composite class value, so row-shaped input
     must be collapsed back into tuple objects before unique-class encoding.
     """
@@ -44,7 +44,9 @@ def _atomic_label_vector(labels: Sequence[Any] | np.ndarray) -> np.ndarray:
         return _object_vector([labels])
 
     if any(isinstance(label, (tuple, list)) for label in items):
-        return _object_vector([tuple(label) if isinstance(label, list) else label for label in items])
+        return _object_vector(
+            [tuple(label) if isinstance(label, list) else label for label in items]
+        )
 
     array = np.asarray(items)
     if array.ndim <= 1:
@@ -86,13 +88,44 @@ def _unique_labels_and_inverse(labels: np.ndarray) -> tuple[np.ndarray, np.ndarr
         return _object_vector(classes), encoded
 
 
+def _as_python_scalar(value: object) -> object:
+    return value.item() if isinstance(value, np.generic) else value
+
+
+def _validate_sample_weights(
+    *,
+    n_samples: int,
+    class_labels: np.ndarray,
+    class_masks: Sequence[np.ndarray],
+    sample_weight: Sequence[float] | np.ndarray,
+) -> np.ndarray:
+    weights = np.asarray(sample_weight, dtype=float).reshape(-1)
+    if weights.shape[0] != n_samples:
+        raise ValueError("sample_weight must contain one weight per feature row.")
+    if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
+        raise ValueError("sample_weight must contain finite non-negative values.")
+
+    zero_weight_classes: list[object] = []
+    for class_label, class_mask in zip(class_labels, class_masks, strict=True):
+        if float(weights[class_mask].sum()) <= 0.0:
+            zero_weight_classes.append(_as_python_scalar(class_label))
+    if zero_weight_classes:
+        raise ValueError(
+            "sample_weight must assign positive total weight to every class; "
+            f"zero-weight classes: {zero_weight_classes!r}."
+        )
+    return weights
+
+
 def install() -> None:
     classifiers = importlib.import_module("neureptrace.decoding.classifiers")
     if getattr(classifiers, _PATCH_MARKER, False):
         return
 
-    def encode_classifier_labels(labels: Sequence[Any] | np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Encode labels as dense integer class ids while preserving composite labels."""
+    def encode_classifier_labels(
+        labels: Sequence[Any] | np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Encode labels as dense integer class ids while preserving composites."""
 
         label_vector = _atomic_label_vector(labels)
         if label_vector.size == 0:
@@ -115,29 +148,31 @@ def install() -> None:
         if label_vector.shape[0] != features_array.shape[0]:
             raise ValueError("labels must contain one label per feature row.")
 
-        classes, _encoded = _unique_labels_and_inverse(label_vector)
+        classes, _ = _unique_labels_and_inverse(label_vector)
         if classes.size == 0:
             raise ValueError("At least one class is required.")
         self.classes_ = classes
+        class_masks = [_label_mask(label_vector, class_label) for class_label in classes]
 
         if sample_weight is None:
             self.prototypes_ = np.vstack(
-                [np.mean(features_array[_label_mask(label_vector, class_label)], axis=0) for class_label in classes]
+                [np.mean(features_array[class_mask], axis=0) for class_mask in class_masks]
             )
         else:
-            weights = np.asarray(sample_weight, dtype=float).reshape(-1)
-            if weights.shape[0] != label_vector.shape[0]:
-                raise ValueError("sample_weight must contain one weight per feature row.")
-            if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
-                raise ValueError("sample_weight must contain finite non-negative values.")
+            weights = _validate_sample_weights(
+                n_samples=label_vector.shape[0],
+                class_labels=classes,
+                class_masks=class_masks,
+                sample_weight=sample_weight,
+            )
             self.prototypes_ = np.vstack(
                 [
                     np.average(
-                        features_array[_label_mask(label_vector, class_label)],
+                        features_array[class_mask],
                         axis=0,
-                        weights=weights[_label_mask(label_vector, class_label)],
+                        weights=weights[class_mask],
                     )
-                    for class_label in classes
+                    for class_mask in class_masks
                 ]
             )
 
