@@ -38,6 +38,7 @@ from . import (  # noqa: E402
     _source_alignment_oracle_patch,
     _source_alignment_pseudo_calibration_patch,
     _source_alignment_pseudo_repetition_patch,
+    _source_alignment_times_validation_patch,
 )
 
 _alignment_window_config_patch.install()
@@ -69,6 +70,7 @@ _mne_pseudo_alignment_fallback_validity_patch.install()
 _nll_eps_validation_patch.install()
 _sample_weight_validation_patch.install()
 _response_window_time_validation_patch.install()
+_source_alignment_times_validation_patch.install()
 
 from . import (  # noqa: E402
     _source_alignment_cli_choices_patch,
