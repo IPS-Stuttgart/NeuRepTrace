@@ -250,7 +250,7 @@ def _resolve_classes(n_classes: int, classes, source_labels, source_validation_l
         return tuple(class_order.tolist())
     labels = source_labels if source_labels is not None else source_validation_labels
     if labels is not None:
-        order = tuple(dict.fromkeys(_object_vector(labels, name="source_labels").tolist()))
+        order = _unique_object_values(_object_vector(labels, name="source_labels"))
         if len(order) != n_classes:
             raise ValueError("Inferred class count from labels does not match probability columns; pass classes explicitly.")
         return order
@@ -329,16 +329,42 @@ def _column_normalize(matrix: np.ndarray, *, epsilon: float) -> np.ndarray:
 
 
 def _object_vector(values, *, name: str) -> np.ndarray:
-    if isinstance(values, np.ndarray) and values.dtype == object and values.ndim == 1:
-        return values.reshape(-1)
-    try:
-        items = list(values)
-    except TypeError as exc:
-        raise ValueError(f"{name} must be a one-dimensional sequence.") from exc
+    array = np.asarray(values, dtype=object)
+    if array.ndim == 0:
+        items = [array.item()]
+    elif array.ndim == 1:
+        items = array.tolist()
+    else:
+        rows = array.reshape(array.shape[0], -1)
+        items = [row[0] if rows.shape[1] == 1 else tuple(row.tolist()) for row in rows]
+    if len(items) < 1:
+        raise ValueError(f"{name} must contain at least one value.")
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
-        vector[index] = value
+        vector[index] = _hashable_object_value(value)
     return vector
+
+
+def _hashable_object_value(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _hashable_object_value(value.item())
+        return tuple(_hashable_object_value(item) for item in value.tolist())
+    if isinstance(value, list):
+        return tuple(_hashable_object_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_hashable_object_value(item) for item in value)
+    if isinstance(value, dict):
+        return tuple(sorted((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items()))
+    return value
+
+
+def _unique_object_values(values: Sequence[Any] | np.ndarray) -> tuple[Any, ...]:
+    unique: list[Any] = []
+    for value in _object_vector(values, name="values").tolist():
+        if not any(_object_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return tuple(unique)
 
 
 def _object_equal(left: object, right: object) -> bool:
@@ -346,8 +372,10 @@ def _object_equal(left: object, right: object) -> bool:
         equal = left == right
     except (TypeError, ValueError):
         return False
-    try:
+    if isinstance(equal, (bool, np.bool_)):
         return bool(equal)
+    try:
+        return bool(np.all(equal))
     except (TypeError, ValueError):
         return False
 
