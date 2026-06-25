@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import importlib.abc
 import importlib.machinery
+import math
 import sys
 from collections.abc import Mapping
 from functools import wraps
-from numbers import Integral
+from numbers import Real
 from types import ModuleType
 from typing import Any
 
@@ -51,8 +52,9 @@ def _patch_config_workflow_bool_parser(module: ModuleType) -> None:
 
     @wraps(original_as_bool)
     def patched_as_bool(value: Any, *, default: bool = False) -> bool:
-        if isinstance(value, Integral) and not isinstance(value, bool):
-            if int(value) in {0, 1}:
+        if isinstance(value, Real) and not isinstance(value, bool):
+            numeric = float(value)
+            if math.isfinite(numeric) and numeric in {0.0, 1.0}:
                 return bool(value)
         return original_as_bool(value, default=default)
 
