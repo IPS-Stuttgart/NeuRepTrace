@@ -111,7 +111,7 @@ def test_standalone_em_and_bbse_estimators() -> None:
 
 def test_soft_confusion_matrix_columns_are_normalized() -> None:
     probabilities = np.asarray([[0.8, 0.2], [0.7, 0.3], [0.1, 0.9], [0.2, 0.8]])
-    labels = np.asarray([("left", 1), ("left", 1), ("right", 2), ("right", 2)], dtype=object)
+    labels = [("left", 1), ("left", 1), ("right", 2), ("right", 2)]
 
     confusion = soft_confusion_matrix(probabilities, labels, classes=[("left", 1), ("right", 2)])
 
