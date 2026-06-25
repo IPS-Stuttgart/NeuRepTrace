@@ -29,6 +29,8 @@ from . import (  # noqa: E402
     _event_detection_extensions,
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
+    _label_proportion_tuple_prediction_patch,
+    _lora_few_shot_tuple_subject_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
     _mne_alignment_calibration_anchor_patch,
@@ -37,6 +39,7 @@ from . import (  # noqa: E402
     _nll_eps_validation_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
+    _probability_stacking_group_summary_patch,
     _reconstruction_encoder_config_patch,
     _reconstruction_tuple_labels_patch,
     _response_window_time_validation_patch,
@@ -55,6 +58,7 @@ from . import (  # noqa: E402
     _source_selection_class_balance_patch,
     _source_selection_composite_ids_patch,
     _source_selection_temperature_patch,
+    _transfer_cross_validation_label_patch,
     _tuple_label_calibration_split_patch,
 )
 
@@ -69,6 +73,8 @@ _correlation_prototype_sample_weight_patch.install()
 _event_detection_extensions.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
+_label_proportion_tuple_prediction_patch.install()
+_lora_few_shot_tuple_subject_patch.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
@@ -77,6 +83,7 @@ _decoding_grouped_cv_patch.install()
 _decoding_probability_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
+_probability_stacking_group_summary_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
@@ -102,6 +109,7 @@ _source_mixstyle_tuple_labels_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_temperature_patch.install()
+_transfer_cross_validation_label_patch.install()
 _tuple_label_calibration_split_patch.install()
 
 from . import (  # noqa: E402
@@ -116,3 +124,7 @@ _source_alignment_contrastive_patch.install()
 # This keeps the method registration visible at runtime.
 importlib.import_module("neureptrace.decoding.source_alignment")
 _source_alignment_oracle_patch.install()
+_source_alignment_target_calibration_offsets_patch.install()
+_source_alignment_cli_choices_patch.install()
+_bushmeg_cue_temporal_bins_patch.install()
+_mne_time_decode_ensemble_param_validation_patch.install()
