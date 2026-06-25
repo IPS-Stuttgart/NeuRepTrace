@@ -88,27 +88,7 @@ def fit_subspace_alignment(
     n_components: int | str | float = DEFAULT_SUBSPACE_COMPONENTS,
     standardization_scope: str | None = "source",
 ) -> SubspaceAlignmentResult:
-    """Fit Category-2 PCA subspace alignment from source and unlabeled target rows.
-
-    Parameters
-    ----------
-    source_features, target_features:
-        Source and held-out target feature rows.  Target rows are treated as
-        unlabeled adaptation data.
-    n_components:
-        Requested latent dimensionality.  The effective value is capped by source
-        rows, target rows, and feature width.
-    standardization_scope:
-        ``"source"`` standardizes both domains with source statistics before the
-        separate PCA fits.  ``"source_target"`` standardizes with pooled source
-        plus target statistics.  ``"none"`` only centers each domain.
-
-    Returns
-    -------
-    SubspaceAlignmentResult
-        Source rows in aligned target-subspace coordinates, target rows in target
-        PCA coordinates, the fitted model, and Category-2 metadata.
-    """
+    """Fit Category-2 PCA subspace alignment from source and unlabeled target rows."""
 
     source = _feature_matrix(source_features, name="source_features")
     target = _feature_matrix(target_features, name="target_features")
@@ -160,7 +140,12 @@ def fit_subspace_aligned_classifier(
     classifier_class_weight: str | Mapping[Any, float] | None = "balanced",
     sample_weight: Sequence[float] | np.ndarray | None = None,
 ) -> SubspaceAlignedClassificationResult:
-    """Train a source-label classifier after Category-2 subspace alignment."""
+    """Train a source-label classifier after Category-2 subspace alignment.
+
+    Source labels are encoded to dense integers before fitting so tuple/list style
+    composite labels remain one class value per source row.  Predictions and class
+    vectors are decoded back to the original label objects.
+    """
 
     labels = _object_vector(source_labels, name="source_labels")
     aligned = fit_subspace_alignment(
@@ -171,7 +156,8 @@ def fit_subspace_aligned_classifier(
     )
     if labels.shape[0] != aligned.source_features.shape[0]:
         raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {aligned.source_features.shape[0]}.")
-    if len(dict.fromkeys(labels.tolist())) < 2:
+    classes, encoded_labels = _encode_object_labels(labels)
+    if classes.shape[0] < 2:
         raise ValueError("source_labels must contain at least two classes.")
     weights = None if sample_weight is None else np.asarray(sample_weight, dtype=float).reshape(-1)
     if weights is not None:
@@ -179,15 +165,17 @@ def fit_subspace_aligned_classifier(
             raise ValueError(f"sample_weight must contain one value per source row: {weights.shape[0]} != {labels.shape[0]}.")
         if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
             raise ValueError("sample_weight must contain finite non-negative values.")
+    class_weight = _encode_class_weight(classifier_class_weight, classes)
     model = clone(classifier) if classifier is not None else LogisticRegression(
         C=_positive_float(classifier_C, name="classifier_C"),
-        class_weight=classifier_class_weight,
+        class_weight=class_weight,
         max_iter=_positive_int(classifier_max_iter, name="classifier_max_iter"),
         random_state=13,
     )
     fit_kwargs = {} if weights is None else {"sample_weight": weights}
-    model.fit(aligned.source_features, labels, **fit_kwargs)
-    predictions = _predict_with_object_classes(model, aligned.target_features)
+    model.fit(aligned.source_features, encoded_labels, **fit_kwargs)
+    encoded_predictions = np.asarray(model.predict(aligned.target_features), dtype=int).reshape(-1)
+    predictions = _decode_object_labels(encoded_predictions, classes)
     probabilities = _probabilities_or_none(model, aligned.target_features)
     metadata = {
         **aligned.metadata,
@@ -200,7 +188,7 @@ def fit_subspace_aligned_classifier(
         target_features=aligned.target_features,
         predictions=predictions,
         probabilities=probabilities,
-        classes=_classes_from_model(model, labels),
+        classes=classes,
         classifier=model,
         model=aligned.model,
         metadata=metadata,
@@ -309,20 +297,39 @@ def _probabilities_or_none(model: BaseEstimator, features: np.ndarray) -> np.nda
     return None
 
 
-def _predict_with_object_classes(model: BaseEstimator, features: np.ndarray) -> np.ndarray:
-    predictions = model.predict(features)
-    output = np.empty(len(predictions), dtype=object)
-    for index, value in enumerate(list(predictions)):
-        output[index] = value
+def _encode_object_labels(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    class_values = list(dict.fromkeys(labels.tolist()))
+    classes = np.empty(len(class_values), dtype=object)
+    for index, value in enumerate(class_values):
+        classes[index] = value
+    encoded = np.empty(labels.shape[0], dtype=int)
+    for row, label in enumerate(labels.tolist()):
+        for class_index, class_label in enumerate(class_values):
+            if label == class_label:
+                encoded[row] = class_index
+                break
+        else:  # pragma: no cover - defensive only
+            raise RuntimeError("Could not encode a source label.")
+    return classes, encoded
+
+
+def _decode_object_labels(encoded: np.ndarray, classes: np.ndarray) -> np.ndarray:
+    output = np.empty(encoded.shape[0], dtype=object)
+    for index, class_index in enumerate(encoded.astype(int).tolist()):
+        if class_index < 0 or class_index >= classes.shape[0]:
+            raise ValueError(f"Classifier predicted class index {class_index}, outside fitted class range.")
+        output[index] = classes[class_index]
     return output
 
 
-def _classes_from_model(model: BaseEstimator, labels: np.ndarray) -> np.ndarray:
-    values = getattr(model, "classes_", tuple(dict.fromkeys(labels.tolist())))
-    vector = np.empty(len(values), dtype=object)
-    for index, value in enumerate(list(values)):
-        vector[index] = value
-    return vector
+def _encode_class_weight(class_weight: str | Mapping[Any, float] | None, classes: np.ndarray) -> str | dict[int, float] | None:
+    if class_weight is None or isinstance(class_weight, str):
+        return class_weight
+    encoded = {}
+    for index, class_label in enumerate(classes.tolist()):
+        if class_label in class_weight:
+            encoded[index] = float(class_weight[class_label])
+    return encoded
 
 
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
