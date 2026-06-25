@@ -54,7 +54,7 @@ def select_class_limited_indices(
         selected = []
         counts: list[int] = []
         seen: list[object] = []
-        for index, label in enumerate(labels):
+        for index, label in enumerate(_label_vector(labels)):
             position = _label_position(seen, label)
             if position is None:
                 seen.append(label)
