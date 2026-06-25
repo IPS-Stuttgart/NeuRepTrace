@@ -13,6 +13,7 @@ from . import (  # noqa: E402
     _alignment_window_config_patch,
     _bushmeg_all_protocols_prediction_metric_patch,
     _bushmeg_all_protocols_timeout_patch,
+    _bushmeg_smoke_enabled_bool_patch,
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_cue_temporal_bins_patch,
     _bushmeg_source_loso_ensemble_numeric_patch,
@@ -113,6 +114,7 @@ _bushmeg_category2_autoencoder_config_patch.install()
 _bushmeg_source_loso_ensemble_numeric_patch.install()
 _category2_autoencoder_all_protocols_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
+_bushmeg_smoke_enabled_bool_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
 _reconstruction_encoder_config_patch.install()
 _reconstruction_tuple_labels_patch.install()
