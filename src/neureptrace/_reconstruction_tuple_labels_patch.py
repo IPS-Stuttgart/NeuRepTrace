@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from functools import wraps
 from typing import Any
 
@@ -86,6 +86,20 @@ def _decode_label_codes(codes: Sequence[Any] | np.ndarray, classes: np.ndarray) 
     return _object_value_vector(classes[int(code)] for code in code_vector)
 
 
+def _encoded_class_weight(class_weight: Any, classes: np.ndarray) -> Any:
+    """Map composite-label class weights to the integer codes used for sklearn."""
+
+    if not isinstance(class_weight, Mapping):
+        return class_weight
+    encoded: dict[int, Any] = {}
+    for key, weight in class_weight.items():
+        for code, label in enumerate(classes.tolist()):
+            if _values_equal(key, label) or _values_equal(key, code):
+                encoded[int(code)] = weight
+                break
+    return encoded
+
+
 def install() -> None:
     """Patch reconstruction-latent classifier labels so composite values remain atomic."""
 
@@ -138,7 +152,7 @@ def install() -> None:
 
         model = clone(classifier) if classifier is not None else LogisticRegression(
             C=cfg.classifier_C,
-            class_weight=cfg.classifier_class_weight,
+            class_weight=_encoded_class_weight(cfg.classifier_class_weight, classes),
             max_iter=cfg.classifier_max_iter,
             random_state=cfg.random_state,
         )
