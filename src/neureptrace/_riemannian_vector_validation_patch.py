@@ -61,9 +61,15 @@ def _label_vector(source_labels: Sequence[Any] | np.ndarray, *, expected_length:
     return native if native.shape == labels.shape else labels
 
 
+def _install_mekt_vector_validation() -> None:
+    mekt_validation = importlib.import_module("neureptrace._mekt_vector_validation_patch")
+    mekt_validation.install()
+
+
 def install() -> None:
     """Patch Riemannian transfer vector validation."""
 
+    _install_mekt_vector_validation()
     riemannian = importlib.import_module("neureptrace.decoding.riemannian")
     original_fit_predict_transfer = riemannian.fit_predict_riemannian_transfer
     if getattr(original_fit_predict_transfer, _PATCH_MARKER, False):
