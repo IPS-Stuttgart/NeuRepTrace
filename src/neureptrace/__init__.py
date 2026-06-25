@@ -18,6 +18,7 @@ from . import (  # noqa: E402
     _bushmeg_source_loso_ensemble_numeric_patch,
     _bushmeg_source_loso_prototype_patch,
     _category2_autoencoder_all_protocols_patch,
+    _category2_autoencoder_max_folds_patch,
     _classifier_tuple_labels_patch,
     _confusion_metadata_lookup_patch,
     _confusion_permutation_seed_patch,
@@ -112,6 +113,7 @@ _pls_da_composite_labels_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _bushmeg_source_loso_ensemble_numeric_patch.install()
 _category2_autoencoder_all_protocols_patch.install()
+_category2_autoencoder_max_folds_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
 _reconstruction_encoder_config_patch.install()
