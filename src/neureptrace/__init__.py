@@ -29,7 +29,6 @@ from . import (  # noqa: E402
     _event_detection_extensions,
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
-    _kernel_mean_matching_bool_validation_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
     _mne_alignment_calibration_anchor_patch,
@@ -70,7 +69,6 @@ _correlation_prototype_sample_weight_patch.install()
 _event_detection_extensions.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
-_kernel_mean_matching_bool_validation_patch.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
@@ -118,7 +116,3 @@ _source_alignment_contrastive_patch.install()
 # This keeps the method registration visible at runtime.
 importlib.import_module("neureptrace.decoding.source_alignment")
 _source_alignment_oracle_patch.install()
-_source_alignment_target_calibration_offsets_patch.install()
-_source_alignment_cli_choices_patch.install()
-_bushmeg_cue_temporal_bins_patch.install()
-_mne_time_decode_ensemble_param_validation_patch.install()
