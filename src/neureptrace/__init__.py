@@ -74,6 +74,7 @@ from . import (  # noqa: E402
     _source_weighting_tuple_row_groups_patch,
     _transfer_cross_validation_label_patch,
     _transfer_null_fallback_patch,
+    _transfer_null_label_conflict_patch,
     _tuple_label_calibration_split_patch,
     _windowed_composite_labels_patch,
 )
@@ -140,6 +141,7 @@ _source_selection_temperature_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _transfer_cross_validation_label_patch.install()
 _transfer_null_fallback_patch.install()
+_transfer_null_label_conflict_patch.install()
 _windowed_composite_labels_patch.install()
 _tuple_label_calibration_split_patch.install()
 
