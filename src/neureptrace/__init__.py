@@ -137,6 +137,7 @@ _source_selection_optional_bounds_patch.install()
 _source_selection_temperature_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _transfer_cross_validation_label_patch.install()
+_transfer_null_fallback_patch.install()
 _tuple_label_calibration_split_patch.install()
 
 from . import (  # noqa: E402
