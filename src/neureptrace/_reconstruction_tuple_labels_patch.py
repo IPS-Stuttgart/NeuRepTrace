@@ -106,12 +106,25 @@ def install() -> None:
         classifier: BaseEstimator | None = None,
         sample_weight: Sequence[float] | np.ndarray | None = None,
     ):
+        train_matrix = reconstruction_encoder._feature_matrix(train_features, name="train_features")
+        labels = _atomic_label_vector(train_labels, expected_length=train_matrix.shape[0], name="train_labels")
+        encode_labels = _requires_code_labels(labels)
+        if not encode_labels:
+            return original(
+                train_features=train_features,
+                train_labels=train_labels,
+                test_features=test_features,
+                config=config,
+                target_encoder_features=target_encoder_features,
+                target_labels=target_labels,
+                classifier=classifier,
+                sample_weight=sample_weight,
+            )
+
         if target_labels is not None:
             raise ValueError("Reconstruction latent classifier does not accept target labels.")
 
         cfg = reconstruction_encoder.reconstruction_encoder_config() if config is None else config
-        train_matrix = reconstruction_encoder._feature_matrix(train_features, name="train_features")
-        labels = _atomic_label_vector(train_labels, expected_length=train_matrix.shape[0], name="train_labels")
         classes, label_codes = _label_codes(labels)
         if classes.shape[0] < 2:
             raise ValueError("train_labels must contain at least two classes.")
@@ -123,8 +136,6 @@ def install() -> None:
             target_encoder_features=target_encoder_features,
         )
 
-        encode_labels = _requires_code_labels(labels)
-        fit_labels = label_codes if encode_labels else labels
         model = clone(classifier) if classifier is not None else LogisticRegression(
             C=cfg.classifier_C,
             class_weight=cfg.classifier_class_weight,
@@ -132,18 +143,11 @@ def install() -> None:
             random_state=cfg.random_state,
         )
         fit_kwargs = {} if sample_weight is None else {"sample_weight": np.asarray(sample_weight, dtype=float)}
-        model.fit(latent.train_latent, fit_labels, **fit_kwargs)
+        model.fit(latent.train_latent, label_codes, **fit_kwargs)
 
-        if encode_labels:
-            predictions = _decode_label_codes(model.predict(latent.test_latent), classes)
-            model_classes = np.asarray(getattr(model, "classes_", np.arange(classes.shape[0])), dtype=int)
-            output_classes = _decode_label_codes(model_classes, classes)
-            label_encoding = "integer_codes_for_composite_labels"
-        else:
-            predictions = np.asarray(model.predict(latent.test_latent))
-            output_classes = np.asarray(getattr(model, "classes_", classes))
-            label_encoding = "native"
-
+        predictions = _decode_label_codes(model.predict(latent.test_latent), classes)
+        model_classes = np.asarray(getattr(model, "classes_", np.arange(classes.shape[0])), dtype=int)
+        output_classes = _decode_label_codes(model_classes, classes)
         probabilities = np.asarray(model.predict_proba(latent.test_latent), dtype=float) if hasattr(model, "predict_proba") else None
         metadata = {
             **latent.metadata,
@@ -151,7 +155,7 @@ def install() -> None:
             "classifier_target_labels_used": False,
             "classifier_name": type(model).__name__,
             "classifier_n_classes": int(output_classes.shape[0]),
-            "classifier_label_encoding": label_encoding,
+            "classifier_label_encoding": "integer_codes_for_composite_labels",
         }
         return reconstruction_encoder.ReconstructionLatentClassificationResult(
             train_latent=latent.train_latent,
