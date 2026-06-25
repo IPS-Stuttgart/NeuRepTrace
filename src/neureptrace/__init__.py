@@ -33,6 +33,7 @@ from . import (  # noqa: E402
     _metadata_column_validation_patch,
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
+    _mne_time_decode_ensemble_param_validation_patch,
     _nll_eps_validation_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
@@ -47,6 +48,7 @@ from . import (  # noqa: E402
     _source_alignment_pseudo_calibration_patch,
     _source_alignment_pseudo_repetition_patch,
     _source_alignment_times_validation_patch,
+    _source_domain_generalization_composite_patch,
     _source_free_standardize_target_patch,
     _source_free_tuple_labels_patch,
     _source_mixstyle_tuple_labels_patch,
@@ -93,6 +95,7 @@ _sample_weight_validation_patch.install()
 _response_window_time_validation_patch.install()
 _riemannian_vector_validation_patch.install()
 _source_alignment_times_validation_patch.install()
+_source_domain_generalization_composite_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
@@ -116,3 +119,4 @@ _source_alignment_oracle_patch.install()
 _source_alignment_target_calibration_offsets_patch.install()
 _source_alignment_cli_choices_patch.install()
 _bushmeg_cue_temporal_bins_patch.install()
+_mne_time_decode_ensemble_param_validation_patch.install()
