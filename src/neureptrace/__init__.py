@@ -62,6 +62,7 @@ from . import (  # noqa: E402
     _source_mixstyle_tuple_labels_patch,
     _source_selection_class_balance_patch,
     _source_selection_composite_ids_patch,
+    _source_selection_optional_bounds_patch,
     _source_selection_temperature_patch,
     _source_weighting_tuple_row_groups_patch,
     _transfer_cross_validation_label_patch,
@@ -120,6 +121,7 @@ _source_mixstyle_tuple_labels_patch.install()
 _random_state_config_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
+_source_selection_optional_bounds_patch.install()
 _source_selection_temperature_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _transfer_cross_validation_label_patch.install()
