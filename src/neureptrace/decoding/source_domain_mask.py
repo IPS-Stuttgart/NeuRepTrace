@@ -107,7 +107,12 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
-    items = list(values)
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} must be a one-dimensional sequence of hashable values, not a scalar string.")
+    try:
+        items = list(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a one-dimensional sequence of hashable values.") from exc
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
         try:
