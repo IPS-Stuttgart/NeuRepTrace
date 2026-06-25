@@ -15,6 +15,7 @@ from . import (  # noqa: E402
     _bushmeg_all_protocols_timeout_patch,
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_cue_temporal_bins_patch,
+    _bushmeg_source_loso_ensemble_numeric_patch,
     _bushmeg_source_loso_prototype_patch,
     _category2_autoencoder_all_protocols_patch,
     _classifier_tuple_labels_patch,
@@ -109,6 +110,7 @@ _observation_schema_label_patch.install()
 _probability_stacking_group_summary_patch.install()
 _pls_da_composite_labels_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
+_bushmeg_source_loso_ensemble_numeric_patch.install()
 _category2_autoencoder_all_protocols_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
