@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import importlib
-import json
 from collections.abc import Mapping, Sequence
 from functools import wraps
 from pathlib import Path
