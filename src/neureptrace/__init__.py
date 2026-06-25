@@ -43,6 +43,7 @@ from . import (  # noqa: E402
     _nll_eps_validation_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
+    _pls_da_composite_labels_patch,
     _probability_stacking_group_summary_patch,
     _random_state_config_patch,
     _reconstruction_encoder_config_patch,
@@ -94,6 +95,7 @@ _decoding_probability_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
 _probability_stacking_group_summary_patch.install()
+_pls_da_composite_labels_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
