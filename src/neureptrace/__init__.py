@@ -26,6 +26,7 @@ from . import (  # noqa: E402
     _decoding_regularization_patch,
     _event_detection_extensions,
     _few_shot_split_validation_patch,
+    _few_shot_tuple_labels_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
     _mne_alignment_calibration_anchor_patch,
@@ -57,6 +58,7 @@ _confusion_permutation_seed_patch.install()
 _correlation_prototype_sample_weight_patch.install()
 _event_detection_extensions.install()
 _few_shot_split_validation_patch.install()
+_few_shot_tuple_labels_patch.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
