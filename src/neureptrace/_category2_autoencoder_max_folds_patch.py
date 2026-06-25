@@ -68,11 +68,32 @@ def _annotate_limited_provenance(summary_path: Path, *, max_folds: int, n_outer_
     sidecar.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
 
+def _call_runner(
+    runner: Any,
+    config_path: Path,
+    *,
+    overrides: Sequence[str] | None,
+    out_path: str | Path | None,
+    predictions_out_path: str | Path | None,
+) -> Any:
+    """Call the runner without injecting defaulted keywords into test doubles."""
+
+    kwargs: dict[str, Any] = {}
+    if overrides is not None:
+        kwargs["overrides"] = overrides
+    if out_path is not None:
+        kwargs["out_path"] = out_path
+    if predictions_out_path is not None:
+        kwargs["predictions_out_path"] = predictions_out_path
+    return runner(config_path, **kwargs)
+
+
 def _patch_runner_module(module: Any) -> None:
-    if getattr(module, _RUNNER_MARKER, False):
+    current_run = module.run_bushmeg_category2_autoencoder_loso
+    if getattr(current_run, _RUNNER_MARKER, False):
         return
 
-    original_run = module.run_bushmeg_category2_autoencoder_loso
+    original_run = current_run
 
     @wraps(original_run)
     def run_bushmeg_category2_autoencoder_loso(
@@ -87,7 +108,13 @@ def _patch_runner_module(module: Any) -> None:
         config = module.apply_overrides(module.load_config(config_path), overrides)
         resolved_max_folds = _resolve_max_folds(module, config, max_folds)
         if resolved_max_folds is None:
-            return original_run(config_path, overrides=overrides, out_path=out_path, predictions_out_path=predictions_out_path)
+            return _call_runner(
+                original_run,
+                config_path,
+                overrides=overrides,
+                out_path=out_path,
+                predictions_out_path=predictions_out_path,
+            )
 
         summary_path = _resolve_summary_path(module, config_path, config, out_path)
         original_loader = module._load_subjects_from_config
@@ -99,7 +126,13 @@ def _patch_runner_module(module: Any) -> None:
 
         module._load_subjects_from_config = load_subjects_from_config
         try:
-            summary = original_run(config_path, overrides=overrides, out_path=out_path, predictions_out_path=predictions_out_path)
+            summary = _call_runner(
+                original_run,
+                config_path,
+                overrides=overrides,
+                out_path=out_path,
+                predictions_out_path=predictions_out_path,
+            )
         finally:
             module._load_subjects_from_config = original_loader
 
@@ -110,6 +143,7 @@ def _patch_runner_module(module: Any) -> None:
         _annotate_limited_provenance(summary_path, max_folds=resolved_max_folds, n_outer_folds=n_outer_folds)
         return summary
 
+    setattr(run_bushmeg_category2_autoencoder_loso, _RUNNER_MARKER, True)
     module.run_bushmeg_category2_autoencoder_loso = run_bushmeg_category2_autoencoder_loso
     setattr(module, _RUNNER_MARKER, True)
 
@@ -126,10 +160,11 @@ def _with_category2_max_folds(config: Mapping[str, Any], max_folds: int | None) 
 
 
 def _patch_all_protocols_patch_module(module: Any) -> None:
-    if getattr(module, _ALL_PROTOCOLS_MARKER, False):
+    current_run_category2_loso = module._run_category2_loso
+    if getattr(current_run_category2_loso, _ALL_PROTOCOLS_MARKER, False):
         return
 
-    original_run_category2_loso = module._run_category2_loso
+    original_run_category2_loso = current_run_category2_loso
 
     @wraps(original_run_category2_loso)
     def _run_category2_loso(
@@ -166,6 +201,7 @@ def _patch_all_protocols_patch_module(module: Any) -> None:
             fold_timeout_seconds=fold_timeout_seconds,
         )
 
+    setattr(_run_category2_loso, _ALL_PROTOCOLS_MARKER, True)
     module._run_category2_loso = _run_category2_loso
     setattr(module, _ALL_PROTOCOLS_MARKER, True)
 
