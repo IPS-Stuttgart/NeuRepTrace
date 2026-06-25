@@ -29,6 +29,7 @@ from . import (  # noqa: E402
     _event_detection_extensions,
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
+    _lora_few_shot_tuple_subject_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
     _mne_alignment_calibration_anchor_patch,
@@ -103,6 +104,7 @@ _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_temperature_patch.install()
 _tuple_label_calibration_split_patch.install()
+_lora_few_shot_tuple_subject_patch.install()
 
 from . import (  # noqa: E402
     _source_alignment_cli_choices_patch,
