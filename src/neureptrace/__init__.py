@@ -30,6 +30,7 @@ from . import (  # noqa: E402
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
     _kernel_mean_matching_bool_validation_patch,
+    _label_proportion_tuple_prediction_patch,
     _lora_few_shot_tuple_subject_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
@@ -73,6 +74,7 @@ _event_detection_extensions.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
+_label_proportion_tuple_prediction_patch.install()
 _lora_few_shot_tuple_subject_patch.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()

@@ -73,6 +73,21 @@ def test_adjust_probability_blocks_to_label_proportions_matches_each_block_prior
     assert set(predict_labels_from_label_proportions(result)).issubset({"rare", "standard"})
 
 
+def test_predict_labels_from_label_proportions_preserves_tuple_classes_as_atomic_labels():
+    result = adjust_probabilities_to_label_proportions(
+        [[0.99, 0.01], [0.01, 0.99]],
+        {(0, "left"): 1, (1, "right"): 1},
+        classes=((0, "left"), (1, "right")),
+        tol=1e-12,
+    )
+
+    predictions = predict_labels_from_label_proportions(result)
+
+    assert predictions.shape == (2,)
+    assert predictions.dtype == object
+    assert list(predictions) == [(0, "left"), (1, "right")]
+
+
 def test_normalize_label_proportions_accepts_counts_and_preserves_class_order():
     proportions, classes = normalize_label_proportions({"standard": 9, "target": 1}, classes=("target", "standard"))
 
