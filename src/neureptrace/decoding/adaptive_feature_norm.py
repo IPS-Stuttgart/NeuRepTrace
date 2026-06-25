@@ -10,8 +10,9 @@ import numpy as np
 
 ADAPTIVE_FEATURE_NORM_PROTOCOL = "unlabeled_target_adaptive_feature_norm"
 ADAPTIVE_FEATURE_NORM_CATEGORY = "2_unlabeled_target_adaptive"
-ADAPTIVE_FEATURE_NORM_METHODS = ("none", "target_center", "target_zscore", "domain_zscore", "moment_match")
+ADAPTIVE_FEATURE_NORM_METHODS = ("none", "target_center", "target_zscore", "domain_zscore", "moment_match", "robust_zscore")
 _MIN_SCALE = 1e-12
+_NORMAL_IQR = 1.3489795003921634
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +45,10 @@ def adaptive_feature_normalize(
     if train.shape[1] != test.shape[1]:
         raise ValueError("train_features and test_features must have the same feature width.")
     source_mean, source_scale = _mean_scale(train, floor)
-    target_mean, target_scale = _mean_scale(test, floor)
+    if method_name == "robust_zscore":
+        target_mean, target_scale = _median_iqr_scale(test, floor)
+    else:
+        target_mean, target_scale = _mean_scale(test, floor)
     if method_name == "none":
         train_out = train.copy()
         test_out = test.copy()
@@ -60,6 +64,9 @@ def adaptive_feature_normalize(
     elif method_name == "moment_match":
         train_out = ((train - source_mean) / source_scale) * target_scale + target_mean
         test_out = test.copy()
+    elif method_name == "robust_zscore":
+        train_out = (train - target_mean) / target_scale
+        test_out = (test - target_mean) / target_scale
     else:  # pragma: no cover
         raise AssertionError(method_name)
     uses_target = method_name != "none"
@@ -101,6 +108,10 @@ def normalize_adaptive_feature_norm_method(method: str | None) -> str:
         "adaptive_batch_norm": "domain_zscore",
         "source_to_target": "moment_match",
         "source_to_target_moment_match": "moment_match",
+        "robust": "robust_zscore",
+        "target_robust": "robust_zscore",
+        "target_iqr": "robust_zscore",
+        "iqr_zscore": "robust_zscore",
     }.get(normalized, normalized)
     if normalized not in ADAPTIVE_FEATURE_NORM_METHODS:
         raise ValueError(f"Unknown adaptive feature normalization method {method!r}.")
@@ -133,6 +144,13 @@ def _mean_scale(matrix: np.ndarray, floor: float) -> tuple[np.ndarray, np.ndarra
     mean = np.mean(matrix, axis=0)
     scale = np.std(matrix, axis=0, ddof=1 if matrix.shape[0] > 1 else 0)
     return mean, np.maximum(scale, floor)
+
+
+def _median_iqr_scale(matrix: np.ndarray, floor: float) -> tuple[np.ndarray, np.ndarray]:
+    median = np.median(matrix, axis=0)
+    q25, q75 = np.percentile(matrix, [25.0, 75.0], axis=0)
+    scale = (q75 - q25) / _NORMAL_IQR
+    return median, np.maximum(scale, floor)
 
 
 def _positive_float(value, *, name: str) -> float:
