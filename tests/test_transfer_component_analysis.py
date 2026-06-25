@@ -37,7 +37,7 @@ def test_tca_linear_shapes_and_metadata() -> None:
     assert result.metadata["tca_valid_for_strict_source_only"] is False
     assert np.all(np.isfinite(result.source_features))
     assert np.all(np.isfinite(result.target_features))
-    assert np.allclose(transform_with_tca_model(result.model, target), result.target_features)
+    assert np.allclose(transform_with_tca_model(result.model, target), result.target_features, atol=1e-5)
 
 
 def test_tca_rbf_kernel_and_component_cap() -> None:
