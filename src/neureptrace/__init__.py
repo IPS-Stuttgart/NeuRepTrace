@@ -16,7 +16,6 @@ from . import (  # noqa: E402
     _bushmeg_smoke_enabled_bool_patch,
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_cue_temporal_bins_patch,
-    _bushmeg_protocol3_index_validation_patch,
     _bushmeg_source_loso_ensemble_numeric_patch,
     _bushmeg_source_loso_prototype_patch,
     _category2_autoencoder_all_protocols_patch,
@@ -40,7 +39,6 @@ from . import (  # noqa: E402
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
     _kernel_mean_matching_bool_validation_patch,
-    _label_shift_source_prior_patch,
     _label_proportion_tuple_prediction_patch,
     _lora_few_shot_tuple_subject_patch,
     _mcca_repetition_count_patch,
@@ -78,6 +76,7 @@ from . import (  # noqa: E402
     _source_selection_optional_bounds_patch,
     _source_selection_temperature_patch,
     _source_weighting_tuple_row_groups_patch,
+    _temporal_smoothing_singleton_sequence_patch,
     _transfer_cross_validation_label_patch,
     _transfer_null_fallback_patch,
     _transfer_null_label_conflict_patch,
@@ -90,7 +89,6 @@ _alignment_window_config_patch.install()
 _dataset_config_participant_patch.install()
 _dataset_name_config_patch.install()
 _dataset_spec_csv_group_column_patch.install()
-_dataset_spec_numeric_validation_patch.install()
 _metadata_column_validation_patch.install()
 _confusion_metadata_lookup_patch.install()
 _confusion_permutation_seed_patch.install()
@@ -101,7 +99,6 @@ _fieldtrip_sampleinfo_validation_patch.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
-_label_shift_source_prior_patch.install()
 _label_proportion_tuple_prediction_patch.install()
 _lora_few_shot_tuple_subject_patch.install()
 _decoding_regularization_patch.install()
@@ -121,7 +118,6 @@ _category2_autoencoder_max_folds_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_smoke_enabled_bool_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
-_bushmeg_protocol3_index_validation_patch.install()
 _reconstruction_encoder_config_patch.install()
 _reconstruction_tuple_labels_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
@@ -151,6 +147,7 @@ _source_selection_class_balance_patch.install()
 _source_selection_optional_bounds_patch.install()
 _source_selection_temperature_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
+_temporal_smoothing_singleton_sequence_patch.install()
 _transfer_cross_validation_label_patch.install()
 _transfer_null_fallback_patch.install()
 _transfer_null_label_conflict_patch.install()
