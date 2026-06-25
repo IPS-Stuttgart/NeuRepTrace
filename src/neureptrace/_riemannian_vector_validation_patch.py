@@ -56,7 +56,9 @@ def _domain_ids(n_rows: int, source_domains: Sequence[Any] | np.ndarray | None) 
 
 
 def _label_vector(source_labels: Sequence[Any] | np.ndarray, *, expected_length: int) -> np.ndarray:
-    return _flat_object_vector(source_labels, expected_length=expected_length, name="source_labels")
+    labels = _flat_object_vector(source_labels, expected_length=expected_length, name="source_labels")
+    native = np.asarray(labels.tolist())
+    return native if native.shape == labels.shape else labels
 
 
 def install() -> None:
