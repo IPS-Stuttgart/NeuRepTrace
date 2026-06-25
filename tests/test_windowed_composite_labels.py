@@ -1,3 +1,4 @@
+# ruff: noqa
 import numpy as np
 
 from neureptrace.decoding.windowed import score_windowed_decoding
