@@ -78,9 +78,11 @@ def _two_float_tuple(value: Any, name: str) -> tuple[float, float]:
 
 
 def install() -> None:
-    """Install strict numeric validation for dataset-spec scalar fields."""
+    """Install strict numeric validation for dataset-spec and calibration scalar fields."""
 
-    from neureptrace import dataset_spec
+    from neureptrace import _calibration_bool_numeric_patch, dataset_spec
+
+    _calibration_bool_numeric_patch.install()
 
     if getattr(dataset_spec, _PATCH_MARKER, False):
         return
