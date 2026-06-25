@@ -92,6 +92,9 @@ def _patch_mcca_target(module: ModuleType) -> None:
         return original_class_alignment_matrix(*args, **kwargs)
 
     module.class_alignment_matrix = class_alignment_matrix
+    hyperalignment_initialization = sys.modules.get("neureptrace.decoding.hyperalignment_initialization")
+    if hyperalignment_initialization is not None:
+        hyperalignment_initialization.class_alignment_matrix = class_alignment_matrix
 
 
 def _patch_module(module: ModuleType) -> None:

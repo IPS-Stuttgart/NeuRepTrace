@@ -13,11 +13,14 @@ from . import (  # noqa: E402
     _alignment_window_config_patch,
     _bushmeg_all_protocols_prediction_metric_patch,
     _bushmeg_all_protocols_timeout_patch,
+    _bushmeg_smoke_enabled_bool_patch,
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_cue_temporal_bins_patch,
+    _bushmeg_protocol3_index_validation_patch,
     _bushmeg_source_loso_ensemble_numeric_patch,
     _bushmeg_source_loso_prototype_patch,
     _category2_autoencoder_all_protocols_patch,
+    _category2_autoencoder_max_folds_patch,
     _classifier_tuple_labels_patch,
     _confusion_metadata_lookup_patch,
     _confusion_permutation_seed_patch,
@@ -37,6 +40,7 @@ from . import (  # noqa: E402
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
     _kernel_mean_matching_bool_validation_patch,
+    _label_shift_source_prior_patch,
     _label_proportion_tuple_prediction_patch,
     _lora_few_shot_tuple_subject_patch,
     _mcca_repetition_count_patch,
@@ -97,6 +101,7 @@ _fieldtrip_sampleinfo_validation_patch.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
+_label_shift_source_prior_patch.install()
 _label_proportion_tuple_prediction_patch.install()
 _lora_few_shot_tuple_subject_patch.install()
 _decoding_regularization_patch.install()
@@ -112,8 +117,11 @@ _pls_da_composite_labels_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _bushmeg_source_loso_ensemble_numeric_patch.install()
 _category2_autoencoder_all_protocols_patch.install()
+_category2_autoencoder_max_folds_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
+_bushmeg_smoke_enabled_bool_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
+_bushmeg_protocol3_index_validation_patch.install()
 _reconstruction_encoder_config_patch.install()
 _reconstruction_tuple_labels_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
