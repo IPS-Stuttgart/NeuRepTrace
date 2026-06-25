@@ -60,6 +60,7 @@ from . import (  # noqa: E402
     _source_selection_composite_ids_patch,
     _source_selection_temperature_patch,
     _transfer_cross_validation_label_patch,
+    _transfer_null_fallback_patch,
     _tuple_label_calibration_split_patch,
 )
 
@@ -112,6 +113,7 @@ _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_temperature_patch.install()
 _transfer_cross_validation_label_patch.install()
+_transfer_null_fallback_patch.install()
 _tuple_label_calibration_split_patch.install()
 
 from . import (  # noqa: E402
