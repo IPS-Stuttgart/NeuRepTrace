@@ -78,7 +78,6 @@ def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
 
-    original_normalize_rerank_top_k = module._normalize_rerank_top_k
     original_normalize_temperature = module._normalize_temperature
     original_parse_float_grid = module._parse_float_grid
     original_fit_stacking_weights = module._fit_stacking_weights
