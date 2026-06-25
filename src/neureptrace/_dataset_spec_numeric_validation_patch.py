@@ -66,7 +66,15 @@ def _optional_float(mapping: Mapping[str, Any], key: str) -> float | None:
 def _two_float_tuple(value: Any, name: str) -> tuple[float, float]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 2:
         raise ValueError(f"{name} must contain exactly two numeric values.")
-    return _finite_float(value[0], name=f"{name}[0]"), _finite_float(value[1], name=f"{name}[1]")
+    lower = _finite_float(value[0], name=f"{name}[0]")
+    if name == "preprocessing_defaults.frequency_range_hz":
+        try:
+            upper = float(value[1])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name}[1] must be a finite numeric value.") from exc
+        if np.isposinf(upper):
+            return lower, upper
+    return lower, _finite_float(value[1], name=f"{name}[1]")
 
 
 def install() -> None:
