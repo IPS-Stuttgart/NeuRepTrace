@@ -1,5 +1,6 @@
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
 from neureptrace.decoding.transfer import (
     append_null_class_features,
     cross_validate_feature_decoding,
@@ -28,6 +29,13 @@ class _ObjectConstantClassifier:
         return predictions
 
 
+def _object_label_vector(*labels):
+    vector = np.empty(len(labels), dtype=object)
+    for index, label in enumerate(labels):
+        vector[index] = label
+    return vector
+
+
 def test_sequential_fold_ids_matches_legacy_contiguous_assignment():
     assert sequential_fold_ids(4, 2).tolist() == [1, 1, 2, 2]
     assert sequential_fold_ids(5, 5).tolist() == [1, 2, 3, 4, 5]
@@ -48,6 +56,20 @@ def test_replace_null_class_predictions_uses_least_frequent_non_null_label():
     predictions = replace_null_class_predictions(np.array([0, 1, 1, 2]))
 
     assert predictions.tolist() == [2, 1, 1, 2]
+
+
+def test_replace_null_class_predictions_counts_numpy_array_labels_atomically():
+    left = np.asarray(["left", 1], dtype=object)
+    right = np.asarray(["right", 2], dtype=object)
+    predictions = _object_label_vector(0, left, left.copy(), right)
+
+    repaired = replace_null_class_predictions(predictions)
+
+    assert repaired.dtype == object
+    assert values_equal(repaired[0], right)
+    assert values_equal(repaired[1], left)
+    assert values_equal(repaired[2], left)
+    assert values_equal(repaired[3], right)
 
 
 def test_cross_validate_feature_decoding_replaces_all_null_predictions():
