@@ -83,6 +83,27 @@ def test_kmm_class_balance_equalizes_source_class_weight_mass() -> None:
     assert result.metadata["kmm_uses_source_labels"] is True
 
 
+def test_kmm_class_balance_preserves_composite_source_labels() -> None:
+    source = np.asarray([[0.0], [0.1], [0.2], [0.3], [3.0], [3.1]], dtype=float)
+    target = np.asarray([[0.0], [0.15], [3.0]], dtype=float)
+    labels = [("major", "left"), ("major", "left"), ("major", "left"), ("major", "left"), ("minor", "right"), ("minor", "right")]
+
+    result = kernel_mean_matching_weights(
+        source,
+        target,
+        gamma=2.0,
+        epsilon=None,
+        source_labels=labels,
+        class_balance=True,
+    )
+
+    major_mask = np.asarray([label == ("major", "left") for label in labels], dtype=bool)
+    minor_mask = np.asarray([label == ("minor", "right") for label in labels], dtype=bool)
+    assert np.isclose(float(np.sum(result.weights[major_mask])), float(np.sum(result.weights[minor_mask])))
+    assert np.isclose(np.mean(result.weights), 1.0)
+    assert result.metadata["kmm_uses_source_labels"] is True
+
+
 def test_kmm_from_config_mapping_and_aliases() -> None:
     source = np.asarray([[0.0], [1.0], [3.0]], dtype=float)
     target = np.asarray([[0.1], [0.2]], dtype=float)
