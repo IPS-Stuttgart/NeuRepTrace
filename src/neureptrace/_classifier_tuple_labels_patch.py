@@ -92,19 +92,19 @@ def _as_python_scalar(value: object) -> object:
 
 def _validate_sample_weights(
     *,
-    labels: np.ndarray,
-    classes: np.ndarray,
+    n_samples: int,
+    class_labels: np.ndarray,
     class_masks: Sequence[np.ndarray],
     sample_weight: Sequence[float] | np.ndarray,
 ) -> np.ndarray:
     weights = np.asarray(sample_weight, dtype=float).reshape(-1)
-    if weights.shape[0] != labels.shape[0]:
+    if weights.shape[0] != n_samples:
         raise ValueError("sample_weight must contain one weight per feature row.")
     if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
         raise ValueError("sample_weight must contain finite non-negative values.")
 
-    zero_weight_classes = []
-    for class_label, class_mask in zip(classes, class_masks):
+    zero_weight_classes: list[object] = []
+    for class_label, class_mask in zip(class_labels, class_masks, strict=True):
         if float(weights[class_mask].sum()) <= 0.0:
             zero_weight_classes.append(_as_python_scalar(class_label))
     if zero_weight_classes:
@@ -144,7 +144,7 @@ def install() -> None:
         if label_vector.shape[0] != features_array.shape[0]:
             raise ValueError("labels must contain one label per feature row.")
 
-        classes, _encoded = _unique_labels_and_inverse(label_vector)
+        classes, _ = _unique_labels_and_inverse(label_vector)
         if classes.size == 0:
             raise ValueError("At least one class is required.")
         self.classes_ = classes
@@ -154,8 +154,8 @@ def install() -> None:
             self.prototypes_ = np.vstack([np.mean(features_array[class_mask], axis=0) for class_mask in class_masks])
         else:
             weights = _validate_sample_weights(
-                labels=label_vector,
-                classes=classes,
+                n_samples=label_vector.shape[0],
+                class_labels=classes,
                 class_masks=class_masks,
                 sample_weight=sample_weight,
             )
