@@ -71,6 +71,24 @@ def _all_same(values: np.ndarray) -> bool:
     return all(_values_equal(value, first) for value in flat)
 
 
+def _assign_masked(array: np.ndarray, mask: np.ndarray, value: object) -> None:
+    """Assign one possibly composite scalar value to every true mask position."""
+
+    if array.dtype == object:
+        for index in np.flatnonzero(mask):
+            array[index] = value
+        return
+    array[mask] = value
+
+
+def _label_accuracy(labels: Sequence | np.ndarray, predictions: Sequence | np.ndarray) -> float:
+    """Return mean equality for labels that may be tuple/list-valued objects."""
+
+    if len(labels) == 0:
+        return np.nan
+    return float(np.mean([_values_equal(label, prediction) for label, prediction in zip(labels, predictions, strict=True)]))
+
+
 def _repair_degenerate_out_of_space_predictions(predictions: np.ndarray, label_values: np.ndarray) -> np.ndarray:
     """Replace the all-null fallback label with a valid observed label.
 
@@ -92,14 +110,14 @@ def _repair_degenerate_out_of_space_predictions(predictions: np.ndarray, label_v
 
     fallback = label_values[0]
     if repaired.dtype == object:
-        repaired[~valid] = fallback
+        _assign_masked(repaired, ~valid, fallback)
         return repaired
 
     try:
         fallback = np.asarray([fallback], dtype=repaired.dtype)[0]
     except (TypeError, ValueError, OverflowError):
         repaired = repaired.astype(object)
-    repaired[~valid] = fallback
+    _assign_masked(repaired, ~valid, fallback)
     return repaired
 
 
@@ -148,7 +166,7 @@ def install() -> None:
             result.predictions,
             _observed_label_values(label_vector),
         )
-        accuracy = float(np.mean(label_vector == predictions)) if len(label_vector) else np.nan
+        accuracy = _label_accuracy(label_vector, predictions)
         return transfer.CrossValidationResult(accuracy=accuracy, predictions=predictions, fold_ids=result.fold_ids)
 
     _cross_validate_feature_decoding.__name__ = _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING.__name__
