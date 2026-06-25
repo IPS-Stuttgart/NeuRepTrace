@@ -9,6 +9,7 @@ __version__ = "0.1.1"
 
 from . import (  # noqa: E402
     _alignment_window_config_patch,
+    _bushmeg_all_protocols_prediction_metric_patch,
     _bushmeg_all_protocols_timeout_patch,
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_source_loso_prototype_patch,
@@ -57,6 +58,7 @@ _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
+_bushmeg_all_protocols_prediction_metric_patch.install()
 _reconstruction_encoder_config_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
 _mcca_repetition_count_patch.install()
