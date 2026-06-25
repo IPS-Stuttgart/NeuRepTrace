@@ -26,6 +26,8 @@ _FINDER_MARKER = "_neureptrace_mekt_vector_validation_finder"
 
 
 def _object_array(items: list[Any]) -> np.ndarray:
+    if not any(isinstance(item, tuple) for item in items):
+        return np.asarray(items)
     vector = np.empty(len(items), dtype=object)
     for index, item in enumerate(items):
         vector[index] = item
