@@ -22,7 +22,7 @@ def _object_vector(values: Sequence[Any]) -> np.ndarray:
 def _atomic_label_vector(labels: Sequence[Any] | np.ndarray) -> np.ndarray:
     """Return a 1-D label vector without expanding tuple/list labels.
 
-    NumPy turns ``[("a", 1), ("b", 2)]`` into a two-dimensional array.  For
+    NumPy turns ``[("a", 1), ("b", 2)]`` into a two-dimensional array. For
     classifier labels each row is one composite class value, so row-shaped input
     must be collapsed back into tuple objects before unique-class encoding.
     """
@@ -44,7 +44,9 @@ def _atomic_label_vector(labels: Sequence[Any] | np.ndarray) -> np.ndarray:
         return _object_vector([labels])
 
     if any(isinstance(label, (tuple, list)) for label in items):
-        return _object_vector([tuple(label) if isinstance(label, list) else label for label in items])
+        return _object_vector(
+            [tuple(label) if isinstance(label, list) else label for label in items]
+        )
 
     array = np.asarray(items)
     if array.ndim <= 1:
@@ -120,8 +122,10 @@ def install() -> None:
     if getattr(classifiers, _PATCH_MARKER, False):
         return
 
-    def encode_classifier_labels(labels: Sequence[Any] | np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Encode labels as dense integer class ids while preserving composite labels."""
+    def encode_classifier_labels(
+        labels: Sequence[Any] | np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Encode labels as dense integer class ids while preserving composites."""
 
         label_vector = _atomic_label_vector(labels)
         if label_vector.size == 0:
@@ -151,7 +155,9 @@ def install() -> None:
         class_masks = [_label_mask(label_vector, class_label) for class_label in classes]
 
         if sample_weight is None:
-            self.prototypes_ = np.vstack([np.mean(features_array[class_mask], axis=0) for class_mask in class_masks])
+            self.prototypes_ = np.vstack(
+                [np.mean(features_array[class_mask], axis=0) for class_mask in class_masks]
+            )
         else:
             weights = _validate_sample_weights(
                 n_samples=label_vector.shape[0],
@@ -160,7 +166,14 @@ def install() -> None:
                 sample_weight=sample_weight,
             )
             self.prototypes_ = np.vstack(
-                [np.average(features_array[class_mask], axis=0, weights=weights[class_mask]) for class_mask in class_masks]
+                [
+                    np.average(
+                        features_array[class_mask],
+                        axis=0,
+                        weights=weights[class_mask],
+                    )
+                    for class_mask in class_masks
+                ]
             )
 
         self.normalized_prototypes_ = self._row_center_normalize(self.prototypes_)
