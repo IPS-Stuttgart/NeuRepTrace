@@ -85,7 +85,7 @@ def _label_vector(labels) -> np.ndarray:
             return array.reshape(1)
         if array.ndim == 1:
             return array
-        if original_dtype == object and array.ndim == 2 and array.shape[1] > 0:
+        if original_dtype is object and array.ndim == 2 and array.shape[1] > 0:
             return _row_tuple_label_vector(array)
         return array.reshape(-1)
 
