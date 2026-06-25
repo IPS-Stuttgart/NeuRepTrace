@@ -192,10 +192,14 @@ def fit_transfer_component_classifier(
             raise ValueError(f"sample_weight must contain one value per source row: {weights.shape[0]} != {labels.shape[0]}.")
         if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
             raise ValueError("sample_weight must contain finite non-negative values.")
+    encoded_class_weight = _encode_classifier_class_weight(
+        classifier_class_weight,
+        label_classes,
+    )
     model = clone(classifier) if classifier is not None else LogisticRegression(
         C=_positive_float(classifier_C, name="classifier_C"),
         max_iter=_positive_int(classifier_max_iter, name="classifier_max_iter"),
-        class_weight=classifier_class_weight,
+        class_weight=encoded_class_weight,
         random_state=13,
     )
     fit_kwargs = {} if weights is None else {"sample_weight": weights}
@@ -504,6 +508,24 @@ def _label_key(value: Any) -> Any:
     except TypeError:
         return ("repr", repr(value))
     return ("scalar", value)
+
+
+def _encode_classifier_class_weight(
+    value: str | Mapping[Any, float] | None,
+    label_classes: np.ndarray,
+) -> str | dict[int, float] | None:
+    if value is None or isinstance(value, str):
+        return value
+    weight_by_key = {
+        _label_key(label): float(weight)
+        for label, weight in value.items()
+    }
+    encoded: dict[int, float] = {}
+    for class_index, label in enumerate(label_classes):
+        key = _label_key(label)
+        if key in weight_by_key:
+            encoded[class_index] = weight_by_key[key]
+    return encoded
 
 
 def _normalize_components(value: int | str) -> int | str:
