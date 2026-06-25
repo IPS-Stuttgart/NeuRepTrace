@@ -10,6 +10,7 @@ from neureptrace.decoding.source_domain_generalization import (
 )
 
 
+
 def _toy_source_problem(seed=13):
     rng = np.random.default_rng(seed)
     labels = np.tile(np.repeat([0, 1], 6), 3)
@@ -26,6 +27,7 @@ def _toy_source_problem(seed=13):
     )
     test_features = rng.normal(size=(7, source_features.shape[1]))
     return source_features, labels, domains, test_features
+
 
 
 def test_fit_source_adversarial_predict_proba_marks_source_only_protocol():
@@ -57,6 +59,31 @@ def test_fit_source_adversarial_predict_proba_marks_source_only_protocol():
     assert result.metadata["source_adversarial_source_validation_mode"] == "heldout_source_domain"
     assert result.metadata["source_domain_generalization_protocol"] == SOURCE_ADVERSARIAL_PROTOCOL
     assert result.metadata["source_domain_generalization_uses_target_features"] is False
+
+
+
+def test_source_domain_generalization_accepts_single_column_source_labels():
+    pytest.importorskip("torch")
+    source_features, labels, domains, test_features = _toy_source_problem(seed=29)
+
+    result = fit_source_adversarial_predict_proba(
+        source_features=source_features,
+        source_labels=labels.reshape(-1, 1),
+        source_domains=domains,
+        test_features=test_features,
+        hidden_units=8,
+        embedding_dim=4,
+        max_epochs=3,
+        batch_size=8,
+        patience=1,
+        random_state=7,
+        device="cpu",
+    )
+
+    assert result.probabilities.shape == (7, 2)
+    np.testing.assert_allclose(result.probabilities.sum(axis=1), 1.0, atol=1e-6)
+    assert result.metadata["source_domain_generalization_source_rows"] == labels.shape[0]
+
 
 
 def test_fit_group_dro_predict_proba_marks_source_only_protocol():
@@ -92,6 +119,7 @@ def test_fit_group_dro_predict_proba_marks_source_only_protocol():
     assert result.metadata["group_dro_final_group_weights"]
 
 
+
 def test_source_domain_generalization_erm_uses_same_protocol_contract():
     pytest.importorskip("torch")
     source_features, labels, domains, test_features = _toy_source_problem(seed=19)
@@ -117,6 +145,20 @@ def test_source_domain_generalization_erm_uses_same_protocol_contract():
     assert result.metadata["source_domain_generalization_uses_target_labels"] is False
 
 
+
+def test_source_domain_generalization_rejects_multi_column_source_labels():
+    with pytest.raises(ValueError, match="source_labels must be one-dimensional"):
+        fit_source_adversarial_predict_proba(
+            source_features=np.zeros((6, 3)),
+            source_labels=np.zeros((6, 2)),
+            source_domains=np.array(["a", "a", "b", "b", "c", "c"]),
+            test_features=np.zeros((2, 3)),
+            max_epochs=1,
+            device="cpu",
+        )
+
+
+
 def test_source_adversarial_rejects_target_feature_dimension_mismatch():
     with pytest.raises(ValueError, match="same feature dimension"):
         fit_source_adversarial_predict_proba(
@@ -127,6 +169,7 @@ def test_source_adversarial_rejects_target_feature_dimension_mismatch():
             max_epochs=1,
             device="cpu",
         )
+
 
 
 def test_source_adversarial_rejects_single_source_domain():
@@ -142,6 +185,7 @@ def test_source_adversarial_rejects_single_source_domain():
         )
 
 
+
 def test_source_adversarial_rejects_missing_source_domain():
     pytest.importorskip("torch")
     with pytest.raises(ValueError, match="source_domains must not contain missing values"):
@@ -153,6 +197,7 @@ def test_source_adversarial_rejects_missing_source_domain():
             max_epochs=1,
             device="cpu",
         )
+
 
 
 def test_normalize_source_domain_generalization_strategy_aliases():
