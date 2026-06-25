@@ -21,6 +21,7 @@ from . import (  # noqa: E402
     _dataset_spec_csv_group_column_patch,
     _decoding_adaptive_calibration,
     _decoding_c_grid_patch,
+    _decoding_classifier_param_patch,
     _decoding_grouped_cv_patch,
     _decoding_probability_patch,
     _decoding_regularization_patch,
@@ -60,6 +61,7 @@ _few_shot_split_validation_patch.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
+_decoding_classifier_param_patch.install()
 _decoding_grouped_cv_patch.install()
 _decoding_probability_patch.install()
 _observation_schema_probability_patch.install()
