@@ -36,6 +36,7 @@ nav:
           - Source-domain Selection: reference/source-selection.md
           - Unlabeled Anchor Alignment: reference/unlabeled-anchor-alignment.md
           - Source MixStyle: reference/source-mixstyle.md
+          - Kernel Mean Matching: reference/kernel-mean-matching.md
           - Emission Compare: reference/emission-compare.md
           - Inference: reference/inference.md
           - Metadata: reference/metadata.md
