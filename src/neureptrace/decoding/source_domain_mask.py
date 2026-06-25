@@ -46,10 +46,10 @@ def source_domain_mask(
     fraction = _unit_interval(holdout_fraction, name="holdout_fraction")
     seed = None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state")
     n_holdout = min(int(np.floor(fraction * len(unique_domains))), len(unique_domains) - min_keep)
-    shuffled = np.asarray(unique_domains, dtype=object)
     rng = np.random.default_rng(seed)
-    rng.shuffle(shuffled)
-    heldout_domains = tuple(shuffled[:n_holdout].tolist())
+    shuffled_indices = np.arange(len(unique_domains), dtype=int)
+    rng.shuffle(shuffled_indices)
+    heldout_domains = tuple(unique_domains[int(index)] for index in shuffled_indices[:n_holdout])
     heldout_set = set(heldout_domains)
     selected_domains = tuple(domain for domain in unique_domains if domain not in heldout_set)
     selected_mask = np.asarray([domain not in heldout_set for domain in domains.tolist()], dtype=bool)
@@ -110,17 +110,43 @@ def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarr
     if isinstance(values, (str, bytes)):
         raise ValueError(f"{name} must be a one-dimensional sequence of hashable values, not a scalar string.")
     try:
-        items = list(values)
+        raw_items = list(values)
     except TypeError as exc:
         raise ValueError(f"{name} must be a one-dimensional sequence of hashable values.") from exc
+
+    array = np.asarray(raw_items, dtype=object)
+    if array.ndim == 0:
+        raise ValueError(f"{name} must be a one-dimensional sequence of hashable values.")
+    if array.ndim == 1:
+        items = array.tolist()
+    else:
+        rows = array.reshape(array.shape[0], -1)
+        if rows.shape[1] == 1:
+            items = rows[:, 0].tolist()
+        else:
+            items = [tuple(_hashable_value(item) for item in row.tolist()) for row in rows]
+
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
         try:
-            hash(value)
+            vector[index] = _hashable_value(value)
         except TypeError as exc:
             raise ValueError(f"{name} values must be hashable; got {value!r}.") from exc
-        vector[index] = value
     return vector
+
+
+def _hashable_value(value: Any) -> Hashable:
+    try:
+        hash(value)
+    except TypeError:
+        if isinstance(value, np.ndarray):
+            return tuple(_hashable_value(item) for item in value.tolist())
+        if isinstance(value, list):
+            return tuple(_hashable_value(item) for item in value)
+        if isinstance(value, tuple):
+            return tuple(_hashable_value(item) for item in value)
+        raise
+    return value
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
