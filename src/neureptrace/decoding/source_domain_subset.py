@@ -21,12 +21,12 @@ def source_domain_subset_mask(source_domains: Sequence[Hashable] | np.ndarray, *
     unique_domains = tuple(dict.fromkeys(domains.tolist()))
     if not unique_domains:
         raise ValueError("At least one source domain is required.")
-    if min_domains < 1 or min_domains > len(unique_domains):
+    min_domains = _validate_positive_int(min_domains, name="min_domains")
+    omit_fraction = _validate_unit_interval(omit_fraction, name="omit_fraction")
+    if min_domains > len(unique_domains):
         raise ValueError("min_domains is outside the valid range.")
-    if not 0.0 <= float(omit_fraction) <= 1.0:
-        raise ValueError("omit_fraction must be in [0, 1].")
     rng = np.random.default_rng(random_state)
-    n_omit = min(int(np.floor(float(omit_fraction) * len(unique_domains))), len(unique_domains) - int(min_domains))
+    n_omit = min(int(np.floor(omit_fraction * len(unique_domains))), len(unique_domains) - min_domains)
     shuffled = np.asarray(unique_domains, dtype=object)
     rng.shuffle(shuffled)
     omitted = tuple(shuffled[:n_omit].tolist())
@@ -56,3 +56,27 @@ def _object_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
         hash(value)
         vector[index] = value
     return vector
+
+
+def _validate_positive_int(value: object, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(numeric)
+
+
+def _validate_unit_interval(value: object, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be in [0, 1].")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be in [0, 1].") from exc
+    if not np.isfinite(numeric) or not 0.0 <= numeric <= 1.0:
+        raise ValueError(f"{name} must be in [0, 1].")
+    return numeric
