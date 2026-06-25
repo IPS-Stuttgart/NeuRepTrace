@@ -42,6 +42,7 @@ from . import (  # noqa: E402
     _generative_augmentation_random_state_patch,
     _kernel_mean_matching_bool_validation_patch,
     _label_shift_source_prior_patch,
+    _label_proportion_block_ids_patch,
     _label_proportion_tuple_prediction_patch,
     _lora_few_shot_tuple_subject_patch,
     _mcca_repetition_count_patch,
@@ -106,6 +107,7 @@ _few_shot_tuple_labels_patch.install()
 _generative_augmentation_random_state_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
 _label_shift_source_prior_patch.install()
+_label_proportion_block_ids_patch.install()
 _label_proportion_tuple_prediction_patch.install()
 _lora_few_shot_tuple_subject_patch.install()
 _decoding_regularization_patch.install()
