@@ -41,6 +41,7 @@ from . import (  # noqa: E402
     _mcca_repetition_count_patch,
     _mekt_vector_validation_patch,
     _metadata_column_validation_patch,
+    _mixstyle_boolean_config_patch,
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
     _mne_time_decode_ensemble_param_validation_patch,
@@ -134,6 +135,7 @@ _source_free_standardize_target_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
 _random_state_config_patch.install()
+_mixstyle_boolean_config_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_optional_bounds_patch.install()
