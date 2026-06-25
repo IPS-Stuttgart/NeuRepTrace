@@ -12,6 +12,7 @@ from . import (  # noqa: E402
     _bushmeg_all_protocols_prediction_metric_patch,
     _bushmeg_all_protocols_timeout_patch,
     _bushmeg_category2_autoencoder_config_patch,
+    _bushmeg_cue_temporal_bins_patch,
     _bushmeg_source_loso_prototype_patch,
     _confusion_metadata_lookup_patch,
     _confusion_permutation_seed_patch,
@@ -90,3 +91,4 @@ importlib.import_module("neureptrace.decoding.source_alignment")
 _source_alignment_oracle_patch.install()
 _source_alignment_target_calibration_offsets_patch.install()
 _source_alignment_cli_choices_patch.install()
+_bushmeg_cue_temporal_bins_patch.install()
