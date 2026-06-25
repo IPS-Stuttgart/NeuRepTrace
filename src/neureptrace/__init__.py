@@ -41,6 +41,7 @@ from . import (  # noqa: E402
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
     _generative_augmentation_random_state_patch,
+    _jda_boolean_config_patch,
     _kernel_mean_matching_bool_validation_patch,
     _label_shift_source_prior_patch,
     _label_proportion_block_ids_patch,
@@ -107,6 +108,7 @@ _fieldtrip_sampleinfo_validation_patch.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _generative_augmentation_random_state_patch.install()
+_jda_boolean_config_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
 _label_shift_source_prior_patch.install()
 _label_proportion_block_ids_patch.install()
