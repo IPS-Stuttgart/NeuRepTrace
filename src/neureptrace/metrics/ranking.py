@@ -85,6 +85,9 @@ def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
             raise ValueError(f"{name} must be one-dimensional.")
         return vector
 
+    if isinstance(values, (str, bytes)):
+        return np.asarray([values], dtype=object)
+
     try:
         items = list(values)
     except TypeError:
