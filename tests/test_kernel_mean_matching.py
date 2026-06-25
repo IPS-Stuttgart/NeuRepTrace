@@ -64,7 +64,7 @@ def test_kmm_linear_kernel_returns_finite_mean_one_weights() -> None:
 
 def test_kmm_class_balance_equalizes_source_class_weight_mass() -> None:
     source = np.asarray([[0.0], [0.1], [0.2], [0.3], [3.0], [3.1]], dtype=float)
-    target = np.asarray([[0.0], [0.15]], dtype=float)
+    target = np.asarray([[0.0], [0.15], [3.0]], dtype=float)
     labels = np.asarray(["major", "major", "major", "major", "minor", "minor"], dtype=object)
 
     result = kernel_mean_matching_weights(
