@@ -33,6 +33,7 @@ nav:
           - Decoding: reference/decoding.md
           - Reconstruction Encoder: reference/reconstruction-encoder.md
           - Riemannian Procrustes: reference/riemannian-procrustes.md
+          - Source-domain Selection: reference/source-selection.md
           - Emission Compare: reference/emission-compare.md
           - Inference: reference/inference.md
           - Metadata: reference/metadata.md
