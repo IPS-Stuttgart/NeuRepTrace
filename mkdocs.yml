@@ -35,6 +35,7 @@ nav:
           - Riemannian Procrustes: reference/riemannian-procrustes.md
           - Source-domain Selection: reference/source-selection.md
           - Unlabeled Anchor Alignment: reference/unlabeled-anchor-alignment.md
+          - Precomputed Foundation Features: reference/precomputed-foundation-features.md
           - Emission Compare: reference/emission-compare.md
           - Inference: reference/inference.md
           - Metadata: reference/metadata.md
