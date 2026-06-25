@@ -10,12 +10,39 @@ import numpy as np
 def values_equal(left: object, right: object) -> bool:
     """Compare labels without leaking tuple/list/array-valued equality."""
 
+    if isinstance(left, np.generic):
+        left = left.item()
+    if isinstance(right, np.generic):
+        right = right.item()
+
+    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
+        try:
+            left_array = np.asarray(left, dtype=object)
+            right_array = np.asarray(right, dtype=object)
+        except (TypeError, ValueError):
+            return False
+        if left_array.shape != right_array.shape:
+            return False
+        return all(
+            values_equal(left_item, right_item)
+            for left_item, right_item in zip(left_array.reshape(-1), right_array.reshape(-1), strict=True)
+        )
+
+    if isinstance(left, (list, tuple)) or isinstance(right, (list, tuple)):
+        if not isinstance(left, (list, tuple)) or not isinstance(right, (list, tuple)):
+            return False
+        if len(left) != len(right):
+            return False
+        return all(values_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
+
     try:
         equal = left == right
     except (TypeError, ValueError):
         return False
-    try:
+    if isinstance(equal, (bool, np.bool_)):
         return bool(equal)
+    try:
+        return bool(np.all(equal))
     except (TypeError, ValueError):
         return False
 
