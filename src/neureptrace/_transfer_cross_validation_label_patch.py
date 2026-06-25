@@ -83,6 +83,56 @@ def _ordered_unique(values: Sequence | np.ndarray) -> np.ndarray:
     return _object_vector(unique)
 
 
+def _label_counts(values: Sequence | np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return stable unique values and counts for arbitrary object labels."""
+
+    unique: list[object] = []
+    counts: list[int] = []
+    for value in values:
+        for index, existing in enumerate(unique):
+            if _values_equal(value, existing):
+                counts[index] += 1
+                break
+        else:
+            unique.append(value)
+            counts.append(1)
+    return _object_vector(unique), np.asarray(counts, dtype=int)
+
+
+def _assign_masked(array: np.ndarray, mask: np.ndarray, value: object) -> None:
+    """Assign one possibly composite scalar value to every true mask position."""
+
+    if array.dtype == object:
+        for index in np.flatnonzero(mask):
+            array[index] = value
+        return
+    array[mask] = value
+
+
+def _replace_null_class_predictions(predictions: Sequence | np.ndarray, *, null_label: object = 0, fallback_label: object = 1) -> np.ndarray:
+    """Replace null predictions without broadcasting tuple/list fallback labels."""
+
+    repaired = np.asarray(predictions).copy()
+    null_mask = _label_equal_mask(repaired, null_label)
+    if not np.any(null_mask):
+        return repaired
+    non_null = repaired[~null_mask]
+    if len(non_null) == 0:
+        _assign_masked(repaired, null_mask, fallback_label)
+        return repaired
+    nonzero_labels, counts = _label_counts(non_null)
+    _assign_masked(repaired, null_mask, nonzero_labels[int(np.argmin(counts))])
+    return repaired
+
+
+def _label_accuracy(labels: Sequence | np.ndarray, predictions: Sequence | np.ndarray) -> float:
+    """Return mean equality for labels that may be tuple/list-valued objects."""
+
+    if len(labels) == 0:
+        return np.nan
+    return float(np.mean([_values_equal(label, prediction) for label, prediction in zip(labels, predictions, strict=True)]))
+
+
 def _needs_object_predictions(labels: np.ndarray) -> bool:
     """Return true when labels cannot be stored losslessly in a float array."""
 
@@ -92,6 +142,8 @@ def _needs_object_predictions(labels: np.ndarray) -> bool:
 def _coerced_null_label(null_label: object, labels: np.ndarray) -> object:
     """Match append_null_class_features' label dtype coercion for null rows."""
 
+    if labels.dtype == object:
+        return null_label
     return np.asarray([null_label], dtype=labels.dtype)[0]
 
 
@@ -218,8 +270,8 @@ def install() -> None:
                 fold_predictions, _ = transfer.predict_window_model(model_bundle, test_features)
             predictions[fold_ids == fold] = fold_predictions
 
-        predictions = transfer.replace_null_class_predictions(predictions, null_label=null_label_value, fallback_label=fallback_label)
-        accuracy = float(np.mean(label_vector == predictions)) if len(label_vector) else np.nan
+        predictions = _replace_null_class_predictions(predictions, null_label=null_label_value, fallback_label=fallback_label)
+        accuracy = _label_accuracy(label_vector, predictions)
         return transfer.CrossValidationResult(accuracy=accuracy, predictions=predictions, fold_ids=fold_ids)
 
     _cross_validate_feature_decoding.__name__ = _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING.__name__
