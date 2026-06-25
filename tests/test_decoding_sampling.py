@@ -60,6 +60,24 @@ def test_select_class_limited_indices_accepts_mixed_hashable_labels():
     assert len(random) == 4
 
 
+def test_select_class_limited_indices_treats_tuple_labels_atomically():
+    labels = [
+        ("face", "early"),
+        ("house", "late"),
+        ("face", "early"),
+        ("house", "late"),
+        ("face", "early"),
+        ("house", "late"),
+    ]
+
+    first = select_class_limited_indices(labels, 2, selection="first")
+    random = select_class_limited_indices(labels, 2, selection="random", seed=0)
+
+    assert first.tolist() == [0, 1, 2, 3]
+    assert len(random) == 4
+    assert np.all(random < len(labels))
+
+
 def test_select_class_limited_indices_validates_inputs():
     with pytest.raises(ValueError, match="max_per_class"):
         select_class_limited_indices([1, 2], 0)
