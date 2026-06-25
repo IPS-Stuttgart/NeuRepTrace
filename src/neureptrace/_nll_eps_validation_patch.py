@@ -7,7 +7,7 @@ from functools import wraps
 
 import numpy as np
 
-_EPS_ERROR = "eps must be finite and in the open interval (0, 1)"
+_EPS_ERROR = "eps must be a positive finite value"
 
 
 def _validate_eps(eps: object) -> float:
