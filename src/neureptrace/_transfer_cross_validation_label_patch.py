@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import label_accuracy, replace_null_class_predictions as _replace_null_class_predictions
 from neureptrace.decoding.generative_augmentation import GenerativeAugmentationConfig
 
 _INSTALLED = False
@@ -218,8 +219,8 @@ def install() -> None:
                 fold_predictions, _ = transfer.predict_window_model(model_bundle, test_features)
             predictions[fold_ids == fold] = fold_predictions
 
-        predictions = transfer.replace_null_class_predictions(predictions, null_label=null_label_value, fallback_label=fallback_label)
-        accuracy = float(np.mean(label_vector == predictions)) if len(label_vector) else np.nan
+        predictions = _replace_null_class_predictions(predictions, null_label=null_label_value, fallback_label=fallback_label)
+        accuracy = label_accuracy(label_vector, predictions)
         return transfer.CrossValidationResult(accuracy=accuracy, predictions=predictions, fold_ids=fold_ids)
 
     _cross_validate_feature_decoding.__name__ = _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING.__name__
