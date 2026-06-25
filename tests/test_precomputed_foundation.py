@@ -18,8 +18,8 @@ from neureptrace.decoding.precomputed_foundation import (
 def test_npz_loader_aligns_requested_row_order(tmp_path) -> None:
     path = tmp_path / "features.npz"
     features = np.asarray([[1.0, 0.0], [0.0, 1.0], [2.0, 2.0]], dtype=float)
-    row_ids = np.asarray(["trial-c", "trial-a", "trial-b"], dtype=object)
-    np.savez(path, features=features, row_ids=row_ids, feature_names=np.asarray(["f0", "f1"], dtype=object))
+    row_ids = np.asarray(["trial-c", "trial-a", "trial-b"])
+    np.savez(path, features=features, row_ids=row_ids, feature_names=np.asarray(["f0", "f1"]))
 
     table = load_precomputed_foundation_features(path, source_model="BENDR")
     aligned = align_precomputed_foundation_features(table, ["trial-a", "trial-b", "trial-c"])
