@@ -20,34 +20,68 @@ def _object_value_vector(values: Iterable[Any]) -> np.ndarray:
     return vector
 
 
-def _atomic_object_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
-    """Return one object value per input row without flattening composites.
-
-    NumPy turns rectangular ``[("subject", "run"), ...]`` inputs into a
-    two-dimensional object array.  Source-domain selection treats such tuples as
-    atomic domain ids or source labels, not as independent rows.
-    """
+def _object_vector_from_array(values: np.ndarray, *, name: str) -> np.ndarray:
+    """Return a 1-D object vector while rejecting true matrix-shaped arrays."""
 
     array = np.asarray(values, dtype=object)
     if array.ndim == 0:
         return _object_value_vector([array.item()])
     if array.ndim == 1:
-        return array.reshape(-1)
+        return _object_value_vector(array.tolist())
+    if array.ndim == 2 and 1 in array.shape:
+        return _object_value_vector(array.reshape(-1).tolist())
+    raise ValueError(f"{name} must be one-dimensional or a single-row/single-column vector; got shape {array.shape}.")
 
-    rows = array.reshape(array.shape[0], -1)
-    if rows.shape[1] == 1:
-        return rows[:, 0].reshape(-1)
-    return _object_value_vector(tuple(row.tolist()) for row in rows)
+
+def _atomic_object_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
+    """Return one object value per input row without flattening composites.
+
+    Plain Python sequences such as ``[("subject", "run"), ...]`` are treated as
+    one row value per outer-list item.  NumPy arrays are stricter: true matrices
+    are rejected because they are usually malformed vector inputs, while
+    single-row/single-column vectors remain accepted for CLI/config callers.
+    """
+
+    if isinstance(values, np.ndarray):
+        return _object_vector_from_array(values, name=name)
+    if isinstance(values, (str, bytes)):
+        return _object_value_vector([values])
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+    return _object_value_vector(items)
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    try:
+        result = left == right
+    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
+        return False
+    if isinstance(result, (bool, np.bool_)):
+        return bool(result)
+    try:
+        return bool(np.all(result))
+    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
+        return False
 
 
 def _object_equal_mask(vector: np.ndarray, value: Any) -> np.ndarray:
     """Compare object vectors item-wise so tuple values are atomic."""
 
-    return np.asarray([item == value for item in vector.tolist()], dtype=bool)
+    return np.asarray([_values_equal(item, value) for item in vector.tolist()], dtype=bool)
+
+
+def _unique_values(vector: np.ndarray) -> tuple[Any, ...]:
+    unique: list[Any] = []
+    for value in vector.tolist():
+        if not any(_values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return tuple(unique)
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int) -> np.ndarray:
-    vector = _atomic_object_vector(values)
+    vector = _atomic_object_vector(values, name="source_domains")
     if vector.shape[0] != expected_length:
         raise ValueError(f"source_domains must contain one value per source row: {vector.shape[0]} != {expected_length}.")
     for domain in vector.tolist():
@@ -59,7 +93,7 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: 
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> np.ndarray:
-    vector = _atomic_object_vector(values)
+    vector = _atomic_object_vector(values, name="source_labels")
     if vector.shape[0] != expected_length:
         raise ValueError(f"source_labels must contain one value per source row: {vector.shape[0]} != {expected_length}.")
     return vector
@@ -68,7 +102,7 @@ def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int) -
 def _class_balanced_weights(sample_weights: np.ndarray, source_labels: Sequence[Any] | np.ndarray, selected_mask: np.ndarray) -> np.ndarray:
     labels = _label_vector(source_labels, expected_length=sample_weights.shape[0])
     balanced = np.asarray(sample_weights, dtype=float).copy()
-    selected_labels = tuple(dict.fromkeys(labels[selected_mask].tolist()))
+    selected_labels = _unique_values(labels[selected_mask])
     if not selected_labels:
         return balanced
     positive_mask = selected_mask & (balanced > 0.0)
