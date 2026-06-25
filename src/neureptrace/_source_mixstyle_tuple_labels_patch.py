@@ -1,9 +1,9 @@
-"""Preserve composite labels in source-only MixStyle augmentation."""
+"""Preserve composite labels and domain IDs in source-only MixStyle augmentation."""
 
 from __future__ import annotations
 
 import importlib
-from collections.abc import Hashable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
 from functools import wraps
 from typing import Any
 
@@ -12,7 +12,7 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_source_mixstyle_tuple_labels_patch_installed"
 
 
-def _object_value_vector(values: Sequence[Any]) -> np.ndarray:
+def _object_value_vector(values: Iterable[Any]) -> np.ndarray:
     items = list(values)
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
@@ -20,40 +20,73 @@ def _object_value_vector(values: Sequence[Any]) -> np.ndarray:
     return vector
 
 
-def _atomic_label_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
-    """Return a 1-D label vector without flattening composite row labels.
+def _atomic_value_vector(values: Any, *, expected_length: int, name: str) -> np.ndarray:
+    """Return a 1-D object vector without flattening composite row values.
 
     NumPy turns ``[("class", "repeat"), ...]`` into a rectangular two-column
-    object array.  Source MixStyle must copy each row label atomically rather
-    than treating the tuple/list entries as independent labels.
+    object array.  MixStyle must keep each row label or domain ID atomic rather
+    than treating tuple/list entries as independent rows.
     """
 
     array = np.asarray(values, dtype=object)
     if array.ndim == 0:
-        return _object_value_vector([array.item()])
-    if array.ndim == 1:
-        return array.reshape(-1)
+        vector = _object_value_vector([array.item()])
+    elif array.ndim == 1:
+        if array.shape[0] == expected_length:
+            vector = array.reshape(-1)
+        elif expected_length == 1:
+            vector = _object_value_vector([tuple(array.tolist())])
+        else:
+            vector = array.reshape(-1)
+    else:
+        rows = array.reshape(array.shape[0], -1)
+        if rows.shape[1] == 1:
+            vector = rows[:, 0].reshape(-1)
+        else:
+            vector = _object_value_vector(tuple(row.tolist()) for row in rows)
 
-    rows = array.reshape(array.shape[0], -1)
-    if rows.shape[1] == 1:
-        return rows[:, 0].reshape(-1)
-    return _object_value_vector(tuple(row.tolist()) for row in rows)
-
-
-def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = _atomic_label_vector(values, name=name)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per source row: {vector.shape[0]} != {expected_length}.")
     return vector
 
 
+def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    return _atomic_value_vector(values, expected_length=expected_length, name=name)
+
+
+def _domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int) -> np.ndarray:
+    vector = _atomic_value_vector(values, expected_length=expected_length, name="source_domains")
+    for domain in vector.tolist():
+        try:
+            hash(domain)
+        except TypeError as exc:
+            raise ValueError(f"source_domains must be hashable; got {domain!r}.") from exc
+    return vector
+
+
+def _domain_equal_mask(domains: np.ndarray, domain: Hashable) -> np.ndarray:
+    return np.asarray([candidate == domain for candidate in domains.tolist()], dtype=bool)
+
+
 def install() -> None:
-    """Patch MixStyle label handling for composite source labels."""
+    """Patch MixStyle label/domain handling for composite source identifiers."""
 
     source_mixstyle = importlib.import_module("neureptrace.decoding.source_mixstyle")
     original_augment = source_mixstyle.augment_source_domains_mixstyle
     if getattr(original_augment, _PATCH_MARKER, False):
         return
+
+    def _domain_stats(features: np.ndarray, domains: np.ndarray, unique_domains: Sequence[Hashable]) -> dict[Hashable, Any]:
+        stats: dict[Hashable, Any] = {}
+        for domain in unique_domains:
+            domain_features = features[_domain_equal_mask(domains, domain)]
+            if domain_features.shape[0] < 1:
+                raise ValueError(f"Source domain {domain!r} has no rows.")
+            mean = np.mean(domain_features, axis=0)
+            scale = np.std(domain_features, axis=0, ddof=0)
+            scale = np.maximum(scale, source_mixstyle._MIN_SCALE)
+            stats[domain] = source_mixstyle._DomainStyleStats(domain_id=domain, mean=mean, scale=scale, n_rows=domain_features.shape[0])
+        return stats
 
     @wraps(original_augment)
     def augment_source_domains_mixstyle(
@@ -66,11 +99,11 @@ def install() -> None:
         cfg = source_mixstyle._coerce_config(config)
         features = source_mixstyle._feature_matrix(source_features, name="source_features")
         labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
-        domains = source_mixstyle._domain_vector(source_domains, expected_length=features.shape[0])
+        domains = _domain_vector(source_domains, expected_length=features.shape[0])
         unique_domains = tuple(dict.fromkeys(domains.tolist()))
         if len(unique_domains) < 2 and cfg.mixes_per_row > 0:
             raise ValueError("MixStyle source-domain augmentation requires at least two source domains.")
-        stats = source_mixstyle._domain_stats(features, domains, unique_domains)
+        stats = _domain_stats(features, domains, unique_domains)
 
         if cfg.mixes_per_row == 0:
             return source_mixstyle._original_only_result(features, labels, domains, cfg=cfg, n_domains=len(unique_domains))
@@ -105,7 +138,7 @@ def install() -> None:
 
         synthetic_matrix = np.vstack(synthetic_features).astype(np.float32, copy=False)
         synthetic_label_vector = _object_value_vector(synthetic_labels)
-        synthetic_domain_vector = np.asarray(synthetic_domains, dtype=object)
+        synthetic_domain_vector = _object_value_vector(synthetic_domains)
         if cfg.include_original:
             output_features = np.vstack([features, synthetic_matrix]).astype(np.float32, copy=False)
             output_labels = np.concatenate([labels, synthetic_label_vector])
@@ -143,6 +176,8 @@ def install() -> None:
 
     setattr(augment_source_domains_mixstyle, _PATCH_MARKER, True)
     source_mixstyle._label_vector = _label_vector
+    source_mixstyle._domain_vector = _domain_vector
+    source_mixstyle._domain_stats = _domain_stats
     source_mixstyle.augment_source_domains_mixstyle = augment_source_domains_mixstyle
 
 
