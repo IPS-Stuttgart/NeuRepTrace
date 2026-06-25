@@ -172,8 +172,8 @@ def augment_source_mixstyle(
         mask_blocks.append(np.zeros(features.shape[0], dtype=bool))
     if synthetic_features:
         feature_blocks.append(np.vstack(synthetic_features))
-        label_blocks.append(np.asarray(synthetic_labels, dtype=object))
-        domain_blocks.append(np.asarray(synthetic_domains, dtype=object))
+        label_blocks.append(_object_value_vector(synthetic_labels))
+        domain_blocks.append(_object_value_vector(synthetic_domains))
         mask_blocks.append(np.ones(len(synthetic_features), dtype=bool))
     if not feature_blocks:
         raise ValueError("No rows would be returned; enable include_original or request augmentations_per_row > 0.")
@@ -187,7 +187,7 @@ def augment_source_mixstyle(
         n_output_rows=output_features.shape[0],
         n_synthetic_rows=int(np.count_nonzero(synthetic_mask)),
         n_domains=len(domain_names),
-        n_classes=int(np.unique(labels).shape[0]),
+        n_classes=len(_unique_values(labels)),
         feature_dim=features.shape[1],
         augmentations_per_row=n_aug,
         alpha=beta_alpha,
@@ -291,19 +291,20 @@ def _mixstyle_row(
 
 def _domain_statistics(features: np.ndarray, domains: np.ndarray) -> dict[Hashable, tuple[np.ndarray, np.ndarray]]:
     stats = {}
-    for domain in dict.fromkeys(domains.tolist()):
-        rows = features[domains == domain]
+    for domain in _unique_values(domains):
+        rows = features[_value_equal_mask(domains, domain)]
         stats[domain] = _mean_std(rows)
     return stats
 
 
 def _label_domain_statistics(features: np.ndarray, labels: np.ndarray, domains: np.ndarray) -> dict[tuple[Any, Hashable], tuple[np.ndarray, np.ndarray]]:
     stats = {}
-    for label in dict.fromkeys(labels.tolist()):
-        for domain in dict.fromkeys(domains.tolist()):
-            mask = (labels == label) & (domains == domain)
+    for label in _unique_values(labels):
+        label_key = _hashable_value(label)
+        for domain in _unique_values(domains):
+            mask = _value_equal_mask(labels, label) & _value_equal_mask(domains, domain)
             if np.any(mask):
-                stats[(label, domain)] = _mean_std(features[mask])
+                stats[(label_key, domain)] = _mean_std(features[mask])
     return stats
 
 
@@ -313,7 +314,7 @@ def _stats_for_row(
     label: Any,
     domain: Hashable,
 ) -> tuple[np.ndarray, np.ndarray]:
-    return label_domain_stats.get((label, domain), domain_stats[domain])
+    return label_domain_stats.get((_hashable_value(label), domain), domain_stats[domain])
 
 
 def _mean_std(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -412,22 +413,93 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"source_labels must contain one value per source row: {vector.shape[0]} != {expected_length}.")
-    return vector
+    return _atomic_value_vector(values, expected_length=expected_length, name="source_labels")
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"source_domains must contain one value per source row: {vector.shape[0]} != {expected_length}.")
+    vector = _atomic_value_vector(values, expected_length=expected_length, name="source_domains")
     for domain in vector.tolist():
         try:
             hash(domain)
         except TypeError as exc:
             raise ValueError(f"source_domains must be hashable; got {domain!r}.") from exc
     return vector
+
+
+def _object_value_vector(values: Sequence[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    """Return one object per source row without flattening composite labels.
+
+    NumPy interprets rectangular inputs such as ``[("left", 1), ...]`` as a
+    two-dimensional object array.  Labels and domain identifiers are row-level
+    metadata, so each rectangular row must remain one atomic value.
+    """
+
+    array = np.asarray(values, dtype=object)
+    if array.ndim == 0:
+        vector = _object_value_vector([array.item()])
+    elif array.ndim == 1:
+        if array.shape[0] == expected_length:
+            vector = _object_value_vector(array.tolist())
+        elif expected_length == 1:
+            vector = _object_value_vector([tuple(array.tolist())])
+        else:
+            vector = _object_value_vector(array.reshape(-1).tolist())
+    else:
+        rows = array.reshape(array.shape[0], -1)
+        if rows.shape[1] == 1:
+            vector = _object_value_vector(rows[:, 0].tolist())
+        else:
+            vector = _object_value_vector(tuple(row.tolist()) for row in rows)
+    if vector.shape[0] != expected_length:
+        raise ValueError(f"{name} must contain one value per source row: {vector.shape[0]} != {expected_length}.")
+    return vector
+
+
+def _unique_values(values: np.ndarray) -> tuple[Any, ...]:
+    unique: list[Any] = []
+    for value in values.tolist():
+        if not any(_values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return tuple(unique)
+
+
+def _value_equal_mask(values: np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_values_equal(value, target) for value in values.tolist()], dtype=bool)
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    try:
+        result = left == right
+    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
+        return False
+    if isinstance(result, (bool, np.bool_)):
+        return bool(result)
+    try:
+        return bool(np.all(result))
+    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
+        return False
+
+
+def _hashable_value(value: Any) -> Any:
+    try:
+        hash(value)
+    except TypeError:
+        if isinstance(value, np.ndarray):
+            return tuple(_hashable_value(item) for item in value.tolist())
+        if isinstance(value, (list, tuple)):
+            return tuple(_hashable_value(item) for item in value)
+        if isinstance(value, dict):
+            return tuple(sorted((_hashable_value(key), _hashable_value(item)) for key, item in value.items()))
+        return repr(value)
+    return value
 
 
 def _normalize_nonnegative_int(value: int | str, *, name: str) -> int:
