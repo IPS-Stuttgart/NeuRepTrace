@@ -192,3 +192,18 @@ def test_decode_from_config_rejects_malformed_dann_controls(
 
     with pytest.raises(ValueError, match=message):
         _decode_kwargs(config, config_dir=tmp_path)
+
+
+def test_config_workflow_accepts_numeric_boolean_flags() -> None:
+    from neureptrace.config_workflow import _as_bool
+
+    assert _as_bool(1) is True
+    assert _as_bool(0) is False
+
+
+@pytest.mark.parametrize("value", [2, -1, 0.5])
+def test_config_workflow_rejects_ambiguous_numeric_boolean_flags(value: float) -> None:
+    from neureptrace.config_workflow import _as_bool
+
+    with pytest.raises(DatasetConfigError, match="boolean"):
+        _as_bool(value)

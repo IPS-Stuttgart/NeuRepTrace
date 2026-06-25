@@ -16,6 +16,7 @@ import importlib.machinery
 import sys
 from collections.abc import Mapping
 from functools import wraps
+from numbers import Integral
 from types import ModuleType
 from typing import Any
 
@@ -24,6 +25,7 @@ _TARGET_MODULES = {
     "neureptrace.decode_from_config",
 }
 _PATCH_MARKER = "_neureptrace_dataset_name_config_patch_installed"
+_BOOL_PATCH_MARKER = "_neureptrace_config_workflow_numeric_bool_patch_installed"
 _FINDER_MARKER = "_neureptrace_dataset_name_config_finder"
 
 
@@ -40,9 +42,28 @@ def _dataset_name_from_config(config: Any, *, default: str = "") -> str:
     return str(value)
 
 
+def _patch_config_workflow_bool_parser(module: ModuleType) -> None:
+    if module.__name__ != "neureptrace.config_workflow":
+        return
+    original_as_bool = getattr(module, "_as_bool", None)
+    if original_as_bool is None or getattr(original_as_bool, _BOOL_PATCH_MARKER, False):
+        return
+
+    @wraps(original_as_bool)
+    def patched_as_bool(value: Any, *, default: bool = False) -> bool:
+        if isinstance(value, Integral) and not isinstance(value, bool):
+            if int(value) in {0, 1}:
+                return bool(value)
+        return original_as_bool(value, default=default)
+
+    setattr(patched_as_bool, _BOOL_PATCH_MARKER, True)
+    module._as_bool = patched_as_bool
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
+    _patch_config_workflow_bool_parser(module)
     decode_kwargs = getattr(module, "_decode_kwargs", None)
     if decode_kwargs is None:
         setattr(module, _PATCH_MARKER, True)
