@@ -47,6 +47,7 @@ from . import (  # noqa: E402
     _source_alignment_pseudo_calibration_patch,
     _source_alignment_pseudo_repetition_patch,
     _source_alignment_times_validation_patch,
+    _source_domain_generalization_composite_patch,
     _source_free_standardize_target_patch,
     _source_free_tuple_labels_patch,
     _source_mixstyle_tuple_labels_patch,
@@ -92,6 +93,7 @@ _sample_weight_validation_patch.install()
 _response_window_time_validation_patch.install()
 _riemannian_vector_validation_patch.install()
 _source_alignment_times_validation_patch.install()
+_source_domain_generalization_composite_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
