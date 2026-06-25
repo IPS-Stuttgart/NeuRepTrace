@@ -65,6 +65,15 @@ def _patch_optional_component_config(module: ModuleType, function_name: str) -> 
     setattr(module, function_name, config_builder)
 
 
+def _patch_source_alignment(source_alignment: ModuleType) -> None:
+    """Compose optional M-CCA component parsing into source-alignment patches."""
+
+    if getattr(source_alignment, _PATCH_MARKER, False):
+        return
+    _patch_optional_component_config(source_alignment, "source_alignment_config")
+    setattr(source_alignment, _PATCH_MARKER, True)
+
+
 def _patch_mcca(module: ModuleType) -> None:
     original_class_alignment_matrices = module.class_alignment_matrices
     original_fit_class_mcca = module.fit_class_mcca
@@ -102,7 +111,8 @@ def _patch_module(module: ModuleType) -> None:
     elif module.__name__ == "neureptrace.decoding.mcca_target":
         _patch_mcca_target(module)
     elif module.__name__ == "neureptrace.decoding.source_alignment":
-        _patch_optional_component_config(module, "source_alignment_config")
+        _patch_source_alignment(module)
+        return
     elif module.__name__ == "neureptrace.decoding.unlabeled_calibration_alignment":
         _patch_optional_component_config(module, "unlabeled_calibration_alignment_config")
     else:  # pragma: no cover - guarded by finder/install targets
