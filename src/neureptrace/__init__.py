@@ -8,6 +8,7 @@ __all__ = ["__version__"]
 __version__ = "0.1.1"
 
 from . import (  # noqa: E402
+    _adversarial_composite_labels_patch,
     _alignment_window_config_patch,
     _bushmeg_all_protocols_prediction_metric_patch,
     _bushmeg_all_protocols_timeout_patch,
@@ -74,6 +75,7 @@ from . import (  # noqa: E402
     _tuple_label_calibration_split_patch,
 )
 
+_adversarial_composite_labels_patch.install()
 _alignment_window_config_patch.install()
 _dataset_config_participant_patch.install()
 _dataset_name_config_patch.install()
