@@ -44,6 +44,7 @@ from . import (  # noqa: E402
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
     _probability_stacking_group_summary_patch,
+    _random_state_config_patch,
     _reconstruction_encoder_config_patch,
     _reconstruction_tuple_labels_patch,
     _response_window_time_validation_patch,
@@ -116,6 +117,7 @@ _source_domain_generalization_composite_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
+_random_state_config_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_temperature_patch.install()
