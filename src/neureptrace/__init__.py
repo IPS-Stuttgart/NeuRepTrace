@@ -20,6 +20,7 @@ from . import (  # noqa: E402
     _dataset_config_participant_patch,
     _dataset_name_config_patch,
     _dataset_spec_csv_group_column_patch,
+    _dataset_spec_numeric_validation_patch,
     _decoding_adaptive_calibration,
     _decoding_c_grid_patch,
     _decoding_classifier_param_patch,
@@ -70,6 +71,7 @@ _alignment_window_config_patch.install()
 _dataset_config_participant_patch.install()
 _dataset_name_config_patch.install()
 _dataset_spec_csv_group_column_patch.install()
+_dataset_spec_numeric_validation_patch.install()
 _metadata_column_validation_patch.install()
 _confusion_metadata_lookup_patch.install()
 _confusion_permutation_seed_patch.install()
