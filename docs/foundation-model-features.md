@@ -132,6 +132,37 @@ decoder = make_decoder(
 The family-specific decoder aliases are convenience wrappers around the same frozen-encoder pipeline.
 You can always use `foundation-linear-probe` with `classifier_param={"model_family": "..."}` instead.
 
+## Precomputed feature tables
+
+If the upstream foundation model is easier to run outside NeuRepTrace, export a row-aligned feature table
+and use `neureptrace.decoding.precomputed_foundation` instead of loading Torch modules at decode time.
+This path supports `.npy`, `.npz`, `.csv`, and `.tsv` tables:
+
+```python
+from neureptrace.decoding.precomputed_foundation import (
+    fit_precomputed_foundation_probe,
+    load_precomputed_foundation_features,
+)
+
+table = load_precomputed_foundation_features(
+    "labram_features.npz",
+    source_model="LaBraM",
+    feature_fit_scope="external_frozen",
+)
+
+result = fit_precomputed_foundation_probe(
+    feature_table=table,
+    train_row_ids=source_trial_ids,
+    train_labels=source_labels,
+    test_row_ids=target_trial_ids,
+)
+```
+
+The probe API has no `target_labels` argument. The `feature_fit_scope` field records whether the external
+feature extractor was declared as `external_frozen` / `source_only`, `source_plus_unlabeled_target`,
+`target_calibrated`, or `oracle_target_included`, so downstream reports can distinguish Protocol 1,
+Protocol 2, Protocol 3, and oracle feature generation.
+
 ## Protocol interpretation
 
 A frozen external encoder plus a source-label probe is **Protocol 1** when the held-out target subject
