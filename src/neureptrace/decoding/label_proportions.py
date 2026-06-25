@@ -218,7 +218,7 @@ def adjust_probability_blocks_to_label_proportions(
         raise ValueError("At least one block is required for block-wise label-proportion calibration.")
 
     for block in ordered_blocks:
-        mask = block_vector == block
+        mask = _object_mask(block_vector, block)
         proportions = _lookup_block_proportions(target_proportions_by_block, block, default_proportions=default_proportions)
         result = adjust_probabilities_to_label_proportions(
             matrix[mask],
@@ -305,6 +305,17 @@ def _apply_class_bias(probabilities: np.ndarray, class_bias: np.ndarray, *, epsi
     if np.any(row_sums <= epsilon):
         raise ValueError("Label-proportion calibration produced a zero-probability row; check proportions and input probabilities.")
     return weighted / row_sums
+
+
+def _object_mask(values: np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_objects_equal(value, target) for value in values.tolist()], dtype=bool)
+
+
+def _objects_equal(left: Any, right: Any) -> bool:
+    result = left == right
+    if isinstance(result, np.ndarray):
+        return bool(np.array_equal(left, right))
+    return bool(result)
 
 
 def _lookup_block_proportions(
