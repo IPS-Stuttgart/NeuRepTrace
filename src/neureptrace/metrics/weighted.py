@@ -134,8 +134,8 @@ def weighted_negative_log_likelihood(
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
     eps = float(eps)
-    if not np.isfinite(eps) or eps <= 0.0:
-        raise ValueError("eps must be a positive finite value")
+    if not np.isfinite(eps) or eps <= 0.0 or eps >= 1.0:
+        raise ValueError("eps must be finite and in the open interval (0, 1)")
 
     true_probabilities = probabilities[np.arange(labels.shape[0]), labels]
     losses = -np.log(np.clip(true_probabilities, eps, 1.0))
