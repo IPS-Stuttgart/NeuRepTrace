@@ -228,7 +228,7 @@ def fit_tca_transfer_classifier(
 ) -> TCATransferClassificationResult:
     """Train a source-label classifier after Category-2 TCA alignment."""
 
-    labels = np.asarray(source_labels, dtype=object).reshape(-1)
+    labels = _label_vector(source_labels)
     source = _feature_matrix(source_features, name="source_features")
     if labels.shape[0] != source.shape[0]:
         raise ValueError(f"source_labels must contain one label per source row: {labels.shape[0]} != {source.shape[0]}.")
@@ -290,6 +290,18 @@ def normalize_tca_kernel(kernel: str | None) -> str:
     if normalized not in TCA_KERNELS:
         raise ValueError(f"Unknown TCA kernel {kernel!r}. Available kernels: {', '.join(TCA_KERNELS)}.")
     return normalized
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+    if any(isinstance(item, tuple) for item in items):
+        vector = np.empty(len(items), dtype=object)
+        vector[:] = items
+        return vector
+    return np.asarray(items).reshape(-1)
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
