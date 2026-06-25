@@ -1,18 +1,4 @@
-"""Finalize source-alignment patch composition and calibrated repetition offsets.
-
-Several source-alignment extensions are installed lazily through import hooks.  The
-last installed hook is the one that sees a future ``decoding.source_alignment``
-import first, so this final patch explicitly applies the earlier source-alignment
-patches in the intended order before adding its own guardrail.
-
-The guardrail fixes target-calibrated and oracle class-repetition projections.
-Source fits may select arbitrary source repetition offsets, but separately
-prepared target calibration matrices and held-out oracle target matrices are
-local target rows.  Reusing source repetition offsets on those rows can index
-outside the available target repetitions or silently pick the wrong rows.  For
-those target projection modes we therefore use offsets local to the target
-matrix.
-"""
+"""Finalize source-alignment patch composition and calibrated repetition offsets."""
 
 from __future__ import annotations
 
@@ -35,6 +21,7 @@ _SOURCE_ALIGNMENT_PATCH_MODULES = (
     "neureptrace._source_alignment_pseudo_repetition_patch",
     "neureptrace._source_alignment_optimal_transport_patch",
     "neureptrace._mne_alignment_calibration_anchor_patch",
+    "neureptrace._mcca_repetition_count_patch",
     "neureptrace._source_alignment_contrastive_patch",
     "neureptrace._source_alignment_oracle_patch",
 )
