@@ -1,3 +1,4 @@
+# ruff: noqa
 """Probabilistic tracing of neural representations over time."""
 
 from __future__ import annotations
@@ -74,6 +75,7 @@ from . import (  # noqa: E402
     _transfer_cross_validation_label_patch,
     _transfer_null_fallback_patch,
     _tuple_label_calibration_split_patch,
+    _windowed_composite_labels_patch,
 )
 
 _adversarial_composite_labels_patch.install()
@@ -138,6 +140,7 @@ _source_selection_temperature_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _transfer_cross_validation_label_patch.install()
 _transfer_null_fallback_patch.install()
+_windowed_composite_labels_patch.install()
 _tuple_label_calibration_split_patch.install()
 
 from . import (  # noqa: E402
@@ -151,6 +154,9 @@ _source_alignment_contrastive_patch.install()
 # The contrastive extension must load before the later source-alignment wrapper.
 # This keeps the method registration visible at runtime.
 importlib.import_module("neureptrace.decoding.source_alignment")
+# Re-apply after the forced import because the winning source-alignment hook can
+# bypass generic M-CCA guardrails that were installed before the module existed.
+_mcca_repetition_count_patch.install()
 _source_alignment_oracle_patch.install()
 _source_alignment_target_calibration_offsets_patch.install()
 _source_alignment_cli_choices_patch.install()
