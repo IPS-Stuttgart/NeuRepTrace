@@ -17,7 +17,7 @@ class SourceDomainSubsetResult:
 
 
 def source_domain_subset_mask(source_domains: Sequence[Hashable] | np.ndarray, *, omit_fraction: float = 0.25, min_domains: int = 1, random_state: int | None = 13) -> SourceDomainSubsetResult:
-    domains = _object_vector(source_domains)
+    domains = _object_vector(source_domains, name="source_domains")
     unique_domains = tuple(dict.fromkeys(domains.tolist()))
     if not unique_domains:
         raise ValueError("At least one source domain is required.")
@@ -40,7 +40,7 @@ def apply_source_domain_subset(features: Sequence[Sequence[float]] | np.ndarray,
     matrix = np.asarray(features, dtype=float)
     if matrix.ndim != 2:
         raise ValueError("features must be a two-dimensional matrix.")
-    label_vector = _object_vector(labels)
+    label_vector = _object_vector(labels, name="labels")
     if label_vector.shape[0] != matrix.shape[0]:
         raise ValueError("labels must contain one value per feature row.")
     result = source_domain_subset_mask(source_domains, **kwargs)
@@ -49,11 +49,19 @@ def apply_source_domain_subset(features: Sequence[Sequence[float]] | np.ndarray,
     return matrix[result.selected_mask].astype(np.float32, copy=False), label_vector[result.selected_mask], result
 
 
-def _object_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
-    items = list(values)
+def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str = "values") -> np.ndarray:
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} must be a one-dimensional sequence of hashable values, not a scalar string.")
+    try:
+        items = list(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a one-dimensional sequence of hashable values.") from exc
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
-        hash(value)
+        try:
+            hash(value)
+        except TypeError as exc:
+            raise ValueError(f"{name} values must be hashable; got {value!r}.") from exc
         vector[index] = value
     return vector
 
