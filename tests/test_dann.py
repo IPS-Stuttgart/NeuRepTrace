@@ -12,14 +12,12 @@ from neureptrace.decoding.dann import (
 )
 
 
-
 def test_dann_helpers_reject_fractional_integer_parameters():
     with pytest.raises(ValueError, match="dann_max_epochs must be an integer"):
         _positive_int(1.5, "dann_max_epochs")
 
     with pytest.raises(ValueError, match="dann_random_state must be an integer"):
         _integer(13.5, "dann_random_state")
-
 
 
 def test_dann_helpers_reject_bool_numeric_parameters():
@@ -34,7 +32,6 @@ def test_dann_helpers_reject_bool_numeric_parameters():
 
     with pytest.raises(ValueError, match="dann_validation_fraction"):
         _bounded_float(True, "dann_validation_fraction", lower=0.0, upper=1.0)
-
 
 
 def test_fit_dann_predict_proba_marks_unlabeled_target_adaptation():
@@ -76,7 +73,6 @@ def test_fit_dann_predict_proba_marks_unlabeled_target_adaptation():
     assert result.metadata["dann_target_rows"] == 10
 
 
-
 def test_fit_dann_accepts_single_column_source_labels():
     pytest.importorskip("torch")
     rng = np.random.default_rng(23)
@@ -111,7 +107,6 @@ def test_fit_dann_accepts_single_column_source_labels():
     np.testing.assert_allclose(result.probabilities.sum(axis=1), 1.0, atol=1e-6)
 
 
-
 def test_fit_dann_rejects_multi_column_source_labels():
     with pytest.raises(ValueError, match="source_labels must be one-dimensional"):
         fit_dann_predict_proba(
@@ -121,7 +116,6 @@ def test_fit_dann_rejects_multi_column_source_labels():
             max_epochs=1,
             device="cpu",
         )
-
 
 
 def test_fit_dann_rejects_feature_dimension_mismatch():
