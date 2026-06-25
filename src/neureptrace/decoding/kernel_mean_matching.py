@@ -380,11 +380,9 @@ def _project_weights(weights: np.ndarray, *, max_weight: float, epsilon: float |
 
 
 def _class_balanced_weights(weights: np.ndarray, labels: Sequence[Any] | np.ndarray) -> np.ndarray:
-    label_vector = np.asarray(labels, dtype=object).reshape(-1)
-    if label_vector.shape[0] != weights.shape[0]:
-        raise ValueError(f"source_labels must contain one label per source row: {label_vector.shape[0]} != {weights.shape[0]}.")
+    label_vector = _source_label_vector(labels, expected_length=weights.shape[0])
     balanced = np.asarray(weights, dtype=float).copy()
-    classes = tuple(dict.fromkeys(label_vector.tolist()))
+    classes = _unique_values(label_vector)
     if not classes:
         return balanced
     total = float(np.sum(balanced))
@@ -393,7 +391,7 @@ def _class_balanced_weights(weights: np.ndarray, labels: Sequence[Any] | np.ndar
         total = float(np.sum(balanced))
     target_mass = total / float(len(classes))
     for class_label in classes:
-        mask = label_vector == class_label
+        mask = _value_equal_mask(label_vector, class_label)
         class_mass = float(np.sum(balanced[mask]))
         if class_mass > 0.0:
             balanced[mask] *= target_mass / class_mass
@@ -473,6 +471,64 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain only finite values.")
     return matrix
+
+
+def _source_label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> np.ndarray:
+    vector = _atomic_object_vector(values, expected_length=expected_length)
+    if vector.shape[0] != expected_length:
+        raise ValueError(f"source_labels must contain one label per source row: {vector.shape[0]} != {expected_length}.")
+    return vector
+
+
+def _atomic_object_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> np.ndarray:
+    """Return one object value per source row without flattening composite labels."""
+
+    array = np.asarray(values, dtype=object)
+    if array.ndim == 0:
+        return _object_vector([array.item()])
+    if array.ndim == 1:
+        if array.shape[0] == expected_length:
+            return _object_vector(array.tolist())
+        if expected_length == 1:
+            return _object_vector([tuple(array.tolist())])
+        return _object_vector(array.reshape(-1).tolist())
+    rows = array.reshape(array.shape[0], -1)
+    if rows.shape[1] == 1:
+        return _object_vector(rows[:, 0].tolist())
+    return _object_vector(tuple(row.tolist()) for row in rows)
+
+
+def _object_vector(values: Sequence[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _unique_values(values: np.ndarray) -> tuple[Any, ...]:
+    unique: list[Any] = []
+    for value in values.tolist():
+        if not any(_values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return tuple(unique)
+
+
+def _value_equal_mask(values: np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_values_equal(value, target) for value in values.tolist()], dtype=bool)
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    try:
+        result = left == right
+    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
+        return False
+    if isinstance(result, (bool, np.bool_)):
+        return bool(result)
+    try:
+        return bool(np.all(result))
+    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
+        return False
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
