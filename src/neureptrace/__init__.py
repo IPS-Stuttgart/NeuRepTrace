@@ -30,6 +30,7 @@ from . import (  # noqa: E402
     _few_shot_tuple_labels_patch,
     _mcca_repetition_count_patch,
     _metadata_column_validation_patch,
+    _mixstyle_composite_ids_patch,
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
     _nll_eps_validation_patch,
@@ -78,6 +79,7 @@ _bushmeg_all_protocols_prediction_metric_patch.install()
 _reconstruction_encoder_config_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
 _mcca_repetition_count_patch.install()
+_mixstyle_composite_ids_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
 _source_alignment_pseudo_repetition_patch.install()
