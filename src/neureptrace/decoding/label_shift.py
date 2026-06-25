@@ -161,7 +161,7 @@ def soft_confusion_matrix(
         raise ValueError("classes length must match probability columns.")
     confusion = np.zeros((probs.shape[1], probs.shape[1]), dtype=float)
     for class_index, class_label in enumerate(class_order.tolist()):
-        mask = labels == class_label
+        mask = _object_mask(labels, class_label)
         if not np.any(mask):
             raise ValueError(f"source_validation_labels contain no rows for class {class_label!r}.")
         confusion[:, class_index] = np.mean(probs[mask], axis=0)
@@ -268,7 +268,7 @@ def _resolve_source_prior(n_classes: int, *, source_prior, source_labels, source
     if labels is None:
         raise ValueError("source_prior, source_labels, or source_validation_labels are required.")
     label_vector = _object_vector(labels, name="source_labels")
-    counts = np.asarray([np.count_nonzero(label_vector == label) for label in classes], dtype=float)
+    counts = np.asarray([np.count_nonzero(_object_mask(label_vector, label)) for label in classes], dtype=float)
     if np.any(counts <= 0.0):
         raise ValueError("source labels must contain at least one row per class.")
     return _normalize_prior(counts, epsilon=epsilon)
@@ -339,6 +339,21 @@ def _object_vector(values, *, name: str) -> np.ndarray:
     for index, value in enumerate(items):
         vector[index] = value
     return vector
+
+
+def _object_equal(left: object, right: object) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
+
+
+def _object_mask(values: Sequence[Any] | np.ndarray, target: object) -> np.ndarray:
+    return np.asarray([_object_equal(value, target) for value in _object_vector(values, name="values")], dtype=bool)
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
