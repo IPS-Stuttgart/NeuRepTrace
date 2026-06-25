@@ -4,11 +4,21 @@ import json
 
 import pytest
 
-from neureptrace.config_workflow import DatasetConfigError, _as_bool, run_decode_from_config
+from neureptrace.config_workflow import (
+    DatasetConfigError,
+    _as_bool,
+    run_decode_from_config,
+)
 
 
-@pytest.mark.parametrize(("value", "expected"), [(1.0, True), (0.0, False)])
-def test_config_workflow_accepts_float_boolean_flags(value: float, expected: bool) -> None:
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(1.0, True), (0.0, False)],
+)
+def test_config_workflow_accepts_float_boolean_flags(
+    value: float,
+    expected: bool,
+) -> None:
     assert _as_bool(value) is expected
 
 
