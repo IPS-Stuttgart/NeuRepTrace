@@ -298,26 +298,15 @@ def _sequence_atomic_vector(values: Sequence | np.ndarray) -> np.ndarray | None:
     return _object_vector(_as_atomic_label(value) for value in items)
 
 
-def _row_atomic_vector(array: np.ndarray, *, name: str) -> np.ndarray:
-    if array.ndim == 0:
-        return np.asarray([array.item()])
-    if array.ndim == 1:
-        return array.copy()
-    if 1 in array.shape:
-        raise ValueError(f"{name} must be one-dimensional.")
-    rows = np.asarray(array, dtype=object).reshape(array.shape[0], -1)
-    return _object_vector(tuple(row.tolist()) for row in rows)
-
-
 def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
     vector = _sequence_atomic_vector(labels)
     if vector is None:
         try:
-            array = np.asarray(labels)
-        except ValueError:
-            vector = _object_vector(_as_atomic_label(value) for value in labels)
-        else:
-            vector = _row_atomic_vector(array, name=name)
+            vector = np.asarray(labels)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be one-dimensional.") from exc
+        if vector.ndim != 1:
+            raise ValueError(f"{name} must be one-dimensional.")
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} length must match feature rows: {vector.shape[0]} != {expected_length}.")
     return vector
@@ -337,9 +326,11 @@ def _prediction_vector(predictions: Sequence | np.ndarray, *, expected_length: i
                 vector = array.copy()
             elif 1 in array.shape:
                 vector = array.reshape(-1).copy()
-            else:
+            elif array.dtype == object:
                 rows = np.asarray(array, dtype=object).reshape(array.shape[0], -1)
                 vector = _object_vector(tuple(row.tolist()) for row in rows)
+            else:
+                raise ValueError(f"{name} must be one-dimensional.")
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} length must match feature rows: {vector.shape[0]} != {expected_length}.")
     return vector
