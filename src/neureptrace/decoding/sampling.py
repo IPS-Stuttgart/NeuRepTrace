@@ -25,6 +25,7 @@ def select_class_limited_indices(
     ----------
     labels:
         One-dimensional class labels, or any array-like object that can be flattened.
+        Tuple-valued labels are treated as scalar composite class labels.
     max_per_class:
         Maximum number of rows to keep per class. ``None`` keeps every row.
     selection:
@@ -42,7 +43,7 @@ def select_class_limited_indices(
         while keeping each split reproducible.
     """
 
-    labels = np.asarray(labels, dtype=object).ravel()
+    labels = _label_vector(labels)
     if max_per_class is None:
         return np.arange(labels.shape[0], dtype=int)
 
@@ -74,11 +75,37 @@ def select_class_limited_indices(
     return np.asarray(sorted(selected), dtype=int)
 
 
+def _label_vector(labels) -> np.ndarray:
+    """Return labels as a one-dimensional object vector without splitting tuples."""
+
+    if isinstance(labels, np.ndarray):
+        array = labels.astype(object, copy=False)
+        if array.ndim == 0:
+            return array.reshape(1)
+        if array.ndim == 1:
+            return array
+        return array.reshape(-1)
+
+    if isinstance(labels, (str, bytes)):
+        return np.asarray([labels], dtype=object)
+
+    try:
+        items = list(labels)
+    except TypeError:
+        items = [labels]
+
+    if any(isinstance(item, tuple) for item in items):
+        vector = np.empty(len(items), dtype=object)
+        vector[:] = items
+        return vector
+    return np.asarray(items, dtype=object).reshape(-1)
+
+
 def _ordered_unique_labels(labels) -> list[object]:
     """Return labels in first-observed order without sorting or hashing."""
 
     unique: list[object] = []
-    for label in np.asarray(labels, dtype=object).reshape(-1):
+    for label in _label_vector(labels):
         if _label_position(unique, label) is None:
             unique.append(label)
     return unique
@@ -92,7 +119,7 @@ def _label_position(labels: list[object], target: object) -> int | None:
 
 
 def _label_mask(labels, target: object) -> np.ndarray:
-    return np.asarray([_labels_equal(label, target) for label in np.asarray(labels, dtype=object).reshape(-1)], dtype=bool)
+    return np.asarray([_labels_equal(label, target) for label in _label_vector(labels)], dtype=bool)
 
 
 def _labels_equal(left: object, right: object) -> bool:
