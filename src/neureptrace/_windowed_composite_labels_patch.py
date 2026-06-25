@@ -29,19 +29,34 @@ def _is_composite_label(value: object) -> bool:
 
 
 def _as_atomic_label(value: object) -> object:
+    if isinstance(value, np.generic):
+        return value.item()
     if isinstance(value, np.ndarray):
         array = np.asarray(value, dtype=object)
         if array.ndim == 0:
-            return array.item()
-        return tuple(array.reshape(-1).tolist())
+            return _as_atomic_label(array.item())
+        return tuple(_as_atomic_label(item) for item in array.reshape(-1).tolist())
     if isinstance(value, list):
-        return tuple(value)
+        return tuple(_as_atomic_label(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_as_atomic_label(item) for item in value)
     return value
 
 
 def _sequence_atomic_vector(values: Sequence | np.ndarray) -> np.ndarray | None:
     if isinstance(values, np.ndarray):
-        return None
+        array = np.asarray(values, dtype=object)
+        if array.ndim <= 0:
+            return None
+        if array.ndim == 1:
+            items = array.tolist()
+            if not items or not any(_is_composite_label(value) for value in items):
+                return None
+            return _object_vector(_as_atomic_label(value) for value in items)
+        rows = array.reshape(array.shape[0], -1)
+        if rows.shape[1] == 1:
+            return None
+        return _object_vector(tuple(_as_atomic_label(item) for item in row.tolist()) for row in rows)
     items = list(values)
     if not items or not any(_is_composite_label(value) for value in items):
         return None
@@ -62,18 +77,18 @@ def _prediction_vector(predictions: Sequence | np.ndarray, *, expected_length: i
     if vector is None:
         try:
             array = np.asarray(predictions)
-        except ValueError:
+        except (TypeError, ValueError):
             vector = _object_vector(_as_atomic_label(value) for value in predictions)
         else:
             if array.ndim == 0:
-                vector = np.asarray([array.item()])
+                vector = np.asarray([_as_atomic_label(array.item())], dtype=object)
             elif array.ndim == 1:
                 vector = array.copy()
             elif 1 in array.shape:
                 vector = array.reshape(-1).copy()
             elif array.dtype == object:
                 rows = np.asarray(array, dtype=object).reshape(array.shape[0], -1)
-                vector = _object_vector(tuple(row.tolist()) for row in rows)
+                vector = _object_vector(tuple(_as_atomic_label(item) for item in row.tolist()) for row in rows)
             else:
                 raise ValueError(f"{name} must be one-dimensional.")
     if vector.shape[0] != expected_length:
