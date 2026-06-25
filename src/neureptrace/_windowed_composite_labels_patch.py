@@ -128,6 +128,7 @@ def install() -> None:
     windowed._balanced_accuracy = _balanced_accuracy
 
     original_predict_window_model = windowed.predict_window_model
+    original_permutation_score_curves = windowed.permutation_score_curves
 
     def predict_window_model(model_bundle: Any, features: Sequence[Sequence[float]] | np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         transformed_features = windowed.transform_window_features(model_bundle, features)
@@ -139,7 +140,47 @@ def install() -> None:
         scores = windowed.prediction_scores(model_bundle.model, transformed_features)
         return predictions, scores
 
+    def permutation_score_curves(
+        train_features: Sequence[Sequence[float]] | np.ndarray,
+        *,
+        validation_features: Sequence[Sequence[float]] | np.ndarray,
+        validation_labels: Sequence | np.ndarray,
+        train_labels: Sequence | np.ndarray,
+        fit_model: windowed.FitModel,
+        n_permutations: int,
+        permutation_rng: np.random.Generator | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        n_permutations = windowed._validate_permutation_count(n_permutations)
+        train_features = windowed._feature_matrix(train_features, name="train_features")
+        validation_features = windowed._feature_matrix(validation_features, name="validation_features")
+        train_labels = _label_vector(train_labels, expected_length=train_features.shape[0], name="train_labels")
+        validation_labels = _label_vector(
+            validation_labels,
+            expected_length=validation_features.shape[0],
+            name="validation_labels",
+        )
+        if permutation_rng is None:
+            permutation_rng = np.random.default_rng()
+
+        permuted_accuracy = []
+        permuted_balanced_accuracy = []
+        for _ in range(n_permutations):
+            permuted_train_labels = np.array(train_labels, copy=True)
+            permutation_rng.shuffle(permuted_train_labels)
+            model = fit_model(train_features, permuted_train_labels)
+            predictions = _prediction_vector(
+                model.predict(validation_features),
+                expected_length=validation_features.shape[0],
+                name="predictions",
+            )
+            permuted_accuracy.append(label_accuracy(validation_labels, predictions))
+            permuted_balanced_accuracy.append(_balanced_accuracy(predictions, validation_labels))
+        return np.asarray(permuted_accuracy, dtype=float), np.asarray(permuted_balanced_accuracy, dtype=float)
+
     predict_window_model.__name__ = original_predict_window_model.__name__
     predict_window_model.__doc__ = original_predict_window_model.__doc__
+    permutation_score_curves.__name__ = original_permutation_score_curves.__name__
+    permutation_score_curves.__doc__ = original_permutation_score_curves.__doc__
     windowed.predict_window_model = predict_window_model
+    windowed.permutation_score_curves = permutation_score_curves
     _INSTALLED = True
