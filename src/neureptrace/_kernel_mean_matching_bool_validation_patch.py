@@ -16,8 +16,21 @@ def _is_boolean(value: Any) -> bool:
     return isinstance(value, (bool, np.bool_))
 
 
+def _validate_box_sum_constraints(*, n_source: int, max_weight: float, epsilon: float | None) -> None:
+    if epsilon is None:
+        return
+    lower = float(n_source) * (1.0 - float(epsilon))
+    max_total = float(n_source) * float(max_weight)
+    if lower > max_total + 1.0e-12:
+        raise ValueError(
+            "KMM box/sum constraints are infeasible: "
+            f"max_weight={float(max_weight):g} permits total source weight at most {max_total:g}, "
+            f"but epsilon={float(epsilon):g} requires at least {lower:g}."
+        )
+
+
 def install() -> None:
-    """Reject boolean KMM numeric parameters before Python coerces them to floats."""
+    """Reject invalid KMM numeric parameters before Python coerces them to floats."""
 
     from neureptrace.decoding import kernel_mean_matching as kmm
 
@@ -27,6 +40,7 @@ def install() -> None:
     original_resolve_kmm_gamma = kmm.resolve_kmm_gamma
     original_normalize_kmm_epsilon = kmm.normalize_kmm_epsilon
     original_kmm_config = kmm.kmm_config
+    original_kernel_mean_matching_weights = kmm.kernel_mean_matching_weights
 
     @wraps(original_resolve_kmm_gamma)
     def resolve_kmm_gamma(value: float | str, source_features: Any, target_features: Any) -> float:
@@ -69,12 +83,22 @@ def install() -> None:
             class_balance=class_balance,
         )
 
+    @wraps(original_kernel_mean_matching_weights)
+    def kernel_mean_matching_weights(source_features: Any, target_features: Any, **kwargs: Any) -> kmm.KernelMeanMatchingResult:
+        source = kmm._feature_matrix(source_features, name="source_features")
+        max_weight_value = kmm._positive_float(kwargs.get("max_weight", kmm.DEFAULT_KMM_MAX_WEIGHT), name="max_weight")
+        epsilon_value = normalize_kmm_epsilon(kwargs.get("epsilon", kmm.DEFAULT_KMM_EPSILON), n_source=source.shape[0])
+        _validate_box_sum_constraints(n_source=source.shape[0], max_weight=max_weight_value, epsilon=epsilon_value)
+        return original_kernel_mean_matching_weights(source_features, target_features, **kwargs)
+
     setattr(resolve_kmm_gamma, _PATCH_MARKER, True)
     setattr(normalize_kmm_epsilon, _PATCH_MARKER, True)
     setattr(kmm_config, _PATCH_MARKER, True)
+    setattr(kernel_mean_matching_weights, _PATCH_MARKER, True)
     kmm.resolve_kmm_gamma = resolve_kmm_gamma
     kmm.normalize_kmm_epsilon = normalize_kmm_epsilon
     kmm.kmm_config = kmm_config
+    kmm.kernel_mean_matching_weights = kernel_mean_matching_weights
 
 
 __all__ = ["install"]
