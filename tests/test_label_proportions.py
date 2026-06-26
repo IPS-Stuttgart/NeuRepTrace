@@ -102,7 +102,7 @@ def test_adjust_probability_blocks_to_label_proportions_preserves_tuple_block_id
     assert np.allclose(result.probabilities[run2_mask].mean(axis=0), [0.25, 0.75], atol=1e-8)
 
 
-def test_adjust_probability_blocks_to_label_proportions_preserves_matrix_block_ids():
+def test_adjust_probability_blocks_to_label_proportions_preserves_matrix_composite_block_ids():
     probabilities = np.asarray(
         [
             [0.85, 0.15],
@@ -132,8 +132,8 @@ def test_adjust_probability_blocks_to_label_proportions_preserves_matrix_block_i
         tol=1e-10,
     )
 
-    run1_mask = np.asarray([tuple(block) == ("subject1", "run1") for block in blocks], dtype=bool)
-    run2_mask = np.asarray([tuple(block) == ("subject1", "run2") for block in blocks], dtype=bool)
+    run1_mask = np.asarray([tuple(row) == ("subject1", "run1") for row in blocks], dtype=bool)
+    run2_mask = np.asarray([tuple(row) == ("subject1", "run2") for row in blocks], dtype=bool)
     assert result.metadata["n_blocks"] == 2
     assert np.allclose(result.probabilities[run1_mask].mean(axis=0), [0.75, 0.25], atol=1e-8)
     assert np.allclose(result.probabilities[run2_mask].mean(axis=0), [0.25, 0.75], atol=1e-8)

@@ -38,7 +38,7 @@ def class_balanced_source_indices(
     source_labels: Sequence[Any] | np.ndarray,
     *,
     strategy: str = "oversample",
-    random_state: int | None = 13,
+    random_state: int | str | None = 13,
 ) -> ClassBalanceResampleResult:
     """Return deterministic class-balanced source-row indices."""
 
@@ -47,10 +47,11 @@ def class_balanced_source_indices(
     if len(classes) < 2:
         raise ValueError("class balancing requires at least two source classes")
     mode = normalize_class_balance_strategy(strategy)
+    seed = _normalize_random_state(random_state, name="random_state")
     class_rows = [_matching_indices(labels, class_label) for class_label in classes]
     counts = np.asarray([rows.size for rows in class_rows], dtype=int)
     target_count = _target_count(counts, mode)
-    rng = np.random.default_rng(random_state)
+    rng = np.random.default_rng(seed)
     sampled: list[np.ndarray] = []
     for rows in class_rows:
         if rows.size == target_count:
@@ -69,7 +70,7 @@ def class_balanced_source_indices(
         original_counts=tuple(int(value) for value in counts),
         balanced_counts=balanced_counts,
         strategy=mode,
-        random_state=random_state,
+        random_state=seed,
     )
 
 
@@ -79,7 +80,7 @@ def fit_class_balanced_jda(
     target_features: Sequence[Sequence[float]] | np.ndarray,
     *,
     balance_strategy: str = "oversample",
-    balance_random_state: int | None = 13,
+    balance_random_state: int | str | None = 13,
     target_probabilities: Sequence[Sequence[float]] | np.ndarray | None = None,
     **jda_kwargs: Any,
 ) -> JointDistributionAdaptationResult:
@@ -154,6 +155,25 @@ def _target_count(counts: np.ndarray, strategy: str) -> int:
     if strategy == "undersample":
         return int(np.min(counts))
     return max(1, int(np.rint(np.median(counts))))
+
+
+def _normalize_random_state(value: int | str | None, *, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.lower() in {"", "none", "null"}:
+            return None
+        value = stripped
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a non-negative integer seed or None")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer seed or None") from exc
+    if not np.isfinite(numeric) or numeric < 0.0 or numeric % 1.0 != 0.0:
+        raise ValueError(f"{name} must be a non-negative integer seed or None")
+    return int(numeric)
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
