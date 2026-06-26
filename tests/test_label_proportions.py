@@ -102,6 +102,43 @@ def test_adjust_probability_blocks_to_label_proportions_preserves_tuple_block_id
     assert np.allclose(result.probabilities[run2_mask].mean(axis=0), [0.25, 0.75], atol=1e-8)
 
 
+def test_adjust_probability_blocks_to_label_proportions_preserves_matrix_composite_block_ids():
+    probabilities = np.asarray(
+        [
+            [0.85, 0.15],
+            [0.75, 0.25],
+            [0.25, 0.75],
+            [0.15, 0.85],
+        ]
+    )
+    blocks = np.asarray(
+        [
+            ["subject1", "run1"],
+            ["subject1", "run1"],
+            ["subject1", "run2"],
+            ["subject1", "run2"],
+        ],
+        dtype=object,
+    )
+
+    result = adjust_probability_blocks_to_label_proportions(
+        probabilities,
+        blocks,
+        {
+            ("subject1", "run1"): [0.75, 0.25],
+            ("subject1", "run2"): [0.25, 0.75],
+        },
+        classes=("rare", "standard"),
+        tol=1e-10,
+    )
+
+    run1_mask = np.asarray([tuple(row) == ("subject1", "run1") for row in blocks], dtype=bool)
+    run2_mask = np.asarray([tuple(row) == ("subject1", "run2") for row in blocks], dtype=bool)
+    assert result.metadata["n_blocks"] == 2
+    assert np.allclose(result.probabilities[run1_mask].mean(axis=0), [0.75, 0.25], atol=1e-8)
+    assert np.allclose(result.probabilities[run2_mask].mean(axis=0), [0.25, 0.75], atol=1e-8)
+
+
 def test_predict_labels_from_label_proportions_preserves_tuple_classes_as_atomic_labels():
     result = adjust_probabilities_to_label_proportions(
         [[0.99, 0.01], [0.01, 0.99]],
