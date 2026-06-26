@@ -25,6 +25,7 @@ MMD_SOURCE_WEIGHTING_PROTOCOL_CATEGORY = "2.5_unlabeled_target_distribution_adap
 DEFAULT_MMD_TEMPERATURE = 0.25
 DEFAULT_MMD_GAMMA: float | str = "median"
 _MIN_SCALE = 1.0e-12
+_GAMMA_VALIDATION_ERROR = "gamma must be positive and finite, or one of: median, auto, scale."
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +149,7 @@ def resolve_mmd_gamma(
 
     target = _feature_matrix(target_features, name="target_features")
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError("gamma must be positive and finite, or one of: median, auto, scale.")
+        raise ValueError(_GAMMA_VALIDATION_ERROR)
     if isinstance(value, str):
         normalized = value.strip().lower().replace("-", "_")
         if normalized in {"median", "auto", "median_distance", "median_heuristic"}:
@@ -161,11 +162,17 @@ def resolve_mmd_gamma(
             return 1.0 / (2.0 * max(sigma2, _MIN_SCALE))
         if normalized == "scale":
             return 1.0 / max(1, target.shape[1])
-        numeric = float(normalized)
+        try:
+            numeric = float(normalized)
+        except ValueError as exc:
+            raise ValueError(_GAMMA_VALIDATION_ERROR) from exc
     else:
-        numeric = float(value)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(_GAMMA_VALIDATION_ERROR) from exc
     if not np.isfinite(numeric) or numeric <= 0.0:
-        raise ValueError("gamma must be positive and finite, or one of: median, auto, scale.")
+        raise ValueError(_GAMMA_VALIDATION_ERROR)
     return numeric
 
 
