@@ -108,12 +108,17 @@ def augment_source_with_mixup(
     features = _feature_matrix(source_features, name="source_features")
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=labels.dtype if labels.dtype != object else object)
-    class_to_index = {class_label: index for index, class_label in enumerate(classes.tolist())}
-    original_distributions = _one_hot(labels, class_to_index)
+    classes = _object_array(_unique_values(labels))
+    original_distributions = _one_hot(labels, classes)
 
     if not cfg.enabled:
-        metadata = _metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=0, n_classes=classes.shape[0], n_source_domains=np.unique(domains).shape[0])
+        metadata = _metadata(
+            cfg,
+            n_source_rows=features.shape[0],
+            n_synthetic_rows=0,
+            n_classes=classes.shape[0],
+            n_source_domains=len(_unique_values(domains)),
+        )
         return SourceMixUpResult(
             features=features.astype(np.float32, copy=False),
             labels=labels.copy(),
@@ -135,7 +140,7 @@ def augment_source_with_mixup(
     lambdas: list[float] = []
 
     for class_label in classes.tolist():
-        class_indices = np.flatnonzero(labels == class_label)
+        class_indices = np.flatnonzero(_object_equal_mask(labels, class_label))
         if class_indices.size == 0:
             continue
         for _ in range(cfg.synthetic_per_class):
@@ -156,8 +161,8 @@ def augment_source_with_mixup(
                 lambdas=np.asarray([lam], dtype=float),
             )[0]
             distribution = np.zeros(classes.shape[0], dtype=float)
-            distribution[class_to_index[labels[content_index]]] += lam
-            distribution[class_to_index[labels[partner_index]]] += 1.0 - lam
+            distribution[_find_value_index(classes, labels[content_index])] += lam
+            distribution[_find_value_index(classes, labels[partner_index])] += 1.0 - lam
             synthetic_rows.append(row)
             synthetic_distributions.append(distribution)
             synthetic_labels.append(_hard_label(labels[content_index], labels[partner_index], lam, policy=cfg.hard_label_policy))
@@ -166,7 +171,7 @@ def augment_source_with_mixup(
             lambdas.append(lam)
 
     synthetic_features = np.vstack(synthetic_rows).astype(np.float32, copy=False) if synthetic_rows else np.empty((0, features.shape[1]), dtype=np.float32)
-    synthetic_label_array = np.asarray(synthetic_labels, dtype=labels.dtype if labels.dtype != object else object)
+    synthetic_label_array = _object_array(synthetic_labels)
     synthetic_distribution_array = np.vstack(synthetic_distributions).astype(np.float32, copy=False) if synthetic_distributions else np.empty((0, classes.shape[0]), dtype=np.float32)
 
     if cfg.preserve_original:
@@ -185,7 +190,7 @@ def augment_source_with_mixup(
         n_source_rows=features.shape[0],
         n_synthetic_rows=synthetic_features.shape[0],
         n_classes=classes.shape[0],
-        n_source_domains=np.unique(domains).shape[0],
+        n_source_domains=len(_unique_values(domains)),
     )
     return SourceMixUpResult(
         features=output_features,
@@ -283,7 +288,8 @@ def _partner_pool(
     if pool.size > 1:
         pool = pool[pool != content_index]
     if cross_domain_partner:
-        cross_pool = pool[domains[pool] != domains[content_index]]
+        same_domain = _object_equal_mask(domains[pool], domains[content_index])
+        cross_pool = pool[~same_domain]
         if cross_pool.size:
             pool = cross_pool
     if pool.size == 0:
@@ -301,10 +307,10 @@ def _hard_label(content_label: Any, partner_label: Any, lam: float, *, policy: s
     raise ValueError(f"Unhandled hard-label policy {policy!r}.")
 
 
-def _one_hot(labels: np.ndarray, class_to_index: Mapping[Any, int]) -> np.ndarray:
-    distributions = np.zeros((labels.shape[0], len(class_to_index)), dtype=np.float32)
+def _one_hot(labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
+    distributions = np.zeros((labels.shape[0], classes.shape[0]), dtype=np.float32)
     for row, label in enumerate(labels.tolist()):
-        distributions[row, class_to_index[label]] = 1.0
+        distributions[row, _find_value_index(classes, label)] = 1.0
     return distributions
 
 
@@ -350,24 +356,93 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
-    return vector
+    return _row_value_vector(values, expected_length=expected_length, name=name, require_hashable=False)
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"source_domains must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
-    for value in vector.tolist():
-        try:
-            hash(value)
-        except TypeError as exc:
-            raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
+    return _row_value_vector(values, expected_length=expected_length, name="source_domains", require_hashable=True)
+
+
+def _row_value_vector(
+    values: Sequence[Any] | np.ndarray,
+    *,
+    expected_length: int,
+    name: str,
+    require_hashable: bool,
+) -> np.ndarray:
+    items = _row_values(values, expected_length=expected_length)
+    if len(items) != expected_length:
+        raise ValueError(f"{name} must contain one value per feature row: {len(items)} != {expected_length}.")
+    if require_hashable:
+        for value in items:
+            try:
+                hash(value)
+            except TypeError as exc:
+                raise ValueError(f"{name} must contain hashable values; got {value!r}.") from exc
+    return _object_array(items)
+
+
+def _row_values(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> list[Any]:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            return [array.item()]
+        if array.ndim == 1:
+            return array.tolist()
+        rows = array.reshape(array.shape[0], -1)
+        if rows.shape[0] == expected_length:
+            return [row[0] if row.shape[0] == 1 else tuple(row.tolist()) for row in rows]
+        if array.size == expected_length and 1 in array.shape:
+            return array.reshape(-1).tolist()
+        return [tuple(row.tolist()) for row in rows]
+    if isinstance(values, (str, bytes)):
+        return [values]
+    try:
+        return list(values)
+    except TypeError:
+        return [values]
+
+
+def _object_array(values: Sequence[Any]) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
     return vector
+
+
+def _unique_values(values: Sequence[Any] | np.ndarray) -> tuple[Any, ...]:
+    unique: list[Any] = []
+    vector = values if isinstance(values, np.ndarray) else _object_array(values)
+    for value in vector.tolist():
+        if not any(_object_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return tuple(unique)
+
+
+def _find_value_index(values: np.ndarray, target: Any) -> int:
+    for index, value in enumerate(values.tolist()):
+        if _object_equal(value, target):
+            return index
+    raise ValueError(f"Unknown class label {target!r}.")
+
+
+def _object_equal_mask(values: np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_object_equal(value, target) for value in values.tolist()], dtype=bool)
+
+
+def _object_equal(left: Any, right: Any) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(equal, (bool, np.bool_)):
+        return bool(equal)
+    try:
+        return bool(np.all(equal))
+    except (TypeError, ValueError):
+        return False
 
 
 def _normalize_integer(value: int | str, *, name: str) -> int:
