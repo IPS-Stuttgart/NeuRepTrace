@@ -34,3 +34,20 @@ def test_rank_class_scores_preserves_multi_column_composite_labels() -> None:
 
     assert result["top_k_accuracy"] == {1: 1.0}
     assert result["rows"][0]["rank1_class"] == ("subject-a", "stim-right")
+
+
+def test_rank_class_scores_preserves_higher_dimensional_composite_labels() -> None:
+    scores = np.asarray([[0.1, 0.9]], dtype=float)
+    classes = np.asarray(
+        [
+            [["subject-a", "left"]],
+            [["subject-a", "right"]],
+        ],
+        dtype=object,
+    )
+    y_true = np.asarray([[["subject-a", "right"]]], dtype=object)
+
+    result = rank_class_scores(scores, classes, y_true, top_k=(1,), row_top_k=1)
+
+    assert result["top_k_accuracy"] == {1: 1.0}
+    assert result["rows"][0]["rank1_class"] == ("subject-a", "right")
