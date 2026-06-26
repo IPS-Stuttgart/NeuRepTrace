@@ -13,6 +13,7 @@ import pandas as pd
 
 _PARTICIPANT_RANGE_RE = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
 _DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_BOOLEAN_PARTICIPANT_TEXT = {"true", "false", "yes", "no"}
 
 PathToken = str | int
 
@@ -134,26 +135,38 @@ def _participants(value: Any) -> list[int]:
         exclude_cfg = value.get("exclude", [])
     else:
         exclude_cfg = []
-    participants = _participant_values(participants_cfg)
-    excluded = set(_participant_values(exclude_cfg))
+    participants = _participant_values(participants_cfg, name="participants.include")
+    excluded = set(_participant_values(exclude_cfg, name="participants.exclude"))
     return [participant for participant in participants if participant not in excluded]
 
 
-def _participant_values(value: Any) -> list[int]:
+def _participant_values(value: Any, *, name: str = "participants.include") -> list[int]:
     if value is None:
         return []
+    if _is_boolean_like(value):
+        raise ValueError(f"{name} must contain participant integers, not booleans.")
+    if isinstance(value, Mapping):
+        raise ValueError(f"{name} must be an integer, string, or sequence, not a mapping.")
     if isinstance(value, int):
         return [value]
     if isinstance(value, str):
+        if value.strip().lower() in _BOOLEAN_PARTICIPANT_TEXT:
+            raise ValueError(f"{name} must contain participant integers, not booleans.")
         tokens = [token.strip() for token in value.replace(";", ",").split(",") if token.strip()]
-        return _participant_values(tokens)
+        return _participant_values(tokens, name=name)
     if isinstance(value, Iterable):
         participants: list[int] = []
         for item in value:
+            if _is_boolean_like(item):
+                raise ValueError(f"{name} entries must be participant integers, not booleans.")
+            if isinstance(item, Mapping):
+                raise ValueError(f"{name} entries must be integers or ranges, not mappings.")
             if isinstance(item, int):
                 participants.append(item)
                 continue
             token = str(item).strip()
+            if token.lower() in _BOOLEAN_PARTICIPANT_TEXT:
+                raise ValueError(f"{name} entries must be participant integers, not booleans.")
             match = _PARTICIPANT_RANGE_RE.match(token)
             if match:
                 start, stop = int(match.group(1)), int(match.group(2))
@@ -162,7 +175,11 @@ def _participant_values(value: Any) -> list[int]:
             elif token:
                 participants.append(int(token))
         return participants
-    raise ValueError("participants.include must be an integer, string, or sequence.")
+    raise ValueError(f"{name} must be an integer, string, or sequence.")
+
+
+def _is_boolean_like(value: Any) -> bool:
+    return isinstance(value, bool) or type(value).__name__ == "bool_"
 
 
 def _runs(config: Mapping[str, Any], *, files: Mapping[str, Any], run_names: Sequence[str] | None) -> list[dict[str, Any]]:

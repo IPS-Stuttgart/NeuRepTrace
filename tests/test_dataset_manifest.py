@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.dataset_manifest import manifest_from_dataset_config, write_manifest_from_dataset_config
 
@@ -42,6 +43,45 @@ def test_manifest_from_dataset_config_expands_participants_runs_and_columns():
     assert frame["fieldtrip_root_path"].tolist() == ["data,0"] * 4
     assert frame["fieldtrip_trim_overlong_labels"].tolist() == ["true"] * 4
     assert frame["baseline_window"].tolist() == ["-0.5,0.0"] * 4
+
+
+@pytest.mark.parametrize(
+    "participants",
+    [
+        True,
+        {"include": True},
+        {"include": [1, False]},
+        {"include": ["true"]},
+        {"include": [1], "exclude": [False]},
+    ],
+)
+def test_manifest_from_dataset_config_rejects_boolean_participants(participants):
+    config = {
+        "dataset": {"root": "data"},
+        "participants": participants,
+        "files": {"main": "sub-{participant}_epo.fif"},
+    }
+
+    with pytest.raises(ValueError, match="boolean|booleans"):
+        manifest_from_dataset_config(config)
+
+
+@pytest.mark.parametrize(
+    "participants",
+    [
+        {"include": {"subject": 1}},
+        {"include": [1, {"subject": 2}]},
+    ],
+)
+def test_manifest_from_dataset_config_rejects_mapping_participants(participants):
+    config = {
+        "dataset": {"root": "data"},
+        "participants": participants,
+        "files": {"main": "sub-{participant}_epo.fif"},
+    }
+
+    with pytest.raises(ValueError, match="mapping|mappings"):
+        manifest_from_dataset_config(config)
 
 
 def test_write_manifest_from_json_config_can_select_run(tmp_path: Path):

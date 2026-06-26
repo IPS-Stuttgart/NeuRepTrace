@@ -59,3 +59,26 @@ def test_adaptive_calibration_rejects_malformed_sample_weight() -> None:
 
     with pytest.raises(ValueError, match="one weight per label"):
         model.fit(features, labels, sample_weight=[1.0, 2.0])
+
+
+@pytest.mark.parametrize(
+    "bad_sample_weight",
+    ([True, False, True], np.array([True, False, True]), [1.0, np.bool_(False), 3.0]),
+)
+def test_adaptive_calibration_rejects_boolean_sample_weight(bad_sample_weight) -> None:
+    features, labels, _sample_weight = _tiny_fallback_data()
+    estimator = make_pipeline(StandardScaler(), SampleWeightRequiredClassifier())
+    model = AdaptiveCalibratedClassifierCV(estimator=estimator, method="sigmoid", cv=3)
+
+    with pytest.raises(ValueError, match="not booleans"):
+        model.fit(features, labels, sample_weight=bad_sample_weight)
+
+
+@pytest.mark.parametrize("bad_cv", [True, False, 1, 2.5, np.nan, np.inf, "3.5", object()])
+def test_adaptive_calibration_rejects_invalid_cv_values(bad_cv) -> None:
+    features, labels, _sample_weight = _tiny_fallback_data()
+    estimator = make_pipeline(StandardScaler(), SampleWeightRequiredClassifier())
+    model = AdaptiveCalibratedClassifierCV(estimator=estimator, method="sigmoid", cv=bad_cv)
+
+    with pytest.raises(ValueError, match="Calibration cv must be an integer at least 2"):
+        model.fit(features, labels)

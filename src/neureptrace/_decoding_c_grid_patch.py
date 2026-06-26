@@ -1,8 +1,9 @@
-"""Runtime compatibility patch for decoder tuning-grid validation.
+"""Runtime compatibility patch for decoder numeric-parameter validation.
 
 This module keeps the public ``neureptrace.decoding`` API stable while adding
-strict validation for non-finite regularization grids. It can be removed once
-the overridden function is folded directly into ``neureptrace.decoding``.
+strict validation for non-finite regularization grids and classifier-parameter
+values. It can be removed once the overridden functions are folded directly into
+``neureptrace.decoding``.
 """
 
 from __future__ import annotations
@@ -15,9 +16,11 @@ _PATCH_MARKER = "_neureptrace_c_grid_patch_installed"
 
 
 def install() -> None:
-    """Install stricter validation for decoder C-grid parsing."""
+    """Install stricter validation for decoder numeric parameters."""
 
-    from neureptrace import decoding
+    from neureptrace import _decoding_classifier_param_patch, decoding
+
+    _decoding_classifier_param_patch.install()
 
     if getattr(decoding, _PATCH_MARKER, False):
         return

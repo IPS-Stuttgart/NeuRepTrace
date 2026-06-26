@@ -2,9 +2,12 @@
 
 YAML booleans are instances of integer-like scalar types in Python.  Without an
 explicit guard, values such as ``latent_dim: true`` or ``classifier_c: true`` are
-silently coerced to ``1``/``1.0``.  That turns misspecified configs into valid but
-unintended BUSH-MEG Category-2 autoencoder runs.  This patch preserves the
-existing parser surface while rejecting boolean values before numeric coercion.
+silently coerced to ``1``/``1.0``.  Fractional integer controls can also be
+silently truncated by ``int(...)``; for example, ``temporal_bins: 1.5`` becomes
+``1``.  That turns misspecified configs into valid but unintended BUSH-MEG
+Category-2 autoencoder runs.  This patch preserves the existing parser surface
+while rejecting boolean values and fractional integer controls before numeric
+coercion.
 """
 
 from __future__ import annotations
@@ -18,12 +21,21 @@ from typing import Any
 import numpy as np
 
 _TARGET_MODULE = "neureptrace.bushmeg_category2_autoencoder_loso"
+_MAX_FOLDS_PATCH_MODULE = "neureptrace._category2_autoencoder_max_folds_patch"
 _PATCH_MARKER = "_neureptrace_bushmeg_category2_autoencoder_config_patch_installed"
 _FINDER_MARKER = "_neureptrace_bushmeg_category2_autoencoder_config_finder"
 
 
 def _is_boolean_scalar(value: Any) -> bool:
     return isinstance(value, (bool, np.bool_))
+
+
+def _is_fractional_integer_value(value: Any) -> bool:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return bool(np.isfinite(number) and number % 1.0 != 0.0)
 
 
 def _patch_module(module: ModuleType) -> None:
@@ -34,7 +46,7 @@ def _patch_module(module: ModuleType) -> None:
     original_positive_float = module._positive_float
 
     def _positive_int(value: Any, *, name: str, minimum: int = 1) -> int:
-        if _is_boolean_scalar(value):
+        if _is_boolean_scalar(value) or _is_fractional_integer_value(value):
             raise ValueError(f"{name} must be an integer.")
         return original_positive_int(value, name=name, minimum=minimum)
 
@@ -46,6 +58,10 @@ def _patch_module(module: ModuleType) -> None:
     module._positive_int = _positive_int
     module._positive_float = _positive_float
     setattr(module, _PATCH_MARKER, True)
+
+
+def _install_max_folds_patch() -> None:
+    importlib.import_module(_MAX_FOLDS_PATCH_MODULE).install()
 
 
 class _Category2AutoencoderConfigPatchLoader(importlib.abc.Loader):
@@ -61,6 +77,26 @@ class _Category2AutoencoderConfigPatchLoader(importlib.abc.Loader):
     def exec_module(self, module: ModuleType) -> None:
         self.wrapped_loader.exec_module(module)
         _patch_module(module)
+
+    def get_code(self, fullname: str):
+        """Delegate code loading so ``python -m`` execution remains supported."""
+
+        get_code = getattr(self.wrapped_loader, "get_code", None)
+        if get_code is None:
+            raise ImportError(f"Loader for {fullname!r} does not provide executable code.")
+        return get_code(fullname)
+
+    def get_source(self, fullname: str):
+        get_source = getattr(self.wrapped_loader, "get_source", None)
+        if get_source is None:
+            return None
+        return get_source(fullname)
+
+    def is_package(self, fullname: str) -> bool:
+        is_package = getattr(self.wrapped_loader, "is_package", None)
+        if is_package is None:
+            return False
+        return bool(is_package(fullname))
 
 
 class _Category2AutoencoderConfigPatchFinder(importlib.abc.MetaPathFinder):
@@ -82,8 +118,9 @@ class _Category2AutoencoderConfigPatchFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Install boolean-value validation for the Category-2 autoencoder config."""
+    """Install Category-2 autoencoder config and fold-limit guardrails."""
 
+    _install_max_folds_patch()
     loaded = sys.modules.get(_TARGET_MODULE)
     if loaded is not None:
         _patch_module(loaded)

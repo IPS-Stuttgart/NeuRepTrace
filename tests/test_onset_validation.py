@@ -47,6 +47,38 @@ def test_parse_chunk_spec_accepts_expected_response():
     assert chunk == OnsetChunk("early", 0.05, 0.20, "positive")
 
 
+def test_parse_chunk_spec_strips_text_fields():
+    chunk = parse_chunk_spec(" early :0.05:0.20: positive ")
+
+    assert chunk == OnsetChunk("early", 0.05, 0.20, "positive")
+
+
+@pytest.mark.parametrize(
+    "spec",
+    (
+        "early:nan:0.20:positive",
+        "early:0.05:nan:positive",
+        "early:inf:0.20:positive",
+        "early:0.05:-inf:positive",
+    ),
+)
+def test_parse_chunk_spec_rejects_nonfinite_bounds(spec: str):
+    with pytest.raises(ValueError, match="must be finite"):
+        parse_chunk_spec(spec)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    (
+        " :0.05:0.20:positive",
+        "early:0.05:0.20: ",
+    ),
+)
+def test_parse_chunk_spec_rejects_blank_text_fields(spec: str):
+    with pytest.raises(ValueError, match="must not be empty"):
+        parse_chunk_spec(spec)
+
+
 def test_summarize_onset_chunks_reports_pre_and_post_windows():
     events, summary = summarize_onset_chunks(
         _chunk_observations(),

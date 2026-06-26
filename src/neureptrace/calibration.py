@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -46,6 +47,34 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
     return paths
 
 
+def _validate_time_window(window: Sequence[object], *, name: str) -> tuple[float, float]:
+    if isinstance(window, (str, bytes)):
+        raise ValueError(f"{name} must contain exactly two finite numeric endpoints.")
+    try:
+        values = tuple(window)
+    except TypeError as exc:
+        raise ValueError(f"{name} must contain exactly two finite numeric endpoints.") from exc
+    if len(values) != 2:
+        raise ValueError(f"{name} must contain exactly two finite numeric endpoints.")
+
+    endpoints: list[float] = []
+    for value in values:
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(f"{name} endpoints must be finite numeric values, not booleans.")
+        try:
+            endpoint = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} endpoints must be finite numeric values.") from exc
+        if not np.isfinite(endpoint):
+            raise ValueError(f"{name} endpoints must be finite numeric values.")
+        endpoints.append(endpoint)
+
+    start, stop = endpoints
+    if stop < start:
+        raise ValueError(f"{name} stop must be greater than or equal to start.")
+    return start, stop
+
+
 def _window_mean(frame: pd.DataFrame, column: str, start: float, stop: float) -> float:
     window = frame[(frame["time"] >= start) & (frame["time"] <= stop)]
     if window.empty:
@@ -55,6 +84,13 @@ def _window_mean(frame: pd.DataFrame, column: str, start: float, stop: float) ->
 
 def _format_float(value: float, digits: int = 3) -> str:
     return f"{value:.{digits}f}"
+
+
+def _reject_boolean_numeric_values(values: pd.Series, column: str, *, source: str) -> None:
+    boolean_values = values.map(lambda value: isinstance(value, (bool, np.bool_))).fillna(False).astype(bool)
+    if boolean_values.any():
+        bad_rows = boolean_values[boolean_values].index.tolist()[:5]
+        raise ValueError(f"{source} contains boolean values in numeric column '{column}' at row(s) {bad_rows}.")
 
 
 def _present_group_columns(frame: pd.DataFrame) -> list[str]:
@@ -68,6 +104,7 @@ def _validate_calibration_summary(summary: pd.DataFrame) -> pd.DataFrame:
 
     validated = summary.copy()
     for column in SUMMARY_NUMERIC_COLUMNS:
+        _reject_boolean_numeric_values(validated[column], column, source="Summary")
         values = pd.to_numeric(validated[column], errors="coerce")
         if values.isna().any():
             bad_rows = values[values.isna()].index.tolist()[:5]
@@ -108,6 +145,8 @@ def summarize_calibration_metrics(
     effect_window: tuple[float, float] = (0.1, 0.8),
 ) -> pd.DataFrame:
     """Summarize accuracy and calibration metrics over benchmark time windows."""
+    baseline_window = _validate_time_window(baseline_window, name="baseline_window")
+    effect_window = _validate_time_window(effect_window, name="effect_window")
     summary = _validate_calibration_summary(summary)
 
     group_columns = _present_group_columns(summary)
@@ -115,7 +154,8 @@ def summarize_calibration_metrics(
     rows = []
     for keys, frame in group_items:
         key_values = keys if isinstance(keys, tuple) else (keys,)
-        group_values = dict(zip(group_columns, key_values, strict=True)) if group_columns else {"decoder": "overall"}
+        group_values = dict(zip(group_columns, key_values, strict=True)) if group_columns else {}
+        group_values.setdefault("decoder", "overall")
         effect = frame[(frame["time"] >= effect_window[0]) & (frame["time"] <= effect_window[1])]
         if effect.empty:
             raise ValueError(f"No time points found in effect window [{effect_window[0]}, {effect_window[1]}].")
@@ -147,6 +187,7 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
 
     validated = frame.copy()
     for column in RELIABILITY_BIN_NUMERIC_COLUMNS:
+        _reject_boolean_numeric_values(validated[column], column, source=str(csv_path))
         values = pd.to_numeric(validated[column], errors="coerce")
         missing_values = values.isna()
         allowed_missing = pd.Series(False, index=values.index)
@@ -200,6 +241,7 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
             raise ValueError(f"{csv_path} contains values outside [0, 1] in column '{column}' at row(s) {bad_rows}.")
 
     if RELIABILITY_BIN_WEIGHT_COLUMN in validated.columns:
+        _reject_boolean_numeric_values(validated[RELIABILITY_BIN_WEIGHT_COLUMN], RELIABILITY_BIN_WEIGHT_COLUMN, source=str(csv_path))
         sample_weight = pd.to_numeric(validated[RELIABILITY_BIN_WEIGHT_COLUMN], errors="coerce")
         missing_weight = sample_weight.isna()
         if missing_weight.any():
@@ -289,6 +331,8 @@ def build_calibration_report(
     effect_window: tuple[float, float] = (0.1, 0.8),
 ) -> str:
     """Build a Markdown report that foregrounds calibration metrics."""
+    baseline_window = _validate_time_window(baseline_window, name="baseline_window")
+    effect_window = _validate_time_window(effect_window, name="effect_window")
     summary = summarize_calibration_metrics(
         pd.read_csv(summary_csv),
         baseline_window=baseline_window,

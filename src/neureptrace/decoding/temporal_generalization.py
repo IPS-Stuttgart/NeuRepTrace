@@ -39,6 +39,9 @@ def compute_temporal_generalization_matrix(
     loading data and constructing ``TemporalFeatureWindow`` objects.
     """
 
+    center_decimals = _validate_center_decimals(center_decimals)
+    fixed_chance_accuracy = _validate_chance_accuracy(chance_accuracy)
+
     if not train_windows:
         raise ValueError("Need at least one train window.")
     if not test_windows:
@@ -47,20 +50,19 @@ def compute_temporal_generalization_matrix(
     base_metadata = dict(metadata or {})
     rows: list[dict[str, object]] = []
     for train_window in sorted(train_windows, key=lambda window: _center_key(window.center, center_decimals)):
-        _validate_window_labels(train_window, role="train")
+        train_labels = _validate_window_labels(train_window, role="train")
         model = fit_model(train_window)
         fitted_metadata = dict(model_metadata(model) if model_metadata is not None else {})
         for test_window in sorted(test_windows, key=lambda window: _center_key(window.center, center_decimals)):
-            _validate_window_labels(test_window, role="test")
-            predictions = np.asarray(predict_labels(model, test_window))
-            labels = np.asarray(test_window.labels)
+            labels = _validate_window_labels(test_window, role="test")
+            predictions = _label_vector(predict_labels(model, test_window), role="predicted labels")
             if len(predictions) != len(labels):
                 raise ValueError(
                     "Predicted label count must match test label count "
                     f"for test window {test_window.center}: {len(predictions)} != {len(labels)}."
                 )
             accuracy = float(np.mean(predictions == labels)) if len(labels) else np.nan
-            chance = _chance_accuracy(chance_accuracy, labels)
+            chance = _chance_accuracy(fixed_chance_accuracy, labels)
             rows.append(
                 {
                     **base_metadata,
@@ -72,10 +74,10 @@ def compute_temporal_generalization_matrix(
                     "chance_accuracy": chance,
                     "chance_percent": 100.0 * chance if np.isfinite(chance) else np.nan,
                     "above_chance": bool(np.isfinite(accuracy) and np.isfinite(chance) and accuracy > chance),
-                    "n_train_trials": len(train_window.labels),
+                    "n_train_trials": len(train_labels),
                     "n_validation_trials": len(labels),
-                    "n_train_classes": len(np.unique(np.asarray(train_window.labels))),
-                    "n_validation_classes": len(np.unique(labels)),
+                    "n_train_classes": _unique_label_count(train_labels),
+                    "n_validation_classes": _unique_label_count(labels),
                     **fitted_metadata,
                 }
             )
@@ -139,12 +141,99 @@ def summarize_temporal_generalization_matrix(
     return pd.DataFrame(rows)
 
 
-def _validate_window_labels(window: TemporalFeatureWindow, *, role: str) -> None:
-    labels = np.asarray(window.labels)
-    if labels.ndim != 1:
-        raise ValueError(f"{role} window labels must be one-dimensional.")
+def _validate_window_labels(window: TemporalFeatureWindow, *, role: str) -> np.ndarray:
+    labels = _label_vector(window.labels, role=f"{role} window labels")
     if len(labels) == 0:
         raise ValueError(f"{role} window labels must not be empty.")
+    return labels
+
+
+def _label_vector(labels: Sequence, *, role: str) -> np.ndarray:
+    if isinstance(labels, (str, bytes)):
+        raise ValueError(f"{role} must be one-dimensional.")
+    if isinstance(labels, np.ndarray):
+        label_array = np.asarray(labels)
+        if label_array.ndim == 1:
+            values = label_array.astype(object, copy=False).tolist()
+        elif label_array.ndim == 2 and 1 in label_array.shape:
+            values = label_array.reshape(-1).astype(object, copy=False).tolist()
+        elif label_array.ndim == 2 and label_array.dtype == object:
+            values = [tuple(_normalize_atomic_label(item) for item in row.tolist()) for row in label_array]
+        else:
+            raise ValueError(f"{role} must be one-dimensional.")
+    else:
+        try:
+            values = list(labels)
+        except TypeError as exc:
+            raise ValueError(f"{role} must be one-dimensional.") from exc
+    result = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        result[index] = _normalize_atomic_label(value)
+    return result
+
+
+def _normalize_atomic_label(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _normalize_atomic_label(value.item())
+        return tuple(_normalize_atomic_label(item) for item in value.tolist())
+    if isinstance(value, list):
+        return tuple(_normalize_atomic_label(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_normalize_atomic_label(item) for item in value)
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _unique_label_count(labels: Sequence) -> int:
+    unique_labels: list[Any] = []
+    for label in labels:
+        if not any(_label_equal(label, existing) for existing in unique_labels):
+            unique_labels.append(label)
+    return len(unique_labels)
+
+
+def _label_equal(left: Any, right: Any) -> bool:
+    if _is_nan_scalar(left) and _is_nan_scalar(right):
+        return True
+    try:
+        return bool(left == right)
+    except ValueError:
+        return False
+
+
+def _is_nan_scalar(value: Any) -> bool:
+    try:
+        return bool(np.isscalar(value) and np.isnan(value))
+    except TypeError:
+        return False
+
+
+def _validate_center_decimals(value: Any) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("center_decimals must be an integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("center_decimals must be an integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError("center_decimals must be an integer.")
+    return int(numeric)
+
+
+def _validate_chance_accuracy(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("chance_accuracy must be a finite probability in [0, 1].")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("chance_accuracy must be a finite probability in [0, 1].") from exc
+    if not np.isfinite(numeric) or numeric < 0.0 or numeric > 1.0:
+        raise ValueError("chance_accuracy must be a finite probability in [0, 1].")
+    return numeric
 
 
 def _center_key(center: float, decimals: int) -> float:
@@ -154,7 +243,7 @@ def _center_key(center: float, decimals: int) -> float:
 def _chance_accuracy(chance_accuracy: float | None, labels: np.ndarray) -> float:
     if chance_accuracy is not None:
         return float(chance_accuracy)
-    n_classes = len(np.unique(labels))
+    n_classes = _unique_label_count(labels)
     return 1.0 / n_classes if n_classes else np.nan
 
 
