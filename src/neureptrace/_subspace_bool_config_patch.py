@@ -1,4 +1,4 @@
-"""Normalize boolean config values from CLI/YAML-style inputs."""
+"""Normalize subspace-adaptation boolean config values from CLI/YAML-style inputs."""
 
 from __future__ import annotations
 
@@ -7,8 +7,7 @@ from typing import Any
 
 import numpy as np
 
-_SUBSPACE_PATCH_MARKER = "_neureptrace_subspace_bool_config_patch_installed"
-_CONDITIONAL_CORAL_PATCH_MARKER = "_neureptrace_conditional_coral_bool_config_patch_installed"
+_PATCH_MARKER = "_neureptrace_subspace_bool_config_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
@@ -44,11 +43,13 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise _bool_error(name)
 
 
-def _install_subspace_bool_config() -> None:
+def install() -> None:
+    """Install strict boolean normalization for subspace-adaptation config."""
+
     from neureptrace.decoding import subspace_adaptation as subspace
 
     original_config = subspace.subspace_adaptation_config
-    if getattr(original_config, _SUBSPACE_PATCH_MARKER, False):
+    if getattr(original_config, _PATCH_MARKER, False):
         return
 
     @wraps(original_config)
@@ -74,45 +75,8 @@ def _install_subspace_bool_config() -> None:
             normalize_latent=_normalize_bool(normalize_latent, name="normalize_latent"),
         )
 
-    setattr(subspace_adaptation_config, _SUBSPACE_PATCH_MARKER, True)
+    setattr(subspace_adaptation_config, _PATCH_MARKER, True)
     subspace.subspace_adaptation_config = subspace_adaptation_config
-
-
-def _install_conditional_coral_bool_config() -> None:
-    from neureptrace.decoding import conditional_coral
-
-    original_config = conditional_coral.conditional_coral_config
-    if getattr(original_config, _CONDITIONAL_CORAL_PATCH_MARKER, False):
-        return
-
-    @wraps(original_config)
-    def conditional_coral_config(
-        *,
-        regularization: float | str = conditional_coral.DEFAULT_CONDITIONAL_CORAL_REGULARIZATION,
-        min_target_rows_per_class: int | str = conditional_coral.DEFAULT_CONDITIONAL_CORAL_MIN_TARGET_ROWS,
-        confidence_threshold: float | str = 0.0,
-        fallback: str = "global",
-        center: Any = True,
-        random_state: int | str | None = 13,
-    ):
-        return original_config(
-            regularization=regularization,
-            min_target_rows_per_class=min_target_rows_per_class,
-            confidence_threshold=confidence_threshold,
-            fallback=fallback,
-            center=_normalize_bool(center, name="center"),
-            random_state=random_state,
-        )
-
-    setattr(conditional_coral_config, _CONDITIONAL_CORAL_PATCH_MARKER, True)
-    conditional_coral.conditional_coral_config = conditional_coral_config
-
-
-def install() -> None:
-    """Install strict boolean normalization for config constructors."""
-
-    _install_subspace_bool_config()
-    _install_conditional_coral_bool_config()
 
 
 __all__ = ["install"]
