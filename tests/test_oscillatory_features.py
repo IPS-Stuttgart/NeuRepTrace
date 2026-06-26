@@ -23,6 +23,46 @@ def _fixture() -> tuple[np.ndarray, np.ndarray]:
     return data, time
 
 
+@pytest.mark.parametrize("axis", [False, True, np.bool_(True)])
+def test_compute_band_features_rejects_boolean_axes(axis) -> None:
+    data, time = _fixture()
+
+    with pytest.raises(ValueError, match="axis must be an integer"):
+        compute_band_features(data, time, trial_axis=axis, windows=[(-0.25, 0.25)])
+
+
+def test_compute_band_features_accepts_numpy_integer_axes() -> None:
+    data, time = _fixture()
+
+    rows = compute_band_features(
+        data,
+        time,
+        trial_axis=np.int64(0),
+        channel_axis=np.int64(1),
+        time_axis=np.int64(-1),
+        windows=[(-0.25, 0.25)],
+    )
+
+    assert len(rows) == data.shape[0]
+
+
+@pytest.mark.parametrize(
+    "window",
+    [
+        (False, 0.25),
+        (-0.25, True),
+        ("named", False, 0.25),
+        {"name": "mapped", "start": -0.25, "stop": np.bool_(True)},
+        BandFeatureWindow("dataclass", -0.25, True),
+    ],
+)
+def test_compute_band_features_rejects_boolean_window_endpoints(window) -> None:
+    data, time = _fixture()
+
+    with pytest.raises(ValueError, match="window .* must be"):
+        compute_band_features(data, time, windows=[window])
+
+
 def test_compute_band_analytic_window_accepts_matlab_row_time_axis() -> None:
     data, time = _fixture()
 

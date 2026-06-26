@@ -11,6 +11,7 @@ from neureptrace.behavior.reaction_time import (
     extract_reaction_times_from_metadata,
     join_reaction_times,
     load_reaction_time_csv,
+    reaction_time_rows_from_values,
 )
 
 
@@ -29,6 +30,36 @@ def test_load_reaction_time_csv_converts_one_based_trials(tmp_path: Path):
         {"participant": "2", "dataset": "main", "trial": 0, "reaction_time": 0.41},
         {"participant": "2", "dataset": "main", "trial": 1, "reaction_time": 0.39},
     ]
+
+
+@pytest.mark.parametrize("trial_index_base", [False, True])
+def test_load_reaction_time_csv_rejects_boolean_trial_index_base(tmp_path: Path, trial_index_base: bool):
+    csv_path = tmp_path / "rt.csv"
+    csv_path.write_text(
+        "participant,dataset,trial,rt\n"
+        "2,main,1,0.41\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="trial_index_base must be one of"):
+        load_reaction_time_csv(csv_path, ReactionTimeCsvConfig(trial_index_base=trial_index_base))
+
+
+@pytest.mark.parametrize("reaction_time_scale", [False, True, math.nan, math.inf])
+def test_reaction_time_helpers_reject_invalid_scale(tmp_path: Path, reaction_time_scale: float | bool):
+    csv_path = tmp_path / "rt.csv"
+    csv_path.write_text(
+        "participant,dataset,trial,rt\n"
+        "2,main,0,0.41\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="reaction_time_scale must be a finite numeric scale"):
+        load_reaction_time_csv(csv_path, ReactionTimeCsvConfig(reaction_time_scale=reaction_time_scale))
+    with pytest.raises(ValueError, match="reaction_time_scale must be a finite numeric scale"):
+        reaction_time_rows_from_values([0.1, 0.2], reaction_time_scale=reaction_time_scale)
+    with pytest.raises(ValueError, match="reaction_time_scale must be a finite numeric scale"):
+        extract_reaction_times_from_metadata({"rt": [0.1, 0.2]}, reaction_time_scale=reaction_time_scale)
 
 
 @pytest.mark.parametrize("trial_value", ["1.5", "nan", "inf", ""])

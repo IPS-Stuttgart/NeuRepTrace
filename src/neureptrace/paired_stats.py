@@ -142,6 +142,7 @@ def sign_flip_p_value(
     if not np.isfinite(differences).all():
         raise ValueError("differences must contain only finite values.")
     n_permutations = _validate_positive_permutation_count(n_permutations)
+    random_state = _validate_random_state(random_state)
 
     observed = abs(float(differences.mean()))
     n_subjects = len(differences)
@@ -166,6 +167,24 @@ def _validate_positive_permutation_count(n_permutations: int) -> int:
     if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
         raise ValueError("n_permutations must be a positive integer.")
     return int(numeric)
+
+
+def _validate_random_state(random_state: int) -> int:
+    if isinstance(random_state, (bool, np.bool_)):
+        raise ValueError("random_state must be a non-negative integer seed.")
+    if isinstance(random_state, (int, np.integer)):
+        integer = int(random_state)
+    else:
+        try:
+            numeric = float(random_state)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("random_state must be a non-negative integer seed.") from exc
+        if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+            raise ValueError("random_state must be a non-negative integer seed.")
+        integer = int(numeric)
+    if integer < 0:
+        raise ValueError("random_state must be a non-negative integer seed.")
+    return integer
 
 
 def paired_decoder_statistics(
