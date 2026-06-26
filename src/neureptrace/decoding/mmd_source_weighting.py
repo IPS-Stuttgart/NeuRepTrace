@@ -153,7 +153,15 @@ def resolve_mmd_gamma(
     if isinstance(value, str):
         normalized = value.strip().lower().replace("-", "_")
         if normalized in {"median", "auto", "median_distance", "median_heuristic"}:
-            matrices = [np.asarray(matrix, dtype=float) for matrix in source_feature_matrices]
+            matrices = [
+                _feature_matrix(matrix, name=f"source_feature_matrices[{index}]")
+                for index, matrix in enumerate(source_feature_matrices)
+            ]
+            for index, matrix in enumerate(matrices):
+                if matrix.shape[1] != target.shape[1]:
+                    raise ValueError(
+                        f"source_feature_matrices[{index}] has feature width {matrix.shape[1]}, expected {target.shape[1]}."
+                    )
             matrices.append(target)
             stacked = np.vstack(matrices)
             squared = _upper_pairwise_squared_distances(stacked)
@@ -218,7 +226,9 @@ def _feature_matrix(features: Sequence[Sequence[float]] | Sequence[float] | np.n
         raise ValueError(f"{name} must be a one- or two-dimensional array.")
     if matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must contain at least one row and one feature.")
-    return np.nan_to_num(matrix.astype(np.float64, copy=False), nan=0.0, posinf=0.0, neginf=0.0)
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(f"{name} must contain only finite values.")
+    return matrix.astype(np.float64, copy=False)
 
 
 def _kernel_mean(left: np.ndarray, right: np.ndarray, gamma: float) -> float:
