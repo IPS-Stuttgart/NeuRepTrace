@@ -20,6 +20,15 @@ class _CompositeLabelSourceModel:
         return probabilities
 
 
+class _ImbalancedPseudoLabelSourceModel:
+    classes_ = np.array([0, 1])
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probabilities = np.tile(np.array([[0.94, 0.06]], dtype=float), (features.shape[0], 1))
+        probabilities[features[:, 0] > 0.0] = np.array([0.42, 0.58], dtype=float)
+        return probabilities
+
+
 def _label_vector(*labels: object) -> np.ndarray:
     values = np.empty(len(labels), dtype=object)
     values[:] = labels
@@ -110,3 +119,50 @@ def test_source_free_adaptation_accepts_explicit_tuple_class_order():
     assert result.adapter.classes_.tolist() == [("right", 2), ("left", 1)]
     assert np.allclose(result.probabilities, source_model.predict_proba(target_features)[:, [1, 0]])
     assert result.adapter.predict(target_features).tolist() == [("left", 1), ("right", 2)]
+
+
+def test_balanced_topk_selection_keeps_minority_pseudo_class_active():
+    target_features = np.vstack([np.full((10, 2), -1.0), np.full((4, 2), 1.0)])
+
+    confidence_adapter = SourceFreeSubjectAdapter(
+        source_model=_ImbalancedPseudoLabelSourceModel(),
+        confidence_threshold=0.80,
+        max_iterations=2,
+        min_class_count=2,
+        min_active_classes=2,
+        prototype_weight=0.5,
+        pseudo_label_selection="confidence",
+    ).fit(target_features)
+    assert confidence_adapter.metadata()["source_free_active_classes"] == 1
+    assert confidence_adapter.metadata()["source_free_stop_reason"] == "insufficient_active_classes"
+
+    balanced_adapter = SourceFreeSubjectAdapter(
+        source_model=_ImbalancedPseudoLabelSourceModel(),
+        confidence_threshold=0.80,
+        max_iterations=2,
+        min_class_count=2,
+        min_active_classes=2,
+        prototype_weight=0.5,
+        pseudo_label_selection="balanced_topk",
+        balanced_topk_per_class=2,
+    ).fit(target_features)
+
+    metadata = balanced_adapter.metadata()
+    assert metadata["source_free_pseudo_label_selection"] == "balanced_topk"
+    assert metadata["source_free_balanced_topk_per_class"] == 2
+    assert metadata["source_free_active_classes"] == 2
+    assert balanced_adapter.prototype_class_counts_.tolist() == [2, 2]
+    assert balanced_adapter.selected_.sum() == 4
+
+
+def test_source_free_string_boolean_is_parsed_for_metadata():
+    target_features = np.array([[-1.0, 0.0], [2.0, 0.0]], dtype=float)
+
+    result = fit_source_free_predict_proba(
+        source_model=_CompositeLabelSourceModel(),
+        target_features=target_features,
+        max_iterations=0,
+        standardize_target="false",
+    )
+
+    assert result.metadata["source_free_standardize_target"] is False

@@ -9,6 +9,7 @@ from sklearn.pipeline import Pipeline
 
 
 SOURCE_FREE_ADAPTATION_PROTOCOL = "source_free_unlabeled_target_adaptation"
+PseudoLabelSelection = Literal["confidence", "balanced_topk"]
 _EPS = 1e-12
 
 
@@ -55,6 +56,8 @@ class SourceFreeSubjectAdapter(BaseEstimator):
         prototype_temperature: float = 1.0,
         standardize_target: bool = True,
         feature_space: Literal["input", "model_preprocessor", "auto"] = "auto",
+        pseudo_label_selection: PseudoLabelSelection = "confidence",
+        balanced_topk_per_class: int | None = None,
     ):
         self.source_model = source_model
         self.confidence_threshold = confidence_threshold
@@ -65,6 +68,8 @@ class SourceFreeSubjectAdapter(BaseEstimator):
         self.prototype_temperature = prototype_temperature
         self.standardize_target = standardize_target
         self.feature_space = feature_space
+        self.pseudo_label_selection = pseudo_label_selection
+        self.balanced_topk_per_class = balanced_topk_per_class
 
     def fit(self, target_features: np.ndarray, *, source_model: Any | None = None, classes: np.ndarray | list[Any] | tuple[Any, ...] | None = None):
         """Fit target-batch adaptation from unlabeled target features only."""
@@ -79,7 +84,8 @@ class SourceFreeSubjectAdapter(BaseEstimator):
         embedding = np.asarray(embedding, dtype=float)
         if embedding.shape[0] != x_target.shape[0]:
             raise ValueError("The source-model preprocessor returned a different number of target rows.")
-        embedding, mean, scale = _standardize_embedding(embedding, enabled=bool(self.standardize_target))
+        standardize_target = _boolean(self.standardize_target, "source_free_standardize_target")
+        embedding, mean, scale = _standardize_embedding(embedding, enabled=standardize_target)
 
         threshold = _bounded_float(self.confidence_threshold, "source_free_confidence_threshold", lower=0.0, upper=1.0, include_upper=True)
         max_iterations = _nonnegative_int(self.max_iterations, "source_free_max_iterations")
@@ -87,6 +93,8 @@ class SourceFreeSubjectAdapter(BaseEstimator):
         min_active_classes = _positive_int(self.min_active_classes, "source_free_min_active_classes")
         prototype_weight = _bounded_float(self.prototype_weight, "source_free_prototype_weight", lower=0.0, upper=1.0, include_upper=True)
         prototype_temperature = _positive_float(self.prototype_temperature, "source_free_prototype_temperature")
+        pseudo_label_selection = _pseudo_label_selection_mode(self.pseudo_label_selection)
+        balanced_topk_per_class = _optional_positive_int(self.balanced_topk_per_class, "source_free_balanced_topk_per_class")
 
         probabilities = source_probabilities.copy()
         prototypes = np.full((classes_array.shape[0], embedding.shape[1]), np.nan, dtype=float)
@@ -101,7 +109,14 @@ class SourceFreeSubjectAdapter(BaseEstimator):
             seen_signatures: set[tuple[tuple[int, int], ...]] = set()
             for iteration in range(1, max_iterations + 1):
                 pseudo_labels = probabilities.argmax(axis=1).astype(int)
-                selected = probabilities.max(axis=1) >= threshold
+                selected = _select_pseudo_label_rows(
+                    probabilities,
+                    pseudo_labels,
+                    threshold=threshold,
+                    selection_mode=pseudo_label_selection,
+                    balanced_topk_per_class=balanced_topk_per_class,
+                    min_class_count=min_class_count,
+                )
                 signature = _pseudo_label_signature(selected, pseudo_labels)
                 if signature in seen_signatures:
                     stop_reason = "selection_repeated"
@@ -133,8 +148,15 @@ class SourceFreeSubjectAdapter(BaseEstimator):
                     break
                 probabilities = next_probabilities
 
-        final_selected = probabilities.max(axis=1) >= threshold
         final_pseudo_labels = probabilities.argmax(axis=1).astype(int)
+        final_selected = _select_pseudo_label_rows(
+            probabilities,
+            final_pseudo_labels,
+            threshold=threshold,
+            selection_mode=pseudo_label_selection,
+            balanced_topk_per_class=balanced_topk_per_class,
+            min_class_count=min_class_count,
+        )
         self.source_model_ = model
         self.classes_ = classes_array
         self.n_features_in_ = x_target.shape[1]
@@ -151,6 +173,9 @@ class SourceFreeSubjectAdapter(BaseEstimator):
         self.pseudo_labels_ = final_pseudo_labels
         self.n_iterations_ = iterations
         self.stop_reason_ = stop_reason
+        self.standardize_target_ = standardize_target
+        self.pseudo_label_selection_ = pseudo_label_selection
+        self.balanced_topk_per_class_ = balanced_topk_per_class
         return self
 
     def predict_proba(self, target_features: np.ndarray) -> np.ndarray:
@@ -193,8 +218,10 @@ class SourceFreeSubjectAdapter(BaseEstimator):
             "source_free_min_active_classes": int(self.min_active_classes),
             "source_free_prototype_weight": float(self.prototype_weight),
             "source_free_prototype_temperature": float(self.prototype_temperature),
-            "source_free_standardize_target": bool(self.standardize_target),
+            "source_free_standardize_target": bool(self.standardize_target_),
             "source_free_feature_space": self.embedding_mode_,
+            "source_free_pseudo_label_selection": self.pseudo_label_selection_,
+            "source_free_balanced_topk_per_class": self.balanced_topk_per_class_,
             "source_free_target_rows": int(self.target_rows_),
             "source_free_n_selected": int(np.count_nonzero(self.selected_)),
             "source_free_selected_fraction": float(np.mean(self.selected_)) if self.selected_.size else 0.0,
@@ -217,6 +244,8 @@ def fit_source_free_predict_proba(
     prototype_temperature: float = 1.0,
     standardize_target: bool = True,
     feature_space: Literal["input", "model_preprocessor", "auto"] = "auto",
+    pseudo_label_selection: PseudoLabelSelection = "confidence",
+    balanced_topk_per_class: int | None = None,
 ) -> SourceFreeAdaptationResult:
     """Fit a source-free adapter and return adapted probabilities for a target batch."""
 
@@ -230,6 +259,8 @@ def fit_source_free_predict_proba(
         prototype_temperature=prototype_temperature,
         standardize_target=standardize_target,
         feature_space=feature_space,
+        pseudo_label_selection=pseudo_label_selection,
+        balanced_topk_per_class=balanced_topk_per_class,
     )
     adapter.fit(target_features, classes=classes)
     return SourceFreeAdaptationResult(adapter=adapter, probabilities=adapter.probabilities_.copy(), metadata=adapter.metadata())
@@ -426,6 +457,47 @@ def _blend_probabilities(source_probabilities: np.ndarray, prototype_probabiliti
     return _softmax_rows((1.0 - weight) * source_logits + weight * prototype_logits)
 
 
+def _select_pseudo_label_rows(
+    probabilities: np.ndarray,
+    pseudo_labels: np.ndarray,
+    *,
+    threshold: float,
+    selection_mode: str,
+    balanced_topk_per_class: int | None,
+    min_class_count: int,
+) -> np.ndarray:
+    probabilities = _normalize_probability_rows(probabilities)
+    pseudo_labels = np.asarray(pseudo_labels, dtype=int)
+    if pseudo_labels.shape != (probabilities.shape[0],):
+        raise ValueError("pseudo_labels must have one entry per probability row.")
+    confidence = probabilities.max(axis=1)
+    if selection_mode == "confidence":
+        return confidence >= float(threshold)
+    if selection_mode != "balanced_topk":
+        raise ValueError(f"Unsupported pseudo-label selection mode: {selection_mode!r}.")
+    top_k = max(int(min_class_count), int(balanced_topk_per_class or min_class_count))
+    selected = np.zeros(probabilities.shape[0], dtype=bool)
+    for class_index in range(probabilities.shape[1]):
+        class_rows = np.flatnonzero(pseudo_labels == class_index)
+        if class_rows.size == 0:
+            continue
+        eligible = class_rows[confidence[class_rows] >= float(threshold)]
+        if eligible.size < min_class_count:
+            eligible = class_rows
+        order = np.argsort(-confidence[eligible], kind="mergesort")
+        selected[eligible[order[:top_k]]] = True
+    return selected
+
+
+def _pseudo_label_selection_mode(value: Any) -> str:
+    text = str(value).strip().lower().replace("-", "_")
+    if text in {"confidence", "threshold", "thresholded"}:
+        return "confidence"
+    if text in {"balanced_topk", "balanced", "class_balanced_topk", "class_balanced"}:
+        return "balanced_topk"
+    raise ValueError("source_free pseudo_label_selection must be one of: confidence, balanced_topk.")
+
+
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
     probabilities = np.asarray(probabilities, dtype=float)
     if probabilities.ndim != 2 or probabilities.shape[0] < 1 or probabilities.shape[1] < 2:
@@ -469,6 +541,15 @@ def _positive_int(value: Any, name: str) -> int:
     return parsed
 
 
+def _optional_positive_int(value: Any, name: str) -> int | None:
+    if value is None:
+        return None
+    parsed = _integer(value, name)
+    if parsed < 1:
+        raise ValueError(f"{name} must be a positive integer when provided.")
+    return parsed
+
+
 def _nonnegative_int(value: Any, name: str) -> int:
     parsed = _integer(value, name)
     if parsed < 0:
@@ -496,9 +577,21 @@ def _positive_float(value: Any, name: str) -> float:
 
 def _bounded_float(value: Any, name: str, *, lower: float, upper: float, include_upper: bool) -> float:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')'}." )
+        raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')'}.")
     number = float(value)
     upper_ok = number <= upper if include_upper else number < upper
     if not np.isfinite(number) or number < lower or not upper_ok:
-        raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')'}." )
+        raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')'}.")
     return number
+
+
+def _boolean(value: Any, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean or one of true/false/yes/no/on/off/1/0.")
