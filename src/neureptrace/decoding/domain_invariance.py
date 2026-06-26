@@ -4,21 +4,26 @@ from __future__ import annotations
 
 import numpy as np
 
+from neureptrace.decoding._domain_ids import atomic_domain_vector, domain_mask, hashable_domain_id, ordered_unique
+
 DOMAIN_INVARIANCE_PROTOCOL = "source_only_domain_risk_summary"
 
 
 def domain_risk_summary(losses, domains):
     """Return per-domain mean loss, overall mean, and variance."""
     loss_values = np.asarray(losses, dtype=float).reshape(-1)
-    domain_values = np.asarray(domains, dtype=object).reshape(-1)
+    domain_values = atomic_domain_vector(domains)
     if loss_values.shape[0] != domain_values.shape[0]:
         raise ValueError("losses and domains must contain the same rows")
     if loss_values.size == 0 or not np.all(np.isfinite(loss_values)):
         raise ValueError("losses must contain finite values")
-    levels = tuple(dict.fromkeys(domain_values.tolist()))
+    levels = ordered_unique(domain_values)
     if len(levels) < 2:
         raise ValueError("at least two source domains are required")
-    per_domain = {level: float(np.mean(loss_values[domain_values == level])) for level in levels}
+    per_domain = {
+        hashable_domain_id(level): float(np.mean(loss_values[domain_mask(domain_values, (level,))]))
+        for level in levels
+    }
     values = np.asarray(tuple(per_domain.values()), dtype=float)
     return {
         "domain_risks": per_domain,
