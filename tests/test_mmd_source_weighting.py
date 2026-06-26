@@ -120,3 +120,19 @@ def test_mmd_gamma_rejects_unknown_string_with_public_validation_error() -> None
 def test_mmd_rejects_mismatched_feature_width() -> None:
     with pytest.raises(ValueError, match="feature width"):
         mmd_source_group_weights({"bad": [[0.0, 1.0]]}, [[0.0]])
+
+
+def test_mmd_rejects_nonfinite_feature_values() -> None:
+    with pytest.raises(ValueError, match="target_features.*finite"):
+        mmd_source_group_weights({"source": [[0.0]]}, [[np.nan]])
+
+    with pytest.raises(ValueError, match="source_features.*finite"):
+        mmd_source_group_weights({"bad": [[np.inf]]}, [[0.0]])
+
+
+def test_resolve_mmd_gamma_validates_source_feature_matrices() -> None:
+    with pytest.raises(ValueError, match="source_feature_matrices.*finite"):
+        resolve_mmd_gamma("median", [np.asarray([[np.inf]], dtype=float)], np.asarray([[0.0]], dtype=float))
+
+    with pytest.raises(ValueError, match="feature width"):
+        resolve_mmd_gamma("median", [np.asarray([[0.0, 1.0]], dtype=float)], np.asarray([[0.0]], dtype=float))
