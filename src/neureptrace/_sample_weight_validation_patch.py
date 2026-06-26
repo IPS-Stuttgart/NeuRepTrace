@@ -7,7 +7,7 @@ from functools import wraps
 
 import numpy as np
 
-_WEIGHT_ERROR = "sample_weight must contain numeric weights"
+_WEIGHT_ERROR = "sample_weight must contain numeric weights, not boolean values"
 _MASK_SCALAR_TYPES = (type(True), np.asarray(True).dtype.type)
 
 

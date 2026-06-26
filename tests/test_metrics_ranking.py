@@ -74,6 +74,107 @@ def test_rank_class_scores_preserves_tuple_class_labels() -> None:
     assert result["rows"][0]["true_label_score"] == pytest.approx(0.9)
 
 
+def test_rank_class_scores_preserves_list_class_labels() -> None:
+    classes = [["run1", "cat"], ["run1", "dog"]]
+    result = rank_class_scores(
+        np.array(
+            [
+                [0.1, 0.9],
+                [0.8, 0.2],
+            ]
+        ),
+        classes,
+        [["run1", "dog"], ["run1", "cat"]],
+        top_k=(1,),
+        row_top_k=1,
+    )
+
+    np.testing.assert_array_equal(result["true_label_ranks"], np.array([1.0, 1.0]))
+    assert result["top_k_accuracy"] == {1: pytest.approx(1.0)}
+    assert result["rows"][0]["rank1_class"] == ["run1", "dog"]
+    assert result["rows"][0]["true_label_score"] == pytest.approx(0.9)
+
+
+def test_rank_class_scores_preserves_array_class_labels() -> None:
+    classes = [np.array(["run1", "cat"], dtype=object), np.array(["run1", "dog"], dtype=object)]
+    result = rank_class_scores(
+        np.array(
+            [
+                [0.1, 0.9],
+                [0.8, 0.2],
+            ]
+        ),
+        classes,
+        [np.array(["run1", "dog"], dtype=object), np.array(["run1", "cat"], dtype=object)],
+        top_k=(1,),
+        row_top_k=1,
+    )
+
+    np.testing.assert_array_equal(result["true_label_ranks"], np.array([1.0, 1.0]))
+    assert result["top_k_accuracy"] == {1: pytest.approx(1.0)}
+    np.testing.assert_array_equal(result["rows"][0]["rank1_class"], np.array(["run1", "dog"], dtype=object))
+    assert result["rows"][0]["true_label_score"] == pytest.approx(0.9)
+
+
+def test_rank_class_scores_preserves_numpy_matrix_composite_labels() -> None:
+    classes = np.asarray([["run1", "cat"], ["run1", "dog"]], dtype=object)
+    y_true = np.asarray([["run1", "dog"], ["run1", "cat"]], dtype=object)
+
+    result = rank_class_scores(
+        np.array(
+            [
+                [0.1, 0.9],
+                [0.8, 0.2],
+            ]
+        ),
+        classes,
+        y_true,
+        top_k=(1,),
+        row_top_k=1,
+    )
+
+    np.testing.assert_array_equal(result["true_label_ranks"], np.array([1.0, 1.0]))
+    assert result["top_k_accuracy"] == {1: pytest.approx(1.0)}
+    assert result["rows"][0]["rank1_class"] == ("run1", "dog")
+    assert result["rows"][0]["true_label_score"] == pytest.approx(0.9)
+
+
+def test_rank_class_scores_treats_scalar_string_labels_as_single_labels() -> None:
+    result = rank_class_scores(
+        np.array([[0.9]]),
+        "target",
+        "target",
+        top_k=(1,),
+        row_top_k=1,
+    )
+
+    np.testing.assert_array_equal(result["true_label_ranks"], np.array([1.0]))
+    assert result["top_k_accuracy"] == {1: pytest.approx(1.0)}
+    assert result["rows"] == [
+        {
+            "true_label_rank": 1.0,
+            "true_label_score": 0.9,
+            "rank1_class": "target",
+            "rank1_score": 0.9,
+        }
+    ]
+
+
+def test_rank_class_scores_allows_scalar_string_y_true_with_class_sequence() -> None:
+    result = rank_class_scores(
+        np.array([[0.4, 0.6]]),
+        ["cat", "dog"],
+        "dog",
+        top_k=(1, 2),
+        row_top_k=2,
+    )
+
+    np.testing.assert_array_equal(result["true_label_ranks"], np.array([1.0]))
+    assert result["top_k_accuracy"] == {1: pytest.approx(1.0), 2: pytest.approx(1.0)}
+    assert result["rows"][0]["rank1_class"] == "dog"
+    assert result["rows"][0]["rank2_class"] == "cat"
+
+
 @pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])
 def test_rank_class_scores_rejects_nonfinite_scores(bad_value: float) -> None:
     scores = np.array([[0.5, bad_value]])

@@ -1,4 +1,4 @@
-"""Runtime patch for stricter few-shot manual split-index validation."""
+"""Runtime patch for stricter few-shot split-index validation."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ _PATCH_MARKER = "_neureptrace_few_shot_split_validation_patch_installed"
 _FINDER_MARKER = "_neureptrace_few_shot_split_validation_finder"
 _INDEX_ERROR = "{name} must contain integer row indices."
 _BOOLEAN_INDEX_ERROR = "{name} must contain integer row indices, not booleans or a boolean mask."
+_DUPLICATE_INDEX_ERROR = "{name} must not contain duplicate target row indices."
 
 
 def _normalize_manual_split_indices(values: Sequence[int] | np.ndarray, *, name: str) -> np.ndarray:
@@ -33,14 +34,24 @@ def _normalize_manual_split_indices(values: Sequence[int] | np.ndarray, *, name:
         raise ValueError(_INDEX_ERROR.format(name=name)) from exc
     if not np.all(np.isfinite(numeric)) or not np.all(numeric % 1.0 == 0.0):
         raise ValueError(_INDEX_ERROR.format(name=name))
-    return numeric.astype(int, copy=False)
+    indices = numeric.astype(int, copy=False)
+    if np.unique(indices).size != indices.size:
+        raise ValueError(_DUPLICATE_INDEX_ERROR.format(name=name))
+    return indices
 
 
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
 
+    original_select = module.select_few_shot_target_calibration_split
     original_fit = module.fit_few_shot_target_calibrated_decoder
+
+    @wraps(original_select)
+    def select_few_shot_target_calibration_split(labels: Any, target_indices: Any = None, *args: Any, **kwargs: Any) -> Any:
+        if target_indices is not None:
+            target_indices = _normalize_manual_split_indices(target_indices, name="target_indices")
+        return original_select(labels, target_indices, *args, **kwargs)
 
     @wraps(original_fit)
     def fit_few_shot_target_calibrated_decoder(*args: Any, **kwargs: Any) -> Any:
@@ -53,6 +64,7 @@ def _patch_module(module: ModuleType) -> None:
             )
         return original_fit(*args, **kwargs)
 
+    module.select_few_shot_target_calibration_split = select_few_shot_target_calibration_split
     module.fit_few_shot_target_calibrated_decoder = fit_few_shot_target_calibrated_decoder
     setattr(module, _PATCH_MARKER, True)
 
