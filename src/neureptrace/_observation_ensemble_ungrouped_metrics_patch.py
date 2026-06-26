@@ -26,6 +26,8 @@ def _iter_metric_groups(frame: pd.DataFrame, group_columns: Sequence[str]) -> It
 def install() -> None:
     """Patch ensemble metric summaries so ungrouped tables produce one global row."""
 
+    importlib.import_module("neureptrace._observation_ensemble_string_groups_patch").install()
+
     observation_ensemble = importlib.import_module("neureptrace.observation_ensemble")
     original_summarize = observation_ensemble.summarize_ensemble_metrics
     if getattr(original_summarize, _PATCH_MARKER, False):
