@@ -97,6 +97,23 @@ def test_cue_subject_feature_vector_concatenates_requested_parts():
     assert np.all(np.isfinite(vector))
 
 
+def test_cue_evoked_bins_reject_more_bins_than_response_samples():
+    data = np.array(
+        [
+            [[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]],
+            [[2.0, 4.0, 6.0], [1.0, 3.0, 5.0]],
+        ],
+        dtype=np.float32,
+    )
+    times = np.array([-0.1, 0.1, 0.2])
+
+    with pytest.raises(ValueError, match="temporal_bins .* must not exceed the 2 cue response-window sample"):
+        _evoked_bin_means(data, times, (0.1, 0.2), temporal_bins=3)
+
+    with pytest.raises(ValueError, match="temporal_bins .* must not exceed the 2 cue response-window sample"):
+        _evoked_gfp_bins(data, times, (0.1, 0.2), temporal_bins=3)
+
+
 def test_cue_source_weights_rejects_boolean_and_fractional_controls():
     features = {
         "target": np.array([1.0, 0.0]),
