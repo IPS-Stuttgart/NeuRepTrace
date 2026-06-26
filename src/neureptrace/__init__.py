@@ -39,6 +39,7 @@ from . import (  # noqa: E402
     _event_detection_extensions,
     _fieldtrip_sampleinfo_validation_patch,
     _few_shot_split_validation_patch,
+    _few_shot_target_index_patch,
     _few_shot_tuple_labels_patch,
     _generative_augmentation_composite_labels_patch,
     _generative_augmentation_random_state_patch,
@@ -131,6 +132,7 @@ _decoding_c_grid_patch.install()
 _decoding_classifier_param_patch.install()
 _decoding_grouped_cv_patch.install()
 _decoding_probability_patch.install()
+_few_shot_target_index_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
 _probability_stacking_group_summary_patch.install()
