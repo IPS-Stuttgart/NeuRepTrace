@@ -46,7 +46,7 @@ def mmd_source_group_weights(
     groups: Sequence[Hashable] | None = None,
     gamma: float | str = DEFAULT_MMD_GAMMA,
     temperature: float = DEFAULT_MMD_TEMPERATURE,
-    top_k: int | None = None,
+    top_k: int | str | None = None,
     blend: float = 1.0,
 ) -> MMDSourceWeightingResult:
     """Return mean-one source-group weights from unlabeled target MMD.
@@ -70,15 +70,17 @@ def mmd_source_group_weights(
         source selection sharper.
     top_k:
         Optional number of lowest-MMD source groups to keep.  Other groups get
-        zero pre-normalization mass.
+        zero pre-normalization mass.  String aliases such as ``"none"`` and
+        integer-like strings are accepted for config-driven runs.
     blend:
         Convex blend between uniform weights and MMD weights.  ``0`` is uniform;
         ``1`` is the full MMD weighting.
     """
 
+    normalized_top_k = _optional_positive_int(top_k, name="top_k")
     group_list = _group_list(groups, source_features)
     if not group_list:
-        return MMDSourceWeightingResult(weights={}, mmd_squared={}, scores={}, metadata=_metadata(0, 0, 0, gamma, temperature, top_k, blend))
+        return MMDSourceWeightingResult(weights={}, mmd_squared={}, scores={}, metadata=_metadata(0, 0, 0, gamma, temperature, normalized_top_k, blend))
     target = _feature_matrix(target_features, name="target_features")
     source_matrices = {group: _feature_matrix(source_features[group], name=f"source_features[{group!r}]") for group in group_list}
     feature_dim = target.shape[1]
@@ -95,14 +97,14 @@ def mmd_source_group_weights(
         mmd_squared[group] = max(0.0, float(mmd))
 
     scores = {group: -value for group, value in mmd_squared.items()}
-    weights = _weights_from_scores(scores, group_list, temperature=temperature, top_k=top_k, blend=blend)
+    weights = _weights_from_scores(scores, group_list, temperature=temperature, top_k=normalized_top_k, blend=blend)
     metadata = _metadata(
         len(group_list),
         int(target.shape[0]),
         int(feature_dim),
         gamma_value,
         temperature,
-        top_k,
+        normalized_top_k,
         blend,
     )
     metadata.update(
@@ -172,7 +174,7 @@ def _weights_from_scores(
     groups: Sequence[Hashable],
     *,
     temperature: float,
-    top_k: int | None,
+    top_k: int | str | None,
     blend: float,
 ) -> dict[Hashable, float]:
     temperature = _positive_float(temperature, name="temperature")

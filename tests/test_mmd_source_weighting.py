@@ -56,6 +56,23 @@ def test_mmd_top_k_keeps_only_lowest_mmd_source_before_mean_one_normalization() 
     assert np.isclose(np.mean(list(result.weights.values())), 1.0)
 
 
+def test_mmd_top_k_config_aliases_are_normalized_before_metadata() -> None:
+    source_features = {
+        "near": [[0.0], [0.1]],
+        "far": [[5.0], [5.1]],
+    }
+    target_features = [[0.0], [0.05]]
+
+    no_limit = mmd_source_group_weights(source_features, target_features, gamma="scale", top_k="none")
+    assert no_limit.metadata["mmd_top_k"] == ""
+    assert set(no_limit.weights) == {"near", "far"}
+
+    top_one = mmd_source_group_weights(source_features, target_features, gamma="scale", top_k="1.0")
+    assert top_one.metadata["mmd_top_k"] == 1
+    assert top_one.weights["near"] == pytest.approx(2.0)
+    assert top_one.weights["far"] == pytest.approx(0.0)
+
+
 def test_mmd_blend_can_make_weights_conservative() -> None:
     source_features = {
         "near": [[0.0], [0.1]],
