@@ -103,8 +103,8 @@ def centroid_aligned_tangent_features(
     domain_ids = _domain_ids(source.shape[0], source_domains, name="source_domains")
     aligned_source = np.empty_like(source)
     source_references = []
-    for domain in np.unique(domain_ids):
-        mask = domain_ids == domain
+    for domain in _unique_values(domain_ids):
+        mask = _value_mask(domain_ids, domain)
         aligned_domain, reference = align_covariances_to_identity(source[mask], epsilon=epsilon)
         aligned_source[mask] = aligned_domain
         source_references.append(reference)
@@ -147,7 +147,7 @@ def mekt_transfer_features(
     labels = np.asarray(source_labels).reshape(-1)
     if labels.shape[0] != source.shape[0]:
         raise ValueError("source_labels length must match source_covariances rows.")
-    classes = np.unique(labels)
+    classes = _unique_value_array(labels)
     if classes.shape[0] < 2:
         raise ValueError("MEKT requires at least two source classes.")
 
@@ -160,7 +160,7 @@ def mekt_transfer_features(
     epsilon = _positive_float(epsilon, name="epsilon")
 
     domain_ids = _domain_ids(source.shape[0], source_domains, name="source_domains")
-    selected_domains = np.unique(domain_ids)
+    selected_domains = _unique_value_array(domain_ids)
     transferability_scores: dict[Any, float] = {}
 
     if dte_top_k is not None:
@@ -174,8 +174,8 @@ def mekt_transfer_features(
             epsilon=epsilon,
         )
         selected_domains = _select_top_domains(transferability_scores, top_k)
-        keep_mask = np.isin(domain_ids, selected_domains)
-        if np.unique(labels[keep_mask]).shape[0] < 2:
+        keep_mask = _values_in(domain_ids, selected_domains)
+        if _unique_value_array(labels[keep_mask]).shape[0] < 2:
             raise ValueError("DTE source-domain selection left fewer than two source classes.")
         source = source[keep_mask]
         labels = labels[keep_mask]
@@ -235,7 +235,7 @@ def mekt_transfer_features(
         source_reference=base.source_reference,
         target_reference=base.target_reference,
         source_domains=domain_ids,
-        selected_source_domains=np.asarray(selected_domains),
+        selected_source_domains=_object_value_array(selected_domains),
         transferability_scores=transferability_scores,
         classes=classes,
         pseudo_labels=pseudo,
@@ -289,7 +289,7 @@ def fit_predict_mekt_transfer(
     labels = np.asarray(source_labels).reshape(-1)
     if transfer.source_domains.shape[0] != labels.shape[0]:
         domains = _domain_ids(labels.shape[0], source_domains, name="source_domains")
-        labels = labels[np.isin(domains, transfer.selected_source_domains)]
+        labels = labels[_values_in(domains, transfer.selected_source_domains)]
     classifier = clone(classifier_template)
     classifier.fit(transfer.source_embedding, labels)
     predictions = np.asarray(classifier.predict(transfer.target_embedding))
@@ -316,8 +316,8 @@ def domain_transferability_scores(
         raise ValueError("source_features and target_features must have the same number of columns.")
     target_mean = target.mean(axis=0)
     scores: dict[Any, float] = {}
-    for domain in np.unique(domains):
-        mask = domains == domain
+    for domain in _unique_values(domains):
+        mask = _value_mask(domains, domain)
         dis = float(np.linalg.norm(_between_class_scatter(source[mask], labels[mask]), ord=1))
         dif = float(np.linalg.norm(_two_domain_between_scatter(source[mask], target_mean, target.shape[0]), ord=1))
         key = domain.item() if isinstance(domain, np.generic) else domain
@@ -341,7 +341,7 @@ def _initial_pseudo_labels(
     pseudo = np.asarray(initial_pseudo_labels).reshape(-1)
     if pseudo.shape[0] != target_features.shape[0]:
         raise ValueError("initial_pseudo_labels length must match target_covariances rows.")
-    if not np.all(np.isin(pseudo, classes)):
+    if not np.all(_values_in(pseudo, classes)):
         raise ValueError("initial_pseudo_labels must contain only source classes.")
     return pseudo
 
@@ -407,8 +407,8 @@ def _within_class_scatter(features: np.ndarray, labels: np.ndarray) -> np.ndarra
     x = _as_2d_float(features, name="features")
     y = np.asarray(labels).reshape(-1)
     scatter = np.zeros((x.shape[1], x.shape[1]), dtype=float)
-    for label in np.unique(y):
-        class_features = x[y == label]
+    for label in _unique_values(y):
+        class_features = x[_value_mask(y, label)]
         if class_features.shape[0] <= 1:
             continue
         centered = class_features - class_features.mean(axis=0, keepdims=True)
@@ -421,8 +421,8 @@ def _between_class_scatter(features: np.ndarray, labels: np.ndarray) -> np.ndarr
     y = np.asarray(labels).reshape(-1)
     overall = x.mean(axis=0)
     scatter = np.zeros((x.shape[1], x.shape[1]), dtype=float)
-    for label in np.unique(y):
-        class_features = x[y == label]
+    for label in _unique_values(y):
+        class_features = x[_value_mask(y, label)]
         diff = (class_features.mean(axis=0) - overall).reshape(-1, 1)
         scatter += float(class_features.shape[0]) * (diff @ diff.T)
     return _symmetrize(scatter)
@@ -492,7 +492,7 @@ def _one_hot(labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
     labels = np.asarray(labels).reshape(-1)
     encoded = np.zeros((labels.shape[0], classes.shape[0]), dtype=float)
     for class_index, label in enumerate(classes):
-        encoded[labels == label, class_index] = 1.0
+        encoded[_value_mask(labels, label), class_index] = 1.0
     if np.any(encoded.sum(axis=1) == 0.0):
         raise ValueError("labels contain values that are not present in classes.")
     return encoded
@@ -506,7 +506,81 @@ def _normalize_components(value: int | None, n_features: int) -> int:
 
 def _select_top_domains(scores: Mapping[Any, float], top_k: int) -> np.ndarray:
     ordered = sorted(scores, key=lambda key: (-float(scores[key]), str(key)))
-    return np.asarray(ordered[: min(int(top_k), len(ordered))])
+    return _object_value_array(ordered[: min(int(top_k), len(ordered))])
+
+
+def _object_value_array(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    items = _value_list(values)
+    array = np.empty(len(items), dtype=object)
+    array[:] = items
+    return array
+
+
+def _value_list(values: Sequence[Any] | np.ndarray) -> list[Any]:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            return [array.item()]
+        if array.ndim == 1:
+            return array.tolist()
+        if array.ndim == 2 and array.dtype == object:
+            return [tuple(row.tolist()) for row in array]
+        return array.reshape(-1).tolist()
+    if isinstance(values, (str, bytes)):
+        return [values]
+    try:
+        return list(values)
+    except TypeError:
+        return [values]
+
+
+def _contains_composite_value(values: Sequence[Any] | np.ndarray) -> bool:
+    return any(isinstance(value, (tuple, list, np.ndarray)) for value in _value_list(values))
+
+
+def _unique_values(values: Sequence[Any] | np.ndarray) -> list[Any]:
+    if not _contains_composite_value(values):
+        return np.unique(values).tolist()
+
+    unique: list[Any] = []
+    for value in _value_list(values):
+        if not any(_values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return unique
+
+
+def _unique_value_array(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    if not _contains_composite_value(values):
+        return np.unique(values)
+    return _object_value_array(_unique_values(values))
+
+
+def _value_mask(values: Sequence[Any] | np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_values_equal(value, target) for value in _value_list(values)], dtype=bool)
+
+
+def _values_in(values: Sequence[Any] | np.ndarray, candidates: Sequence[Any] | np.ndarray) -> np.ndarray:
+    candidate_values = _value_list(candidates)
+    return np.asarray(
+        [any(_values_equal(value, candidate) for candidate in candidate_values) for value in _value_list(values)],
+        dtype=bool,
+    )
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    try:
+        comparison = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(comparison, np.ndarray):
+        try:
+            return bool(np.all(comparison))
+        except (TypeError, ValueError):
+            return False
+    try:
+        return bool(comparison)
+    except (TypeError, ValueError):
+        return False
 
 
 def _as_2d_float(features: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
