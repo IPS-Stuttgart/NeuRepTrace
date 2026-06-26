@@ -53,6 +53,91 @@ def sequential_fold_ids(n_trials: int, n_folds: int) -> np.ndarray:
     return np.ceil(np.arange(1, n_trials + 1) / (n_trials / n_folds)).astype(int)
 
 
+def _object_vector(values: Sequence | np.ndarray) -> np.ndarray:
+    """Build a one-dimensional object vector without expanding composite labels."""
+
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _prediction_vector(predictions: Sequence | np.ndarray) -> np.ndarray:
+    """Return predictions as one atomic label per row."""
+
+    if isinstance(predictions, np.ndarray):
+        return predictions.copy()
+    try:
+        array = np.asarray(predictions)
+    except ValueError:
+        return _object_vector(predictions)
+    if array.ndim <= 1:
+        return array.copy()
+    rows = array.reshape(array.shape[0], -1)
+    return _object_vector(tuple(row.tolist()) for row in rows)
+
+
+def _values_equal(left: object, right: object) -> bool:
+    """Compare possibly composite labels without leaking array-valued equality."""
+
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
+
+
+def _label_mask(values: np.ndarray, label: object) -> np.ndarray:
+    """Return a boolean mask for scalar, tuple, and heterogeneous labels."""
+
+    flat_mask = np.asarray([_values_equal(value, label) for value in values.reshape(-1)], dtype=bool)
+    return flat_mask.reshape(values.shape)
+
+
+def _least_frequent_label(values: np.ndarray) -> object:
+    """Return the least frequent observed label without sorting heterogeneous objects."""
+
+    if values.dtype != object:
+        labels, counts = np.unique(values, return_counts=True)
+        return labels[np.argmin(counts)]
+
+    unique_labels: list[object] = []
+    counts: list[int] = []
+    for value in values:
+        for index, label in enumerate(unique_labels):
+            if _values_equal(value, label):
+                counts[index] += 1
+                break
+        else:
+            unique_labels.append(value)
+            counts.append(1)
+    return unique_labels[int(np.argmin(counts))]
+
+
+def _assign_label(values: np.ndarray, mask: np.ndarray, label: object) -> np.ndarray:
+    """Assign one possibly composite label to every masked position."""
+
+    if values.dtype == object:
+        flat_values = values.reshape(-1)
+        for index in np.flatnonzero(mask.reshape(-1)):
+            flat_values[index] = label
+        return values
+
+    try:
+        values[mask] = label
+        return values
+    except (TypeError, ValueError):
+        object_values = _object_vector(values.reshape(-1))
+        flat_mask = mask.reshape(-1)
+        for index in np.flatnonzero(flat_mask):
+            object_values[index] = label
+        return object_values.reshape(values.shape)
+
+
 def append_null_class_features(
     stimulus_features: Sequence[Sequence[float]] | np.ndarray,
     labels: Sequence | np.ndarray,
@@ -79,22 +164,18 @@ def append_null_class_features(
 def replace_null_class_predictions(
     predictions: Sequence | np.ndarray,
     *,
-    null_label: int | float = 0,
-    fallback_label: int | float = 1,
+    null_label: object = 0,
+    fallback_label: object = 1,
 ) -> np.ndarray:
     """Replace predicted null labels with a non-null class label."""
 
-    predictions = np.asarray(predictions).copy()
-    null_mask = predictions == null_label
+    predictions = _prediction_vector(predictions)
+    null_mask = _label_mask(predictions, null_label)
     if not np.any(null_mask):
         return predictions
     non_null = predictions[~null_mask]
-    if len(non_null) == 0:
-        predictions[null_mask] = fallback_label
-        return predictions
-    nonzero_labels, counts = np.unique(non_null, return_counts=True)
-    predictions[null_mask] = nonzero_labels[np.argmin(counts)]
-    return predictions
+    replacement = fallback_label if len(non_null) == 0 else _least_frequent_label(non_null)
+    return _assign_label(predictions, null_mask, replacement)
 
 
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals

@@ -53,6 +53,37 @@ def test_select_few_shot_target_calibration_split_rejects_invalid_target_indices
         select_few_shot_target_calibration_split(labels, target_indices=[0.0, 1.5, 3.0, 4.0, 6.0, 7.0])
 
 
+@pytest.mark.parametrize(
+    ("split", "match"),
+    [
+        (
+            FewShotTargetCalibrationSplit(
+                calibration_indices=np.array([True, False, False, False]),
+                evaluation_indices=np.array([1, 2]),
+            ),
+            "calibration_indices.*boolean",
+        ),
+        (
+            FewShotTargetCalibrationSplit(
+                calibration_indices=np.array([0]),
+                evaluation_indices=np.array([1.5, 2.0]),
+            ),
+            "evaluation_indices.*integer row indices",
+        ),
+    ],
+)
+def test_fit_few_shot_target_calibrated_decoder_rejects_invalid_manual_split_indices(split, match):
+    with pytest.raises(ValueError, match=match):
+        fit_few_shot_target_calibrated_decoder(
+            source_features=np.array([[0.0], [1.0]]),
+            source_labels=np.array([0, 1]),
+            target_features=np.array([[0.0], [0.1], [1.0], [0.9]]),
+            target_labels=np.array([0, 0, 1, 1]),
+            split=split,
+            emission_mode="uncalibrated",
+        )
+
+
 def test_select_few_shot_target_calibration_split_rejects_if_no_evaluation_rows_remain():
     labels = np.array([0, 1, 0, 1])
 

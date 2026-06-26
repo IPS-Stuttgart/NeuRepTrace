@@ -150,6 +150,48 @@ def test_matlab_fieldtrip_loader_returns_trial_dataset(tmp_path: Path) -> None:
     assert dataset.channels == ("MEG001", "MEG002")
 
 
+def test_csv_feature_matrix_excludes_declared_group_column(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    pd.DataFrame(
+        {
+            "condition": ["face", "house"],
+            "run": [1, 2],
+            "amplitude": [0.2, 0.8],
+        }
+    ).to_csv(root / "features.csv", index=False)
+    spec_path = tmp_path / "dataset.json"
+    spec_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "neureptrace.dataset.v1",
+                "dataset_id": "csv-toy",
+                "root": {"path": str(root)},
+                "subjects": [1],
+                "splits": {
+                    "features": {
+                        "loader": "csv_feature_matrix",
+                        "path_template": "features.csv",
+                        "label_column": "condition",
+                        "group_column": "run",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    spec = load_dataset_spec(spec_path)
+    dataset = load_split_dataset(spec, "features", 1)
+
+    assert dataset.labels is not None
+    assert dataset.labels.tolist() == ["face", "house"]
+    assert dataset.channels == ("amplitude",)
+    assert dataset.data.shape == (2, 1, 1)
+    np.testing.assert_allclose(dataset.data[:, 0, 0], [0.2, 0.8])
+    assert dataset.metadata is not None
+    assert dataset.metadata["run"].tolist() == [1, 2]
+
+
 def test_expand_participant_ids_supports_ranges_and_deduplication() -> None:
     ids = expand_participant_ids(["1-3", 3, 6, {"range": ["08", "10"]}, {"id": "13"}])
 

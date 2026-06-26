@@ -21,6 +21,7 @@ from typing import Any
 import numpy as np
 
 _TARGET_MODULE = "neureptrace.bushmeg_category2_autoencoder_loso"
+_MAX_FOLDS_PATCH_MODULE = "neureptrace._category2_autoencoder_max_folds_patch"
 _PATCH_MARKER = "_neureptrace_bushmeg_category2_autoencoder_config_patch_installed"
 _FINDER_MARKER = "_neureptrace_bushmeg_category2_autoencoder_config_finder"
 
@@ -59,6 +60,10 @@ def _patch_module(module: ModuleType) -> None:
     setattr(module, _PATCH_MARKER, True)
 
 
+def _install_max_folds_patch() -> None:
+    importlib.import_module(_MAX_FOLDS_PATCH_MODULE).install()
+
+
 class _Category2AutoencoderConfigPatchLoader(importlib.abc.Loader):
     def __init__(self, wrapped_loader: importlib.abc.Loader) -> None:
         self.wrapped_loader = wrapped_loader
@@ -72,6 +77,26 @@ class _Category2AutoencoderConfigPatchLoader(importlib.abc.Loader):
     def exec_module(self, module: ModuleType) -> None:
         self.wrapped_loader.exec_module(module)
         _patch_module(module)
+
+    def get_code(self, fullname: str):
+        """Delegate code loading so ``python -m`` execution remains supported."""
+
+        get_code = getattr(self.wrapped_loader, "get_code", None)
+        if get_code is None:
+            raise ImportError(f"Loader for {fullname!r} does not provide executable code.")
+        return get_code(fullname)
+
+    def get_source(self, fullname: str):
+        get_source = getattr(self.wrapped_loader, "get_source", None)
+        if get_source is None:
+            return None
+        return get_source(fullname)
+
+    def is_package(self, fullname: str) -> bool:
+        is_package = getattr(self.wrapped_loader, "is_package", None)
+        if is_package is None:
+            return False
+        return bool(is_package(fullname))
 
 
 class _Category2AutoencoderConfigPatchFinder(importlib.abc.MetaPathFinder):
@@ -93,8 +118,9 @@ class _Category2AutoencoderConfigPatchFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Install boolean and fractional-integer validation for the Category-2 autoencoder config."""
+    """Install Category-2 autoencoder config and fold-limit guardrails."""
 
+    _install_max_folds_patch()
     loaded = sys.modules.get(_TARGET_MODULE)
     if loaded is not None:
         _patch_module(loaded)

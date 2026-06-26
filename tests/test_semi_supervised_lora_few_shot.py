@@ -31,6 +31,17 @@ def _small_source_target_problem():
     return np.asarray(source_features, dtype=float), np.asarray(source_labels, dtype=object), np.asarray(source_groups, dtype=object), target_features, target_labels
 
 
+def test_semi_supervised_lora_label_vector_keeps_rectangular_object_rows_atomic():
+    from neureptrace.decoding.semi_supervised_lora_few_shot import _as_1d_object_array
+
+    labels = np.asarray([("face", "left"), ("house", "right"), ("face", "left")], dtype=object)
+
+    vector = _as_1d_object_array(labels, name="labels")
+
+    assert vector.shape == (3,)
+    assert vector.tolist() == [("face", "left"), ("house", "right"), ("face", "left")]
+
+
 def test_semi_supervised_lora_few_shot_does_not_use_evaluation_labels_with_fixed_split():
     pytest.importorskip("torch")
     from neureptrace.decoding.few_shot import FewShotTargetCalibrationSplit
@@ -117,3 +128,45 @@ def test_semi_supervised_lora_few_shot_marks_transductive_unlabeled_target_featu
     assert result.metadata["semi_supervised_lora_unlabeled_target_rows"] == result.evaluation_indices.shape[0]
     assert result.metadata["few_shot_n_target_calibration_rows"] == 2
     assert result.metadata["few_shot_n_target_evaluation_rows"] == 6
+
+
+def test_semi_supervised_lora_few_shot_preserves_composite_labels_and_groups():
+    pytest.importorskip("torch")
+    from neureptrace.decoding.few_shot import FewShotTargetCalibrationSplit
+    from neureptrace.decoding.semi_supervised_lora_few_shot import fit_semi_supervised_lora_few_shot_decoder
+
+    source_features, source_labels, source_groups, target_features, target_labels = _small_source_target_problem()
+    source_labels = [("class", int(label)) for label in source_labels.tolist()]
+    target_labels = [("class", int(label)) for label in target_labels.tolist()]
+    source_groups = [("subject", str(group)) for group in source_groups.tolist()]
+    split = FewShotTargetCalibrationSplit(calibration_indices=np.array([0, 4]), evaluation_indices=np.array([1, 2, 3, 5, 6, 7]))
+
+    result = fit_semi_supervised_lora_few_shot_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        source_groups=source_groups,
+        target_features=target_features,
+        target_labels=target_labels,
+        classes=[("class", 0), ("class", 1)],
+        split=split,
+        per_class=1,
+        seed=41,
+        hidden_units=8,
+        lora_rank=2,
+        source_pretrain_epochs=2,
+        meta_epochs=1,
+        meta_inner_steps=1,
+        target_adaptation_steps=2,
+        batch_size=8,
+        learning_rate=0.02,
+        adapter_learning_rate=0.02,
+        entropy_loss_weight=0.0,
+        consistency_loss_weight=0.0,
+        use_evaluation_features_unlabeled=False,
+        device="cpu",
+    )
+
+    assert result.model.classes_.shape == (2,)
+    assert result.model.classes_.tolist() == [("class", 0), ("class", 1)]
+    assert result.probabilities.shape == (6, 2)
+    assert result.metadata["semi_supervised_lora_meta_learning_enabled"] is True
