@@ -83,10 +83,10 @@ def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
             return vector.reshape(1)
         if vector.ndim == 1:
             return vector
-        if min(vector.shape) > 1:
-            rows = [tuple(row.tolist()) for row in vector.reshape(vector.shape[0], -1)]
-            return _object_vector(rows)
-        raise ValueError(f"{name} must be one-dimensional.")
+        if vector.shape[1] == 1:
+            return vector.reshape(-1)
+        rows = [tuple(row.tolist()) for row in vector.reshape(vector.shape[0], -1)]
+        return _object_vector(rows)
 
     if isinstance(values, (str, bytes)):
         return np.asarray([values], dtype=object)
