@@ -109,6 +109,7 @@ from . import (  # noqa: E402
     _subspace_adaptation_config_bool_patch,
     _temporal_generalization_string_groups_patch,
     _temporal_smoothing_singleton_sequence_patch,
+    _torch_weight_validation_patch,
     _transfer_array_label_null_patch,
     _transfer_components_validation_patch,
     _transfer_cross_validation_label_patch,
@@ -217,6 +218,7 @@ _subspace_bool_config_patch.install()
 _subspace_adaptation_config_bool_patch.install()
 _temporal_generalization_string_groups_patch.install()
 _temporal_smoothing_singleton_sequence_patch.install()
+_torch_weight_validation_patch.install()
 _transfer_array_label_null_patch.install()
 _transfer_components_validation_patch.install()
 _transfer_cross_validation_label_patch.install()
