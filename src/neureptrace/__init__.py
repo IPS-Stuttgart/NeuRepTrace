@@ -85,6 +85,7 @@ from . import (  # noqa: E402
     _source_weighting_tuple_row_groups_patch,
     _temporal_smoothing_singleton_sequence_patch,
     _transfer_array_label_null_patch,
+    _transfer_components_validation_patch,
     _transfer_cross_validation_label_patch,
     _transfer_null_fallback_patch,
     _transfer_null_label_conflict_patch,
@@ -165,6 +166,7 @@ _source_selection_temperature_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _temporal_smoothing_singleton_sequence_patch.install()
 _transfer_array_label_null_patch.install()
+_transfer_components_validation_patch.install()
 _transfer_cross_validation_label_patch.install()
 _transfer_null_fallback_patch.install()
 _transfer_null_label_conflict_patch.install()

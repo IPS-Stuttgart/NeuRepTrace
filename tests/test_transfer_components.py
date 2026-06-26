@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from sklearn.svm import LinearSVC
 
 from neureptrace.decoding.transfer_components import (
     TRANSFER_COMPONENT_CATEGORY,
+    TransferComponentConfig,
     fit_transfer_component_classifier,
     fit_transfer_component_features,
     normalize_standardize_scope,
@@ -101,3 +103,48 @@ def test_transfer_components_support_numpy_object_matrix_composite_labels() -> N
     assert result.classes.shape == (2,)
     assert set(result.classes.tolist()) == {("left", 1), ("right", 2)}
     assert all(isinstance(prediction, tuple) for prediction in result.predictions)
+
+
+def test_transfer_component_config_parses_string_boolean_center_kernel() -> None:
+    assert transfer_component_config(center_kernel="false").center_kernel is False
+    assert transfer_component_config(center_kernel="off").center_kernel is False
+    assert transfer_component_config(center_kernel="enabled").center_kernel is True
+
+
+def test_transfer_components_normalize_direct_config_center_kernel_string() -> None:
+    source, _labels, target = _toy_data()
+
+    result = fit_transfer_component_features(source_features=source, target_features=target, config=TransferComponentConfig(n_components=1, kernel="rbf", center_kernel="false"))
+
+    assert result.config.center_kernel is False
+
+
+def test_transfer_components_reject_boolean_gamma() -> None:
+    source, _labels, target = _toy_data()
+
+    with pytest.raises(ValueError, match="gamma"):
+        transfer_component_config(gamma=True)
+    with pytest.raises(ValueError, match="gamma"):
+        fit_transfer_component_features(source_features=source, target_features=target, config=TransferComponentConfig(n_components=1, kernel="rbf", gamma=np.bool_(False)))
+
+
+def test_transfer_component_classifier_rejects_matrix_sample_weight() -> None:
+    source, labels, target = _toy_data()
+
+    with pytest.raises(ValueError, match="sample_weight"):
+        fit_transfer_component_classifier(source_features=source, source_labels=labels, target_features=target, config={"n_components": 1}, sample_weight=np.ones((2, 3)))
+
+
+def test_transfer_component_classifier_rejects_boolean_sample_weight() -> None:
+    source, labels, target = _toy_data()
+
+    with pytest.raises(ValueError, match="sample_weight"):
+        fit_transfer_component_classifier(source_features=source, source_labels=labels, target_features=target, config={"n_components": 1}, sample_weight=[True, False, True, False, True, False])
+
+
+def test_transfer_component_classifier_accepts_column_sample_weight() -> None:
+    source, labels, target = _toy_data()
+
+    result = fit_transfer_component_classifier(source_features=source, source_labels=labels, target_features=target, config={"n_components": 1}, sample_weight=np.ones((6, 1)))
+
+    assert result.predictions.shape == (6,)
