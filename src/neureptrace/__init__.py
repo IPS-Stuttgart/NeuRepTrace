@@ -58,6 +58,7 @@ from . import (  # noqa: E402
     _nll_eps_validation_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
+    _paired_stats_tie_patch,
     _pls_da_composite_labels_patch,
     _probability_stacking_group_summary_patch,
     _random_state_config_patch,
@@ -155,6 +156,7 @@ _sample_weight_validation_patch.install()
 _sampling_composite_label_array_patch.install()
 _semi_supervised_lora_tuple_labels_patch.install()
 _response_window_time_validation_patch.install()
+_paired_stats_tie_patch.install()
 _riemannian_vector_validation_patch.install()
 _source_alignment_times_validation_patch.install()
 _source_domain_generalization_composite_patch.install()
