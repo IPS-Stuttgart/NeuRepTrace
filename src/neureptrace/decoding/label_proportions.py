@@ -376,10 +376,13 @@ def _base_metadata(
 def _normalize_positive_int(value: int | str, *, name: str) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a positive integer.")
-    parsed = int(value)
-    if parsed < 1 or float(parsed) != float(value):
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
         raise ValueError(f"{name} must be a positive integer.")
-    return parsed
+    return int(numeric)
 
 
 def _normalize_positive_float(value: float | str, *, name: str) -> float:
