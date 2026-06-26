@@ -4,9 +4,10 @@ The config-driven decoders accept a ``dataset`` section as a mapping.  Some
 callers omit ``dataset.name`` because the input files already identify the data
 source.  The legacy fallback in the config-to-decoder translation used the
 entire ``dataset`` mapping as the fallback value, which can leak a dictionary
-into ``dataset_name`` result metadata.  This patch preserves the public helper
-surface while replacing only mapping-valued fallbacks with a stable empty
-string.
+into ``dataset_name`` result metadata.  A related path-template edge case is
+``dataset.name: null``: output templates such as ``results/{dataset}_summary.csv``
+should use the stable placeholder name ``dataset`` rather than creating files
+with the literal ``None`` stem.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ _TARGET_MODULES = {
 }
 _PATCH_MARKER = "_neureptrace_dataset_name_config_patch_installed"
 _BOOL_PATCH_MARKER = "_neureptrace_config_workflow_numeric_bool_patch_installed"
+_OUTPUT_TEMPLATE_PATCH_MARKER = "_neureptrace_dataset_output_template_patch_installed"
 _FINDER_MARKER = "_neureptrace_dataset_name_config_finder"
 
 
@@ -41,6 +43,15 @@ def _dataset_name_from_config(config: Any, *, default: str = "") -> str:
     if value is None or isinstance(value, Mapping):
         return default
     return str(value)
+
+
+def _dataset_template_name_from_config(config: Any, *, default: str = "dataset") -> str:
+    """Return the safe token used for ``{dataset}`` output templates."""
+
+    value = _dataset_name_from_config(config, default="")
+    if value.strip() == "":
+        return default
+    return value
 
 
 def _patch_config_workflow_bool_parser(module: ModuleType) -> None:
@@ -62,10 +73,55 @@ def _patch_config_workflow_bool_parser(module: ModuleType) -> None:
     module._as_bool = patched_as_bool
 
 
+def _patch_decode_from_config_output_templates(module: ModuleType) -> None:
+    if module.__name__ != "neureptrace.decode_from_config" or getattr(module, _OUTPUT_TEMPLATE_PATCH_MARKER, False):
+        return
+    original_output_base_dir = getattr(module, "_output_base_dir", None)
+    original_resolve_output = getattr(module, "_resolve_output", None)
+    if original_output_base_dir is None or original_resolve_output is None:
+        return
+
+    @wraps(original_output_base_dir)
+    def patched_output_base_dir(config: Mapping[str, Any], *, config_dir):
+        outputs = module._section(config, "outputs")
+        policy_base = module._base_for_policy(config, config_dir=config_dir)
+        base_dir = outputs.get("base_dir") or outputs.get("dir")
+        if base_dir in {None, ""}:
+            return policy_base
+        dataset_name = _dataset_template_name_from_config(config)
+        return module.expand_path(str(base_dir).format(dataset=dataset_name), base_dir=policy_base)
+
+    @wraps(original_resolve_output)
+    def patched_resolve_output(
+        config: Mapping[str, Any],
+        *,
+        config_dir,
+        key: str,
+        default: str | None = None,
+    ):
+        outputs = module._section(config, "outputs")
+        value = outputs.get(key, default)
+        if value is None or value == "":
+            return None
+        dataset_name = _dataset_template_name_from_config(config)
+        formatted = str(value).format(dataset=dataset_name)
+        path = module.Path(formatted)
+        if path.is_absolute():
+            return path
+        return module._output_base_dir(config, config_dir=config_dir) / path
+
+    setattr(patched_output_base_dir, _OUTPUT_TEMPLATE_PATCH_MARKER, True)
+    setattr(patched_resolve_output, _OUTPUT_TEMPLATE_PATCH_MARKER, True)
+    module._output_base_dir = patched_output_base_dir
+    module._resolve_output = patched_resolve_output
+    setattr(module, _OUTPUT_TEMPLATE_PATCH_MARKER, True)
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
     _patch_config_workflow_bool_parser(module)
+    _patch_decode_from_config_output_templates(module)
     decode_kwargs = getattr(module, "_decode_kwargs", None)
     if decode_kwargs is None:
         setattr(module, _PATCH_MARKER, True)
