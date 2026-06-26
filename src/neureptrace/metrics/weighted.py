@@ -166,15 +166,22 @@ def weighted_top_k_accuracy(
     *,
     k: int = 1,
 ) -> float:
-    """Compute weighted top-k classification accuracy."""
+    """Compute weighted top-k classification accuracy.
+
+    Classes tied at the k-th score are counted as being in the top-k set. This
+    avoids arbitrary false negatives for uniform or otherwise tied probability
+    rows, where ``argpartition`` would choose one of the tied columns by array
+    implementation detail rather than model evidence.
+    """
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
     k = _validate_k(k)
     if k >= probabilities.shape[1]:
         return 1.0
 
-    top_k = np.argpartition(probabilities, kth=probabilities.shape[1] - k, axis=1)[:, -k:]
-    correct = np.any(top_k == labels[:, None], axis=1).astype(float)
+    kth_scores = np.partition(probabilities, kth=probabilities.shape[1] - k, axis=1)[:, -k]
+    true_scores = probabilities[np.arange(labels.shape[0]), labels]
+    correct = (true_scores >= kth_scores).astype(float)
     return float(np.average(correct, weights=weights))
 
 
