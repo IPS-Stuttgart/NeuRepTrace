@@ -50,7 +50,11 @@ def test_dataset_spec_accepts_integral_label_numeric_strings() -> None:
 
 def test_dataset_spec_rejects_boolean_split_label_index_base() -> None:
     payload = _minimal_spec()
-    payload["splits"]["main"]["label_index_base"] = True  # type: ignore[index]
+    splits = payload["splits"]
+    assert isinstance(splits, dict)
+    main_split = splits["main"]
+    assert isinstance(main_split, dict)
+    main_split["label_index_base"] = True
 
     with pytest.raises(ValueError, match="label_index_base must be an integer"):
         dataset_spec_from_mapping(payload)
@@ -59,9 +63,9 @@ def test_dataset_spec_rejects_boolean_split_label_index_base() -> None:
 @pytest.mark.parametrize(
     ("preprocessing", "message"),
     [
-        ({"resample_hz": True}, "resample_hz must be finite"),
-        ({"window_size_s": float("inf")}, "window_size_s must be finite"),
-        ({"frequency_range_hz": [0.5, False]}, r"preprocessing_defaults\.frequency_range_hz\[1\] must be finite"),
+        ({"resample_hz": True}, "resample_hz must be a finite"),
+        ({"window_size_s": float("inf")}, "window_size_s must be a finite"),
+        ({"frequency_range_hz": [0.5, False]}, r"preprocessing_defaults\.frequency_range_hz\[1\] must be a finite"),
     ],
 )
 def test_dataset_spec_rejects_invalid_preprocessing_numeric_fields(preprocessing: dict[str, object], message: str) -> None:

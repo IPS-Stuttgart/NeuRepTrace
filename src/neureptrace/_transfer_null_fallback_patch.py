@@ -1,54 +1,54 @@
-"""Keep degenerate null-fallback CV predictions inside the observed label space."""
+"""Keep transfer CV fallback predictions inside the observed label space."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import assign_masked, label_accuracy, values_equal
 from neureptrace.decoding.generative_augmentation import GenerativeAugmentationConfig
 
 _INSTALLED = False
 _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING = None
 
 
-def _sorted_label_values(labels: np.ndarray) -> np.ndarray:
-    """Return the deterministic label order used by the transfer decoders."""
+def _object_vector(values: Iterable[object]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
 
-    values = sorted(np.unique(labels))
-    if labels.dtype == object:
-        return np.asarray(values, dtype=object)
-    return np.asarray(values)
+
+def _ordered_unique(values: Sequence | np.ndarray) -> np.ndarray:
+    unique: list[object] = []
+    for value in values:
+        if not any(values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return _object_vector(unique)
+
+
+def _observed_label_values(labels: np.ndarray) -> np.ndarray:
+    if np.issubdtype(labels.dtype, np.number):
+        return np.asarray(sorted(np.unique(labels)))
+    return _ordered_unique(labels)
 
 
 def _label_space_mask(predictions: np.ndarray, label_values: np.ndarray) -> np.ndarray:
-    """Return a mask of predictions that belong to the observed non-null labels."""
-
-    valid = np.zeros(predictions.shape, dtype=bool)
-    for label in label_values:
-        valid |= predictions == label
-    return valid
+    return np.asarray([any(values_equal(prediction, label) for label in label_values) for prediction in predictions], dtype=bool)
 
 
 def _all_same(values: np.ndarray) -> bool:
     if values.size == 0:
         return False
     flat = values.reshape(-1)
-    return bool(np.all(flat == flat[0]))
+    first = flat[0]
+    return all(values_equal(value, first) for value in flat)
 
 
 def _repair_degenerate_out_of_space_predictions(predictions: np.ndarray, label_values: np.ndarray) -> np.ndarray:
-    """Replace the all-null fallback label with a valid observed label.
-
-    ``replace_null_class_predictions`` uses its scalar ``fallback_label`` only
-    when every fold predicts the artificial null class.  Historically that
-    default was label 1, which can be outside the observed label set.  Only this
-    degenerate all-out-of-label-space case is repaired here; mixed valid/invalid
-    model outputs are left untouched rather than silently masking a classifier
-    error.
-    """
-
     repaired = np.asarray(predictions).copy()
     if repaired.size == 0 or label_values.size == 0:
         return repaired
@@ -58,15 +58,12 @@ def _repair_degenerate_out_of_space_predictions(predictions: np.ndarray, label_v
         return repaired
 
     fallback = label_values[0]
-    if repaired.dtype == object:
-        repaired[~valid] = fallback
-        return repaired
-
-    try:
-        fallback = np.asarray([fallback], dtype=repaired.dtype)[0]
-    except (TypeError, ValueError, OverflowError):
-        repaired = repaired.astype(object)
-    repaired[~valid] = fallback
+    if repaired.dtype != object:
+        try:
+            fallback = np.asarray([fallback], dtype=repaired.dtype)[0]
+        except (TypeError, ValueError, OverflowError):
+            repaired = repaired.astype(object)
+    assign_masked(repaired, ~valid, fallback)
     return repaired
 
 
@@ -113,9 +110,9 @@ def install() -> None:
         )
         predictions = _repair_degenerate_out_of_space_predictions(
             result.predictions,
-            _sorted_label_values(label_vector),
+            _observed_label_values(label_vector),
         )
-        accuracy = float(np.mean(label_vector == predictions)) if len(label_vector) else np.nan
+        accuracy = label_accuracy(label_vector, predictions)
         return transfer.CrossValidationResult(accuracy=accuracy, predictions=predictions, fold_ids=result.fold_ids)
 
     _cross_validate_feature_decoding.__name__ = _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING.__name__

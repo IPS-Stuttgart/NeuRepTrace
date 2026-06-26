@@ -48,6 +48,49 @@ def test_temporal_generalization_matrix_scores_all_train_test_pairs():
     assert rows.loc[~rows["is_diagonal"], "accuracy"].tolist() == [0.0, 0.0]
 
 
+def test_temporal_generalization_preserves_composite_tuple_labels():
+    train_window = TemporalFeatureWindow(
+        center=0.0,
+        features=np.zeros((3, 1)),
+        labels=[("left", 1), ("right", 2), ("left", 1)],
+    )
+    test_window = TemporalFeatureWindow(
+        center=0.0,
+        features=np.zeros((3, 1)),
+        labels=[("left", 1), ("right", 2), ("left", 1)],
+    )
+
+    rows = compute_temporal_generalization_matrix(
+        [train_window],
+        [test_window],
+        fit_model=lambda window: window,
+        predict_labels=lambda _model, _window: np.asarray([("left", 1), ("right", 2), ("left", 1)], dtype=object),
+    )
+
+    assert rows.loc[0, "accuracy"] == 1.0
+    assert rows.loc[0, "chance_accuracy"] == 0.5
+    assert rows.loc[0, "n_train_trials"] == 3
+    assert rows.loc[0, "n_validation_trials"] == 3
+    assert rows.loc[0, "n_train_classes"] == 2
+    assert rows.loc[0, "n_validation_classes"] == 2
+
+
+def test_temporal_generalization_rejects_matrix_label_arrays():
+    invalid_train_window = TemporalFeatureWindow(
+        center=0.0,
+        features=np.zeros((2, 1)),
+        labels=np.asarray([[0, 1], [1, 0]]),
+    )
+
+    with pytest.raises(ValueError, match="train window labels must be one-dimensional"):
+        compute_temporal_generalization_matrix(
+            [invalid_train_window],
+            [_window(0.0, [-1.0, 1.0], [0, 1])],
+            fit_model=lambda window: window,
+            predict_labels=lambda _model, window: window.labels,
+        )
+
+
 def test_temporal_generalization_includes_model_metadata():
     train_windows = [_window(0.0, [-1.0, 1.0], [0, 1])]
     test_windows = [_window(0.0, [-1.0, 1.0], [0, 1])]

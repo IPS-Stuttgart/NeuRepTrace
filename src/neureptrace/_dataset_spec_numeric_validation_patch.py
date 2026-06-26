@@ -1,11 +1,11 @@
 """Runtime validation patch for dataset-spec numeric fields.
 
-YAML and JSON dataset specs often encode configuration values as plain Python
-scalars after loading.  Booleans are integer-like in Python, so direct
-``int(...)``/``float(...)`` coercion can silently turn malformed numeric fields
-such as ``index_base: true`` into valid-looking values.  Keep the public parser
-strict by rejecting booleans, non-integral integers, and non-finite floats at
-the dataset-spec boundary.
+YAML and JSON dataset specs often decode configuration values as plain Python
+scalars.  Since booleans are integer-like in Python, direct ``int(...)`` or
+``float(...)`` coercion can silently turn malformed numeric fields such as
+``index_base: true`` into valid-looking numbers.  Keep the public parser strict
+by rejecting booleans, non-integral integers, and non-finite floats at the
+specification boundary.
 """
 
 from __future__ import annotations
@@ -24,13 +24,13 @@ def _is_boolean(value: Any) -> bool:
 
 def _finite_float(value: Any, *, name: str) -> float:
     if _is_boolean(value):
-        raise ValueError(f"{name} must be finite numeric value.")
+        raise ValueError(f"{name} must be a finite numeric value.")
     try:
         number = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be finite numeric value.") from exc
+        raise ValueError(f"{name} must be a finite numeric value.") from exc
     if not np.isfinite(number):
-        raise ValueError(f"{name} must be finite numeric value.")
+        raise ValueError(f"{name} must be a finite numeric value.")
     return float(number)
 
 
@@ -41,7 +41,7 @@ def _integer(value: Any, *, name: str, minimum: int | None = None) -> int:
         number = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be an integer.") from exc
-    if not np.isfinite(number) or number % 1.0 != 0.0:
+    if not np.isfinite(number) or not number.is_integer():
         raise ValueError(f"{name} must be an integer.")
     integer = int(number)
     if minimum is not None and integer < minimum:
@@ -78,9 +78,11 @@ def _two_float_tuple(value: Any, name: str) -> tuple[float, float]:
 
 
 def install() -> None:
-    """Install strict numeric validation for dataset-spec scalar fields."""
+    """Install strict numeric validation for dataset-spec and calibration scalar fields."""
 
-    from neureptrace import dataset_spec
+    from neureptrace import _calibration_bool_numeric_patch, dataset_spec
+
+    _calibration_bool_numeric_patch.install()
 
     if getattr(dataset_spec, _PATCH_MARKER, False):
         return

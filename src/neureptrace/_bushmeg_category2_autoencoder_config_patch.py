@@ -21,6 +21,7 @@ from typing import Any
 import numpy as np
 
 _TARGET_MODULE = "neureptrace.bushmeg_category2_autoencoder_loso"
+_MAX_FOLDS_PATCH_MODULE = "neureptrace._category2_autoencoder_max_folds_patch"
 _PATCH_MARKER = "_neureptrace_bushmeg_category2_autoencoder_config_patch_installed"
 _FINDER_MARKER = "_neureptrace_bushmeg_category2_autoencoder_config_finder"
 
@@ -57,6 +58,10 @@ def _patch_module(module: ModuleType) -> None:
     module._positive_int = _positive_int
     module._positive_float = _positive_float
     setattr(module, _PATCH_MARKER, True)
+
+
+def _install_max_folds_patch() -> None:
+    importlib.import_module(_MAX_FOLDS_PATCH_MODULE).install()
 
 
 class _Category2AutoencoderConfigPatchLoader(importlib.abc.Loader):
@@ -113,8 +118,9 @@ class _Category2AutoencoderConfigPatchFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Install boolean and fractional-integer validation for the Category-2 autoencoder config."""
+    """Install Category-2 autoencoder config and fold-limit guardrails."""
 
+    _install_max_folds_patch()
     loaded = sys.modules.get(_TARGET_MODULE)
     if loaded is not None:
         _patch_module(loaded)
