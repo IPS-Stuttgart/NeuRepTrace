@@ -122,6 +122,28 @@ def test_decode_from_config_quoted_false_flags_stay_disabled(tmp_path: Path) -> 
     assert kwargs["label_shuffle_control"] is False
 
 
+def test_decode_from_config_null_dataset_name_uses_stable_output_token(tmp_path: Path) -> None:
+    from neureptrace.decode_from_config import _decode_kwargs
+
+    kwargs = _decode_kwargs(
+        {
+            "dataset": {"name": None},
+            "preprocessing": {},
+            "decoding": {"label_column": "condition"},
+            "outputs": {
+                "base_dir": "results/{dataset}",
+                "summary_csv": "{dataset}_summary.csv",
+                "calibration_csv": "{dataset}_calibration.csv",
+            },
+        },
+        config_dir=tmp_path,
+    )
+
+    assert kwargs["dataset_name"] == ""
+    assert kwargs["out_path"] == tmp_path / "results/dataset/dataset_summary.csv"
+    assert kwargs["calibration_out_path"] == tmp_path / "results/dataset/dataset_calibration.csv"
+
+
 @pytest.mark.parametrize(
     ("preprocessing", "decoding", "message"),
     [
