@@ -86,15 +86,17 @@ from . import (  # noqa: E402
     _sampling_composite_label_array_patch,
     _semi_supervised_lora_tuple_labels_patch,
     _source_alignment_anchor_patch,
+    _source_alignment_cli_choices_patch,
+    _source_alignment_contrastive_patch,
     _source_alignment_optimal_transport_patch,
     _source_alignment_oracle_patch,
     _source_alignment_pseudo_calibration_patch,
     _source_alignment_pseudo_repetition_patch,
     _source_alignment_times_validation_patch,
     _source_domain_generalization_composite_patch,
-    _source_free_soft_prototypes_patch,
     _source_free_standardize_target_patch,
     _source_free_probability_rows_patch,
+    _source_free_soft_prototypes_patch,
     _source_free_tuple_labels_patch,
     _source_label_vector_patch,
     _source_mixup_boolean_config_patch,
@@ -199,10 +201,13 @@ _response_window_time_validation_patch.install()
 _paired_stats_tie_patch.install()
 _riemannian_vector_validation_patch.install()
 _source_alignment_times_validation_patch.install()
+_source_alignment_contrastive_patch.install()
+_source_alignment_oracle_patch.install()
+_source_alignment_cli_choices_patch.install()
 _source_domain_generalization_composite_patch.install()
-_source_free_soft_prototypes_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_probability_rows_patch.install()
+_source_free_soft_prototypes_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_label_vector_patch.install()
 _source_mixup_boolean_config_patch.install()
@@ -220,17 +225,17 @@ _source_weighting_enabled_alias_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _subspace_bool_config_patch.install()
 _subspace_adaptation_config_bool_patch.install()
-
-
-_OPTIONAL_PATCH_MODULES = (
-    "_openneuro_decoding_patch",
-    "_openneuro_resilient_patch",
-)
-for _module_name in _OPTIONAL_PATCH_MODULES:
-    try:
-        _module = importlib.import_module(f"{__name__}.{_module_name}")
-    except ModuleNotFoundError:
-        continue
-    install = getattr(_module, "install", None)
-    if callable(install):
-        install()
+_temporal_generalization_string_groups_patch.install()
+_temporal_smoothing_singleton_sequence_patch.install()
+_torch_weight_validation_patch.install()
+_transfer_array_label_null_patch.install()
+_transfer_components_validation_patch.install()
+_transfer_cross_validation_label_patch.install()
+_transfer_null_fallback_patch.install()
+_transfer_null_label_conflict_patch.install()
+_mne_time_decode_ensemble_param_validation_patch.install()
+_tuple_label_calibration_split_patch.install()
+_unlabeled_anchor_tuple_patch.install()
+_vrex_numeric_config_patch.install()
+_windowed_composite_labels_patch.install()
+_bushmeg_cue_temporal_bins_patch.install()
