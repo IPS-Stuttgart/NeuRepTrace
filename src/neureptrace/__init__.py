@@ -73,6 +73,7 @@ from . import (  # noqa: E402
     _pls_da_composite_labels_patch,
     _probability_stacking_group_summary_patch,
     _random_state_config_patch,
+    _reaction_time_trial_index_base_patch,
     _reconstruction_encoder_config_patch,
     _reconstruction_tuple_labels_patch,
     _response_window_time_validation_patch,
@@ -197,6 +198,7 @@ _source_mixup_boolean_config_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
 _source_mixstyle_tuple_vectors_patch.install()
 _random_state_config_patch.install()
+_reaction_time_trial_index_base_patch.install()
 _mixstyle_boolean_config_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
