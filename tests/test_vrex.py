@@ -54,3 +54,22 @@ def test_vrex_rejects_invalid_boolean_hyperparameters(param):
 
     with pytest.raises(ValueError, match="fit_intercept must be a boolean"):
         model.fit(features, labels, source_domains=domains)
+
+
+@pytest.mark.parametrize(
+    ("parameter", "value", "message"),
+    [
+        ("max_iter", True, "max_iter must be a positive integer"),
+        ("max_iter", np.bool_(True), "max_iter must be a positive integer"),
+        ("tol", True, "tol must be positive and finite"),
+        ("penalty_weight", True, "penalty_weight must be finite and non-negative"),
+        ("l2", False, "l2 must be finite and non-negative"),
+    ],
+)
+def test_vrex_rejects_boolean_numeric_hyperparameters(parameter, value, message):
+    features, labels, domains = _source_table()
+
+    model = LinearVRExClassifier(**{parameter: value})
+
+    with pytest.raises(ValueError, match=message):
+        model.fit(features, labels, source_domains=domains)
