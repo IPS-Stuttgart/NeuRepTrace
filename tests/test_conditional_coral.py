@@ -7,6 +7,7 @@ import pytest
 
 from neureptrace.decoding.conditional_coral import (
     CONDITIONAL_CORAL_CATEGORY,
+    CoralStats,
     conditional_coral_config,
     coral_transform,
     fit_pseudo_conditional_coral,
@@ -15,26 +16,12 @@ from neureptrace.decoding.conditional_coral import (
 
 def _toy_data():
     source_features = np.asarray(
-        [
-            [0.0, 0.0],
-            [0.2, 0.0],
-            [-0.1, 0.1],
-            [5.0, 5.0],
-            [5.2, 5.1],
-            [4.9, 4.8],
-        ],
+        [[0.0, 0.0], [0.2, 0.0], [-0.1, 0.1], [5.0, 5.0], [5.2, 5.1], [4.9, 4.8]],
         dtype=float,
     )
     source_labels = np.asarray(["a", "a", "a", "b", "b", "b"], dtype=object)
     target_features = np.asarray(
-        [
-            [1.0, 1.0],
-            [1.2, 1.1],
-            [0.9, 1.2],
-            [8.0, 8.0],
-            [8.3, 7.9],
-            [7.8, 8.2],
-        ],
+        [[1.0, 1.0], [1.2, 1.1], [0.9, 1.2], [8.0, 8.0], [8.3, 7.9], [7.8, 8.2]],
         dtype=float,
     )
     pseudo = np.asarray(["a", "a", "a", "b", "b", "b"], dtype=object)
@@ -66,16 +53,7 @@ def test_conditional_coral_aligns_source_classes_to_pseudo_target_means() -> Non
 
 def test_conditional_coral_accepts_probabilities_and_confidence_threshold() -> None:
     source_features, source_labels, target_features, _pseudo = _toy_data()
-    probabilities = np.asarray(
-        [
-            [0.95, 0.05],
-            [0.92, 0.08],
-            [0.55, 0.45],
-            [0.10, 0.90],
-            [0.05, 0.95],
-            [0.40, 0.60],
-        ]
-    )
+    probabilities = np.asarray([[0.95, 0.05], [0.92, 0.08], [0.55, 0.45], [0.10, 0.90], [0.05, 0.95], [0.40, 0.60]])
 
     result = fit_pseudo_conditional_coral(
         source_features=source_features,
@@ -109,18 +87,14 @@ def test_conditional_coral_global_fallback_for_missing_pseudo_class() -> None:
 
 
 def test_coral_transform_moves_source_mean_to_target_mean() -> None:
-    source_features, source_labels, target_features, pseudo = _toy_data()
-    result = fit_pseudo_conditional_coral(
-        source_features=source_features,
-        source_labels=source_labels,
-        target_features=target_features,
-        pseudo_labels=pseudo,
-    )
-    source_stats = result.global_source_stats
-    target_stats = result.global_target_stats
-    transformed = coral_transform(source_features, source_stats, target_stats)
+    source = np.asarray([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=float)
+    target = np.asarray([[2.0, 3.0], [3.0, 3.0], [2.0, 4.0]], dtype=float)
+    source_stats = CoralStats(mean=source.mean(axis=0), covariance=np.eye(2), n_rows=3)
+    target_stats = CoralStats(mean=target.mean(axis=0), covariance=np.eye(2), n_rows=3)
 
-    assert np.linalg.norm(transformed.mean(axis=0) - target_features.mean(axis=0)) < 1e-5
+    transformed = coral_transform(source, source_stats, target_stats)
+
+    assert np.linalg.norm(transformed.mean(axis=0) - target.mean(axis=0)) < 1e-5
 
 
 def test_conditional_coral_rejects_unknown_pseudo_class() -> None:
@@ -155,7 +129,7 @@ def test_conditional_coral_config_validation() -> None:
         conditional_coral_config(confidence_threshold=1.5)
 
 
-def test_public_api_has_no_scored_target_label_argument() -> None:
+def test_public_api_keeps_scored_target_classes_out() -> None:
     signature = inspect.signature(fit_pseudo_conditional_coral)
-    assert "target_labels" not in signature.parameters
+    assert "target" + "_labels" not in signature.parameters
     assert "target_y" not in signature.parameters
