@@ -40,6 +40,7 @@ from . import (  # noqa: E402
     _fieldtrip_sampleinfo_validation_patch,
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
+    _generative_augmentation_composite_labels_patch,
     _generative_augmentation_random_state_patch,
     _joint_distribution_adaptation_config_bool_patch,
     _kernel_mean_matching_bool_validation_patch,
@@ -108,6 +109,7 @@ _fieldtrip_sampleinfo_validation_patch.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _generative_augmentation_random_state_patch.install()
+_generative_augmentation_composite_labels_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
 _joint_distribution_adaptation_config_bool_patch.install()
 _label_shift_source_prior_patch.install()
