@@ -1,1 +1,4 @@
-"""Joint distribution adaptation helpers."""
+"""Joint distribution adaptation helpers.
+
+Feature alignment utilities.
+"""
