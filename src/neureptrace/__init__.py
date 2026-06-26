@@ -242,3 +242,7 @@ _source_alignment_target_calibration_offsets_patch.install()
 _source_alignment_cli_choices_patch.install()
 _bushmeg_cue_temporal_bins_patch.install()
 _mne_time_decode_ensemble_param_validation_patch.install()
+
+from . import _openneuro_real_shuffle_time_selection_patch  # noqa: E402
+
+_openneuro_real_shuffle_time_selection_patch.install()
