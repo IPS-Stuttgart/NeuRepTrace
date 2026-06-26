@@ -17,6 +17,27 @@ def test_sign_flip_p_value_rejects_infinite_difference() -> None:
         sign_flip_p_value(np.array([0.1, float("inf")], dtype=float))
 
 
+def test_sign_flip_p_value_rejects_boolean_random_state() -> None:
+    with pytest.raises(ValueError, match="random_state must be a non-negative integer seed"):
+        sign_flip_p_value(np.array([0.1, -0.2, 0.3], dtype=float), n_permutations=2, random_state=True)
+
+    with pytest.raises(ValueError, match="random_state must be a non-negative integer seed"):
+        sign_flip_p_value(np.array([0.1, -0.2, 0.3], dtype=float), n_permutations=2, random_state=np.bool_(False))
+
+
+def test_paired_decoder_statistics_rejects_boolean_random_state() -> None:
+    subject_metrics = pd.DataFrame(
+        {
+            "decoder": ["a", "a", "b", "b"],
+            "subject": ["s1", "s2", "s1", "s2"],
+            "effect_accuracy": [0.8, 0.7, 0.6, 0.5],
+        }
+    )
+
+    with pytest.raises(ValueError, match="random_state must be a non-negative integer seed"):
+        paired_decoder_statistics(subject_metrics, metrics=("effect_accuracy",), n_permutations=2, random_state=True)
+
+
 def test_paired_decoder_statistics_rejects_non_finite_metric_values() -> None:
     subject_metrics = pd.DataFrame(
         {

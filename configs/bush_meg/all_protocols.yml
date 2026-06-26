@@ -1,0 +1,260 @@
+schema_version: neureptrace.dataset.v1
+
+paths:
+    base: cwd
+
+dataset:
+    name: bush_meg
+    type: fieldtrip_mat
+    root: ${BUSH_MEG_DATA_DIR}
+    participant_file: Part{participant}Data.mat
+    variable: data
+    channel_type: mag
+    fields:
+        trial: trial
+        time: time
+        label: label
+        trialinfo: trialinfo
+        sensor_geometry: grad
+
+participants:
+    ids: 1-4,6,8,9,10,13-27
+
+validation:
+    trim_channel_labels_to_data: true
+    channel_policy: exact
+
+metadata:
+    columns:
+        - name: stimulus_class
+          index: 0
+        - name: condition
+          index: 1
+          optional: true
+
+preprocessing:
+    tmin: -0.35
+    tmax: 0.35
+    normalization: subject_baseline_whiten
+    baseline_window: [-0.35, -0.05]
+    feature_preprocessor: pca
+    pca_components: 96
+    window_size: 0.100
+    window_centers: [0.088, 0.136, 0.184, 0.232, 0.280]
+    temporal_bins: 4
+    feature_kind: evoked_dct
+
+decoding:
+    label_column: stimulus_class
+    group_column: participant
+    classifier: multinomial-logistic
+    emission_mode: uncalibrated
+    max_iter: 2000
+
+source_loso:
+    group_column: participant
+    selection_metric: balanced_accuracy
+    candidate_grid:
+        temporal_bins: [4]
+        feature_kinds: [evoked_dct]
+        decoders: [multinomial-logistic]
+        emission_modes: [uncalibrated]
+        feature_preprocessors: [pca]
+        pca_components: [96]
+        c_grid: [1.0]
+        window_sets:
+            - name: response_window_c
+              centers: [0.088, 0.136, 0.184, 0.232, 0.280]
+              window_size: 0.100
+        window_combines: [log_probability_mean]
+
+outputs:
+    base_dir: results/bush_meg/all_protocols
+    source_loso_summary_csv: results/bush_meg/all_protocols/source_loso_summary.csv
+    source_loso_inner_cv_csv: results/bush_meg/all_protocols/source_loso_inner_cv.csv
+    source_loso_predictions_csv: results/bush_meg/all_protocols/source_loso_predictions.csv
+    covariance_loso_summary_csv: results/bush_meg/all_protocols/covariance_loso_summary.csv
+    covariance_loso_inner_cv_csv: results/bush_meg/all_protocols/covariance_loso_inner_cv.csv
+    covariance_loso_predictions_csv: results/bush_meg/all_protocols/covariance_loso_predictions.csv
+    supervised_lowrank_loso_summary_csv: results/bush_meg/all_protocols/supervised_lowrank_loso_summary.csv
+    supervised_lowrank_loso_inner_cv_csv: results/bush_meg/all_protocols/supervised_lowrank_loso_inner_cv.csv
+    supervised_lowrank_loso_predictions_csv: results/bush_meg/all_protocols/supervised_lowrank_loso_predictions.csv
+    provenance: true
+    hash_input_files: true
+
+all_protocols:
+    output_dir: results/bush_meg/all_protocols
+    methods: all
+    method_groups:
+        protocol1_source_only:
+            - source_loso_logistic
+            - source_loso_linear_svm
+            - source_loso_correlation_prototype
+            - source_loso_decoder_ensemble
+            - source_probability_calibration_none
+            - source_probability_calibration_temperature
+            - source_probability_calibration_class_bias
+            - source_probability_calibration_temperature_plus_class_bias
+            - source_probability_calibration_confusion_correction_l2
+            - source_alignment_procrustes_group_projection
+            - source_alignment_hyperalignment_group_projection
+            - source_alignment_mcca_group_projection
+            - contrastive_group_projection
+            - source_domain_generalization_erm
+            - source_domain_generalization_subject_adversarial
+            - source_domain_generalization_group_dro
+            - reconstruction_source_only
+            - generative_source_gaussian
+            - generative_source_gan
+            - generative_source_diffusion
+            - foundation_frozen_linear_probe
+        protocol2_unlabeled_target_adaptive:
+            - euclidean_alignment
+            - coral_alignment
+            - target_baseline_covariance
+            - subject_sensor_covariance
+            - sinkhorn_transport
+            - group_projection_target_centered
+            - pseudo_label_target_calibrated_alignment
+            - pseudo_label_self_training
+            - riemannian_tangent_transfer
+            - riemannian_procrustes_no_rotation
+            - riemannian_procrustes_paired_unlabeled
+            - mekt
+            - optimal_transport_sinkhorn
+            - source_weighting_target_similarity
+            - source_weighting_hybrid
+            - dann
+            - cdan
+            - cdan_mmd
+            - cdan_conditional_mmd
+            - ttime_after_predict
+            - ttime_before_predict
+            - source_free_adaptation
+            - reconstruction_source_plus_target
+            - unlabeled_calibration_hyperalignment
+            - unlabeled_calibration_mcca
+            - unlabeled_calibration_procrustes
+            - target_style_gaussian
+            - target_style_gan
+            - target_style_diffusion
+            - weak_label_proportion_calibration
+        protocol3_few_shot_calibrated:
+            - source_plus_target_calibration_logistic_k1
+            - source_plus_target_calibration_logistic_k2
+            - source_plus_target_calibration_logistic_k4
+            - source_plus_target_calibration_logistic_k8
+            - source_plus_target_calibration_logistic_k16
+            - source_plus_target_calibration_linear_svm_k1
+            - source_plus_target_calibration_linear_svm_k2
+            - source_plus_target_calibration_linear_svm_k4
+            - source_plus_target_calibration_linear_svm_k8
+            - source_plus_target_calibration_linear_svm_k16
+            - few_shot_target_calibrated_decoder_k1
+            - few_shot_target_calibrated_decoder_k2
+            - few_shot_target_calibrated_decoder_k4
+            - few_shot_target_calibrated_decoder_k8
+            - few_shot_target_calibrated_decoder_k16
+            - target_calibrated_procrustes_k1
+            - target_calibrated_procrustes_k2
+            - target_calibrated_procrustes_k4
+            - target_calibrated_procrustes_k8
+            - target_calibrated_procrustes_k16
+            - target_calibrated_hyperalignment_k1
+            - target_calibrated_hyperalignment_k2
+            - target_calibrated_hyperalignment_k4
+            - target_calibrated_hyperalignment_k8
+            - target_calibrated_hyperalignment_k16
+            - target_calibrated_mcca_k1
+            - target_calibrated_mcca_k2
+            - target_calibrated_mcca_k4
+            - target_calibrated_mcca_k8
+            - target_calibrated_mcca_k16
+            - target_calibrated_gaussian_k1
+            - target_calibrated_gaussian_k2
+            - target_calibrated_gaussian_k4
+            - target_calibrated_gaussian_k8
+            - target_calibrated_gaussian_k16
+            - contrastive_target_calibrated
+            - semi_supervised_lora_few_shot_k1
+            - semi_supervised_lora_few_shot_k2
+            - semi_supervised_lora_few_shot_k4
+            - semi_supervised_lora_few_shot_k8
+            - semi_supervised_lora_few_shot_k16
+            - target_calibrated_gan
+            - target_calibrated_diffusion
+        protocol4_oracle_debug:
+            - oracle_target_calibrated_procrustes
+            - oracle_target_calibrated_hyperalignment
+            - oracle_target_calibrated_mcca
+    method_settings:
+        supervised_lowrank_loso:
+            heavy: true
+            enabled: false
+            smoke_enabled: true
+        source_domain_generalization_subject_adversarial: &heavy_torch_smoke
+            heavy: true
+            enabled: false
+            smoke_enabled: true
+            smoke_overrides:
+                decoding:
+                    max_iter: 200
+                    hidden_units: 32
+                    embedding_dim: 16
+                    max_epochs: 5
+        reconstruction_source_only:
+            <<: *heavy_torch_smoke
+        generative_source_gan:
+            <<: *heavy_torch_smoke
+        generative_source_diffusion:
+            <<: *heavy_torch_smoke
+        foundation_frozen_linear_probe:
+            heavy: true
+            enabled: false
+            smoke_enabled: false
+        dann:
+            heavy: true
+            enabled: false
+            smoke_enabled: true
+            smoke_overrides:
+                decoding:
+                    max_iter: 200
+                    dann_hidden_units: 32
+                    dann_embedding_dim: 16
+                    dann_max_epochs: 5
+                    dann_batch_size: 64
+                    dann_patience: 2
+        cdan:
+            <<: *heavy_torch_smoke
+        cdan_mmd:
+            <<: *heavy_torch_smoke
+        cdan_conditional_mmd:
+            <<: *heavy_torch_smoke
+        ttime_after_predict:
+            <<: *heavy_torch_smoke
+        ttime_before_predict:
+            <<: *heavy_torch_smoke
+        source_free_adaptation:
+            <<: *heavy_torch_smoke
+        reconstruction_source_plus_target:
+            <<: *heavy_torch_smoke
+        target_style_gan:
+            <<: *heavy_torch_smoke
+        target_style_diffusion:
+            <<: *heavy_torch_smoke
+        semi_supervised_lora_few_shot:
+            <<: *heavy_torch_smoke
+        semi_supervised_lora_few_shot_k1:
+            <<: *heavy_torch_smoke
+        semi_supervised_lora_few_shot_k2:
+            <<: *heavy_torch_smoke
+        semi_supervised_lora_few_shot_k4:
+            <<: *heavy_torch_smoke
+        semi_supervised_lora_few_shot_k8:
+            <<: *heavy_torch_smoke
+        semi_supervised_lora_few_shot_k16:
+            <<: *heavy_torch_smoke
+        target_calibrated_gan:
+            <<: *heavy_torch_smoke
+        target_calibrated_diffusion:
+            <<: *heavy_torch_smoke

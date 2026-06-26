@@ -3,6 +3,7 @@ import pytest
 
 from neureptrace.decoding.source_weighting import (
     dynamic_source_group_weights,
+    normalize_source_group_weighting_mode,
     sample_weights_from_group_weights,
     selected_source_groups,
     source_group_weighting_config,
@@ -91,3 +92,16 @@ def test_config_metadata_marks_category_two_modes():
     assert cfg.protocol == "unlabeled_target_adaptive"
     assert metadata["source_group_weighting_uses_unlabeled_target_data"] is True
     assert metadata["source_group_weighting_uses_target_labels"] is False
+
+
+def test_enabled_aliases_select_source_reliability_mode():
+    assert normalize_source_group_weighting_mode(True) == "source_reliability"
+    assert normalize_source_group_weighting_mode("true") == "source_reliability"
+    assert normalize_source_group_weighting_mode("on") == "source_reliability"
+    assert normalize_source_group_weighting_mode("yes") == "source_reliability"
+
+    cfg = source_group_weighting_config({"enabled": True})
+
+    assert cfg.mode == "source_reliability"
+    assert cfg.protocol == "strict_source_only"
+    assert cfg.uses_unlabeled_target_data is False

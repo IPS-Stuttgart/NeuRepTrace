@@ -107,6 +107,22 @@ def _normalize_nonnegative_int(value: int | str, *, name: str) -> int:
     return int(numeric)
 
 
+def _normalize_index_vector(values: Sequence[int] | np.ndarray, *, name: str) -> np.ndarray:
+    array = np.asarray(values)
+    if array.ndim == 0:
+        array = array.reshape(1)
+    flat = array.reshape(-1)
+    if flat.dtype == np.bool_ or any(isinstance(value, (bool, np.bool_)) for value in flat.tolist()):
+        raise ValueError(f"{name} must contain integer row indices, not booleans or a boolean mask.")
+    try:
+        numeric = np.asarray(flat, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain integer row indices.") from exc
+    if not np.all(np.isfinite(numeric)) or not np.all(numeric % 1.0 == 0.0):
+        raise ValueError(f"{name} must contain integer row indices.")
+    return numeric.astype(int, copy=False)
+
+
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
     probabilities = np.asarray(probabilities, dtype=float)
     if probabilities.ndim != 2:
@@ -171,7 +187,7 @@ def select_few_shot_target_calibration_split(
     if target_indices is None:
         indices = np.arange(label_vector.shape[0], dtype=int)
     else:
-        indices = np.asarray(target_indices, dtype=int).reshape(-1)
+        indices = _normalize_index_vector(target_indices, name="target_indices")
     if indices.size == 0:
         raise ValueError("few-shot target calibration requires at least one target row.")
     if np.any(indices < 0) or np.any(indices >= label_vector.shape[0]):
@@ -294,8 +310,8 @@ def fit_few_shot_target_calibrated_decoder(
             min_evaluation_per_class=min_evaluation_per_class,
         )
 
-    calibration_indices = np.asarray(split.calibration_indices, dtype=int).reshape(-1)
-    evaluation_indices = np.asarray(split.evaluation_indices, dtype=int).reshape(-1)
+    calibration_indices = _normalize_index_vector(split.calibration_indices, name="calibration_indices")
+    evaluation_indices = _normalize_index_vector(split.evaluation_indices, name="evaluation_indices")
     if calibration_indices.size == 0:
         raise ValueError("few-shot target calibration selected no calibration rows.")
     if evaluation_indices.size == 0:

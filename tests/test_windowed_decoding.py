@@ -116,6 +116,16 @@ def test_fit_window_model_rejects_feature_matrix_without_columns():
         )
 
 
+def test_fit_window_model_rejects_multidimensional_train_labels():
+    with pytest.raises(ValueError, match="train_labels must be one-dimensional"):
+        fit_window_model(
+            np.array([[-1.0], [1.0]]),
+            np.array([[0], [1]]),
+            fit_model=_fit_sign_classifier,
+            components_pca=float("inf"),
+        )
+
+
 def test_score_windowed_decoding_returns_accuracy_predictions_and_permutation_p():
     result = score_windowed_decoding(
         train_features=np.array([[-2.0], [-1.0], [1.0], [2.0]]),
@@ -190,6 +200,17 @@ def test_score_windowed_decoding_rejects_mismatched_validation_labels():
             train_labels=np.array([0, 1]),
             validation_features=np.array([[-1.0], [1.0]]),
             validation_labels=np.array([0]),
+            fit_model=_fit_sign_classifier,
+        )
+
+
+def test_score_windowed_decoding_rejects_multidimensional_validation_labels():
+    with pytest.raises(ValueError, match="validation_labels must be one-dimensional"):
+        score_windowed_decoding(
+            train_features=np.array([[-1.0], [1.0]]),
+            train_labels=np.array([0, 1]),
+            validation_features=np.array([[-1.0], [1.0]]),
+            validation_labels=np.array([[0], [1]]),
             fit_model=_fit_sign_classifier,
         )
 
