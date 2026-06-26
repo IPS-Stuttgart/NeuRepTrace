@@ -49,7 +49,9 @@ from . import (  # noqa: E402
     _label_proportion_block_ids_patch,
     _label_proportion_tuple_prediction_patch,
     _lora_few_shot_tuple_subject_patch,
+    _mcca_component_count_patch,
     _mcca_repetition_count_patch,
+    _mcca_subject_pca_components_patch,
     _mekt_vector_validation_patch,
     _metadata_column_validation_patch,
     _mixstyle_boolean_config_patch,
@@ -59,6 +61,7 @@ from . import (  # noqa: E402
     _nll_eps_validation_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
+    _paired_stats_tie_patch,
     _pls_da_composite_labels_patch,
     _probability_stacking_group_summary_patch,
     _random_state_config_patch,
@@ -144,7 +147,9 @@ _reconstruction_encoder_config_patch.install()
 _reconstruction_tuple_labels_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
 _bushmeg_all_protocols_subject_loader_patch.install()
+_mcca_component_count_patch.install()
 _mcca_repetition_count_patch.install()
+_mcca_subject_pca_components_patch.install()
 _mekt_vector_validation_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
@@ -157,6 +162,7 @@ _sample_weight_validation_patch.install()
 _sampling_composite_label_array_patch.install()
 _semi_supervised_lora_tuple_labels_patch.install()
 _response_window_time_validation_patch.install()
+_paired_stats_tie_patch.install()
 _riemannian_vector_validation_patch.install()
 _source_alignment_times_validation_patch.install()
 _source_domain_generalization_composite_patch.install()
