@@ -27,9 +27,9 @@ def source_domain_subset_mask(source_domains: Sequence[Hashable] | np.ndarray, *
         raise ValueError("min_domains is outside the valid range.")
     rng = np.random.default_rng(random_state)
     n_omit = min(int(np.floor(omit_fraction * len(unique_domains))), len(unique_domains) - min_domains)
-    shuffled = np.asarray(unique_domains, dtype=object)
-    rng.shuffle(shuffled)
-    omitted = tuple(shuffled[:n_omit].tolist())
+    shuffled_indices = np.arange(len(unique_domains), dtype=int)
+    rng.shuffle(shuffled_indices)
+    omitted = tuple(unique_domains[int(index)] for index in shuffled_indices[:n_omit])
     omitted_set = set(omitted)
     selected = tuple(domain for domain in unique_domains if domain not in omitted_set)
     mask = np.asarray([domain not in omitted_set for domain in domains.tolist()], dtype=bool)
@@ -52,18 +52,46 @@ def apply_source_domain_subset(features: Sequence[Sequence[float]] | np.ndarray,
 def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str = "values") -> np.ndarray:
     if isinstance(values, (str, bytes)):
         raise ValueError(f"{name} must be a one-dimensional sequence of hashable values, not a scalar string.")
-    try:
-        items = list(values)
-    except TypeError as exc:
-        raise ValueError(f"{name} must be a one-dimensional sequence of hashable values.") from exc
+    items = _row_items(values, name=name)
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
         try:
-            hash(value)
+            vector[index] = _hashable_value(value)
         except TypeError as exc:
             raise ValueError(f"{name} values must be hashable; got {value!r}.") from exc
-        vector[index] = value
     return vector
+
+
+def _row_items(values: Sequence[Any] | np.ndarray, *, name: str) -> list[Any]:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            raise ValueError(f"{name} must be a one-dimensional sequence of hashable values.")
+        if array.ndim == 1:
+            return array.tolist()
+        rows = array.reshape(array.shape[0], -1)
+        if rows.shape[1] == 1:
+            return rows[:, 0].tolist()
+        return [tuple(row.tolist()) for row in rows]
+    try:
+        return list(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a one-dimensional sequence of hashable values.") from exc
+
+
+def _hashable_value(value: Any) -> Hashable:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _hashable_value(value.item())
+        return tuple(_hashable_value(item) for item in value.tolist())
+    if isinstance(value, list):
+        return tuple(_hashable_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_hashable_value(item) for item in value)
+    hash(value)
+    return value
 
 
 def _validate_positive_int(value: object, *, name: str) -> int:
