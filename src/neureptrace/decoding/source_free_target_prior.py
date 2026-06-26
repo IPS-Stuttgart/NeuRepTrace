@@ -142,7 +142,8 @@ def _validate_prior(prior: np.ndarray, *, n_classes: int) -> np.ndarray:
         raise ValueError("target prior must contain finite non-negative entries.")
     if float(target_prior.sum()) <= 0.0:
         raise ValueError("target prior must contain positive mass.")
-    return np.clip(target_prior / target_prior.sum(), _EPS, None)
+    target_prior = np.clip(target_prior / target_prior.sum(), _EPS, None)
+    return target_prior / target_prior.sum()
 
 
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
