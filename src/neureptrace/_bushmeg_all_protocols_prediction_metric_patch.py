@@ -18,11 +18,26 @@ _CLASS_COLUMN_RE = re.compile(r"^class_(\d+)$")
 
 
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
-    if probabilities.size == 0:
+    probability_matrix = np.asarray(probabilities, dtype=float)
+    label_indices = np.asarray(labels, dtype=int).reshape(-1)
+    if probability_matrix.size == 0:
         return float("nan")
-    k = min(int(k), probabilities.shape[1])
-    top = np.argsort(probabilities, axis=1)[:, -k:]
-    return float(np.mean([label in row for label, row in zip(labels, top, strict=True)]))
+    if probability_matrix.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional matrix.")
+    if label_indices.size != probability_matrix.shape[0]:
+        raise ValueError("labels must have one entry per probability row.")
+    if probability_matrix.shape[1] == 0:
+        return float("nan")
+
+    k_value = min(max(int(k), 1), probability_matrix.shape[1])
+    thresholds = np.partition(probability_matrix, -k_value, axis=1)[:, -k_value]
+    hits: list[bool] = []
+    for row, label, threshold in zip(probability_matrix, label_indices, thresholds, strict=True):
+        if label < 0 or label >= row.shape[0]:
+            hits.append(False)
+        else:
+            hits.append(bool(row[int(label)] >= threshold))
+    return float(np.mean(hits))
 
 
 def _numeric_label_indices(values: pd.Series) -> np.ndarray | None:
@@ -127,6 +142,7 @@ def install() -> None:
     if getattr(all_protocols, _PATCH_MARKER, False):
         return
 
+    all_protocols._top_k_accuracy = _top_k_accuracy
     all_protocols._prediction_metric_frame = _prediction_metric_frame
     setattr(all_protocols, _PATCH_MARKER, True)
 
