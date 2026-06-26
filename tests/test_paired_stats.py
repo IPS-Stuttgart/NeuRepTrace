@@ -138,6 +138,27 @@ def test_paired_decoder_statistics_keeps_emission_modes_separate():
     assert effect_rows.loc["uncalibrated", "better_decoder_by_mean"] == "lda"
 
 
+def test_paired_decoder_statistics_stratifies_additional_summary_columns():
+    rows = []
+    for pca_components, lda_accuracy, logistic_accuracy in [("10", 0.50, 0.70), ("20", 0.80, 0.60)]:
+        for subject in ["sub-01", "sub-02"]:
+            rows.extend(
+                [
+                    {"emission_mode": "calibrated", "pca_components": pca_components, "decoder": "lda", "subject": subject, "effect_accuracy": lda_accuracy},
+                    {"emission_mode": "calibrated", "pca_components": pca_components, "decoder": "logistic", "subject": subject, "effect_accuracy": logistic_accuracy},
+                ]
+            )
+
+    stats = paired_decoder_statistics(pd.DataFrame(rows), metrics=("effect_accuracy",), n_permutations=10_000)
+    effect_rows = stats.set_index("pca_components")
+
+    assert set(effect_rows.index) == {"10", "20"}
+    assert effect_rows.loc["10", "mean_difference_a_minus_b"] == pytest.approx(-0.20)
+    assert effect_rows.loc["10", "better_decoder_by_mean"] == "logistic"
+    assert effect_rows.loc["20", "mean_difference_a_minus_b"] == pytest.approx(0.20)
+    assert effect_rows.loc["20", "better_decoder_by_mean"] == "lda"
+
+
 def test_paired_decoder_statistics_rejects_duplicate_subject_decoder_modes():
     rows = []
     for duplicate in range(2):

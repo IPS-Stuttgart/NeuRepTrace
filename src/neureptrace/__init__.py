@@ -20,6 +20,7 @@ from . import (  # noqa: E402
     _bushmeg_protocol3_index_validation_patch,
     _bushmeg_source_loso_ensemble_numeric_patch,
     _bushmeg_source_loso_prototype_patch,
+    _calibration_weight_fraction_patch,
     _category2_autoencoder_all_protocols_patch,
     _category2_autoencoder_max_folds_patch,
     _classifier_tuple_labels_patch,
@@ -62,6 +63,8 @@ from . import (  # noqa: E402
     _mne_pseudo_alignment_fallback_validity_patch,
     _mne_time_decode_ensemble_param_validation_patch,
     _nll_eps_validation_patch,
+    _observation_ensemble_partial_class_columns_patch,
+    _observation_ensemble_ungrouped_metrics_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
     _paired_stats_tie_patch,
@@ -86,6 +89,7 @@ from . import (  # noqa: E402
     _source_free_probability_rows_patch,
     _source_free_tuple_labels_patch,
     _source_label_vector_patch,
+    _source_mixup_boolean_config_patch,
     _source_mixstyle_tuple_labels_patch,
     _source_mixstyle_tuple_vectors_patch,
     _source_selection_class_balance_patch,
@@ -97,6 +101,7 @@ from . import (  # noqa: E402
     _source_weighting_tuple_row_groups_patch,
     _subspace_bool_config_patch,
     _subspace_adaptation_config_bool_patch,
+    _temporal_generalization_string_groups_patch,
     _temporal_smoothing_singleton_sequence_patch,
     _transfer_array_label_null_patch,
     _transfer_components_validation_patch,
@@ -105,6 +110,7 @@ from . import (  # noqa: E402
     _transfer_null_label_conflict_patch,
     _tuple_label_calibration_split_patch,
     _unlabeled_anchor_tuple_patch,
+    _vrex_numeric_config_patch,
     _windowed_composite_labels_patch,
 )
 
@@ -142,6 +148,8 @@ _decoding_probability_patch.install()
 _few_shot_target_index_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
+_observation_ensemble_partial_class_columns_patch.install()
+_observation_ensemble_ungrouped_metrics_patch.install()
 _probability_stacking_group_summary_patch.install()
 _pls_da_composite_labels_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
@@ -168,6 +176,7 @@ _source_alignment_optimal_transport_patch.install()
 _mne_alignment_calibration_anchor_patch.install()
 _mne_pseudo_alignment_fallback_validity_patch.install()
 _nll_eps_validation_patch.install()
+_calibration_weight_fraction_patch.install()
 _sample_weight_validation_patch.install()
 _sampling_composite_label_array_patch.install()
 _semi_supervised_lora_tuple_labels_patch.install()
@@ -180,6 +189,7 @@ _source_free_standardize_target_patch.install()
 _source_free_probability_rows_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_label_vector_patch.install()
+_source_mixup_boolean_config_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
 _source_mixstyle_tuple_vectors_patch.install()
 _random_state_config_patch.install()
@@ -193,6 +203,7 @@ _source_weighting_enabled_alias_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _subspace_bool_config_patch.install()
 _subspace_adaptation_config_bool_patch.install()
+_temporal_generalization_string_groups_patch.install()
 _temporal_smoothing_singleton_sequence_patch.install()
 _transfer_array_label_null_patch.install()
 _transfer_components_validation_patch.install()
@@ -202,6 +213,7 @@ _transfer_null_label_conflict_patch.install()
 _windowed_composite_labels_patch.install()
 _tuple_label_calibration_split_patch.install()
 _unlabeled_anchor_tuple_patch.install()
+_vrex_numeric_config_patch.install()
 
 from . import (  # noqa: E402
     _source_alignment_cli_choices_patch,

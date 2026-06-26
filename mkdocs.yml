@@ -38,6 +38,7 @@ nav:
           - Transfer Component Analysis: reference/transfer-component-analysis.md
           - Source MixStyle: reference/source-mixstyle.md
           - Kernel Mean Matching: reference/kernel-mean-matching.md
+          - Prior-shift Adaptation: reference/prior-shift.md
           - Emission Compare: reference/emission-compare.md
           - Inference: reference/inference.md
           - Metadata: reference/metadata.md
