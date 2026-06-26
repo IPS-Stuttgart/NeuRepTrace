@@ -135,18 +135,12 @@ def adapt_probability_blocks_for_prior_shift(
     """Run prior-shift adaptation separately for each target block."""
 
     matrix = _probability_matrix(probabilities, epsilon=kwargs.get("epsilon", EPSILON))
-    blocks = np.asarray(block_ids, dtype=object).reshape(-1)
-    if blocks.shape[0] != matrix.shape[0]:
-        raise ValueError(f"block_ids must contain one value per probability row: {blocks.shape[0]} != {matrix.shape[0]}.")
+    blocks = _object_vector(block_ids, expected_length=matrix.shape[0], name="block_ids")
     minimum = _positive_int(min_block_rows, name="min_block_rows")
     adapted = np.empty_like(matrix)
     results: dict[Hashable, PriorShiftAdaptationResult] = {}
-    for block in tuple(dict.fromkeys(blocks.tolist())):
-        try:
-            hash(block)
-        except TypeError as exc:
-            raise ValueError(f"block_ids must be hashable; got {block!r}.") from exc
-        mask = blocks == block
+    for block in _unique_values(blocks):
+        mask = _object_equal_mask(blocks, block)
         if int(np.sum(mask)) < minimum:
             raise ValueError(f"Block {block!r} has fewer than min_block_rows={minimum} rows.")
         result = adapt_probabilities_for_prior_shift(matrix[mask], source_prior=source_prior, **kwargs)
@@ -172,11 +166,11 @@ def adapt_probability_blocks_for_prior_shift(
 def prior_from_labels(labels: Sequence[Hashable] | np.ndarray, classes: Sequence[Hashable] | np.ndarray | None = None, *, smoothing: float | str = 0.0) -> tuple[np.ndarray, tuple[Hashable, ...]]:
     """Compute an empirical prior from source labels."""
 
-    label_vector = np.asarray(labels, dtype=object).reshape(-1)
+    label_vector = _object_vector(labels, name="labels")
     if label_vector.size == 0:
         raise ValueError("labels must contain at least one row.")
-    class_order = tuple(dict.fromkeys(label_vector.tolist())) if classes is None else tuple(np.asarray(classes, dtype=object).reshape(-1).tolist())
-    counts = np.asarray([np.sum(label_vector == class_label) for class_label in class_order], dtype=float)
+    class_order = _unique_values(label_vector) if classes is None else tuple(_object_vector(classes, name="classes").tolist())
+    counts = np.asarray([np.count_nonzero(_object_equal_mask(label_vector, class_label)) for class_label in class_order], dtype=float)
     return _normalize_prior(counts + _nonnegative_float(smoothing, name="smoothing"), epsilon=EPSILON), class_order
 
 
@@ -251,6 +245,80 @@ def _normalize_bias(values: np.ndarray) -> np.ndarray:
 
 def _format(values: np.ndarray) -> str:
     return "|".join(f"{float(value):.12g}" for value in np.asarray(values, dtype=float).reshape(-1))
+
+
+def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str, expected_length: int | None = None) -> np.ndarray:
+    items = _row_items(values, expected_length=expected_length)
+    if expected_length is not None and len(items) != expected_length:
+        raise ValueError(f"{name} must contain one value per probability row: {len(items)} != {expected_length}.")
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = _hashable_object_value(value)
+    return vector
+
+
+def _row_items(values: Sequence[Any] | np.ndarray, *, expected_length: int | None) -> list[Any]:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            return [array.item()]
+        if array.ndim == 1:
+            return array.tolist()
+        rows = array.reshape(array.shape[0], -1)
+        if expected_length is not None and rows.shape[0] == expected_length:
+            return [row[0] if row.shape[0] == 1 else tuple(row.tolist()) for row in rows]
+        if expected_length is not None and array.size == expected_length and 1 in array.shape:
+            return array.reshape(-1).tolist()
+        return [tuple(row.tolist()) for row in rows]
+    if isinstance(values, (str, bytes)):
+        return [values]
+    try:
+        return list(values)
+    except TypeError:
+        return [values]
+
+
+def _hashable_object_value(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _hashable_object_value(value.item())
+        return tuple(_hashable_object_value(item) for item in value.tolist())
+    if isinstance(value, list):
+        return tuple(_hashable_object_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_hashable_object_value(item) for item in value)
+    if isinstance(value, dict):
+        pairs = ((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items())
+        return tuple(sorted(pairs, key=lambda pair: repr(pair[0])))
+    return value
+
+
+def _unique_values(values: Sequence[Any] | np.ndarray) -> tuple[Any, ...]:
+    unique: list[Any] = []
+    vector = values if isinstance(values, np.ndarray) else _object_vector(values, name="values")
+    for value in vector.tolist():
+        if not any(_object_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return tuple(unique)
+
+
+def _object_equal_mask(values: np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_object_equal(value, target) for value in values.tolist()], dtype=bool)
+
+
+def _object_equal(left: Any, right: Any) -> bool:
+    try:
+        comparison = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(comparison, (bool, np.bool_)):
+        return bool(comparison)
+    try:
+        return bool(np.all(comparison))
+    except (TypeError, ValueError):
+        return False
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
