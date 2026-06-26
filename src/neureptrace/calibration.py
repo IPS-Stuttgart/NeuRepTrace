@@ -86,6 +86,13 @@ def _format_float(value: float, digits: int = 3) -> str:
     return f"{value:.{digits}f}"
 
 
+def _reject_boolean_numeric_values(values: pd.Series, column: str, *, source: str) -> None:
+    boolean_values = values.map(lambda value: isinstance(value, (bool, np.bool_))).fillna(False).astype(bool)
+    if boolean_values.any():
+        bad_rows = boolean_values[boolean_values].index.tolist()[:5]
+        raise ValueError(f"{source} contains boolean values in numeric column '{column}' at row(s) {bad_rows}.")
+
+
 def _present_group_columns(frame: pd.DataFrame) -> list[str]:
     return [column for column in GROUP_COLUMNS if column in frame.columns]
 
@@ -97,6 +104,7 @@ def _validate_calibration_summary(summary: pd.DataFrame) -> pd.DataFrame:
 
     validated = summary.copy()
     for column in SUMMARY_NUMERIC_COLUMNS:
+        _reject_boolean_numeric_values(validated[column], column, source="Summary")
         values = pd.to_numeric(validated[column], errors="coerce")
         if values.isna().any():
             bad_rows = values[values.isna()].index.tolist()[:5]
@@ -179,6 +187,7 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
 
     validated = frame.copy()
     for column in RELIABILITY_BIN_NUMERIC_COLUMNS:
+        _reject_boolean_numeric_values(validated[column], column, source=str(csv_path))
         values = pd.to_numeric(validated[column], errors="coerce")
         missing_values = values.isna()
         allowed_missing = pd.Series(False, index=values.index)
@@ -232,6 +241,7 @@ def _validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFr
             raise ValueError(f"{csv_path} contains values outside [0, 1] in column '{column}' at row(s) {bad_rows}.")
 
     if RELIABILITY_BIN_WEIGHT_COLUMN in validated.columns:
+        _reject_boolean_numeric_values(validated[RELIABILITY_BIN_WEIGHT_COLUMN], RELIABILITY_BIN_WEIGHT_COLUMN, source=str(csv_path))
         sample_weight = pd.to_numeric(validated[RELIABILITY_BIN_WEIGHT_COLUMN], errors="coerce")
         missing_weight = sample_weight.isna()
         if missing_weight.any():
