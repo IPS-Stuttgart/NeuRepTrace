@@ -1,4 +1,4 @@
-"""Preserve composite class labels in source-free adaptation."""
+"""Preserve composite class labels in source-free and related adaptation paths."""
 
 from __future__ import annotations
 
@@ -90,16 +90,17 @@ def _align_probability_columns(probabilities: np.ndarray, *, model_classes: np.n
 
 
 def install() -> None:
-    """Patch source-free adaptation class-label handling."""
+    """Patch source-free and torch-adaptation class-label handling."""
 
     source_free = importlib.import_module("neureptrace.decoding.source_free")
-    if getattr(source_free._resolve_classes, _PATCH_MARKER, False):
-        return
-    global _normalize_probability_rows
-    _normalize_probability_rows = source_free._normalize_probability_rows
-    setattr(_resolve_classes, _PATCH_MARKER, True)
-    source_free._resolve_classes = _resolve_classes
-    source_free._align_probability_columns = _align_probability_columns
+    if not getattr(source_free._resolve_classes, _PATCH_MARKER, False):
+        global _normalize_probability_rows
+        _normalize_probability_rows = source_free._normalize_probability_rows
+        setattr(_resolve_classes, _PATCH_MARKER, True)
+        source_free._resolve_classes = _resolve_classes
+        source_free._align_probability_columns = _align_probability_columns
+
+    importlib.import_module("neureptrace._adversarial_composite_labels_patch").install()
 
 
 __all__ = ["install"]
