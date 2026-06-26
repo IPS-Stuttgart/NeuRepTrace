@@ -47,12 +47,21 @@ class FewShotTargetCalibrationResult:
 
 
 def _as_1d_object_array(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
-    array = np.asarray(values, dtype=object)
-    if array.ndim == 0:
-        return array.reshape(1)
-    if array.ndim != 1:
-        raise ValueError(f"{name} must be one-dimensional.")
-    return array.reshape(-1)
+    if isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            return values.reshape(1)
+        if values.ndim != 1:
+            raise ValueError(f"{name} must be one-dimensional.")
+        return values.reshape(-1)
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+    if any(isinstance(item, tuple) for item in items):
+        vector = np.empty(len(items), dtype=object)
+        vector[:] = items
+        return vector
+    return np.asarray(items).reshape(-1)
 
 
 def _as_feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
@@ -111,6 +120,8 @@ def _normalize_index_vector(values: Sequence[int] | np.ndarray, *, name: str) ->
     array = np.asarray(values)
     if array.ndim == 0:
         array = array.reshape(1)
+    if array.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional.")
     flat = array.reshape(-1)
     if flat.dtype == np.bool_ or any(isinstance(value, (bool, np.bool_)) for value in flat.tolist()):
         raise ValueError(f"{name} must contain integer row indices, not booleans or a boolean mask.")
