@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 
 from neureptrace.decoding import make_decoder
@@ -144,6 +145,23 @@ def test_summarize_temporal_generalization_matrix_groups_rows():
             "is_diagonal": False,
         }
     ]
+
+
+def test_summarize_temporal_generalization_matrix_accepts_single_group_column_string():
+    rows = pd.DataFrame(
+        {
+            "decoder": ["toy", "toy", "other"],
+            "accuracy": [1.0, 0.5, 0.0],
+            "chance_accuracy": [0.5, 0.5, 0.5],
+        }
+    )
+
+    summary = summarize_temporal_generalization_matrix(rows, group_columns="decoder")
+
+    assert summary["decoder"].tolist() == ["other", "toy"]
+    assert summary["n_rows"].tolist() == [1, 2]
+    assert summary["accuracy_mean"].tolist() == [0.0, 0.75]
+    assert summary["above_chance_count"].tolist() == [0, 1]
 
 
 @pytest.mark.parametrize("invalid", [True, np.bool_(False), 1.5, np.nan])
