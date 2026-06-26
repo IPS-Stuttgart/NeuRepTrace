@@ -19,6 +19,7 @@ from neureptrace.io.fieldtrip_mat import load_fieldtrip_mat_epochs
 SUPPORTED_DATASET_TYPES = {"fieldtrip_mat", "mne_epochs"}
 DEFAULT_SCHEMA_VERSION = "neureptrace.dataset.v1"
 CHANNEL_POLICIES = {"exact", "intersection", "first_dataset"}
+_BOOLEAN_PARTICIPANT_TEXT = {"true", "false", "yes", "no"}
 
 
 class ConfigValidationError(ValueError):
@@ -98,14 +99,24 @@ def apply_overrides(config: Mapping[str, Any], overrides: Sequence[str] | None =
     return updated
 
 
+def _is_boolean_like(value: Any) -> bool:
+    return isinstance(value, bool) or type(value).__name__ == "bool_"
+
+
 def parse_participant_ids(value: Any) -> list[int | str]:
     """Parse compact participant specifications such as ``1-4,6,8``."""
 
     if value is None:
         return []
+    if _is_boolean_like(value):
+        raise ValueError("participants.ids must contain participant identifiers, not booleans.")
+    if isinstance(value, Mapping):
+        raise ValueError("participants.ids must be an int, string, or list, not a mapping.")
     if isinstance(value, int):
         return [value]
     if isinstance(value, str):
+        if value.strip().lower() in _BOOLEAN_PARTICIPANT_TEXT:
+            raise ValueError("participants.ids must contain participant identifiers, not booleans.")
         parts: Iterable[Any] = [part.strip() for part in value.split(",") if part.strip()]
     elif isinstance(value, Iterable):
         parts = value
@@ -114,12 +125,18 @@ def parse_participant_ids(value: Any) -> list[int | str]:
 
     parsed: list[int | str] = []
     for part in parts:
+        if _is_boolean_like(part):
+            raise ValueError("participants.ids entries must be participant identifiers, not booleans.")
+        if isinstance(part, Mapping):
+            raise ValueError("participants.ids entries must be scalars, not mappings.")
         if isinstance(part, int):
             parsed.append(part)
             continue
         text = str(part).strip()
         if not text:
             continue
+        if text.lower() in _BOOLEAN_PARTICIPANT_TEXT:
+            raise ValueError("participants.ids entries must be participant identifiers, not booleans.")
         if "," in text:
             parsed.extend(parse_participant_ids(text))
             continue

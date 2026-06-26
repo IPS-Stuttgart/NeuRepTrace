@@ -1,0 +1,22 @@
+from __future__ import annotations
+
+import numpy as np
+
+from neureptrace.decoding.confidence_filter import confidence_filter, probability_entropy
+
+
+def test_confidence_filter_basic_thresholds() -> None:
+    rows = np.asarray([[0.90, 0.10], [0.55, 0.45], [0.10, 0.80]], dtype=float)
+    result = confidence_filter(rows, min_confidence=0.70, min_margin=0.20)
+    assert result.predicted_index.tolist() == [0, 0, 1]
+    assert result.accepted_mask.tolist() == [True, False, True]
+    assert result.metadata["confidence_filter_n_accepted"] == 2
+
+
+def test_entropy_and_row_normalization() -> None:
+    rows = np.asarray([[5.0, 5.0], [10.0, 0.0]], dtype=float)
+    entropy = probability_entropy(rows)
+    result = confidence_filter(rows, min_confidence=0.8)
+    assert np.allclose(entropy, [1.0, 0.0], atol=1e-6)
+    assert np.allclose(result.confidence, [0.5, 1.0])
+    assert result.accepted_mask.tolist() == [False, True]

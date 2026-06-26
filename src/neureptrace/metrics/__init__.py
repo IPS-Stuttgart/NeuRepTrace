@@ -70,6 +70,23 @@ def _labels_contain_boolean(labels: np.ndarray) -> bool:
     return False
 
 
+def _coerce_label_indices(labels: np.ndarray) -> np.ndarray:
+    if _labels_contain_boolean(labels):
+        raise ValueError("labels must contain integer class indices")
+    if np.issubdtype(labels.dtype, np.integer):
+        return labels.astype(int, copy=False)
+
+    try:
+        numeric_labels = np.asarray(labels, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("labels must contain integer class indices") from exc
+    if not np.all(np.isfinite(numeric_labels)):
+        raise ValueError("labels must contain finite integer class indices")
+    if not np.all(numeric_labels == np.floor(numeric_labels)):
+        raise ValueError("labels must contain integer class indices")
+    return numeric_labels.astype(int, copy=False)
+
+
 def validate_probability_inputs(
     probabilities: np.ndarray,
     labels: np.ndarray | None = None,
@@ -114,15 +131,10 @@ def validate_probability_inputs(
         raise ValueError("labels must have shape (n_samples,)")
     if probabilities.shape[0] != labels.shape[0]:
         raise ValueError("probabilities and labels must contain the same samples")
-    if _labels_contain_boolean(labels):
-        raise ValueError("labels must contain integer class indices")
-    if not np.issubdtype(labels.dtype, np.integer):
-        if not np.all(np.equal(labels, np.asarray(labels, dtype=int))):
-            raise ValueError("labels must contain integer class indices")
-        labels = labels.astype(int)
+    labels = _coerce_label_indices(labels)
     if np.any(labels < 0) or np.any(labels >= probabilities.shape[1]):
         raise ValueError("labels must be valid column indices for probabilities")
-    return probabilities, labels.astype(int, copy=False)
+    return probabilities, labels
 
 
 def expected_calibration_error(

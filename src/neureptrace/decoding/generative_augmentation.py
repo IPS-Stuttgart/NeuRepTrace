@@ -663,6 +663,16 @@ def _sample_class_rows(
         calibration_mean = np.mean(calibration_rows, axis=0)
         mean = (1.0 - config.target_calibration_weight) * mean + config.target_calibration_weight * calibration_mean
         covariance_rows = np.vstack([class_rows, calibration_rows])
+    noise = rng.normal(size=(config.synthetic_per_class, class_rows.shape[1]))
+    if config.covariance_shrinkage >= 1.0:
+        variance_rows = covariance_rows if covariance_rows.shape[0] > 1 else fallback_rows
+        if variance_rows.shape[0] > 1:
+            variance = np.var(variance_rows, axis=0, ddof=1)
+        else:
+            variance = np.ones(class_rows.shape[1], dtype=float)
+        variance = np.where(np.isfinite(variance), variance, 1.0)
+        scale = np.sqrt(np.maximum(variance, max(float(config.covariance_floor), 0.0)))
+        return mean + config.noise_scale * noise * scale
     covariance = _regularized_covariance(
         covariance_rows,
         fallback_rows=fallback_rows,
@@ -670,7 +680,6 @@ def _sample_class_rows(
         floor=config.covariance_floor,
     )
     sqrt_covariance = _matrix_power(covariance, 0.5, floor=config.covariance_floor)
-    noise = rng.normal(size=(config.synthetic_per_class, class_rows.shape[1]))
     return mean + config.noise_scale * (noise @ sqrt_covariance.T)
 
 
