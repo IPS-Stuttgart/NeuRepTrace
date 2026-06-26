@@ -73,12 +73,19 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
         l2 = _nonnegative_float(self.l2, name="l2")
         max_iter = _positive_int(self.max_iter, name="max_iter")
         tol = _positive_float(self.tol, name="tol")
+        fit_intercept = _boolean_config_value(self.fit_intercept, name="fit_intercept")
+        standardize = _boolean_config_value(self.standardize, name="standardize")
         sample_weights = _class_weights(labels, classes=classes, class_weight=self.class_weight)
 
-        self.feature_mean_ = np.mean(x, axis=0) if self.standardize else np.zeros(x.shape[1], dtype=float)
+        self.fit_intercept_ = fit_intercept
+        self.standardize_ = standardize
+        self.feature_mean_ = np.mean(x, axis=0) if standardize else np.zeros(x.shape[1], dtype=float)
         centered = x - self.feature_mean_
-        ddof = 1 if x.shape[0] > 1 else 0
-        self.feature_scale_ = np.maximum(np.std(centered, axis=0, ddof=ddof), _MIN_SCALE) if self.standardize else np.ones(x.shape[1], dtype=float)
+        self.feature_scale_ = (
+            np.maximum(np.std(centered, axis=0, ddof=1 if x.shape[0] > 1 else 0), _MIN_SCALE)
+            if standardize
+            else np.ones(x.shape[1], dtype=float)
+        )
         z = centered / self.feature_scale_
 
         self.classes_ = _object_vector(classes, expected_length=len(classes), name="classes")
@@ -90,9 +97,10 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
         self.l2_ = l2
         self.class_weight_vector_ = sample_weights.copy()
 
-        n_free = self.n_classes_ - 1
-        coefficient_size = self.n_features_in_ * n_free
-        initial = np.zeros(coefficient_size + (n_free if self.fit_intercept else 0), dtype=float)
+        n_free_classes = self.n_classes_ - 1
+        coefficient_size = self.n_features_in_ * n_free_classes
+        parameter_size = coefficient_size + (n_free_classes if fit_intercept else 0)
+        initial = np.zeros(parameter_size, dtype=float)
 
         def objective(parameters: np.ndarray) -> tuple[float, np.ndarray]:
             coefficients, intercept = self._unpack(parameters)
@@ -109,8 +117,9 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
                 residual = probabilities
                 residual[np.arange(domain_y.shape[0]), domain_y] -= 1.0
                 residual *= weights[:, None]
-                pieces = [(domain_x.T @ residual[:, :-1]).ravel()]
-                if self.fit_intercept:
+                coefficient_gradient = domain_x.T @ residual[:, :-1]
+                pieces = [coefficient_gradient.ravel()]
+                if fit_intercept:
                     pieces.append(np.sum(residual[:, :-1], axis=0))
                 losses.append(loss)
                 gradients.append(np.concatenate(pieces))
@@ -148,10 +157,10 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
         return self
 
     def _unpack(self, parameters: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        n_free = self.n_classes_ - 1
-        coefficient_size = self.n_features_in_ * n_free
-        coefficients = parameters[:coefficient_size].reshape(self.n_features_in_, n_free)
-        intercept = parameters[coefficient_size:] if self.fit_intercept else np.zeros(n_free, dtype=float)
+        n_free_classes = self.n_classes_ - 1
+        coefficient_size = self.n_features_in_ * n_free_classes
+        coefficients = parameters[:coefficient_size].reshape(self.n_features_in_, n_free_classes)
+        intercept = parameters[coefficient_size:] if self.fit_intercept_ else np.zeros(n_free_classes, dtype=float)
         return coefficients, intercept
 
     def _standardized(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
@@ -201,8 +210,8 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
             "vrex_test_rows": "" if test_rows is None else int(test_rows),
             "vrex_penalty_weight": float(self.penalty_weight_),
             "vrex_l2": float(self.l2_),
-            "vrex_standardize": bool(self.standardize),
-            "vrex_fit_intercept": bool(self.fit_intercept),
+            "vrex_standardize": bool(self.standardize_),
+            "vrex_fit_intercept": bool(self.fit_intercept_),
             "vrex_mean_domain_risk": float(self.mean_domain_risk_),
             "vrex_domain_risk_variance": float(self.domain_risk_variance_),
             "vrex_domain_risks": "|".join(f"{value:.12g}" for value in self.domain_risks_),
@@ -335,3 +344,20 @@ def _nonnegative_float(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be finite and non-negative.")
     return parsed
+
+
+def _boolean_config_value(value: bool | int | float | str, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+        raise ValueError(f"{name} must be a boolean value, got {value!r}.")
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        parsed = float(value)
+        if np.isfinite(parsed) and parsed in {0.0, 1.0}:
+            return bool(parsed)
+    raise ValueError(f"{name} must be a boolean value, got {value!r}.")
