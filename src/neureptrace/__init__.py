@@ -93,6 +93,7 @@ from . import (  # noqa: E402
     _source_alignment_oracle_patch,
     _source_alignment_pseudo_calibration_patch,
     _source_alignment_pseudo_repetition_patch,
+    _source_alignment_target_seed_patch,
     _source_alignment_times_validation_patch,
     _source_domain_generalization_composite_patch,
     _source_free_standardize_target_patch,
@@ -189,6 +190,7 @@ _mmd_source_weighting_gamma_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
 _source_alignment_pseudo_repetition_patch.install()
+_source_alignment_target_seed_patch.install()
 _source_alignment_optimal_transport_patch.install()
 _mne_alignment_calibration_anchor_patch.install()
 _mne_pseudo_alignment_fallback_validity_patch.install()
