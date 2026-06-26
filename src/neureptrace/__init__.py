@@ -77,6 +77,7 @@ from . import (  # noqa: E402
     _probability_stacking_group_summary_patch,
     _random_state_config_patch,
     _reaction_time_trial_index_base_patch,
+    _reaction_time_trial_value_type_patch,
     _reconstruction_encoder_config_patch,
     _reconstruction_tuple_labels_patch,
     _report_finite_metric_selection_patch,
@@ -208,6 +209,7 @@ _source_mixstyle_tuple_labels_patch.install()
 _source_mixstyle_tuple_vectors_patch.install()
 _random_state_config_patch.install()
 _reaction_time_trial_index_base_patch.install()
+_reaction_time_trial_value_type_patch.install()
 _mixstyle_boolean_config_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
