@@ -106,20 +106,7 @@ def validate_probability_inputs(
     require_normalized: bool = True,
     normalization_atol: float = 1e-6,
 ) -> tuple[np.ndarray, np.ndarray | None]:
-    """Validate and coerce probability-matrix inputs used by scoring metrics.
-
-    Parameters
-    ----------
-    probabilities:
-        Array-like object with shape ``(n_samples, n_classes)``.
-    labels:
-        Optional integer class labels of shape ``(n_samples,)``.
-    require_normalized:
-        If true, each probability row must sum to one within
-        ``normalization_atol``.
-    normalization_atol:
-        Absolute tolerance for row-sum checks.
-    """
+    """Validate and coerce probability-matrix inputs used by scoring metrics."""
     normalization_atol = _validate_non_negative_finite_float(normalization_atol, "normalization_atol")
     probabilities = np.asarray(probabilities, dtype=float)
     if probabilities.ndim != 2:
@@ -149,23 +136,8 @@ def validate_probability_inputs(
     return probabilities, labels
 
 
-def expected_calibration_error(
-    probabilities: np.ndarray,
-    labels: np.ndarray,
-    *,
-    n_bins: int = 10,
-) -> float:
-    """Compute top-label expected calibration error.
-
-    Parameters
-    ----------
-    probabilities:
-        Array of shape ``(n_samples, n_classes)`` with predicted class probabilities.
-    labels:
-        Integer class labels of shape ``(n_samples,)``.
-    n_bins:
-        Number of equally spaced confidence bins.
-    """
+def expected_calibration_error(probabilities: np.ndarray, labels: np.ndarray, *, n_bins: int = 10) -> float:
+    """Compute top-label expected calibration error."""
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
     n_bins = _validate_positive_integer(n_bins, "n_bins")
@@ -190,12 +162,7 @@ def expected_calibration_error(
     return float(ece)
 
 
-def reliability_bins(
-    probabilities: np.ndarray,
-    labels: np.ndarray,
-    *,
-    n_bins: int = 10,
-) -> list[dict[str, float | int]]:
+def reliability_bins(probabilities: np.ndarray, labels: np.ndarray, *, n_bins: int = 10) -> list[dict[str, float | int]]:
     """Summarize top-label reliability bins for calibration plots."""
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
@@ -261,5 +228,6 @@ def top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int = 1)
     if k >= probabilities.shape[1]:
         return 1.0
 
-    top_k = np.argpartition(probabilities, kth=probabilities.shape[1] - k, axis=1)[:, -k:]
-    return float(np.mean(np.any(top_k == labels[:, None], axis=1)))
+    kth_scores = np.partition(probabilities, kth=probabilities.shape[1] - k, axis=1)[:, -k]
+    true_scores = probabilities[np.arange(labels.shape[0]), labels]
+    return float(np.mean(true_scores >= kth_scores))
