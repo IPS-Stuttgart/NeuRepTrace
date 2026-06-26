@@ -78,6 +78,28 @@ def test_select_class_limited_indices_treats_tuple_labels_atomically():
     assert np.all(random < len(labels))
 
 
+def test_select_class_limited_indices_treats_numpy_tuple_label_matrix_atomically():
+    labels = np.asarray(
+        [
+            ("face", "early"),
+            ("house", "late"),
+            ("face", "early"),
+            ("house", "late"),
+            ("face", "early"),
+            ("house", "late"),
+        ],
+        dtype=object,
+    )
+
+    first = select_class_limited_indices(labels, 2, selection="first")
+    random = select_class_limited_indices(labels, 2, selection="random", seed=0)
+
+    assert labels.ndim == 2
+    assert first.tolist() == [0, 1, 2, 3]
+    assert len(random) == 4
+    assert np.all(random < labels.shape[0])
+
+
 def test_select_class_limited_indices_validates_inputs():
     with pytest.raises(ValueError, match="max_per_class"):
         select_class_limited_indices([1, 2], 0)

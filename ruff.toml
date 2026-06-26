@@ -1,0 +1,4 @@
+line-length = 180
+
+[lint.per-file-ignores]
+"src/neureptrace/__init__.py" = ["F401"]
