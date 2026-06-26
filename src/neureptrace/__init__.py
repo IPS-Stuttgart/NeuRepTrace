@@ -59,6 +59,7 @@ from . import (  # noqa: E402
     _mekt_vector_validation_patch,
     _metadata_column_validation_patch,
     _mixstyle_boolean_config_patch,
+    _mmd_source_weighting_gamma_patch,
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
     _mne_time_decode_ensemble_param_validation_patch,
@@ -171,6 +172,7 @@ _mcca_component_count_patch.install()
 _mcca_repetition_count_patch.install()
 _mcca_subject_pca_components_patch.install()
 _mekt_vector_validation_patch.install()
+_mmd_source_weighting_gamma_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
 _source_alignment_pseudo_repetition_patch.install()

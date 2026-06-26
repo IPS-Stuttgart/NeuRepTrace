@@ -109,6 +109,14 @@ def test_mmd_gamma_heuristics_and_validation() -> None:
         resolve_mmd_gamma(0.0, source, target)
 
 
+def test_mmd_gamma_rejects_unknown_string_with_public_validation_error() -> None:
+    source = [np.asarray([[0.0, 0.0], [1.0, 0.0]], dtype=float)]
+    target = np.asarray([[0.0, 1.0], [1.0, 1.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="gamma must be positive and finite"):
+        resolve_mmd_gamma("not-a-gamma", source, target)
+
+
 def test_mmd_rejects_mismatched_feature_width() -> None:
     with pytest.raises(ValueError, match="feature width"):
         mmd_source_group_weights({"bad": [[0.0, 1.0]]}, [[0.0]])
