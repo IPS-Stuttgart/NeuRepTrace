@@ -310,8 +310,8 @@ def fit_few_shot_target_calibrated_decoder(
             min_evaluation_per_class=min_evaluation_per_class,
         )
 
-    calibration_indices = np.asarray(split.calibration_indices, dtype=int).reshape(-1)
-    evaluation_indices = np.asarray(split.evaluation_indices, dtype=int).reshape(-1)
+    calibration_indices = _normalize_index_vector(split.calibration_indices, name="calibration_indices")
+    evaluation_indices = _normalize_index_vector(split.evaluation_indices, name="evaluation_indices")
     if calibration_indices.size == 0:
         raise ValueError("few-shot target calibration selected no calibration rows.")
     if evaluation_indices.size == 0:

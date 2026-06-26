@@ -62,6 +62,28 @@ def test_source_gaussian_appends_deterministic_source_only_samples():
     np.testing.assert_allclose(first.features, second.features)
 
 
+def test_config_accepts_numpy_scalar_random_state():
+    config = generative_augmentation_config(method="source_gaussian", synthetic_per_class=1, random_state=np.array(7))
+
+    assert config.random_state == 7
+
+
+def test_config_accepts_case_insensitive_none_random_state():
+    config = generative_augmentation_config(random_state="NULL")
+
+    assert config.random_state is None
+
+
+def test_config_rejects_vector_random_state_before_rng_use():
+    with pytest.raises(ValueError, match="random_state"):
+        generative_augmentation_config(random_state=np.array([1, 2]))
+
+
+def test_config_rejects_negative_random_state_before_rng_use():
+    with pytest.raises(ValueError, match="random_state"):
+        generative_augmentation_config(method="source_gaussian", synthetic_per_class=1, random_state="-1")
+
+
 def test_target_style_gaussian_uses_unlabeled_target_features_only():
     features, labels = _toy_features()
     target_features = features + np.array([10.0, -3.0])

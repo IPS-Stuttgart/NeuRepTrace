@@ -12,6 +12,14 @@ from collections.abc import Iterable
 import numpy as np
 
 
+def _weights_contain_boolean(weights: np.ndarray) -> bool:
+    if np.issubdtype(weights.dtype, np.bool_):
+        return True
+    if weights.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in weights.ravel())
+    return False
+
+
 def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_samples: int) -> np.ndarray:
     """Return validated non-negative per-sample weights.
 
@@ -22,7 +30,16 @@ def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_sample
     n_samples:
         Expected number of samples.
     """
-    weights = np.asarray(sample_weight, dtype=float)
+    try:
+        raw_weights = np.asarray(sample_weight, dtype=object)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("sample_weight must have shape (n_samples,)") from exc
+    if _weights_contain_boolean(raw_weights):
+        raise ValueError("sample_weight must contain numeric weights, not boolean values")
+    try:
+        weights = raw_weights.astype(float, copy=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("sample_weight must contain numeric weights") from exc
     if weights.ndim != 1:
         raise ValueError("sample_weight must have shape (n_samples,)")
     if weights.shape[0] != n_samples:
@@ -134,8 +151,8 @@ def weighted_negative_log_likelihood(
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
     eps = float(eps)
-    if not np.isfinite(eps) or eps <= 0.0:
-        raise ValueError("eps must be a positive finite value")
+    if not np.isfinite(eps) or eps <= 0.0 or eps >= 1.0:
+        raise ValueError("eps must be finite and in the open interval (0, 1)")
 
     true_probabilities = probabilities[np.arange(labels.shape[0]), labels]
     losses = -np.log(np.clip(true_probabilities, eps, 1.0))

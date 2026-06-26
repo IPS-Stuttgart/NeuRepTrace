@@ -60,7 +60,10 @@ def probability_columns(frame: pd.DataFrame) -> tuple[str, ...]:
 def _value_at(values: Sequence[object] | np.ndarray | pd.Series | None, index: int, default: object = "") -> object:
     if values is None:
         return default
-    value = values[index]
+    if isinstance(values, pd.Series):
+        value = values.iloc[index]
+    else:
+        value = values[index]
     if isinstance(value, np.generic):
         return value.item()
     return value

@@ -17,7 +17,7 @@ def _validate_eps(eps: object) -> float:
         numeric = float(eps)
     except (TypeError, ValueError) as exc:
         raise ValueError(_EPS_ERROR) from exc
-    if not np.isfinite(numeric) or numeric <= 0.0:
+    if not np.isfinite(numeric) or numeric <= 0.0 or numeric >= 1.0:
         raise ValueError(_EPS_ERROR)
     return numeric
 

@@ -74,6 +74,33 @@ def test_full_mekt_iterates_joint_alignment_without_target_labels():
     assert hasattr(classifier, "predict")
 
 
+def test_mekt_accepts_single_column_source_domain_vectors():
+    source, _ = _toy_covariances(mixing=np.eye(3))
+    target, _ = _toy_covariances(mixing=np.diag([0.8, 1.3, 1.1]))
+    domains = np.asarray(["s1"] * 4 + ["s2"] * 4, dtype=object).reshape(-1, 1)
+
+    transfer = centroid_aligned_tangent_features(source, target, source_domains=domains)
+
+    assert transfer.source_domains.shape == (8,)
+    assert transfer.source_domains.tolist() == ["s1"] * 4 + ["s2"] * 4
+    assert transfer.source_features.shape == (8, 6)
+
+
+def test_mekt_rejects_true_matrix_shaped_source_vectors():
+    source, labels = _toy_covariances(mixing=np.eye(3))
+    target, _ = _toy_covariances(mixing=np.eye(3))
+    label_matrix = np.asarray([[0, 1], [0, 1], [0, 1], [0, 1]], dtype=int)
+    domain_matrix = np.column_stack([np.asarray(["s1"] * source.shape[0]), np.asarray(["s2"] * source.shape[0])])
+
+    with pytest.raises(ValueError, match="source_labels must be a one-dimensional vector"):
+        mekt_transfer_features(source, label_matrix, target, n_iterations=1, n_neighbors=2)
+
+    with pytest.raises(ValueError, match="source_domains must be a one-dimensional vector"):
+        centroid_aligned_tangent_features(source, target, source_domains=domain_matrix)
+
+    assert labels.shape[0] == source.shape[0]
+
+
 def test_mekt_domain_transferability_scores_and_selection():
     source_features = np.array(
         [
