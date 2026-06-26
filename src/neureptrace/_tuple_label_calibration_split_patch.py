@@ -341,6 +341,13 @@ def _patch_few_shot() -> None:
 
     @wraps(original_fit)
     def fit_few_shot_target_calibrated_decoder(*args: Any, **kwargs: Any):
+        split = kwargs.get("split")
+        if split is not None:
+            kwargs = dict(kwargs)
+            kwargs["split"] = few_shot.FewShotTargetCalibrationSplit(
+                evaluation_indices=_normalize_manual_split_indices(split.evaluation_indices, name="evaluation_indices"),
+                calibration_indices=_normalize_manual_split_indices(split.calibration_indices, name="calibration_indices"),
+            )
         if kwargs.get("classes") is not None:
             kwargs = dict(kwargs)
             kwargs["classes"] = _atomic_label_vector(kwargs["classes"], name="classes")
