@@ -83,6 +83,67 @@ def test_blockwise_prior_shift_estimates_different_block_priors() -> None:
     assert np.allclose(result.probabilities.sum(axis=1), 1.0)
 
 
+def test_blockwise_prior_shift_preserves_composite_block_ids() -> None:
+    probabilities = np.vstack(
+        [
+            np.tile(np.asarray([[0.9, 0.1]]), (3, 1)),
+            np.tile(np.asarray([[0.1, 0.9]]), (3, 1)),
+        ]
+    )
+    blocks = [
+        ("subject1", "run1"),
+        ("subject1", "run1"),
+        ("subject1", "run1"),
+        ("subject1", "run2"),
+        ("subject1", "run2"),
+        ("subject1", "run2"),
+    ]
+
+    result = adapt_probability_blocks_for_prior_shift(
+        probabilities,
+        blocks,
+        source_prior=[0.5, 0.5],
+        smoothing=0.0,
+        min_block_rows=2,
+    )
+
+    assert set(result.block_results) == {("subject1", "run1"), ("subject1", "run2")}
+    assert result.block_results[("subject1", "run1")].target_prior[0] > 0.9
+    assert result.block_results[("subject1", "run2")].target_prior[1] > 0.9
+    assert result.metadata["prior_shift_n_blocks"] == 2
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+
+
+def test_blockwise_prior_shift_preserves_matrix_composite_block_ids() -> None:
+    probabilities = np.vstack(
+        [
+            np.tile(np.asarray([[0.9, 0.1]]), (2, 1)),
+            np.tile(np.asarray([[0.1, 0.9]]), (2, 1)),
+        ]
+    )
+    blocks = np.asarray(
+        [
+            ["subject1", "run1"],
+            ["subject1", "run1"],
+            ["subject1", "run2"],
+            ["subject1", "run2"],
+        ],
+        dtype=object,
+    )
+
+    result = adapt_probability_blocks_for_prior_shift(
+        probabilities,
+        blocks,
+        source_prior=[0.5, 0.5],
+        smoothing=0.0,
+        min_block_rows=2,
+    )
+
+    assert set(result.block_results) == {("subject1", "run1"), ("subject1", "run2")}
+    assert result.block_results[("subject1", "run1")].target_prior[0] > 0.9
+    assert result.block_results[("subject1", "run2")].target_prior[1] > 0.9
+
+
 def test_blockwise_prior_shift_rejects_tiny_blocks() -> None:
     probabilities = np.asarray([[0.6, 0.4], [0.4, 0.6]])
 
@@ -94,6 +155,34 @@ def test_prior_from_labels_uses_source_labels_only() -> None:
     prior, classes = prior_from_labels(["left", "left", "right", "left"], classes=["left", "right"])
 
     assert classes == ("left", "right")
+    assert np.allclose(prior, [0.75, 0.25])
+
+
+def test_prior_from_labels_preserves_composite_labels() -> None:
+    prior, classes = prior_from_labels(
+        [("task", "left"), ("task", "left"), ("task", "right"), ("task", "left")],
+        classes=[("task", "left"), ("task", "right")],
+    )
+
+    assert classes == (("task", "left"), ("task", "right"))
+    assert np.allclose(prior, [0.75, 0.25])
+
+
+def test_prior_from_labels_preserves_matrix_composite_labels() -> None:
+    labels = np.asarray(
+        [
+            ["task", "left"],
+            ["task", "left"],
+            ["task", "right"],
+            ["task", "left"],
+        ],
+        dtype=object,
+    )
+    classes = np.asarray([["task", "left"], ["task", "right"]], dtype=object)
+
+    prior, class_order = prior_from_labels(labels, classes=classes)
+
+    assert class_order == (("task", "left"), ("task", "right"))
     assert np.allclose(prior, [0.75, 0.25])
 
 
