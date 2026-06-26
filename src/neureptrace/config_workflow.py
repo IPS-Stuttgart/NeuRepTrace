@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 from collections.abc import Mapping, Sequence
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
@@ -120,6 +121,9 @@ def _as_bool(value: Any, *, default: bool = False) -> bool:
         return default
     if isinstance(value, bool):
         return value
+    if isinstance(value, Integral):
+        if int(value) in {0, 1}:
+            return bool(value)
     if isinstance(value, str):
         normalized = value.strip().lower()
         if normalized in {"1", "true", "yes", "on"}:
