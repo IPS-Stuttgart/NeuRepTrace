@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from neureptrace.onset_detection import annotate_threshold_crossings
 
@@ -51,4 +52,4 @@ def test_probability_true_class_scores_use_probability_suffix_labels():
         score_column="probability_true_class",
     )
 
-    assert thresholded["onset_score"].tolist() == [0.85, 0.70]
+    assert thresholded["onset_score"].tolist() == pytest.approx([0.85, 0.70])
