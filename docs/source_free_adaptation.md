@@ -75,3 +75,41 @@ The metadata records the selector as:
 - `source_free_class_counts`
 
 Keep the default `confidence` selector as the benchmark-safe baseline, and report `balanced_topk` as a separate adaptation variant.
+
+## Target-prior correction stages
+
+Some OpenNeuro Protocol-2.5 target batches are source-biased: the source model can systematically under-predict a class in the unlabeled target subject, so high-confidence pseudo-label selection starts from the wrong marginal class prior. The `neureptrace.decoding.source_free_target_prior` helper adds a benchmark-safe correction that estimates only the marginal predicted class distribution on `X_t`.
+
+The default stage is `post`, which preserves the existing behavior and renormalizes final probabilities:
+
+```python
+from neureptrace.decoding.source_free_target_prior import fit_source_free_target_prior_predict_proba
+
+result = fit_source_free_target_prior_predict_proba(
+    source_model=source_model,
+    target_features=X_target_unlabeled,
+    target_prior_correction="balanced",
+    target_prior_strength=1.0,
+    target_prior_correction_stage="post",
+)
+```
+
+For Protocol-2.5 experiments where the source-model prior bias prevents minority pseudo-class prototypes from becoming active, try the `pre` stage. It wraps the frozen source model before pseudo-label selection and prototype fitting, still using only unlabeled target features:
+
+```python
+result = fit_source_free_target_prior_predict_proba(
+    source_model=source_model,
+    target_features=X_target_unlabeled,
+    confidence_threshold=0.80,
+    max_iterations=5,
+    min_class_count=2,
+    min_active_classes=2,
+    pseudo_label_selection="balanced_topk",
+    balanced_topk_per_class=4,
+    target_prior_correction="balanced",
+    target_prior_strength=1.0,
+    target_prior_correction_stage="pre",
+)
+```
+
+Use `target_prior_correction_stage="both"` as an exploratory variant when a pre-corrected source model still leaves a biased final probability prior. Metadata records `source_free_target_prior_correction_stage`, `source_free_target_prior_strength`, `source_free_target_class_prior`, and keeps `source_free_target_prior_uses_target_labels=False`.
