@@ -12,6 +12,7 @@ from . import (  # noqa: E402
     _adversarial_composite_labels_patch,
     _alignment_window_config_patch,
     _bushmeg_all_protocols_prediction_metric_patch,
+    _bushmeg_all_protocols_subject_loader_patch,
     _bushmeg_all_protocols_timeout_patch,
     _bushmeg_smoke_enabled_bool_patch,
     _bushmeg_category2_autoencoder_config_patch,
@@ -149,6 +150,7 @@ _bushmeg_protocol3_index_validation_patch.install()
 _reconstruction_encoder_config_patch.install()
 _reconstruction_tuple_labels_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
+_bushmeg_all_protocols_subject_loader_patch.install()
 _lora_few_shot_numeric_config_patch.install()
 _mcca_component_count_patch.install()
 _mcca_repetition_count_patch.install()
