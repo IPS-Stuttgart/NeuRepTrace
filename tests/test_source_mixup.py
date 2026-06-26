@@ -56,6 +56,33 @@ def test_source_mixup_appends_same_class_synthetic_rows() -> None:
     assert np.all(domains[result.partner_indices] != domains[result.content_indices])
 
 
+def test_source_mixup_preserves_tuple_labels_as_atomic_classes() -> None:
+    features = np.asarray(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [5.0, 5.0],
+            [6.0, 5.0],
+        ],
+        dtype=float,
+    )
+    labels = [("cue", "left"), ("cue", "left"), ("cue", "right"), ("cue", "right")]
+    domains = np.asarray(["s1", "s2", "s1", "s2"], dtype=object)
+
+    result = augment_source_with_mixup(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "same_class_partner": True, "cross_domain_partner": True, "random_state": 11},
+    )
+
+    assert result.classes.tolist() == [("cue", "left"), ("cue", "right")]
+    assert result.labels[:4].tolist() == labels
+    assert result.labels[result.synthetic_mask].tolist() == [labels[index] for index in result.content_indices]
+    assert result.label_distributions.shape == (6, 2)
+    assert np.allclose(result.label_distributions.sum(axis=1), 1.0)
+
+
 def test_cross_class_mixup_returns_soft_label_distributions() -> None:
     features = np.asarray([[0.0, 0.0], [10.0, 10.0]], dtype=float)
     labels = np.asarray(["left", "right"], dtype=object)
