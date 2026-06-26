@@ -45,6 +45,41 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise _bool_error(name)
 
 
+def _hashable_value(value: Any) -> Any:
+    """Return a stable hashable representation for JSON/YAML-style IDs."""
+
+    try:
+        hash(value)
+    except TypeError:
+        if isinstance(value, np.ndarray):
+            return tuple(_hashable_value(item) for item in value.tolist())
+        if isinstance(value, list):
+            return tuple(_hashable_value(item) for item in value)
+        if isinstance(value, tuple):
+            return tuple(_hashable_value(item) for item in value)
+        if isinstance(value, dict):
+            return tuple(
+                sorted(
+                    ((_hashable_value(key), _hashable_value(item)) for key, item in value.items()),
+                    key=repr,
+                )
+            )
+        return repr(value)
+    return value
+
+
+def _canonicalize_source_domains(source_domains: Any) -> Any:
+    """Keep row-level domain IDs hashable without flattening composite IDs."""
+
+    if source_domains is None or isinstance(source_domains, (str, bytes, np.ndarray)):
+        return source_domains
+    try:
+        items = list(source_domains)
+    except TypeError:
+        return source_domains
+    return [_hashable_value(item) for item in items]
+
+
 def install() -> None:
     """Install strict Source MixUp boolean option normalization."""
 
@@ -102,7 +137,7 @@ def install() -> None:
             return original_augment(
                 source_features,
                 source_labels,
-                source_domains=source_domains,
+                source_domains=_canonicalize_source_domains(source_domains),
                 config=_coerce_config_with_bool(config),
             )
 
