@@ -54,6 +54,48 @@ def test_uniform_source_domain_ensemble_is_protocol1() -> None:
     assert result.metadata["source_domain_ensemble_uses_target_labels"] is False
 
 
+def test_source_domain_ensemble_preserves_composite_tuple_labels() -> None:
+    source_features = np.asarray(
+        [
+            [-2.0, 0.0],
+            [-1.6, 0.2],
+            [1.7, -0.1],
+            [2.1, 0.1],
+            [-1.8, 3.0],
+            [-1.4, 3.2],
+            [1.8, 2.8],
+            [2.2, 3.1],
+        ],
+        dtype=float,
+    )
+    source_labels = [
+        ("face", "left"),
+        ("face", "left"),
+        ("object", "right"),
+        ("object", "right"),
+        ("face", "left"),
+        ("face", "left"),
+        ("object", "right"),
+        ("object", "right"),
+    ]
+    source_domains = ["a", "a", "a", "a", "b", "b", "b", "b"]
+    target_features = np.asarray([[-1.7, 0.1], [1.9, 0.0]], dtype=float)
+
+    result = fit_source_domain_probability_ensemble(
+        source_features=source_features,
+        source_labels=source_labels,
+        source_domains=source_domains,
+        target_features=target_features,
+        weighting="uniform",
+    )
+
+    assert result.classes.tolist() == [("face", "left"), ("object", "right")]
+    assert result.predictions.shape == (2,)
+    assert set(result.predictions.tolist()) <= {("face", "left"), ("object", "right")}
+    assert result.models["a"].classes.tolist() == [("face", "left"), ("object", "right")]
+    assert result.metadata["source_domain_ensemble_n_classes"] == 2
+
+
 def test_target_confidence_weighting_is_protocol2() -> None:
     source_features, source_labels, source_domains, target_features = _toy_domains()
 
