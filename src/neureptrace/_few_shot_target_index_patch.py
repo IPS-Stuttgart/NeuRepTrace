@@ -8,7 +8,8 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_few_shot_target_index_patch_installed"
-_INDEX_ERROR_SUFFIX = "must be an integer row-index vector."
+_INDEX_ERROR_SUFFIX = "must contain integer row indices."
+_BOOLEAN_INDEX_ERROR_SUFFIX = "must contain integer row indices, not boolean values."
 
 
 def _normalize_index_vector(values: Any, *, name: str) -> np.ndarray:
@@ -21,7 +22,7 @@ def _normalize_index_vector(values: Any, *, name: str) -> np.ndarray:
     normalized: list[int] = []
     for value in array.tolist():
         if isinstance(value, (bool, np.bool_)):
-            raise ValueError(f"{name} {_INDEX_ERROR_SUFFIX}")
+            raise ValueError(f"{name} {_BOOLEAN_INDEX_ERROR_SUFFIX}")
         try:
             numeric = float(value)
         except (TypeError, ValueError) as exc:
