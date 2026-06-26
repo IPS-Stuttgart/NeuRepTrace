@@ -211,6 +211,27 @@ def test_adjust_probability_blocks_to_label_proportions_preserves_row_vector_blo
     assert np.allclose(result.probabilities[1], [0.0, 1.0], atol=1e-8)
 
 
+def test_adjust_probabilities_to_label_proportions_handles_epsilon_only_active_support():
+    result = adjust_probabilities_to_label_proportions(
+        np.asarray(
+            [
+                [0.0, 1.0],
+                [0.0, 1.0],
+            ],
+            dtype=float,
+        ),
+        [1.0, 0.0],
+        classes=("rare", "standard"),
+        tol=1e-12,
+    )
+
+    assert result.converged
+    assert result.classes == ("rare", "standard")
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+    assert np.allclose(result.probabilities, [[1.0, 0.0], [1.0, 0.0]])
+    assert np.allclose(result.probabilities.mean(axis=0), [1.0, 0.0])
+
+
 def test_predict_labels_from_label_proportions_preserves_tuple_classes_as_atomic_labels():
     result = adjust_probabilities_to_label_proportions(
         [[0.99, 0.01], [0.01, 0.99]],
