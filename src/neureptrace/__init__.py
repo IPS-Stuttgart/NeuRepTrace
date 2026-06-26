@@ -66,6 +66,7 @@ from . import (  # noqa: E402
     _mne_pseudo_alignment_fallback_validity_patch,
     _mne_time_decode_ensemble_param_validation_patch,
     _nll_eps_validation_patch,
+    _observation_ensemble_missing_label_patch,
     _observation_ensemble_partial_class_columns_patch,
     _observation_ensemble_string_groups_patch,
     _observation_ensemble_ungrouped_metrics_patch,
@@ -165,6 +166,7 @@ _observation_schema_string_columns_patch.install()
 _observation_ensemble_partial_class_columns_patch.install()
 _observation_ensemble_string_groups_patch.install()
 _observation_ensemble_ungrouped_metrics_patch.install()
+_observation_ensemble_missing_label_patch.install()
 _probability_stacking_group_summary_patch.install()
 _pls_da_composite_labels_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
