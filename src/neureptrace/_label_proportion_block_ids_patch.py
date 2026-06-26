@@ -9,7 +9,8 @@ import numpy as np
 
 import neureptrace.decoding.label_proportions as _label_proportions
 
-_PATCH_MARKER = "_neureptrace_label_proportion_block_ids_patch_installed"
+_BLOCK_ID_PATCH_MARKER = "_neureptrace_label_proportion_block_ids_patch_installed"
+_ZERO_SUPPORT_PATCH_MARKER = "_neureptrace_label_proportion_zero_support_patch_installed"
 
 
 def _object_block_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int | None = None) -> np.ndarray:
@@ -74,6 +75,17 @@ def _unique_blocks(block_vector: np.ndarray) -> tuple[Hashable, ...]:
         if not any(_values_equal(block, existing) for existing in blocks):
             blocks.append(block)
     return tuple(blocks)
+
+
+def _apply_class_bias(probabilities: np.ndarray, class_bias: np.ndarray, *, epsilon: float) -> np.ndarray:
+    """Apply class-bias factors while preserving the epsilon support floor."""
+
+    del epsilon
+    weighted = probabilities * class_bias.reshape(1, -1)
+    row_sums = np.sum(weighted, axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("Label-proportion calibration produced a zero-probability row; check proportions and input probabilities.")
+    return weighted / row_sums
 
 
 def _adjust_probability_blocks_to_label_proportions(
@@ -169,13 +181,17 @@ def _adjust_probability_blocks_to_label_proportions(
 
 
 def install() -> None:
-    """Install tuple-safe block-id handling for weak label-proportion calibration."""
+    """Install robust weak label-proportion calibration helpers."""
 
-    current = _label_proportions.adjust_probability_blocks_to_label_proportions
-    if getattr(current, _PATCH_MARKER, False):
-        return
-    setattr(_adjust_probability_blocks_to_label_proportions, _PATCH_MARKER, True)
-    _label_proportions.adjust_probability_blocks_to_label_proportions = _adjust_probability_blocks_to_label_proportions
+    current_block = _label_proportions.adjust_probability_blocks_to_label_proportions
+    if not getattr(current_block, _BLOCK_ID_PATCH_MARKER, False):
+        setattr(_adjust_probability_blocks_to_label_proportions, _BLOCK_ID_PATCH_MARKER, True)
+        _label_proportions.adjust_probability_blocks_to_label_proportions = _adjust_probability_blocks_to_label_proportions
+
+    current_bias = _label_proportions._apply_class_bias
+    if not getattr(current_bias, _ZERO_SUPPORT_PATCH_MARKER, False):
+        setattr(_apply_class_bias, _ZERO_SUPPORT_PATCH_MARKER, True)
+        _label_proportions._apply_class_bias = _apply_class_bias
 
 
 __all__ = ["install"]
