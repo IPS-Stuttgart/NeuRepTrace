@@ -239,3 +239,7 @@ _unlabeled_anchor_tuple_patch.install()
 _vrex_numeric_config_patch.install()
 _windowed_composite_labels_patch.install()
 _bushmeg_cue_temporal_bins_patch.install()
+
+from . import _openneuro_real_shuffle_time_selection_patch  # noqa: E402
+
+_openneuro_real_shuffle_time_selection_patch.install()
