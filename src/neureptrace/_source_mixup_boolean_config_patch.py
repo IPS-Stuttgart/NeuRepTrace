@@ -1,4 +1,4 @@
-"""Normalize Source MixUp boolean config values from CLI/YAML-style inputs."""
+"""Normalize Source MixUp boolean config values and composite row identifiers."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_source_mixup_boolean_config_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
+_LABEL_TOKEN_PREFIX = "__neureptrace_source_mixup_label_"
 
 
 def _bool_error(name: str) -> ValueError:
@@ -68,10 +69,98 @@ def _hashable_value(value: Any) -> Any:
     return value
 
 
-def _canonicalize_source_domains(source_domains: Any) -> Any:
+def _object_vector(items: list[Any]) -> np.ndarray:
+    vector = np.empty(len(items), dtype=object)
+    for index, item in enumerate(items):
+        vector[index] = item
+    return vector
+
+
+def _atomic_vector(values: Any, *, expected_length: int, name: str) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            items = array.tolist()
+        elif array.ndim == 2 and array.shape[0] == expected_length and array.shape[1] != 1:
+            items = [tuple(row.tolist()) for row in array]
+        elif array.ndim == 2 and (array.shape[1] == 1 or (array.shape[0] == 1 and array.shape[1] == expected_length)):
+            items = array.reshape(-1).tolist()
+        else:
+            raise ValueError(f"{name} must be a vector or one composite row per feature row; got shape {array.shape}.")
+    elif isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        try:
+            items = list(values)
+        except TypeError:
+            items = [values]
+    if len(items) != expected_length:
+        raise ValueError(f"{name} must contain one value per feature row: {len(items)} != {expected_length}.")
+    return _object_vector(items)
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    try:
+        result = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(result, (bool, np.bool_)):
+        return bool(result)
+    try:
+        return bool(np.all(result))
+    except (TypeError, ValueError):
+        return False
+
+
+def _unique_values(values: np.ndarray) -> list[Any]:
+    unique: list[Any] = []
+    for value in values.tolist():
+        if not any(_values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return unique
+
+
+def _is_composite_label(value: Any) -> bool:
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.ndarray):
+        return value.ndim != 0
+    return isinstance(value, (tuple, list, dict))
+
+
+def _tokenize_source_labels(source_labels: Any, *, expected_length: int) -> tuple[Any, dict[str, Any]]:
+    labels = _atomic_vector(source_labels, expected_length=expected_length, name="source_labels")
+    if not any(_is_composite_label(label) for label in labels.tolist()):
+        return source_labels, {}
+    unique = _unique_values(labels)
+    token_to_label = {f"{_LABEL_TOKEN_PREFIX}{index}": label for index, label in enumerate(unique)}
+    tokens = np.empty(labels.shape[0], dtype=object)
+    for row, label in enumerate(labels.tolist()):
+        match = next(index for index, known in enumerate(unique) if _values_equal(label, known))
+        tokens[row] = f"{_LABEL_TOKEN_PREFIX}{match}"
+    return tokens, token_to_label
+
+
+def _restore_label_tokens(values: Any, token_to_label: dict[str, Any]) -> np.ndarray:
+    vector = np.asarray(values, dtype=object).reshape(-1)
+    if not token_to_label:
+        return vector
+    restored = np.empty(vector.shape[0], dtype=object)
+    for index, value in enumerate(vector.tolist()):
+        restored[index] = token_to_label.get(value, value)
+    return restored
+
+
+def _canonicalize_source_domains(source_domains: Any, *, expected_length: int | None = None) -> Any:
     """Keep row-level domain IDs hashable without flattening composite IDs."""
 
-    if source_domains is None or isinstance(source_domains, (str, bytes, np.ndarray)):
+    if source_domains is None or isinstance(source_domains, (str, bytes)):
+        return source_domains
+    if isinstance(source_domains, np.ndarray) and expected_length is not None:
+        return [_hashable_value(item) for item in _atomic_vector(source_domains, expected_length=expected_length, name="source_domains").tolist()]
+    if isinstance(source_domains, np.ndarray):
         return source_domains
     try:
         items = list(source_domains)
@@ -134,11 +223,20 @@ def install() -> None:
             source_domains=None,
             config: Any = None,
         ):
-            return original_augment(
+            n_rows = source_mixup._feature_matrix(source_features, name="source_features").shape[0]
+            token_labels, token_to_label = _tokenize_source_labels(source_labels, expected_length=n_rows)
+            result = original_augment(
                 source_features,
-                source_labels,
-                source_domains=_canonicalize_source_domains(source_domains),
+                token_labels,
+                source_domains=_canonicalize_source_domains(source_domains, expected_length=n_rows),
                 config=_coerce_config_with_bool(config),
+            )
+            if not token_to_label:
+                return result
+            return replace(
+                result,
+                labels=_restore_label_tokens(result.labels, token_to_label),
+                classes=_restore_label_tokens(result.classes, token_to_label),
             )
 
         setattr(augment_source_with_mixup, _PATCH_MARKER, True)
