@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from neureptrace.decoding.domain_importance import DOMAIN_IMPORTANCE_CATEGORY, fit_domain_classifier_importance_weights
+from neureptrace.decoding.domain_importance import DOMAIN_IMPORTANCE_CATEGORY, domain_importance_config, fit_domain_classifier_importance_weights
 
 
 def test_domain_weights_are_category2_and_normalized() -> None:
@@ -29,3 +30,15 @@ def test_domain_weights_record_clip_none() -> None:
     assert result.metadata["domain_importance_clip_min"] == ""
     assert result.metadata["domain_importance_clip_max"] == ""
     assert np.isclose(result.sample_weights.mean(), 1.0)
+
+
+def test_domain_importance_config_parses_boolean_strings() -> None:
+    cfg = domain_importance_config(normalize="false", account_for_sample_priors="off")
+
+    assert cfg.normalize is False
+    assert cfg.account_for_sample_priors is False
+
+
+def test_domain_importance_config_rejects_ambiguous_boolean_strings() -> None:
+    with pytest.raises(ValueError, match="normalize"):
+        domain_importance_config(normalize="sometimes")
