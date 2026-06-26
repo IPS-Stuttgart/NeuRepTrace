@@ -20,6 +20,7 @@ from . import (  # noqa: E402
     _bushmeg_protocol3_index_validation_patch,
     _bushmeg_source_loso_ensemble_numeric_patch,
     _bushmeg_source_loso_prototype_patch,
+    _calibration_weight_fraction_patch,
     _category2_autoencoder_all_protocols_patch,
     _category2_autoencoder_max_folds_patch,
     _classifier_tuple_labels_patch,
@@ -173,6 +174,7 @@ _source_alignment_optimal_transport_patch.install()
 _mne_alignment_calibration_anchor_patch.install()
 _mne_pseudo_alignment_fallback_validity_patch.install()
 _nll_eps_validation_patch.install()
+_calibration_weight_fraction_patch.install()
 _sample_weight_validation_patch.install()
 _sampling_composite_label_array_patch.install()
 _semi_supervised_lora_tuple_labels_patch.install()
