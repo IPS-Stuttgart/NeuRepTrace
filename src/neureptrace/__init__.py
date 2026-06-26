@@ -104,6 +104,7 @@ from . import (  # noqa: E402
     _source_free_tuple_labels_patch,
     _source_label_vector_patch,
     _source_mixup_boolean_config_patch,
+    _source_mixup_random_state_patch,
     _source_mixstyle_tuple_labels_patch,
     _source_mixstyle_tuple_vectors_patch,
     _source_selection_class_balance_patch,
@@ -218,6 +219,7 @@ _source_free_soft_prototypes_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_label_vector_patch.install()
 _source_mixup_boolean_config_patch.install()
+_source_mixup_random_state_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
 _source_mixstyle_tuple_vectors_patch.install()
 _random_state_config_patch.install()
