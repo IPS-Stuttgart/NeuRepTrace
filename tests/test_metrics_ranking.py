@@ -188,22 +188,33 @@ def test_rank_class_scores_rejects_duplicate_classes() -> None:
         rank_class_scores([[0.8, 0.2]], ["target", "target"], ["target"])
 
 
-def test_rank_class_scores_rejects_multidimensional_y_true() -> None:
-    with pytest.raises(ValueError, match="y_true must be one-dimensional"):
-        rank_class_scores(
-            np.array([[0.9, 0.1], [0.2, 0.8]]),
-            ["target", "distractor"],
-            np.array([["target"], ["distractor"]]),
-        )
+def test_rank_class_scores_accepts_column_vector_y_true() -> None:
+    result = rank_class_scores(
+        np.array([[0.9, 0.1], [0.2, 0.8]]),
+        ["target", "distractor"],
+        np.array([["target"], ["distractor"]]),
+        top_k=(1,),
+        row_top_k=1,
+    )
+
+    np.testing.assert_array_equal(result["true_label_ranks"], np.array([1.0, 1.0]))
+    assert result["top_k_accuracy"] == {1: pytest.approx(1.0)}
+    assert result["rows"][1]["rank1_class"] == "distractor"
 
 
-def test_rank_class_scores_rejects_multidimensional_classes() -> None:
-    with pytest.raises(ValueError, match="classes must be one-dimensional"):
-        rank_class_scores(
-            np.array([[0.9, 0.1]]),
-            np.array([["target", "distractor"]]),
-            ["target"],
-        )
+def test_rank_class_scores_preserves_single_row_numpy_composite_class_label() -> None:
+    result = rank_class_scores(
+        np.array([[0.9]]),
+        np.array([["target", "distractor"]], dtype=object),
+        np.array([["target", "distractor"]], dtype=object),
+        top_k=(1,),
+        row_top_k=1,
+    )
+
+    np.testing.assert_array_equal(result["true_label_ranks"], np.array([1.0]))
+    assert result["top_k_accuracy"] == {1: pytest.approx(1.0)}
+    assert result["rows"][0]["rank1_class"] == ("target", "distractor")
+    assert result["rows"][0]["true_label_score"] == pytest.approx(0.9)
 
 
 def test_rank_class_scores_allows_empty_class_axis() -> None:
