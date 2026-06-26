@@ -16,10 +16,7 @@ def expand_paths(patterns: Sequence[str | Path]) -> list[Path]:
     paths: list[Path] = []
     for pattern in patterns:
         matches = sorted(glob.glob(str(pattern)))
-        if matches:
-            paths.extend(Path(match) for match in matches)
-        else:
-            paths.append(Path(pattern))
+        paths.extend(Path(match) for match in matches) if matches else paths.append(Path(pattern))
     return paths
 
 
@@ -156,7 +153,8 @@ def is_correct_detection(row: pd.Series) -> bool:
     if "true_label" in row and "predicted_label" in row and pd.notna(row["true_label"]) and pd.notna(row["predicted_label"]):
         true_label = _integer_label(row["true_label"])
         predicted_label = _integer_label(row["predicted_label"])
-        return true_label is not None and predicted_label is not None and true_label == predicted_label
+        if true_label is not None and predicted_label is not None:
+            return true_label == predicted_label
     if "true_class" in row and "predicted_class" in row and pd.notna(row["true_class"]) and pd.notna(row["predicted_class"]):
         return str(row["true_class"]) == str(row["predicted_class"])
     return False
