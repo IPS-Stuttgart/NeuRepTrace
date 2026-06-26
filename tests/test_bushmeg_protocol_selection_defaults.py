@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from neureptrace.bushmeg_all_protocols import _configured_method_names, _selected_methods
+from neureptrace.bushmeg_all_protocols import _configured_method_names, _parse_protocols, _selected_methods
 
 
 def test_default_selection_respects_explicit_protocol3_request() -> None:
@@ -24,6 +24,28 @@ def test_default_selection_respects_explicit_protocol3_request() -> None:
         include_oracle=False,
     )
     assert configured_names == selected_names
+
+
+def test_scalar_integer_protocol_filter_matches_cli_string_filter() -> None:
+    assert _parse_protocols(3) == {3}
+
+    selected = _selected_methods(
+        all_protocols={},
+        methods=None,
+        protocols=3,
+        include_oracle=False,
+    )
+
+    assert selected
+    assert all(spec.protocol_category == 3 for spec in selected)
+
+    configured_names = _configured_method_names(
+        all_protocols={},
+        methods=None,
+        protocols=3,
+        include_oracle=False,
+    )
+    assert configured_names == {spec.method for spec in selected}
 
 
 def test_default_selection_without_explicit_protocols_keeps_existing_protocol1_2_defaults() -> None:

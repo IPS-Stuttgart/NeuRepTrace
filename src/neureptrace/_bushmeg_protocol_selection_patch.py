@@ -3,16 +3,29 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 _PATCH_MARKER = "_neureptrace_bushmeg_protocol_selection_patch_installed"
 
 
+def _split_csv(value: Any) -> list[str]:
+    """Normalize comma-separated, iterable, and scalar config values to tokens."""
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [token.strip() for token in value.split(",") if token.strip()]
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray)):
+        return [str(token).strip() for token in value if str(token).strip()]
+    token = str(value).strip()
+    return [token] if token else []
+
+
 def _default_configured_methods(
     all_protocols_module: Any,
     registry: Mapping[str, Any],
-    protocols: str | Sequence[str | int] | None,
+    protocols: Any,
 ) -> list[str]:
     requested_protocols = all_protocols_module._parse_protocols(protocols)
     default_protocols = requested_protocols if all_protocols_module._split_csv(protocols) else {1, 2}
@@ -47,11 +60,14 @@ def install() -> None:
     if getattr(all_protocols, _PATCH_MARKER, False):
         return
 
+    all_protocols_module = all_protocols
+    all_protocols_module._split_csv = _split_csv
+
     def _selected_methods(
         *,
         all_protocols: Mapping[str, Any],
         methods: str | Sequence[str] | None,
-        protocols: str | Sequence[str | int] | None,
+        protocols: Any,
         include_oracle: bool,
         non_oracle: bool = False,
     ) -> list[Any]:
@@ -88,7 +104,7 @@ def install() -> None:
         *,
         all_protocols: Mapping[str, Any],
         methods: str | Sequence[str] | None,
-        protocols: str | Sequence[str | int] | None,
+        protocols: Any,
         include_oracle: bool,
         non_oracle: bool = False,
     ) -> set[str]:
@@ -112,7 +128,6 @@ def install() -> None:
             and (include_oracle or registry[method].protocol_category != 4)
         }
 
-    all_protocols_module = all_protocols
     all_protocols._selected_methods = _selected_methods
     all_protocols._configured_method_names = _configured_method_names
     setattr(all_protocols, _PATCH_MARKER, True)

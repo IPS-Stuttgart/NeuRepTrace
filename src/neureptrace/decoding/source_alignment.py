@@ -1162,6 +1162,7 @@ def _target_alignment_matrix(
         labels=labels,
         classes=classes,
         n_repetitions_per_class=repetitions,
+        rebase_out_of_range=config.fits_target_projection,
     )
     rows = []
     for class_position, class_label in enumerate(classes):
@@ -1193,13 +1194,14 @@ def _normalize_target_repetition_offsets(
     labels: np.ndarray,
     classes: np.ndarray,
     n_repetitions_per_class: int,
+    rebase_out_of_range: bool = False,
 ) -> dict[int, np.ndarray] | None:
     if selected_offsets_by_class is None:
         return None
     normalized: dict[int, np.ndarray] = {}
     for class_position, class_label in enumerate(classes):
         try:
-            offsets = np.asarray(selected_offsets_by_class[class_position], dtype=int)
+            offsets = _normalize_target_repetition_offset_vector(selected_offsets_by_class[class_position])
         except KeyError as exc:
             raise ValueError(f"selected_offsets_by_class is missing class position {class_position}.") from exc
         if offsets.ndim != 1:
@@ -1211,11 +1213,29 @@ def _normalize_target_repetition_offsets(
             )
         class_count = _count_anchor_value(labels, class_label)
         if offsets.size and (int(np.min(offsets)) < 0 or int(np.max(offsets)) >= class_count):
-            raise ValueError(
-                f"selected offsets for class {class_label!r} are outside the target subject's available repetitions."
-            )
+            if rebase_out_of_range:
+                offsets = np.arange(int(n_repetitions_per_class), dtype=int)
+            else:
+                raise ValueError(
+                    f"selected offsets for class {class_label!r} are outside the target subject's available repetitions."
+                )
         normalized[class_position] = offsets
     return normalized
+
+
+def _normalize_target_repetition_offset_vector(offsets: Sequence[int] | np.ndarray) -> np.ndarray:
+    raw_offsets = np.asarray(offsets, dtype=object)
+    if raw_offsets.ndim != 1:
+        raise ValueError("selected_offsets_by_class entries must be one-dimensional.")
+    if any(isinstance(value, (bool, np.bool_)) for value in raw_offsets.tolist()):
+        raise ValueError("selected_offsets_by_class entries must contain integer offsets.")
+    try:
+        numeric = np.asarray(raw_offsets, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("selected_offsets_by_class entries must contain integer offsets.") from exc
+    if not np.all(np.isfinite(numeric)) or not np.all(numeric % 1.0 == 0.0):
+        raise ValueError("selected_offsets_by_class entries must contain integer offsets.")
+    return numeric.astype(int, copy=False)
 
 
 def _fit_source_alignment_model(

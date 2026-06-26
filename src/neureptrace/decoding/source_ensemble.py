@@ -268,10 +268,34 @@ def _aligned_probabilities(model: BaseEstimator, features: np.ndarray, *, classe
         return _normalize_probability_rows(aligned, epsilon=epsilon)
     if hasattr(model, "decision_function"):
         scores = np.asarray(model.decision_function(features), dtype=float)
+        model_classes = np.asarray(getattr(model, "classes_", ()), dtype=object)
         if scores.ndim == 1:
+            if model_classes.size == 0:
+                if classes.shape[0] != 2:
+                    raise ValueError("Binary decision_function alignment requires model.classes_ when the global class set is not binary.")
+                model_classes = classes
+            if model_classes.shape[0] != 2:
+                raise ValueError("One-dimensional decision_function output requires exactly two model classes.")
             scores = np.column_stack([-scores, scores])
+        elif scores.ndim == 2:
+            if model_classes.size == 0:
+                if scores.shape[1] != classes.shape[0]:
+                    raise ValueError("Multiclass decision_function alignment requires model.classes_ when output width differs from the global class count.")
+                model_classes = classes
+        else:
+            raise ValueError("decision_function output must be one- or two-dimensional.")
+        if scores.shape[0] != features.shape[0]:
+            raise ValueError("decision_function output must contain one row per feature row.")
+        if scores.shape[1] != model_classes.shape[0]:
+            raise ValueError("decision_function output width must match model.classes_.")
         shifted = scores - np.max(scores, axis=1, keepdims=True)
-        return _normalize_probability_rows(np.exp(np.clip(shifted, -50.0, 50.0)), epsilon=epsilon)
+        raw = np.exp(np.clip(shifted, -50.0, 50.0))
+        aligned = np.full((features.shape[0], classes.shape[0]), epsilon, dtype=float)
+        class_to_column = {class_label: index for index, class_label in enumerate(classes.tolist())}
+        for source_column, class_label in enumerate(model_classes.tolist()):
+            if class_label in class_to_column:
+                aligned[:, class_to_column[class_label]] = raw[:, source_column]
+        return _normalize_probability_rows(aligned, epsilon=epsilon)
     predictions = np.asarray(model.predict(features), dtype=object)
     output = np.full((features.shape[0], classes.shape[0]), epsilon, dtype=float)
     class_to_column = {class_label: index for index, class_label in enumerate(classes.tolist())}
