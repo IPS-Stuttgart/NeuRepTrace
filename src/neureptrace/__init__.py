@@ -40,6 +40,7 @@ from . import (  # noqa: E402
     _event_detection_extensions,
     _fieldtrip_sampleinfo_validation_patch,
     _few_shot_split_validation_patch,
+    _few_shot_target_index_patch,
     _few_shot_tuple_labels_patch,
     _generative_augmentation_composite_labels_patch,
     _generative_augmentation_random_state_patch,
@@ -48,6 +49,7 @@ from . import (  # noqa: E402
     _label_shift_source_prior_patch,
     _label_proportion_block_ids_patch,
     _label_proportion_tuple_prediction_patch,
+    _lora_few_shot_numeric_config_patch,
     _lora_few_shot_tuple_subject_patch,
     _mcca_component_count_patch,
     _mcca_repetition_count_patch,
@@ -98,6 +100,7 @@ from . import (  # noqa: E402
     _transfer_null_fallback_patch,
     _transfer_null_label_conflict_patch,
     _tuple_label_calibration_split_patch,
+    _unlabeled_anchor_tuple_patch,
     _windowed_composite_labels_patch,
 )
 
@@ -131,6 +134,7 @@ _decoding_c_grid_patch.install()
 _decoding_classifier_param_patch.install()
 _decoding_grouped_cv_patch.install()
 _decoding_probability_patch.install()
+_few_shot_target_index_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
 _probability_stacking_group_summary_patch.install()
@@ -147,6 +151,7 @@ _reconstruction_encoder_config_patch.install()
 _reconstruction_tuple_labels_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
 _bushmeg_all_protocols_subject_loader_patch.install()
+_lora_few_shot_numeric_config_patch.install()
 _mcca_component_count_patch.install()
 _mcca_repetition_count_patch.install()
 _mcca_subject_pca_components_patch.install()
@@ -188,6 +193,7 @@ _transfer_null_fallback_patch.install()
 _transfer_null_label_conflict_patch.install()
 _windowed_composite_labels_patch.install()
 _tuple_label_calibration_split_patch.install()
+_unlabeled_anchor_tuple_patch.install()
 
 from . import (  # noqa: E402
     _source_alignment_cli_choices_patch,

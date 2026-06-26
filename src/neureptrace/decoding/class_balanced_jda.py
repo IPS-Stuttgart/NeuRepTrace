@@ -172,12 +172,29 @@ def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarr
         raise ValueError(f"{name} must be a one-dimensional sequence") from exc
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
-        try:
-            hash(value)
-        except TypeError as exc:
-            raise ValueError(f"{name} values must be hashable") from exc
-        vector[index] = value
+        vector[index] = _hashable_label(value, name=name)
     return vector
+
+
+def _hashable_label(value: Any, *, name: str) -> Any:
+    try:
+        hash(value)
+    except TypeError:
+        return _hashable_composite_label(value, name=name)
+    return value
+
+
+def _hashable_composite_label(value: Any, *, name: str) -> tuple[Any, ...]:
+    try:
+        items = list(value)
+    except TypeError as exc:
+        raise ValueError(f"{name} values must be hashable") from exc
+    label = tuple(_hashable_label(item, name=name) for item in items)
+    try:
+        hash(label)
+    except TypeError as exc:  # Defensive guard for unusual nested containers.
+        raise ValueError(f"{name} values must be hashable") from exc
+    return label
 
 
 def _object_mask(values: np.ndarray, target: Any) -> np.ndarray:

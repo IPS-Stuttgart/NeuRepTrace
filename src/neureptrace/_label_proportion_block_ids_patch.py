@@ -23,10 +23,8 @@ def _object_block_vector(values: Sequence[Hashable] | np.ndarray) -> np.ndarray:
             items = array.tolist()
         elif array.ndim == 2 and 1 in array.shape:
             items = array.reshape(-1).tolist()
-        elif array.ndim == 2:
-            items = [tuple(row.tolist()) for row in array]
         else:
-            raise ValueError(f"block_ids must be one-dimensional or a two-dimensional composite-id matrix; got shape {array.shape}.")
+            raise ValueError(f"block_ids must be one-dimensional or a single-column vector; got shape {array.shape}.")
     elif isinstance(values, (str, bytes)):
         items = [values]
     else:
@@ -40,7 +38,7 @@ def _object_block_vector(values: Sequence[Hashable] | np.ndarray) -> np.ndarray:
         try:
             hash(item)
         except TypeError as exc:
-            raise ValueError(f"block_ids must contain hashable identifiers; got {item!r}.") from exc
+            raise ValueError(f"block_ids must contain hashable block identifiers; got {item!r}.") from exc
         vector[index] = item
     return vector
 
