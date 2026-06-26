@@ -54,7 +54,7 @@ def test_label_proportion_blocks_preserve_tuple_block_ids():
 def test_label_proportion_blocks_reject_matrix_shaped_block_ids():
     malformed_blocks = np.asarray([["run1", "run1"], ["run2", "run2"]], dtype=object)
 
-    with pytest.raises(ValueError, match="block_ids.*one-dimensional"):
+    with pytest.raises(ValueError, match="block_ids.*same row count"):
         adjust_probability_blocks_to_label_proportions(
             _probabilities(),
             malformed_blocks,
