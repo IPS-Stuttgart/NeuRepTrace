@@ -9,6 +9,7 @@ from neureptrace.signal.band import (
     bandpass_filter,
     extract_alpha_signal_and_phase,
     sampling_rate_from_time_axis,
+    validate_time_axis,
 )
 
 
@@ -17,6 +18,11 @@ def test_sampling_rate_from_time_axis_validates_uniform_axis() -> None:
 
     with pytest.raises(ValueError, match="uniformly sampled"):
         sampling_rate_from_time_axis([0.0, 0.01, 0.03])
+
+
+def test_validate_time_axis_rejects_multidimensional_axes() -> None:
+    with pytest.raises(ValueError, match="one-dimensional"):
+        validate_time_axis(np.array([[0.0, 0.01], [0.02, 0.03]]))
 
 
 def test_bandpass_filter_and_hilbert_keep_shape() -> None:
