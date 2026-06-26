@@ -38,7 +38,14 @@ def _normalize_axis(axis: int, ndim: int) -> int:
 def validate_time_axis(time_vector) -> np.ndarray:
     """Return a validated, one-dimensional, uniformly sampled time axis."""
 
-    time_vector = np.asarray(time_vector, dtype=float).ravel()
+    time_vector = np.asarray(time_vector, dtype=float)
+    if time_vector.ndim == 0:
+        raise ValueError("time_vector must contain at least two samples.")
+    if time_vector.ndim != 1:
+        non_singleton_axes = sum(size > 1 for size in time_vector.shape)
+        if non_singleton_axes != 1:
+            raise ValueError("time_vector must be one-dimensional.")
+        time_vector = time_vector.reshape(-1)
     if time_vector.size < 2:
         raise ValueError("time_vector must contain at least two samples.")
     if not np.all(np.isfinite(time_vector)):
