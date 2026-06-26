@@ -72,6 +72,7 @@ from . import (  # noqa: E402
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
     _observation_schema_string_columns_patch,
+    _openneuro_real_shuffle_time_selection_patch,
     _paired_stats_tie_patch,
     _pls_da_composite_labels_patch,
     _probability_stacking_group_summary_patch,
@@ -241,7 +242,4 @@ _unlabeled_anchor_tuple_patch.install()
 _vrex_numeric_config_patch.install()
 _windowed_composite_labels_patch.install()
 _bushmeg_cue_temporal_bins_patch.install()
-
-from . import _openneuro_real_shuffle_time_selection_patch  # noqa: E402
-
 _openneuro_real_shuffle_time_selection_patch.install()
