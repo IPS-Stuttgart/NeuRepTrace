@@ -8,6 +8,7 @@ import pytest
 
 from neureptrace.dataset_config import (
     ConfigValidationError,
+    _fieldtrip_file_specs,
     apply_overrides,
     effective_config,
     iter_dataset_files,
@@ -66,6 +67,38 @@ def test_validate_fieldtrip_config_and_iter_files(tmp_path: Path):
         tmp_path / "data" / "Part2Data.mat",
         tmp_path / "data" / "Part3Data.mat",
     ]
+
+
+def test_fieldtrip_dataset_files_accepts_single_path_string(tmp_path: Path):
+    config = {
+        "dataset": {
+            "type": "fieldtrip_mat",
+            "root": "data",
+            "files": "Part10Data.mat",
+        },
+        "decoding": {"label_column": "stimulus_class"},
+    }
+
+    assert validate_dataset_config(config, base_dir=tmp_path) == []
+    expected = tmp_path / "data" / "Part10Data.mat"
+    assert iter_dataset_files(config, base_dir=tmp_path) == [expected]
+    assert _fieldtrip_file_specs(config, base_dir=tmp_path) == [(expected, {})]
+
+
+def test_fieldtrip_dataset_files_accepts_single_mapping_with_metadata(tmp_path: Path):
+    config = {
+        "dataset": {
+            "type": "fieldtrip_mat",
+            "root": "data",
+            "files": {"path": "Part11Data.mat", "split": "calibration"},
+        },
+        "decoding": {"label_column": "stimulus_class"},
+    }
+
+    assert validate_dataset_config(config, base_dir=tmp_path) == []
+    expected = tmp_path / "data" / "Part11Data.mat"
+    assert iter_dataset_files(config, base_dir=tmp_path) == [expected]
+    assert _fieldtrip_file_specs(config, base_dir=tmp_path) == [(expected, {"split": "calibration"})]
 
 
 def test_iter_dataset_files_includes_mne_metadata_csv(tmp_path: Path):
