@@ -9,6 +9,10 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_reaction_time_trial_value_type_patch_installed"
 
 
+def _trial_error(value: object) -> ValueError:
+    return ValueError(f"trial values must be finite integers, got {value!r}.")
+
+
 def install() -> None:
     """Ensure invalid trial objects raise the documented ValueError."""
 
@@ -18,13 +22,13 @@ def install() -> None:
         return
 
     def _to_int(value: object) -> int:
-        text = "" if value is None else str(value).strip()
         try:
+            text = "" if value is None else str(value).strip()
             number = float(text)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"trial values must be finite integers, got {value!r}.") from exc
+            raise _trial_error(value) from exc
         if not np.isfinite(number) or not number.is_integer():
-            raise ValueError(f"trial values must be finite integers, got {value!r}.")
+            raise _trial_error(value)
         return int(number)
 
     setattr(_to_int, _PATCH_MARKER, True)
