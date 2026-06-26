@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from neureptrace.decoding.source_centroid import SOURCE_CENTROID_CATEGORY, fit_source_centroid_decoder, source_centroid_config
+
+
+def test_source_centroid_predicts_nearest_classes() -> None:
+    source_features = np.asarray([[-2.0], [-1.5], [2.0], [1.5]], dtype=float)
+    source_labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+    test_features = np.asarray([[-1.8], [1.8]], dtype=float)
+
+    result = fit_source_centroid_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        test_features=test_features,
+        config={"use_diagonal_scale": False},
+    )
+
+    assert result.predictions.tolist() == ["left", "right"]
+    assert result.probabilities.shape == (2, 2)
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+    assert result.metadata["source_centroid_protocol_category"] == SOURCE_CENTROID_CATEGORY
+    assert result.metadata["source_centroid_valid_for_strict_source_only"] is True
+
+
+def test_source_centroid_shrinkage_moves_centroids_toward_global_mean() -> None:
+    source_features = np.asarray([[0.0], [2.0], [8.0], [10.0]], dtype=float)
+    source_labels = np.asarray([0, 0, 1, 1], dtype=object)
+    test_features = np.asarray([[1.0], [9.0]], dtype=float)
+
+    no_shrink = fit_source_centroid_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        test_features=test_features,
+        config={"shrinkage": 0.0, "use_diagonal_scale": False},
+    )
+    shrink = fit_source_centroid_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        test_features=test_features,
+        config={"shrinkage": 0.5, "use_diagonal_scale": False},
+    )
+
+    assert np.allclose(no_shrink.centroids.ravel(), np.asarray([1.0, 9.0]))
+    assert np.allclose(shrink.centroids.ravel(), np.asarray([3.0, 7.0]))
+
+
+def test_source_centroid_config_validation() -> None:
+    cfg = source_centroid_config(temperature="2.5", shrinkage="0.25")
+    assert cfg.temperature == 2.5
+    assert cfg.shrinkage == 0.25
+
+    with pytest.raises(ValueError, match="shrinkage"):
+        source_centroid_config(shrinkage=1.5)
+
+
+def test_source_centroid_rejects_shape_mismatch() -> None:
+    with pytest.raises(ValueError, match="same feature width"):
+        fit_source_centroid_decoder(
+            source_features=[[0.0, 1.0], [1.0, 0.0]],
+            source_labels=[0, 1],
+            test_features=[[0.0]],
+        )
