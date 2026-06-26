@@ -117,6 +117,8 @@ def fit_source_domain_probability_ensemble(
     classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
+    class_indices = {label: index for index, label in enumerate(classes.tolist())}
+    encoded_labels = np.asarray([class_indices[label] for label in labels.tolist()], dtype=int)
     mode = normalize_ensemble_weighting(weighting)
     temp = _positive_float(temperature, name="temperature")
     eps = _positive_float(epsilon, name="epsilon")
@@ -132,8 +134,8 @@ def fit_source_domain_probability_ensemble(
         if domain_classes.shape[0] < min_classes:
             continue
         model = clone(model_template)
-        model.fit(source[mask], domain_labels)
-        probabilities = _aligned_probabilities(model, target, classes=classes, epsilon=eps)
+        model.fit(source[mask], encoded_labels[mask])
+        probabilities = _aligned_probabilities(model, target, classes=np.arange(classes.shape[0]), epsilon=eps)
         models[domain] = SourceDomainModel(domain_id=domain, model=model, n_rows=int(np.sum(mask)), classes=domain_classes)
         domain_probabilities[domain] = probabilities
     if not models:
