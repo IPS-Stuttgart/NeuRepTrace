@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from neureptrace import _reaction_time_trial_index_base_patch
+from neureptrace import _reaction_time_trial_value_type_patch
 
 _reaction_time_trial_index_base_patch.install()
+_reaction_time_trial_value_type_patch.install()
 
 from neureptrace.behavior.reaction_time import (  # noqa: E402
     REACTION_TIME_FIELD_CANDIDATES,
