@@ -109,6 +109,7 @@ from . import (  # noqa: E402
     _transfer_null_label_conflict_patch,
     _tuple_label_calibration_split_patch,
     _unlabeled_anchor_tuple_patch,
+    _vrex_numeric_config_patch,
     _windowed_composite_labels_patch,
 )
 
@@ -210,6 +211,7 @@ _transfer_null_label_conflict_patch.install()
 _windowed_composite_labels_patch.install()
 _tuple_label_calibration_split_patch.install()
 _unlabeled_anchor_tuple_patch.install()
+_vrex_numeric_config_patch.install()
 
 from . import (  # noqa: E402
     _source_alignment_cli_choices_patch,
