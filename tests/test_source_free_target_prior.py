@@ -99,6 +99,19 @@ def test_target_prior_strength_interpolates_correction():
     assert none[:, 1].mean() < partial[:, 1].mean() < full[:, 1].mean()
 
 
+def test_disabled_target_prior_correction_ignores_irrelevant_prior_argument():
+    probabilities = np.array([[0.90, 0.10], [0.70, 0.30]], dtype=float)
+
+    corrected, prior = apply_target_prior_correction(
+        probabilities,
+        mode="none",
+        prior=np.array([1.0]),
+    )
+
+    assert np.allclose(corrected, probabilities)
+    assert np.allclose(prior, [0.8, 0.2])
+
+
 def test_smoothed_target_prior_makes_balancing_less_aggressive():
     probabilities = np.array([[0.98, 0.02], [0.92, 0.08]], dtype=float)
 

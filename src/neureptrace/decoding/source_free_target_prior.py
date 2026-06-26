@@ -130,6 +130,13 @@ def apply_target_prior_correction(
     normalized = _normalize_probability_rows(probabilities)
     parsed_mode = _target_prior_correction_mode(mode)
     parsed_strength = _bounded_strength(strength)
+    if parsed_mode == "none":
+        target_prior = stabilize_target_class_prior(
+            estimate_target_class_prior(normalized, estimator=estimator),
+            smoothing=smoothing,
+            floor=floor,
+        )
+        return normalized, target_prior
     raw_prior = (
         estimate_target_class_prior(normalized, estimator=estimator)
         if prior is None
@@ -140,7 +147,7 @@ def apply_target_prior_correction(
         smoothing=smoothing,
         floor=floor,
     )
-    if parsed_mode == "none" or parsed_strength == 0.0:
+    if parsed_strength == 0.0:
         return normalized, target_prior
     corrected = normalized / np.power(target_prior[np.newaxis, :], parsed_strength)
     return _normalize_probability_rows(corrected), target_prior
