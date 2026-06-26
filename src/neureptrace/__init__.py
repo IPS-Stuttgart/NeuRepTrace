@@ -30,6 +30,7 @@ from . import (  # noqa: E402
     _confusion_permutation_seed_patch,
     _correlation_prototype_sample_weight_patch,
     _dataset_config_participant_patch,
+    _dataset_files_scalar_patch,
     _dataset_name_config_patch,
     _dataset_spec_csv_group_column_patch,
     _dataset_spec_numeric_validation_patch,
@@ -120,6 +121,7 @@ from . import (  # noqa: E402
 _adversarial_composite_labels_patch.install()
 _alignment_window_config_patch.install()
 _dataset_config_participant_patch.install()
+_dataset_files_scalar_patch.install()
 _dataset_name_config_patch.install()
 _dataset_spec_csv_group_column_patch.install()
 _dataset_spec_numeric_validation_patch.install()
