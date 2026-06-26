@@ -295,13 +295,50 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _object_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    items = list(values)
+    items = _row_items(values, expected_length=expected_length)
     if len(items) != expected_length:
         raise ValueError(f"{name} must contain one value per source row: {len(items)} != {expected_length}.")
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
-        vector[index] = value
+        vector[index] = _hashable_object_value(value)
     return vector
+
+
+def _row_items(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> list[Any]:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            return [array.item()]
+        if array.ndim == 1:
+            return array.tolist()
+        rows = array.reshape(array.shape[0], -1)
+        if rows.shape[0] == expected_length:
+            return [row[0] if row.shape[0] == 1 else tuple(row.tolist()) for row in rows]
+        if array.size == expected_length and 1 in array.shape:
+            return array.reshape(-1).tolist()
+        return [tuple(row.tolist()) for row in rows]
+    if isinstance(values, (str, bytes)):
+        return [values]
+    try:
+        return list(values)
+    except TypeError:
+        return [values]
+
+
+def _hashable_object_value(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _hashable_object_value(value.item())
+        return tuple(_hashable_object_value(item) for item in value.tolist())
+    if isinstance(value, list):
+        return tuple(_hashable_object_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_hashable_object_value(item) for item in value)
+    if isinstance(value, dict):
+        return tuple(sorted((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items()))
+    return value
 
 
 def _validate_hashable(values: np.ndarray, *, name: str) -> None:
