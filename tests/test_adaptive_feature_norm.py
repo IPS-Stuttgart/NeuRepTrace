@@ -62,3 +62,9 @@ def test_aliases_and_guardrails() -> None:
         adaptive_feature_normalize(train, test, method="unknown")
     with pytest.raises(ValueError, match="positive"):
         adaptive_feature_normalize(train, test, scale_floor=0)
+
+
+def test_target_labels_are_not_part_of_api() -> None:
+    train, test = _features()
+    with pytest.raises(TypeError):
+        adaptive_feature_normalize(train, test, target_labels=[0, 1])
