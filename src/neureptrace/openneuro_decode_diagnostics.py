@@ -154,10 +154,34 @@ def _validate_aggregate_manifest_compatibility(
         raise ValueError(f"Incompatible shard manifests for {column!r}: {details}")
 
 
+def _is_empty_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, dict | list | tuple):
+        return len(value) == 0
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    if isinstance(missing, bool) or getattr(missing, "shape", None) == ():
+        return bool(missing)
+    return False
+
+
+def _normalize_manifest_provenance_value(value: Any) -> Any:
+    if isinstance(value, list | tuple):
+        return "|".join(str(item).strip() for item in value if str(item).strip())
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return value
+
+
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
-    if pd.isna(value):
+    if _is_empty_value(value):
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -174,7 +198,7 @@ def _parse_bool_token(value: Any) -> bool:
 
 
 def _optional_unique_bool(value: Any, *, column: str) -> bool | None:
-    if value in {"", None}:
+    if _is_empty_value(value):
         return None
     tokens = [
         token.strip()
@@ -301,8 +325,8 @@ def _provenance_value(
     summary_key: str | None = None,
 ) -> Any:
     value = manifest.get(manifest_key, "")
-    if value not in {"", None}:
-        return value
+    if not _is_empty_value(value):
+        return _normalize_manifest_provenance_value(value)
     return summary_provenance.get(summary_key or manifest_key, "")
 
 
@@ -378,7 +402,7 @@ def _diagnostics_best_time(output_dirs: Sequence[Path], explicit_best_time: floa
         return explicit_best_time
     for output_dir in output_dirs:
         value = _read_json(output_dir / "run_manifest.json").get("diagnostics_best_time", "")
-        if value not in {"", None}:
+        if not _is_empty_value(value):
             numeric = _as_float(value)
             if numeric is not None:
                 return numeric
