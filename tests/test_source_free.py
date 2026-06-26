@@ -29,6 +29,15 @@ class _ImbalancedPseudoLabelSourceModel:
         return probabilities
 
 
+class _CollapsedPseudoLabelSourceModel:
+    classes_ = np.array([0, 1])
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probabilities = np.tile(np.array([[0.64, 0.36]], dtype=float), (features.shape[0], 1))
+        probabilities[features[:, 0] > 0.0] = np.array([0.56, 0.44], dtype=float)
+        return probabilities
+
+
 def _label_vector(*labels: object) -> np.ndarray:
     values = np.empty(len(labels), dtype=object)
     values[:] = labels
@@ -76,6 +85,7 @@ def test_source_free_adaptation_uses_target_features_but_no_target_labels():
     assert result.metadata["source_free_uses_target_labels"] is False
     assert result.metadata["source_free_valid_for_benchmark"] is True
     assert result.metadata["source_free_target_rows"] == target_features.shape[0]
+    assert result.metadata["source_free_prototype_estimator"] == "hard"
 
 
 def test_source_free_adapter_does_not_accept_target_labels_keyword():
@@ -153,6 +163,70 @@ def test_balanced_topk_selection_keeps_minority_pseudo_class_active():
     assert metadata["source_free_active_classes"] == 2
     assert balanced_adapter.prototype_class_counts_.tolist() == [2, 2]
     assert balanced_adapter.selected_.sum() == 4
+
+
+def test_soft_all_prototypes_keep_classes_active_when_argmax_collapses():
+    target_features = np.vstack([np.full((8, 2), -1.0), np.full((8, 2), 1.0)])
+
+    hard_adapter = SourceFreeSubjectAdapter(
+        source_model=_CollapsedPseudoLabelSourceModel(),
+        confidence_threshold=0.90,
+        max_iterations=2,
+        min_class_count=2,
+        min_active_classes=2,
+        prototype_weight=0.5,
+        pseudo_label_selection="confidence",
+        prototype_estimator="hard",
+    ).fit(target_features)
+    assert hard_adapter.metadata()["source_free_stop_reason"] == "none_selected"
+    assert hard_adapter.metadata()["source_free_active_classes"] == 0
+
+    soft_adapter = SourceFreeSubjectAdapter(
+        source_model=_CollapsedPseudoLabelSourceModel(),
+        confidence_threshold=0.90,
+        max_iterations=2,
+        min_class_count=2,
+        min_active_classes=2,
+        prototype_weight=0.5,
+        pseudo_label_selection="confidence",
+        prototype_estimator="soft_all",
+    ).fit(target_features)
+
+    metadata = soft_adapter.metadata()
+    assert metadata["source_free_prototype_estimator"] == "soft_all"
+    assert metadata["source_free_uses_target_labels"] is False
+    assert metadata["source_free_valid_for_benchmark"] is True
+    assert metadata["source_free_active_classes"] == 2
+    assert np.all(np.isfinite(soft_adapter.prototypes_))
+    assert np.allclose(soft_adapter.predict_proba(target_features).sum(axis=1), 1.0)
+
+
+def test_fit_source_free_predict_proba_forwards_soft_prototype_estimator():
+    target_features = np.vstack([np.full((4, 2), -1.0), np.full((4, 2), 1.0)])
+
+    result = fit_source_free_predict_proba(
+        source_model=_CollapsedPseudoLabelSourceModel(),
+        target_features=target_features,
+        confidence_threshold=0.90,
+        max_iterations=1,
+        min_class_count=2,
+        min_active_classes=2,
+        prototype_estimator="soft_all",
+    )
+
+    assert result.metadata["source_free_prototype_estimator"] == "soft_all"
+    assert result.metadata["source_free_active_classes"] == 2
+    assert result.probabilities.shape == (8, 2)
+
+
+def test_source_free_rejects_unknown_prototype_estimator():
+    target_features = np.array([[-1.0, 0.0], [2.0, 0.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="prototype_estimator"):
+        SourceFreeSubjectAdapter(
+            source_model=_CompositeLabelSourceModel(),
+            prototype_estimator="target_labels",
+        ).fit(target_features)
 
 
 def test_source_free_string_boolean_is_parsed_for_metadata():

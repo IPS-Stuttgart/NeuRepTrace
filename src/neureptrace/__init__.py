@@ -97,6 +97,7 @@ from . import (  # noqa: E402
     _source_domain_generalization_composite_patch,
     _source_free_standardize_target_patch,
     _source_free_probability_rows_patch,
+    _source_free_soft_prototypes_patch,
     _source_free_tuple_labels_patch,
     _source_label_vector_patch,
     _source_mixup_boolean_config_patch,
@@ -207,6 +208,7 @@ _source_alignment_cli_choices_patch.install()
 _source_domain_generalization_composite_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_probability_rows_patch.install()
+_source_free_soft_prototypes_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_label_vector_patch.install()
 _source_mixup_boolean_config_patch.install()
