@@ -1,10 +1,4 @@
-"""Source-only variance-risk extrapolation for cross-subject decoding.
-
-The estimator in this module implements a dependency-light linear VREx classifier.
-It minimizes the mean cross-entropy over source domains together with a penalty on
-the variance of per-domain risks.  Only source features, source labels, and source
-domain identifiers are accepted; held-out target data are absent from the API.
-"""
+"""Source-only variance-risk extrapolation for cross-subject decoding."""
 
 from __future__ import annotations
 
@@ -31,23 +25,7 @@ class VRExFitResult:
 
 
 class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
-    """Linear multiclass VREx classifier for strict source-only generalization.
-
-    Parameters
-    ----------
-    penalty_weight:
-        Weight on the variance of source-domain cross-entropy risks.
-    l2:
-        L2 penalty applied to linear coefficients, excluding intercepts.
-    max_iter, tol:
-        L-BFGS optimization controls.
-    fit_intercept:
-        Whether to fit class intercepts.
-    standardize:
-        Whether to standardize features using source rows only.
-    class_weight:
-        ``None``, ``"balanced"``, or a mapping keyed by source class label.
-    """
+    """Linear multiclass VREx classifier for strict source-only generalization."""
 
     def __init__(
         self,
@@ -74,8 +52,6 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
         *,
         source_domains: Sequence[Hashable] | np.ndarray,
     ) -> "LinearVRExClassifier":
-        """Fit from source rows, labels, and source-domain identifiers only."""
-
         x = _feature_matrix(source_features, name="source_features")
         labels = _object_vector(source_labels, expected_length=x.shape[0], name="source_labels")
         domains = _object_vector(source_domains, expected_length=x.shape[0], name="source_domains")
@@ -87,10 +63,11 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
             raise ValueError("VREx requires at least two source classes.")
         if len(domain_values) < 2:
             raise ValueError("VREx requires at least two source domains.")
+
         class_to_index = _unique_index(classes, name="source classes")
         domain_to_index = _unique_index(domain_values, name="source domains")
-        encoded_labels = np.asarray([class_to_index[value] for value in labels.tolist()], dtype=int)
-        encoded_domains = np.asarray([domain_to_index[value] for value in domains.tolist()], dtype=int)
+        y = np.asarray([class_to_index[value] for value in labels.tolist()], dtype=int)
+        domain_ids = np.asarray([domain_to_index[value] for value in domains.tolist()], dtype=int)
 
         penalty_weight = _nonnegative_float(self.penalty_weight, name="penalty_weight")
         l2 = _nonnegative_float(self.l2, name="l2")
@@ -109,10 +86,10 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
             if standardize
             else np.ones(x.shape[1], dtype=float)
         )
-        standardized = centered / self.feature_scale_
+        z = centered / self.feature_scale_
 
-        self.classes_ = np.asarray(classes, dtype=object)
-        self.source_domains_ = np.asarray(domain_values, dtype=object)
+        self.classes_ = _object_vector(classes, expected_length=len(classes), name="classes")
+        self.source_domains_ = _object_vector(domain_values, expected_length=len(domain_values), name="source_domains")
         self.n_features_in_ = int(x.shape[1])
         self.n_classes_ = len(classes)
         self.n_source_domains_ = len(domain_values)
@@ -130,13 +107,12 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
             losses: list[float] = []
             gradients: list[np.ndarray] = []
             for domain_index in range(self.n_source_domains_):
-                mask = encoded_domains == domain_index
-                domain_x = standardized[mask]
-                domain_y = encoded_labels[mask]
+                mask = domain_ids == domain_index
+                domain_x = z[mask]
+                domain_y = y[mask]
                 weights = sample_weights[mask]
                 weights = weights / np.sum(weights)
-                logits = _reference_logits(domain_x, coefficients, intercept)
-                probabilities = _softmax(logits)
+                probabilities = _softmax(_reference_logits(domain_x, coefficients, intercept))
                 loss = float(np.sum(weights * -np.log(np.maximum(probabilities[np.arange(domain_y.shape[0]), domain_y], _MIN_SCALE))))
                 residual = probabilities
                 residual[np.arange(domain_y.shape[0]), domain_y] -= 1.0
@@ -152,14 +128,12 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
             gradient_matrix = np.vstack(gradients)
             mean_loss = float(np.mean(loss_vector))
             centered_losses = loss_vector - mean_loss
-            variance = float(np.mean(centered_losses**2))
-            gradient = np.mean(gradient_matrix, axis=0)
-            gradient += 2.0 * penalty_weight * np.mean(centered_losses[:, None] * gradient_matrix, axis=0)
-            objective_value = mean_loss + penalty_weight * variance
+            value = mean_loss + penalty_weight * float(np.mean(centered_losses**2))
+            gradient = np.mean(gradient_matrix, axis=0) + 2.0 * penalty_weight * np.mean(centered_losses[:, None] * gradient_matrix, axis=0)
             if l2 > 0.0:
-                objective_value += 0.5 * l2 * float(np.sum(parameters[:coefficient_size] ** 2))
+                value += 0.5 * l2 * float(np.sum(parameters[:coefficient_size] ** 2))
                 gradient[:coefficient_size] += l2 * parameters[:coefficient_size]
-            return objective_value, gradient
+            return value, gradient
 
         optimization = minimize(
             fun=lambda parameters: objective(parameters)[0],
@@ -177,7 +151,7 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
         self.optimization_message_ = str(optimization.message)
         self.n_iter_ = int(getattr(optimization, "nit", 0))
         self.objective_ = float(optimization.fun)
-        self.domain_risks_ = self._domain_risks(standardized, encoded_labels, encoded_domains, sample_weights)
+        self.domain_risks_ = self._domain_risks(z, y, domain_ids, sample_weights)
         self.domain_risk_variance_ = float(np.var(self.domain_risks_))
         self.mean_domain_risk_ = float(np.mean(self.domain_risks_))
         return self
@@ -199,17 +173,13 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
 
     def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
         logits = _reference_logits(self._standardized(features), self.coef_, self.intercept_)
-        if self.n_classes_ == 2:
-            return logits[:, 1] - logits[:, 0]
-        return logits
+        return logits[:, 1] - logits[:, 0] if self.n_classes_ == 2 else logits
 
     def predict_proba(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-        logits = _reference_logits(self._standardized(features), self.coef_, self.intercept_)
-        return _softmax(logits)
+        return _softmax(_reference_logits(self._standardized(features), self.coef_, self.intercept_))
 
     def predict(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-        indices = np.argmax(self.predict_proba(features), axis=1)
-        return self.classes_[indices]
+        return self.classes_[np.argmax(self.predict_proba(features), axis=1)]
 
     def _domain_risks(self, x: np.ndarray, y: np.ndarray, domains: np.ndarray, sample_weights: np.ndarray) -> np.ndarray:
         probabilities = _softmax(_reference_logits(x, self.coef_, self.intercept_))
@@ -222,8 +192,6 @@ class LinearVRExClassifier(ClassifierMixin, BaseEstimator):
         return np.asarray(risks, dtype=float)
 
     def metadata(self, *, test_rows: int | None = None) -> dict[str, Any]:
-        """Return protocol and optimization provenance for reports."""
-
         if not hasattr(self, "coef_"):
             raise RuntimeError("LinearVRExClassifier must be fitted before metadata is available.")
         return {
@@ -263,8 +231,6 @@ def fit_vrex_predict_proba(
     test_features: Sequence[Sequence[float]] | np.ndarray,
     **model_kwargs: Any,
 ) -> VRExFitResult:
-    """Fit a source-only VREx classifier and emit probabilities for test rows."""
-
     model = LinearVRExClassifier(**model_kwargs)
     model.fit(source_features, source_labels, source_domains=source_domains)
     probabilities = model.predict_proba(test_features)
@@ -272,8 +238,7 @@ def fit_vrex_predict_proba(
 
 
 def _reference_logits(x: np.ndarray, coefficients: np.ndarray, intercept: np.ndarray) -> np.ndarray:
-    free_logits = x @ coefficients + intercept
-    return np.column_stack([free_logits, np.zeros(x.shape[0], dtype=float)])
+    return np.column_stack([x @ coefficients + intercept, np.zeros(x.shape[0], dtype=float)])
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -282,14 +247,35 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     return exponentiated / np.sum(exponentiated, axis=1, keepdims=True)
 
 
+def _labels_equal(left: object, right: object) -> bool:
+    try:
+        comparison = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(comparison, np.ndarray):
+        try:
+            return bool(np.all(comparison))
+        except (TypeError, ValueError):
+            return False
+    try:
+        return bool(comparison)
+    except (TypeError, ValueError):
+        return False
+
+
 def _class_weights(labels: np.ndarray, *, classes: Sequence[Any], class_weight: str | Mapping[Any, float] | None) -> np.ndarray:
     if class_weight is None:
         return np.ones(labels.shape[0], dtype=float)
-    if class_weight == "balanced":
+    if isinstance(class_weight, str):
+        if class_weight != "balanced":
+            raise ValueError("class_weight must be None, 'balanced', or a mapping keyed by source class.")
         weights = np.zeros(labels.shape[0], dtype=float)
         for class_label in classes:
-            mask = labels == class_label
-            weights[mask] = labels.shape[0] / (len(classes) * np.count_nonzero(mask))
+            mask = np.asarray([_labels_equal(label, class_label) for label in labels.tolist()], dtype=bool)
+            count = int(np.count_nonzero(mask))
+            if count == 0:
+                raise ValueError("source class has no matching rows for balanced class weighting.")
+            weights[mask] = labels.shape[0] / (len(classes) * count)
         return weights
     if not isinstance(class_weight, Mapping):
         raise ValueError("class_weight must be None, 'balanced', or a mapping keyed by source class.")
