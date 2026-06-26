@@ -134,6 +134,11 @@ def _normalize_index_vector(values: Sequence[int] | np.ndarray, *, name: str) ->
     return numeric.astype(int, copy=False)
 
 
+def _reject_duplicate_indices(indices: np.ndarray, *, name: str) -> None:
+    if np.unique(indices).size != indices.size:
+        raise ValueError(f"{name} contains duplicate target row indices.")
+
+
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
     probabilities = np.asarray(probabilities, dtype=float)
     if probabilities.ndim != 2:
@@ -203,6 +208,7 @@ def select_few_shot_target_calibration_split(
         raise ValueError("few-shot target calibration requires at least one target row.")
     if np.any(indices < 0) or np.any(indices >= label_vector.shape[0]):
         raise ValueError("target_indices contains an out-of-range row index.")
+    _reject_duplicate_indices(indices, name="target_indices")
 
     per_class_count = _normalize_positive_int(per_class, name="few_shot_target_calibration_per_class")
     min_eval = _normalize_nonnegative_int(min_evaluation_per_class, name="few_shot_min_evaluation_per_class")
@@ -330,6 +336,7 @@ def fit_few_shot_target_calibrated_decoder(
     for name, indices in {"calibration_indices": calibration_indices, "evaluation_indices": evaluation_indices}.items():
         if np.any(indices < 0) or np.any(indices >= target_matrix.shape[0]):
             raise ValueError(f"{name} contains an out-of-range target row index.")
+        _reject_duplicate_indices(indices, name=name)
     if np.intersect1d(calibration_indices, evaluation_indices).size:
         raise ValueError("few-shot calibration and evaluation indices must be disjoint.")
 
