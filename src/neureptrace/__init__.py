@@ -27,6 +27,7 @@ from . import (  # noqa: E402
     _category2_autoencoder_max_folds_patch,
     _classifier_tuple_labels_patch,
     _config_workflow_float_bool_patch,
+    _conditional_coral_bool_config_patch,
     _confusion_metadata_lookup_patch,
     _confusion_permutation_seed_patch,
     _correlation_prototype_sample_weight_patch,
@@ -141,6 +142,7 @@ _confusion_permutation_seed_patch.install()
 _correlation_prototype_sample_weight_patch.install()
 _classifier_tuple_labels_patch.install()
 _config_workflow_float_bool_patch.install()
+_conditional_coral_bool_config_patch.install()
 _event_detection_extensions.install()
 _fieldtrip_sampleinfo_validation_patch.install()
 _few_shot_split_validation_patch.install()
