@@ -6,6 +6,11 @@ turn malformed matrix-shaped labels into apparently valid per-row labels, or let
 matrix-shaped domain arrays reach later NumPy masking operations.  This patch
 keeps genuine vectors accepted, including single-row/single-column CLI vectors,
 while rejecting true matrices at the public boundary.
+
+It also keeps tuple-valued source-domain identifiers atomic when DTE source-domain
+selection materializes the top-k domain list.  Without that guard, NumPy can coerce
+``[(subject, run), ...]`` into a 2-D string array, causing ``np.isin`` to reject
+all matching tuple-valued domain rows.
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ from __future__ import annotations
 import importlib.abc
 import importlib.machinery
 import sys
-from collections.abc import Hashable
+from collections.abc import Hashable, Mapping
 from functools import wraps
 from types import ModuleType
 from typing import Any
@@ -64,6 +69,11 @@ def _as_hashable_vector(values: Any, *, name: str) -> np.ndarray:
 
 def _normalize_optional_vector(value: Any, *, name: str) -> np.ndarray | None:
     return None if value is None else _as_hashable_vector(value, name=name)
+
+
+def _select_top_domains(scores: Mapping[Any, float], top_k: int) -> np.ndarray:
+    ordered = sorted(scores, key=lambda key: (-float(scores[key]), str(key)))
+    return _object_array(list(ordered[: min(int(top_k), len(ordered))]))
 
 
 def _patch_module(module: ModuleType) -> None:
@@ -125,6 +135,7 @@ def _patch_module(module: ModuleType) -> None:
         )
 
     module._domain_ids = _domain_ids
+    module._select_top_domains = _select_top_domains
     module.centroid_aligned_tangent_features = centroid_aligned_tangent_features
     module.mekt_transfer_features = mekt_transfer_features
     module.fit_predict_mekt_transfer = fit_predict_mekt_transfer
