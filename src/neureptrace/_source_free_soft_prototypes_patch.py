@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 
 import neureptrace.decoding.source_free as _sf
+from neureptrace._source_free_standardize_target_patch import _normalize_bool, _persist_normalized_numeric_config
 
 
 def _prototype_estimator_mode(value: Any) -> str:
@@ -100,7 +101,7 @@ def _fit(self, target_features: np.ndarray, *, source_model: Any | None = None, 
     embedding = np.asarray(embedding, dtype=float)
     if embedding.shape[0] != x_target.shape[0]:
         raise ValueError("The source-model preprocessor returned a different number of target rows.")
-    standardize_target = _sf._boolean(self.standardize_target, "source_free_standardize_target")
+    standardize_target = _normalize_bool(self.standardize_target, name="source_free_standardize_target")
     embedding, mean, scale = _sf._standardize_embedding(embedding, enabled=standardize_target)
     threshold = _sf._bounded_float(self.confidence_threshold, "source_free_confidence_threshold", lower=0.0, upper=1.0, include_upper=True)
     max_iterations = _sf._nonnegative_int(self.max_iterations, "source_free_max_iterations")
@@ -184,10 +185,12 @@ def _fit(self, target_features: np.ndarray, *, source_model: Any | None = None, 
     self.pseudo_labels_ = final_pseudo_labels
     self.n_iterations_ = iterations
     self.stop_reason_ = stop_reason
+    self.standardize_target = standardize_target
     self.standardize_target_ = standardize_target
     self.pseudo_label_selection_ = pseudo_label_selection
     self.balanced_topk_per_class_ = balanced_topk_per_class
     self.prototype_estimator_ = prototype_estimator
+    _persist_normalized_numeric_config(_sf, self)
     return self
 
 
