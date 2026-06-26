@@ -1,3 +1,3 @@
-# Domain objective
+# Source-domain subsets
 
-Source-only domain generalization objective helpers.
+`neureptrace.decoding.domain_subsets` generates strict source-only masks for leave-one-domain-out bagging and ablation experiments.
