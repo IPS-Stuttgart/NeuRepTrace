@@ -53,3 +53,23 @@ def test_from_decoded_fold_builds_valid_canonical_rows() -> None:
 
     assert table.validate().is_valid
     assert table.frame["probability_true_class"].tolist() == [0.8, 0.9]
+
+
+def test_from_decoded_fold_uses_positional_lookup_for_metadata_series() -> None:
+    table = ProbabilityObservationTable.from_decoded_fold(
+        probabilities=np.array([[0.2, 0.8], [0.9, 0.1]]),
+        test_labels=np.array([1, 0]),
+        predictions=np.array([1, 0]),
+        class_names=["noise", "face"],
+        test_indices=np.array([0, 1]),
+        fold=0,
+        decoder="logistic",
+        backend="sklearn",
+        emission_mode="calibrated",
+        time=0.15,
+        session_values=pd.Series(["session-a", "session-b"], index=[10, 20]),
+        group_values=pd.Series(["subject-a", "subject-b"], index=[10, 20]),
+    )
+
+    assert table.frame["session"].tolist() == ["session-a", "session-b"]
+    assert table.frame["group"].tolist() == ["subject-a", "subject-b"]
