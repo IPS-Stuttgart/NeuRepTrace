@@ -337,7 +337,8 @@ def _hashable_object_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_hashable_object_value(item) for item in value)
     if isinstance(value, dict):
-        return tuple(sorted((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items()))
+        pairs = ((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items())
+        return tuple(sorted(pairs, key=lambda pair: repr(pair[0])))
     return value
 
 
@@ -363,6 +364,8 @@ def _unique_index(values: Sequence[Hashable], *, name: str) -> dict[Hashable, in
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
     parsed = float(value)
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
@@ -370,6 +373,8 @@ def _positive_int(value: int | str, *, name: str) -> int:
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
     parsed = float(value)
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
@@ -377,6 +382,8 @@ def _positive_float(value: float | str, *, name: str) -> float:
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite and non-negative.")
     parsed = float(value)
     if not np.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be finite and non-negative.")

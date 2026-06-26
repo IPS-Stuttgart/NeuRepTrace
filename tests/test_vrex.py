@@ -46,6 +46,46 @@ def test_vrex_accepts_numeric_boolean_hyperparameters():
     assert np.allclose(model.feature_scale_, np.ones(features.shape[1]))
 
 
+def test_vrex_accepts_matrix_shaped_source_domain_ids():
+    features, labels, _ = _source_table()
+    domains = np.asarray([[1, 0], [1, 0], [2, 0], [2, 0]])
+
+    model = LinearVRExClassifier(max_iter=3, tol=1e-4)
+    model.fit(features, labels, source_domains=domains)
+
+    assert model.n_source_domains_ == 2
+    assert model.source_domains_.tolist() == [(1, 0), (2, 0)]
+    assert model.predict_proba(features[:2]).shape == (2, 2)
+
+
+def test_vrex_accepts_list_valued_source_labels_with_mapping_weights():
+    features, _, domains = _source_table()
+    labels = [["left", 0], ["right", 0], ["left", 0], ["right", 0]]
+
+    model = LinearVRExClassifier(class_weight={("left", 0): 1.0, ("right", 0): 2.0}, max_iter=3, tol=1e-4)
+    model.fit(features, labels, source_domains=domains)
+
+    assert model.classes_.tolist() == [("left", 0), ("right", 0)]
+    assert np.allclose(model.class_weight_vector_, [1.0, 2.0, 1.0, 2.0])
+    assert model.predict(features[:1]).tolist() in [[("left", 0)], [("right", 0)]]
+
+
+def test_vrex_accepts_dict_valued_source_domains_with_mixed_key_types():
+    features, labels, _ = _source_table()
+    domains = [
+        {"subject": 1, 0: "run-a"},
+        {"subject": 1, 0: "run-a"},
+        {"subject": 2, 0: "run-b"},
+        {"subject": 2, 0: "run-b"},
+    ]
+
+    model = LinearVRExClassifier(max_iter=3, tol=1e-4)
+    model.fit(features, labels, source_domains=domains)
+
+    assert model.n_source_domains_ == 2
+    assert model.predict_proba(features[:2]).shape == (2, 2)
+
+
 @pytest.mark.parametrize("param", ["maybe", 2, np.nan])
 def test_vrex_rejects_invalid_boolean_hyperparameters(param):
     features, labels, domains = _source_table()
