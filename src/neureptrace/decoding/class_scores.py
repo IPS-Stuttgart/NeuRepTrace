@@ -5,25 +5,67 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
 from neureptrace.decoding.windowed import WindowedModelBundle, transform_window_features
 
 
 def _object_label_vector(labels: Sequence[object]) -> np.ndarray:
-    vector = np.empty(len(labels), dtype=object)
-    for index, label in enumerate(labels):
+    values = list(labels)
+    vector = np.empty(len(values), dtype=object)
+    for index, label in enumerate(values):
         vector[index] = label
     return vector
 
 
+def _as_python_scalar(value: object) -> object:
+    return value.item() if isinstance(value, np.generic) else value
+
+
+def _is_composite_label(label: object) -> bool:
+    return isinstance(label, (list, tuple, np.ndarray)) and not isinstance(label, (str, bytes))
+
+
+def _coerce_composite_label(label: object) -> object:
+    """Canonicalize sequence-valued labels without splitting them into classes."""
+
+    if isinstance(label, np.generic):
+        return label.item()
+    if isinstance(label, np.ndarray):
+        array = label.astype(object, copy=False)
+        if array.ndim == 0:
+            return _as_python_scalar(array.item())
+        flat = array.reshape(-1)
+        if flat.size == 1:
+            return _as_python_scalar(flat[0])
+        return tuple(_coerce_composite_label(value) for value in flat.tolist())
+    if isinstance(label, list):
+        return tuple(_coerce_composite_label(value) for value in label)
+    if isinstance(label, tuple):
+        return tuple(_coerce_composite_label(value) for value in label)
+    return label
+
+
+def _row_label_vector(labels: np.ndarray) -> np.ndarray:
+    array = labels.astype(object, copy=False)
+    if array.ndim == 0:
+        return _object_label_vector([_coerce_composite_label(array.item())])
+    if array.ndim == 1:
+        values = array.tolist()
+        if any(_is_composite_label(value) for value in values):
+            return _object_label_vector(_coerce_composite_label(value) for value in values)
+        return labels.ravel()
+
+    rows = array.reshape(array.shape[0], -1)
+    if rows.shape[1] == 1:
+        return _object_label_vector(_coerce_composite_label(row[0]) for row in rows)
+    return _object_label_vector(tuple(_coerce_composite_label(value) for value in row.tolist()) for row in rows)
+
+
 def _label_vector(labels: Sequence | np.ndarray) -> np.ndarray:
-    """Return a one-dimensional class-label vector without splitting tuples."""
+    """Return a one-dimensional class-label vector without splitting composite labels."""
 
     if isinstance(labels, np.ndarray):
-        if labels.ndim == 0:
-            return labels.reshape(1)
-        if labels.dtype == object and labels.ndim == 1:
-            return labels
-        return labels.ravel()
+        return _row_label_vector(labels)
 
     if isinstance(labels, (str, bytes)):
         return np.asarray([labels])
@@ -33,22 +75,13 @@ def _label_vector(labels: Sequence | np.ndarray) -> np.ndarray:
     except TypeError:
         return np.asarray([labels])
 
-    if any(isinstance(label, tuple) for label in items):
-        return _object_label_vector(items)
+    if any(_is_composite_label(label) for label in items):
+        return _object_label_vector(_coerce_composite_label(label) for label in items)
     return np.asarray(items).ravel()
 
 
 def _labels_equal(left: object, right: object) -> bool:
-    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
-        return bool(np.array_equal(left, right))
-    try:
-        equal = left == right
-    except (TypeError, ValueError):
-        return False
-    try:
-        return bool(equal)
-    except (TypeError, ValueError):
-        return False
+    return values_equal(left, right)
 
 
 def _label_matches(classes: np.ndarray, target: object) -> np.ndarray:

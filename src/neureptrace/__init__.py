@@ -47,6 +47,7 @@ from . import (  # noqa: E402
     _joint_distribution_adaptation_config_bool_patch,
     _kernel_mean_matching_bool_validation_patch,
     _label_shift_source_prior_patch,
+    _label_shift_source_label_metadata_patch,
     _label_proportion_block_ids_patch,
     _label_proportion_tuple_prediction_patch,
     _lora_few_shot_numeric_config_patch,
@@ -82,6 +83,7 @@ from . import (  # noqa: E402
     _source_alignment_times_validation_patch,
     _source_domain_generalization_composite_patch,
     _source_free_standardize_target_patch,
+    _source_free_probability_rows_patch,
     _source_free_tuple_labels_patch,
     _source_label_vector_patch,
     _source_mixstyle_tuple_labels_patch,
@@ -93,6 +95,7 @@ from . import (  # noqa: E402
     _source_selection_vector_shape_patch,
     _source_weighting_enabled_alias_patch,
     _source_weighting_tuple_row_groups_patch,
+    _subspace_adaptation_config_bool_patch,
     _temporal_smoothing_singleton_sequence_patch,
     _transfer_array_label_null_patch,
     _transfer_components_validation_patch,
@@ -125,6 +128,7 @@ _generative_augmentation_composite_labels_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
 _joint_distribution_adaptation_config_bool_patch.install()
 _label_shift_source_prior_patch.install()
+_label_shift_source_label_metadata_patch.install()
 _label_proportion_block_ids_patch.install()
 _label_proportion_tuple_prediction_patch.install()
 _lora_few_shot_tuple_subject_patch.install()
@@ -172,6 +176,7 @@ _riemannian_vector_validation_patch.install()
 _source_alignment_times_validation_patch.install()
 _source_domain_generalization_composite_patch.install()
 _source_free_standardize_target_patch.install()
+_source_free_probability_rows_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_label_vector_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
@@ -185,6 +190,7 @@ _source_selection_temperature_patch.install()
 _source_selection_vector_shape_patch.install()
 _source_weighting_enabled_alias_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
+_subspace_adaptation_config_bool_patch.install()
 _temporal_smoothing_singleton_sequence_patch.install()
 _transfer_array_label_null_patch.install()
 _transfer_components_validation_patch.install()
