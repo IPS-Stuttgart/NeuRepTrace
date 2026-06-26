@@ -10,6 +10,7 @@ silently refer to different repetition offsets.
 
 from __future__ import annotations
 
+import importlib
 import importlib.abc
 import importlib.machinery
 import sys
@@ -35,6 +36,10 @@ def _patch_source_alignment(source_alignment: ModuleType) -> None:
 
     source_alignment._source_alignment_repetition_selection = _source_alignment_repetition_selection
     setattr(source_alignment, _PATCH_MARKER, True)
+
+
+def _install_config_validation() -> None:
+    importlib.import_module("neureptrace._source_alignment_target_seed_patch").install()
 
 
 class _SourceAlignmentPseudoRepetitionPatchLoader(importlib.abc.Loader):
@@ -74,12 +79,15 @@ def install() -> None:
     module = sys.modules.get(_TARGET_MODULE)
     if module is not None:
         _patch_source_alignment(module)
+        _install_config_validation()
         return
     if any(getattr(finder, _FINDER_MARKER, False) for finder in sys.meta_path):
+        _install_config_validation()
         return
     finder = _SourceAlignmentPseudoRepetitionPatchFinder()
     setattr(finder, _FINDER_MARKER, True)
     sys.meta_path.insert(0, finder)
+    _install_config_validation()
 
 
 __all__ = ["install"]
