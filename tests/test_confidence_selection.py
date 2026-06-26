@@ -70,9 +70,9 @@ def test_per_class_top_k_keeps_one_row_per_predicted_class() -> None:
 def test_margin_filter_combines_with_threshold() -> None:
     probabilities = np.asarray(
         [
-            [0.80, 0.20],
+            [0.80, 0.20, 0.00],
             [0.80, 0.19, 0.01],
-            [0.60, 0.40],
+            [0.60, 0.40, 0.00],
         ]
     )
 
