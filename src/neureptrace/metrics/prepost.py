@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
+import numpy as np
 import pandas as pd
 
 Window = tuple[float, float]
@@ -99,12 +101,29 @@ def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
 
 
 def _validate_window(window: Window) -> Window:
-    if len(window) != 2:
+    try:
+        window_length = len(window)
+    except TypeError as exc:
+        raise ValueError("window must contain exactly two values") from exc
+    if window_length != 2:
         raise ValueError("window must contain exactly two values")
-    window_start, window_stop = float(window[0]), float(window[1])
+    window_start = _validate_window_endpoint(window[0], name="start")
+    window_stop = _validate_window_endpoint(window[1], name="stop")
     if window_start > window_stop:
         raise ValueError("window start must be less than or equal to window stop")
     return window_start, window_stop
+
+
+def _validate_window_endpoint(value: object, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"window {name} must be a finite numeric value")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"window {name} must be a finite numeric value") from exc
+    if not math.isfinite(numeric):
+        raise ValueError(f"window {name} must be a finite numeric value")
+    return numeric
 
 
 def _iter_groups(frame: pd.DataFrame, group_columns: Sequence[str]):

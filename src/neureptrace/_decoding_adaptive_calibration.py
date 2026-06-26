@@ -8,15 +8,40 @@ from sklearn.base import BaseEstimator, ClassifierMixin, clone
 _MARKER = "_neureptrace_adaptive_calibration_installed"
 
 
+def _sample_weight_has_boolean_values(sample_weight) -> bool:
+    values = np.asarray(sample_weight, dtype=object).reshape(-1)
+    return any(isinstance(value, (bool, np.bool_)) for value in values)
+
+
 def _normalize_sample_weight(sample_weight, *, n_rows: int) -> np.ndarray | None:
     if sample_weight is None:
         return None
-    weights = np.asarray(sample_weight, dtype=float).reshape(-1)
+    if _sample_weight_has_boolean_values(sample_weight):
+        raise ValueError("sample_weight must contain finite non-negative numeric values, not booleans.")
+    try:
+        weights = np.asarray(sample_weight, dtype=float).reshape(-1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("sample_weight must contain finite non-negative numeric values.") from exc
     if weights.shape[0] != int(n_rows):
         raise ValueError("sample_weight must contain one weight per label.")
     if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
-        raise ValueError("sample_weight must contain finite non-negative values.")
+        raise ValueError("sample_weight must contain finite non-negative numeric values.")
     return weights
+
+
+def _validate_cv(value: object) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("Calibration cv must be an integer at least 2.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Calibration cv must be an integer at least 2.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError("Calibration cv must be an integer at least 2.")
+    requested = int(numeric)
+    if requested < 2:
+        raise ValueError("Calibration cv must be an integer at least 2.")
+    return requested
 
 
 def _fit_with_optional_sample_weight(model, features, labels, sample_weight=None):
@@ -55,9 +80,7 @@ class AdaptiveCalibratedClassifierCV(ClassifierMixin, BaseEstimator):
         classes, counts = np.unique(labels_array, return_counts=True)
         if classes.shape[0] < 2:
             raise ValueError("Calibration requires at least two classes.")
-        requested = int(self.cv)
-        if requested < 2:
-            raise ValueError("Calibration cv must be at least 2.")
+        requested = _validate_cv(self.cv)
         min_count = int(counts.min())
         self.classes_ = classes
         self.requested_calibration_cv_ = requested

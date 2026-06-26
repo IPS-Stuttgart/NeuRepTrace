@@ -10,6 +10,22 @@ from sklearn.svm import LinearSVC
 from neureptrace.decoding.source_free import SOURCE_FREE_ADAPTATION_PROTOCOL, SourceFreeSubjectAdapter, fit_source_free_predict_proba
 
 
+class _CompositeLabelSourceModel:
+    def __init__(self):
+        self.classes_ = _label_vector(("left", 1), ("right", 2))
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probabilities = np.tile(np.array([[0.80, 0.20]], dtype=float), (features.shape[0], 1))
+        probabilities[features[:, 0] > 0.0] = np.array([0.25, 0.75], dtype=float)
+        return probabilities
+
+
+def _label_vector(*labels: object) -> np.ndarray:
+    values = np.empty(len(labels), dtype=object)
+    values[:] = labels
+    return values
+
+
 def _source_target_fixture(seed: int = 0):
     rng = np.random.default_rng(seed)
     source_features = np.vstack(
@@ -78,3 +94,19 @@ def test_source_free_adaptation_supports_decision_function_models():
     assert probabilities.shape == (target_features.shape[0], 2)
     assert np.allclose(probabilities.sum(axis=1), 1.0)
     assert adapter.metadata()["source_free_feature_space"] == "model_preprocessor"
+
+
+def test_source_free_adaptation_accepts_explicit_tuple_class_order():
+    target_features = np.array([[-1.0, 0.0], [2.0, 0.0]], dtype=float)
+    source_model = _CompositeLabelSourceModel()
+
+    result = fit_source_free_predict_proba(
+        source_model=source_model,
+        target_features=target_features,
+        classes=[("right", 2), ("left", 1)],
+        max_iterations=0,
+    )
+
+    assert result.adapter.classes_.tolist() == [("right", 2), ("left", 1)]
+    assert np.allclose(result.probabilities, source_model.predict_proba(target_features)[:, [1, 0]])
+    assert result.adapter.predict(target_features).tolist() == [("left", 1), ("right", 2)]

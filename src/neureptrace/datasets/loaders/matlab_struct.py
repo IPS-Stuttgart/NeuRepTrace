@@ -4,10 +4,35 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
 from neureptrace.datasets.spec import DatasetFile
+
+
+def _normalize_index_path(raw_index_path: Any) -> tuple[int, ...]:
+    """Normalize ``matlab.index_path`` without lossy truthiness or string iteration."""
+
+    if raw_index_path is None:
+        return ()
+    if isinstance(raw_index_path, (str, bytes)):
+        raise ValueError("matlab.index_path must be an integer or a sequence of integer indices, not a string.")
+    if isinstance(raw_index_path, bool):
+        raise ValueError("matlab.index_path entries must be integer indices, not booleans.")
+    if isinstance(raw_index_path, Integral):
+        return (int(raw_index_path),)
+    if not isinstance(raw_index_path, Sequence):
+        raise ValueError("matlab.index_path must be an integer or a sequence of integer indices.")
+
+    normalized: list[int] = []
+    for value in raw_index_path:
+        if isinstance(value, bool):
+            raise ValueError("matlab.index_path entries must be integer indices, not booleans.")
+        if not isinstance(value, Integral):
+            raise ValueError("matlab.index_path entries must be integer indices.")
+        normalized.append(int(value))
+    return tuple(normalized)
 
 
 def load_matlab_struct(
@@ -47,7 +72,7 @@ def load_matlab_struct_recording(dataset_file: DatasetFile, spec: Mapping[str, A
     raw_index_path = matlab.get("index_path")
     if raw_index_path is None and bool(matlab.get("squeeze_first_element", False)):
         raw_index_path = [0]
-    index_path = tuple(int(value) for value in (raw_index_path or ()))
+    index_path = _normalize_index_path(raw_index_path)
     return load_matlab_struct(
         dataset_file.path,
         variable=variable,

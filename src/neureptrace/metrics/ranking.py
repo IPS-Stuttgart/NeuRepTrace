@@ -21,7 +21,7 @@ def rank_class_scores(
     rank summaries are undefined and returned as ``NaN``.
     """
 
-    y_true = np.asarray(y_true, dtype=object).ravel()
+    y_true = _label_vector(y_true, name="y_true")
     top_k = tuple(_validate_integer(k, name="top_k", minimum=1) for k in top_k)
     row_top_k = _validate_integer(row_top_k, name="row_top_k", minimum=0)
     if not class_column:
@@ -31,7 +31,7 @@ def rank_class_scores(
         return _empty_class_rank_result(y_true, top_k)
 
     score_matrix = np.asarray(scores, dtype=float)
-    class_order = np.asarray(classes, dtype=object).ravel()
+    class_order = _label_vector(classes, name="classes")
     if score_matrix.ndim != 2:
         raise ValueError("scores must be a two-dimensional matrix.")
     if score_matrix.shape[0] != y_true.shape[0]:
@@ -74,6 +74,55 @@ def rank_class_scores(
         "median_true_label_rank": _finite_nanmedian(true_label_ranks),
         "rows": rows,
     }
+
+
+def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        vector = values.astype(object, copy=False)
+        if vector.ndim == 0:
+            return vector.reshape(1)
+        if vector.ndim == 1:
+            return vector
+        if min(vector.shape) > 1:
+            rows = [tuple(row.tolist()) for row in vector.reshape(vector.shape[0], -1)]
+            return _object_vector(rows)
+        raise ValueError(f"{name} must be one-dimensional.")
+
+    if isinstance(values, (str, bytes)):
+        return np.asarray([values], dtype=object)
+
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+
+    if _contains_composite_label(items):
+        vector = _object_vector(items)
+    else:
+        vector = np.asarray(items, dtype=object)
+    if vector.ndim == 0:
+        return vector.reshape(1)
+    if vector.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional.")
+    return vector
+
+
+def _contains_composite_label(items: Sequence[object]) -> bool:
+    return any(_is_composite_label(item) for item in items)
+
+
+def _is_composite_label(value: object) -> bool:
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.ndarray):
+        return value.ndim != 0
+    return isinstance(value, (tuple, list, dict))
+
+
+def _object_vector(items: Sequence[object]) -> np.ndarray:
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
+    return vector
 
 
 def _validate_integer(value: object, *, name: str, minimum: int) -> int:
@@ -131,7 +180,16 @@ def _class_labels_equal(left, right) -> bool:
     left = _as_python_scalar(left)
     right = _as_python_scalar(right)
     try:
-        if bool(left == right):
+        comparison = left == right
+    except (TypeError, ValueError):
+        comparison = False
+    if isinstance(comparison, np.ndarray):
+        try:
+            return bool(np.all(comparison))
+        except (TypeError, ValueError):
+            return False
+    try:
+        if bool(comparison):
             return True
     except (TypeError, ValueError):
         pass

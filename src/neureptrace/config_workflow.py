@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections.abc import Mapping, Sequence
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
@@ -93,12 +95,24 @@ def _require_path(value: str | Path | None, *, config_dir: Path, name: str) -> P
     return path
 
 
+def _as_finite_float(value: Any, *, name: str) -> float:
+    if isinstance(value, bool):
+        raise DatasetConfigError(f"'{name}' must contain finite numeric values.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise DatasetConfigError(f"'{name}' must contain finite numeric values.") from exc
+    if not math.isfinite(parsed):
+        raise DatasetConfigError(f"'{name}' must contain finite numeric values.")
+    return parsed
+
+
 def _as_float_pair(value: Any, *, name: str) -> tuple[float, float] | None:
     if value is None:
         return None
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 2:
         raise DatasetConfigError(f"'{name}' must contain exactly two numeric values.")
-    start, stop = map(float, value)
+    start, stop = (_as_finite_float(item, name=name) for item in value)
     return start, stop
 
 
@@ -107,6 +121,9 @@ def _as_bool(value: Any, *, default: bool = False) -> bool:
         return default
     if isinstance(value, bool):
         return value
+    if isinstance(value, Integral):
+        if int(value) in {0, 1}:
+            return bool(value)
     if isinstance(value, str):
         normalized = value.strip().lower()
         if normalized in {"1", "true", "yes", "on"}:

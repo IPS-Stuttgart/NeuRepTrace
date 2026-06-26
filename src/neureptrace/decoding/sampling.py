@@ -25,6 +25,7 @@ def select_class_limited_indices(
     ----------
     labels:
         One-dimensional class labels, or any array-like object that can be flattened.
+        Tuple-valued labels are treated as scalar composite class labels.
     max_per_class:
         Maximum number of rows to keep per class. ``None`` keeps every row.
     selection:
@@ -42,23 +43,18 @@ def select_class_limited_indices(
         while keeping each split reproducible.
     """
 
-    labels = np.asarray(labels, dtype=object).ravel()
+    labels = _label_vector(labels)
     if max_per_class is None:
         return np.arange(labels.shape[0], dtype=int)
 
-    if isinstance(max_per_class, (bool, np.bool_)):
-        raise ValueError("max_per_class must be positive or None.")
-
-    max_per_class = int(max_per_class)
-    if max_per_class <= 0:
-        raise ValueError("max_per_class must be positive or None.")
+    max_per_class = _normalize_integer(max_per_class, name="max_per_class", minimum=1)
     selection = normalize_class_limit_selection(selection)
 
     if selection == "first":
         selected = []
         counts: list[int] = []
         seen: list[object] = []
-        for index, label in enumerate(labels):
+        for index, label in enumerate(_label_vector(labels)):
             position = _label_position(seen, label)
             if position is None:
                 seen.append(label)
@@ -79,11 +75,48 @@ def select_class_limited_indices(
     return np.asarray(sorted(selected), dtype=int)
 
 
+def _label_vector(labels) -> np.ndarray:
+    """Return labels as a one-dimensional object vector without splitting tuples."""
+
+    if isinstance(labels, np.ndarray):
+        original_dtype = labels.dtype
+        array = labels.astype(object, copy=False)
+        if array.ndim == 0:
+            return array.reshape(1)
+        if array.ndim == 1:
+            return array
+        if np.issubdtype(original_dtype, np.object_) and array.ndim == 2 and array.shape[1] > 0:
+            return _row_tuple_label_vector(array)
+        return array.reshape(-1)
+
+    if isinstance(labels, (str, bytes)):
+        return np.asarray([labels], dtype=object)
+
+    try:
+        items = list(labels)
+    except TypeError:
+        items = [labels]
+
+    if any(isinstance(item, tuple) for item in items):
+        vector = np.empty(len(items), dtype=object)
+        vector[:] = items
+        return vector
+    return np.asarray(items, dtype=object).reshape(-1)
+
+
+def _row_tuple_label_vector(array: np.ndarray) -> np.ndarray:
+    """Interpret an object row matrix as one composite label per input row."""
+
+    vector = np.empty(array.shape[0], dtype=object)
+    vector[:] = [tuple(row) for row in array.tolist()]
+    return vector
+
+
 def _ordered_unique_labels(labels) -> list[object]:
     """Return labels in first-observed order without sorting or hashing."""
 
     unique: list[object] = []
-    for label in np.asarray(labels, dtype=object).reshape(-1):
+    for label in _label_vector(labels):
         if _label_position(unique, label) is None:
             unique.append(label)
     return unique
@@ -97,7 +130,7 @@ def _label_position(labels: list[object], target: object) -> int | None:
 
 
 def _label_mask(labels, target: object) -> np.ndarray:
-    return np.asarray([_labels_equal(label, target) for label in np.asarray(labels, dtype=object).reshape(-1)], dtype=bool)
+    return np.asarray([_labels_equal(label, target) for label in _label_vector(labels)], dtype=bool)
 
 
 def _labels_equal(left: object, right: object) -> bool:
@@ -120,17 +153,27 @@ def normalize_class_limit_selection(value: str) -> str:
     return normalized
 
 
+def _normalize_integer(value, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    integer = int(number)
+    if minimum is not None and integer < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    return integer
+
+
 def normalize_class_limit_seed(value: int | str | None) -> int | None:
     """Normalize a deterministic class-limit seed value."""
 
-    if value is None or value == "":
+    if value is None or (isinstance(value, str) and value.strip() == ""):
         return None
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError("seed must be a non-negative integer or None.")
-    seed = int(value)
-    if seed < 0:
-        raise ValueError("seed must be non-negative or None.")
-    return seed
+    return _normalize_integer(value, name="seed", minimum=0)
 
 
 def _class_limit_rng(seed: int | str | None, seed_context: int | Iterable[int] | None):
@@ -145,18 +188,8 @@ def _seed_context_values(seed_context: int | Iterable[int] | None) -> list[int]:
     if seed_context is None:
         return []
     if isinstance(seed_context, (str, bytes)) or np.isscalar(seed_context):
-        values = [_normalize_seed_context_value(seed_context)]
-    else:
-        try:
-            values = [_normalize_seed_context_value(value) for value in seed_context]
-        except TypeError:
-            values = [_normalize_seed_context_value(seed_context)]
-    if any(value < 0 for value in values):
-        raise ValueError("seed_context values must be non-negative.")
-    return values
-
-
-def _normalize_seed_context_value(value: object) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError("seed_context values must be non-negative integers.")
-    return int(value)
+        return [_normalize_integer(seed_context, name="seed_context", minimum=0)]
+    try:
+        return [_normalize_integer(value, name="seed_context", minimum=0) for value in seed_context]
+    except TypeError:
+        return [_normalize_integer(seed_context, name="seed_context", minimum=0)]

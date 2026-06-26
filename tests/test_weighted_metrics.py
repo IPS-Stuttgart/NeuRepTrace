@@ -102,7 +102,18 @@ def test_weighted_probability_metrics_accept_integer_like_labels() -> None:
     assert weighted_negative_log_likelihood(probabilities, labels, sample_weight) == pytest.approx(-np.mean(np.log([0.7, 0.6])))
 
 
-@pytest.mark.parametrize("bad_labels", [np.array([0.0, np.nan]), np.array([0.0, np.inf]), np.array([0.0, 0.5]), np.array([0, "class-a"], dtype=object)])
+@pytest.mark.parametrize(
+    "bad_labels",
+    [
+        np.array([0.0, np.nan]),
+        np.array([0.0, np.inf]),
+        np.array([0.0, 0.5]),
+        np.array([0, "class-a"], dtype=object),
+        np.array([True, False]),
+        np.array([0, True], dtype=object),
+        np.array([np.bool_(True), np.bool_(False)], dtype=object),
+    ],
+)
 def test_weighted_probability_metrics_reject_invalid_label_indices(bad_labels: np.ndarray) -> None:
     probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
     sample_weight = np.array([1.0, 1.0])

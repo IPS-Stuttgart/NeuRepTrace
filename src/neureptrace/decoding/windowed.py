@@ -295,6 +295,8 @@ def _normalize_pca_components(components_pca: int | float | str | None, features
 
     if components_pca is None:
         return None
+    if isinstance(components_pca, (bool, np.bool_)):
+        raise ValueError(_pca_components_error_message())
     if isinstance(components_pca, str):
         normalized = components_pca.strip().lower()
         if normalized in {"", "all", "inf", "infinity", "none"}:
@@ -340,9 +342,9 @@ def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: s
 
 
 def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(labels).ravel()
+    vector = np.asarray(labels)
     if vector.ndim != 1:
         raise ValueError(f"{name} must be one-dimensional.")
-    if len(vector) != expected_length:
-        raise ValueError(f"{name} length must match feature rows: {len(vector)} != {expected_length}.")
+    if vector.shape[0] != expected_length:
+        raise ValueError(f"{name} length must match feature rows: {vector.shape[0]} != {expected_length}.")
     return vector
