@@ -43,3 +43,11 @@ def test_kmm_rejects_boolean_epsilon_values() -> None:
 
     with pytest.raises(ValueError, match="epsilon"):
         kmm_config(epsilon=np.bool_(False))
+
+
+def test_kmm_rejects_infeasible_box_sum_constraints() -> None:
+    source = np.asarray([[0.0], [1.0], [2.0], [3.0]], dtype=float)
+    target = np.asarray([[0.0], [1.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="infeasible"):
+        kernel_mean_matching_weights(source, target, max_weight=0.25, epsilon=0.1)

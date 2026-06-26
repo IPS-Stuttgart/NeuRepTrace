@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import label_accuracy, replace_null_class_predictions as _replace_null_class_predictions
 from neureptrace.decoding.generative_augmentation import GenerativeAugmentationConfig
 
 _INSTALLED = False
@@ -66,6 +68,13 @@ def _values_equal(left: object, right: object) -> bool:
         return False
 
 
+def _label_equal_mask(values: Sequence | np.ndarray, label: object) -> np.ndarray:
+    """Return an equality mask that is safe for tuple/list-valued object labels."""
+
+    array = np.asarray(values, dtype=object)
+    return np.asarray([_values_equal(value, label) for value in array], dtype=bool)
+
+
 def _ordered_unique(values: Sequence | np.ndarray) -> np.ndarray:
     """Return stable unique values without sorting heterogeneous object labels."""
 
@@ -88,6 +97,11 @@ def _coerced_null_label(null_label: object, labels: np.ndarray) -> object:
     return np.asarray([null_label], dtype=labels.dtype)[0]
 
 
+def _install_null_fallback_patch() -> None:
+    null_fallback_patch = importlib.import_module("neureptrace._transfer_null_fallback_patch")
+    null_fallback_patch.install()
+
+
 def install() -> None:
     """Install the object-label-safe cross-validation wrapper once."""
 
@@ -100,6 +114,38 @@ def install() -> None:
     _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING = transfer.cross_validate_feature_decoding
     _ORIGINAL_LABEL_VECTOR = transfer._label_vector
     transfer._label_vector = _atomic_label_vector
+
+    def _one_vs_rest_predictions_object(
+        train_features: np.ndarray,
+        train_labels: np.ndarray,
+        test_features: np.ndarray,
+        class_labels: np.ndarray,
+        *,
+        classifier: str,
+        classifier_param: Any,
+        components_pca: int | float,
+        random_state: int | None,
+    ) -> np.ndarray:
+        all_scores = np.zeros((test_features.shape[0], len(class_labels)))
+        for class_index, class_label in enumerate(class_labels):
+            binary_bundle = transfer.fit_window_model(
+                train_features,
+                _label_equal_mask(train_labels, class_label),
+                fit_model=lambda features, labels: transfer._fit_binary_model(
+                    features,
+                    labels,
+                    classifier=classifier,
+                    classifier_param=classifier_param,
+                    random_state=random_state,
+                ),
+                components_pca=components_pca,
+            )
+            transformed_test = transfer.transform_window_features(binary_bundle, test_features)
+            if classifier in ("lasso", "svm-binary", "binary-svm"):
+                all_scores[:, class_index] = transfer.positive_class_score(binary_bundle.model, transformed_test)
+            else:
+                all_scores[:, class_index] = binary_bundle.model.predict(transformed_test)
+        return class_labels[np.argmax(all_scores, axis=1)]
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
     def _cross_validate_feature_decoding(
@@ -159,7 +205,7 @@ def install() -> None:
             test_features = features[test_mask]
 
             if classifier in transfer.BINARY_ONE_VS_REST_CLASSIFIERS:
-                fold_predictions = transfer._one_vs_rest_predictions(
+                fold_predictions = _one_vs_rest_predictions_object(
                     train_features,
                     train_labels,
                     test_features,
@@ -179,11 +225,12 @@ def install() -> None:
                 fold_predictions, _ = transfer.predict_window_model(model_bundle, test_features)
             predictions[fold_ids == fold] = fold_predictions
 
-        predictions = transfer.replace_null_class_predictions(predictions, null_label=null_label_value, fallback_label=fallback_label)
-        accuracy = float(np.mean(label_vector == predictions)) if len(label_vector) else np.nan
+        predictions = _replace_null_class_predictions(predictions, null_label=null_label_value, fallback_label=fallback_label)
+        accuracy = label_accuracy(label_vector, predictions)
         return transfer.CrossValidationResult(accuracy=accuracy, predictions=predictions, fold_ids=fold_ids)
 
     _cross_validate_feature_decoding.__name__ = _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING.__name__
     _cross_validate_feature_decoding.__doc__ = _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING.__doc__
     transfer.cross_validate_feature_decoding = _cross_validate_feature_decoding
+    _install_null_fallback_patch()
     _INSTALLED = True
