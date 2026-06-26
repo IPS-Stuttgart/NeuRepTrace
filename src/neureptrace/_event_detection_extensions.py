@@ -2,11 +2,44 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 
 from neureptrace._onset_detection_runs import detection_runs as _enumerate_detection_runs
 from neureptrace._onset_detection_runs import first_detection_run as _select_first_detection_run
+
+
+def _label_values_from_probability_columns(prob_columns: Sequence[str]) -> tuple[int, ...]:
+    suffixes = tuple(str(column).removeprefix("prob_class_") for column in prob_columns)
+    if all(suffix.isdigit() for suffix in suffixes):
+        return tuple(int(suffix) for suffix in suffixes)
+    return tuple(range(len(suffixes)))
+
+
+def _class_lookup_for_probability_columns(frame: pd.DataFrame, prob_columns: Sequence[str], label_values: Sequence[int]) -> dict[int, str]:
+    lookup: dict[int, str] = {}
+    for label_value, prob_column in zip(label_values, prob_columns, strict=True):
+        suffix = str(prob_column).removeprefix("prob_class_")
+        class_column = f"class_{suffix}"
+        if class_column not in frame.columns:
+            continue
+        values = frame[class_column].dropna()
+        if not values.empty:
+            lookup[int(label_value)] = str(values.iloc[0])
+
+    for column in frame.columns:
+        if not column.startswith("class_"):
+            continue
+        try:
+            class_label = int(column.removeprefix("class_"))
+        except ValueError:
+            continue
+        values = frame[column].dropna()
+        if not values.empty:
+            lookup.setdefault(class_label, str(values.iloc[0]))
+    return lookup
 
 
 def _install_onset_detection_extensions() -> None:
@@ -58,6 +91,57 @@ def _install_onset_detection_extensions() -> None:
 
     onset._detection_runs = _detection_runs  # noqa: SLF001
     onset._first_detection_run = _first_detection_run  # noqa: SLF001
+
+
+def _install_probability_suffix_extensions() -> None:
+    """Keep onset inference aligned with numeric ``prob_class_*`` label suffixes."""
+    from neureptrace import onset_detection as onset
+
+    if getattr(onset, "_probability_suffix_compat_patched", False):
+        return
+
+    original_score_values = onset._score_values  # noqa: SLF001
+    original_ensure_prediction_columns = onset._ensure_prediction_columns  # noqa: SLF001
+
+    def _score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
+        if score_column != "probability_true_class" or "probability_true_class" in frame.columns or "true_label" not in frame.columns:
+            return original_score_values(frame, score_column)
+
+        prob_columns = onset.probability_columns(frame)
+        probabilities = onset._normalize_probabilities(frame[prob_columns].to_numpy(dtype=float))  # noqa: SLF001
+        true_labels, valid_labels = onset._integer_labels(frame["true_label"])  # noqa: SLF001
+        label_values = _label_values_from_probability_columns(prob_columns)
+        position_by_label = {int(label): position for position, label in enumerate(label_values)}
+        scores = np.full(len(frame), np.nan, dtype=float)
+        for row_index in np.flatnonzero(valid_labels):
+            position = position_by_label.get(int(true_labels[row_index]))
+            if position is not None:
+                scores[row_index] = probabilities[row_index, position]
+        return pd.Series(scores, index=frame.index)
+
+    def _ensure_prediction_columns(frame: pd.DataFrame) -> pd.DataFrame:
+        if "predicted_label" in frame.columns and "predicted_class" in frame.columns:
+            return original_ensure_prediction_columns(frame)
+
+        frame = frame.copy()
+        prob_columns = onset.probability_columns(frame)
+        probabilities = onset._normalize_probabilities(frame[prob_columns].to_numpy(dtype=float))  # noqa: SLF001
+        label_values = _label_values_from_probability_columns(prob_columns)
+        predicted_positions = probabilities.argmax(axis=1)
+        predicted_labels = np.asarray([label_values[position] for position in predicted_positions], dtype=int)
+        if "predicted_label" in frame.columns:
+            parsed_labels, valid_labels = onset._integer_labels(frame["predicted_label"])  # noqa: SLF001
+            predicted_labels[valid_labels] = parsed_labels[valid_labels]
+        if "predicted_label" not in frame.columns:
+            frame["predicted_label"] = predicted_labels
+        if "predicted_class" not in frame.columns:
+            lookup = _class_lookup_for_probability_columns(frame, prob_columns, label_values)
+            frame["predicted_class"] = [lookup.get(int(label), str(int(label))) for label in predicted_labels]
+        return frame
+
+    onset._score_values = _score_values  # noqa: SLF001
+    onset._ensure_prediction_columns = _ensure_prediction_columns  # noqa: SLF001
+    onset._probability_suffix_compat_patched = True  # noqa: SLF001
 
 
 def _metadata_text_matches(observations: pd.DataFrame, column: str, expected: object) -> bool:
@@ -202,4 +286,5 @@ def _install_threshold_annotation_extensions() -> None:
 
 def install() -> None:
     _install_onset_detection_extensions()
+    _install_probability_suffix_extensions()
     _install_threshold_annotation_extensions()
