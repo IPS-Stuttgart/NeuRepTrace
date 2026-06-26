@@ -40,14 +40,18 @@ from . import (  # noqa: E402
     _fieldtrip_sampleinfo_validation_patch,
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
+    _generative_augmentation_composite_labels_patch,
     _generative_augmentation_random_state_patch,
     _joint_distribution_adaptation_config_bool_patch,
     _kernel_mean_matching_bool_validation_patch,
     _label_shift_source_prior_patch,
     _label_proportion_block_ids_patch,
     _label_proportion_tuple_prediction_patch,
+    _lora_few_shot_numeric_config_patch,
     _lora_few_shot_tuple_subject_patch,
+    _mcca_component_count_patch,
     _mcca_repetition_count_patch,
+    _mcca_subject_pca_components_patch,
     _mekt_vector_validation_patch,
     _metadata_column_validation_patch,
     _mixstyle_boolean_config_patch,
@@ -57,6 +61,7 @@ from . import (  # noqa: E402
     _nll_eps_validation_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
+    _paired_stats_tie_patch,
     _pls_da_composite_labels_patch,
     _probability_stacking_group_summary_patch,
     _random_state_config_patch,
@@ -76,14 +81,19 @@ from . import (  # noqa: E402
     _source_domain_generalization_composite_patch,
     _source_free_standardize_target_patch,
     _source_free_tuple_labels_patch,
+    _source_label_vector_patch,
     _source_mixstyle_tuple_labels_patch,
+    _source_mixstyle_tuple_vectors_patch,
     _source_selection_class_balance_patch,
     _source_selection_composite_ids_patch,
     _source_selection_optional_bounds_patch,
     _source_selection_temperature_patch,
+    _source_selection_vector_shape_patch,
+    _source_weighting_enabled_alias_patch,
     _source_weighting_tuple_row_groups_patch,
     _temporal_smoothing_singleton_sequence_patch,
     _transfer_array_label_null_patch,
+    _transfer_components_validation_patch,
     _transfer_cross_validation_label_patch,
     _transfer_null_fallback_patch,
     _transfer_null_label_conflict_patch,
@@ -108,6 +118,7 @@ _fieldtrip_sampleinfo_validation_patch.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _generative_augmentation_random_state_patch.install()
+_generative_augmentation_composite_labels_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
 _joint_distribution_adaptation_config_bool_patch.install()
 _label_shift_source_prior_patch.install()
@@ -135,7 +146,10 @@ _bushmeg_protocol3_index_validation_patch.install()
 _reconstruction_encoder_config_patch.install()
 _reconstruction_tuple_labels_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
+_lora_few_shot_numeric_config_patch.install()
+_mcca_component_count_patch.install()
 _mcca_repetition_count_patch.install()
+_mcca_subject_pca_components_patch.install()
 _mekt_vector_validation_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
@@ -148,21 +162,27 @@ _sample_weight_validation_patch.install()
 _sampling_composite_label_array_patch.install()
 _semi_supervised_lora_tuple_labels_patch.install()
 _response_window_time_validation_patch.install()
+_paired_stats_tie_patch.install()
 _riemannian_vector_validation_patch.install()
 _source_alignment_times_validation_patch.install()
 _source_domain_generalization_composite_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_tuple_labels_patch.install()
+_source_label_vector_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
+_source_mixstyle_tuple_vectors_patch.install()
 _random_state_config_patch.install()
 _mixstyle_boolean_config_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_optional_bounds_patch.install()
 _source_selection_temperature_patch.install()
+_source_selection_vector_shape_patch.install()
+_source_weighting_enabled_alias_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _temporal_smoothing_singleton_sequence_patch.install()
 _transfer_array_label_null_patch.install()
+_transfer_components_validation_patch.install()
 _transfer_cross_validation_label_patch.install()
 _transfer_null_fallback_patch.install()
 _transfer_null_label_conflict_patch.install()

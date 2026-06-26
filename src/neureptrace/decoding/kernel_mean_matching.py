@@ -31,6 +31,8 @@ DEFAULT_KMM_REGULARIZATION = 1.0e-6
 DEFAULT_KMM_MAX_ITER = 500
 DEFAULT_KMM_TOL = 1.0e-8
 _MIN_SCALE = 1.0e-12
+_KMM_GAMMA_ERROR = "gamma must be positive and finite, or one of: median, auto, scale."
+_KMM_EPSILON_ERROR = "epsilon must be finite and non-negative, 'auto', or None."
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +221,8 @@ def kmm_config(
 ) -> KernelMeanMatchingConfig:
     """Normalize user-facing KMM configuration values."""
 
+    _reject_boolean_numeric(gamma, error_message=_KMM_GAMMA_ERROR)
+    _reject_boolean_numeric(epsilon, error_message=_KMM_EPSILON_ERROR)
     return KernelMeanMatchingConfig(
         kernel=normalize_kmm_kernel(kernel),
         gamma=gamma,
@@ -283,6 +287,7 @@ def resolve_kmm_gamma(value: float | str, source_features: Sequence[Sequence[flo
     target = _feature_matrix(target_features, name="target_features")
     if source.shape[1] != target.shape[1]:
         raise ValueError("source_features and target_features must have matching feature width.")
+    _reject_boolean_numeric(value, error_message=_KMM_GAMMA_ERROR)
     if isinstance(value, str):
         normalized = value.strip().lower().replace("-", "_")
         if normalized in {"median", "auto", "median_distance", "median_heuristic"}:
@@ -296,13 +301,14 @@ def resolve_kmm_gamma(value: float | str, source_features: Sequence[Sequence[flo
     else:
         numeric = float(value)
     if not np.isfinite(numeric) or numeric <= 0.0:
-        raise ValueError("gamma must be positive and finite, or one of: median, auto, scale.")
+        raise ValueError(_KMM_GAMMA_ERROR)
     return numeric
 
 
 def normalize_kmm_epsilon(value: float | str | None, *, n_source: int) -> float | None:
     """Resolve KMM sum-constraint slack."""
 
+    _reject_boolean_numeric(value, error_message=_KMM_EPSILON_ERROR)
     if value is None:
         return None
     if isinstance(value, str):
@@ -316,7 +322,7 @@ def normalize_kmm_epsilon(value: float | str | None, *, n_source: int) -> float 
     else:
         numeric = float(value)
     if not np.isfinite(numeric) or numeric < 0.0:
-        raise ValueError("epsilon must be finite and non-negative, 'auto', or None.")
+        raise ValueError(_KMM_EPSILON_ERROR)
     return numeric
 
 
@@ -529,6 +535,11 @@ def _values_equal(left: Any, right: Any) -> bool:
         return bool(np.all(result))
     except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
         return False
+
+
+def _reject_boolean_numeric(value: Any, *, error_message: str) -> None:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(error_message)
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
