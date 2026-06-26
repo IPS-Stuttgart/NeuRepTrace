@@ -30,13 +30,16 @@ def _atomic_label_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np
     ``np.asarray([("run-1", "face"), ...], dtype=object)`` has shape
     ``(n, 2)``.  For class labels, each row is one composite value rather than
     two independent labels, so collapse row-shaped label arrays into tuple
-    objects before downstream class counting or equality checks.
+    objects before downstream class counting or equality checks.  In contrast,
+    ``(n, 1)`` arrays are column vectors of scalar labels and are flattened.
     """
 
     array = np.asarray(values, dtype=object)
     if array.ndim == 0:
         return _object_value_vector([array.item()])
     if array.ndim == 1:
+        return array.reshape(-1)
+    if array.ndim == 2 and array.shape[1] == 1:
         return array.reshape(-1)
     rows = [tuple(row.tolist()) for row in array.reshape(array.shape[0], -1)]
     return _object_value_vector(rows)
