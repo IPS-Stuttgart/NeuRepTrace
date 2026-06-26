@@ -95,6 +95,7 @@ from . import (  # noqa: E402
     _source_selection_vector_shape_patch,
     _source_weighting_enabled_alias_patch,
     _source_weighting_tuple_row_groups_patch,
+    _subspace_bool_config_patch,
     _subspace_adaptation_config_bool_patch,
     _temporal_smoothing_singleton_sequence_patch,
     _transfer_array_label_null_patch,
@@ -190,6 +191,7 @@ _source_selection_temperature_patch.install()
 _source_selection_vector_shape_patch.install()
 _source_weighting_enabled_alias_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
+_subspace_bool_config_patch.install()
 _subspace_adaptation_config_bool_patch.install()
 _temporal_smoothing_singleton_sequence_patch.install()
 _transfer_array_label_null_patch.install()
