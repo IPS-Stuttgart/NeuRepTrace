@@ -66,6 +66,7 @@ from . import (  # noqa: E402
     _observation_ensemble_ungrouped_metrics_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
+    _observation_schema_string_columns_patch,
     _paired_stats_tie_patch,
     _pls_da_composite_labels_patch,
     _probability_stacking_group_summary_patch,
@@ -145,6 +146,7 @@ _decoding_probability_patch.install()
 _few_shot_target_index_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
+_observation_schema_string_columns_patch.install()
 _observation_ensemble_partial_class_columns_patch.install()
 _observation_ensemble_ungrouped_metrics_patch.install()
 _probability_stacking_group_summary_patch.install()
