@@ -18,6 +18,7 @@ from . import (  # noqa: E402
     _bushmeg_category2_autoencoder_config_patch,
     _bushmeg_cue_temporal_bins_patch,
     _bushmeg_protocol3_index_validation_patch,
+    _bushmeg_protocol_selection_patch,
     _bushmeg_source_loso_ensemble_numeric_patch,
     _bushmeg_source_loso_prototype_patch,
     _calibration_weight_fraction_patch,
@@ -163,6 +164,7 @@ _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_smoke_enabled_bool_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
 _bushmeg_protocol3_index_validation_patch.install()
+_bushmeg_protocol_selection_patch.install()
 _reconstruction_encoder_config_patch.install()
 _reconstruction_tuple_labels_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
