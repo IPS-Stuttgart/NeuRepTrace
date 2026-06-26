@@ -40,6 +40,7 @@ from . import (  # noqa: E402
     _fieldtrip_sampleinfo_validation_patch,
     _few_shot_split_validation_patch,
     _few_shot_tuple_labels_patch,
+    _generative_augmentation_composite_labels_patch,
     _generative_augmentation_random_state_patch,
     _joint_distribution_adaptation_config_bool_patch,
     _kernel_mean_matching_bool_validation_patch,
@@ -77,13 +78,16 @@ from . import (  # noqa: E402
     _source_free_standardize_target_patch,
     _source_free_tuple_labels_patch,
     _source_mixstyle_tuple_labels_patch,
+    _source_mixstyle_tuple_vectors_patch,
     _source_selection_class_balance_patch,
     _source_selection_composite_ids_patch,
     _source_selection_optional_bounds_patch,
     _source_selection_temperature_patch,
+    _source_selection_vector_shape_patch,
     _source_weighting_tuple_row_groups_patch,
     _temporal_smoothing_singleton_sequence_patch,
     _transfer_array_label_null_patch,
+    _transfer_components_validation_patch,
     _transfer_cross_validation_label_patch,
     _transfer_null_fallback_patch,
     _transfer_null_label_conflict_patch,
@@ -108,6 +112,7 @@ _fieldtrip_sampleinfo_validation_patch.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _generative_augmentation_random_state_patch.install()
+_generative_augmentation_composite_labels_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
 _joint_distribution_adaptation_config_bool_patch.install()
 _label_shift_source_prior_patch.install()
@@ -154,15 +159,18 @@ _source_domain_generalization_composite_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
+_source_mixstyle_tuple_vectors_patch.install()
 _random_state_config_patch.install()
 _mixstyle_boolean_config_patch.install()
 _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_optional_bounds_patch.install()
 _source_selection_temperature_patch.install()
+_source_selection_vector_shape_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _temporal_smoothing_singleton_sequence_patch.install()
 _transfer_array_label_null_patch.install()
+_transfer_components_validation_patch.install()
 _transfer_cross_validation_label_patch.install()
 _transfer_null_fallback_patch.install()
 _transfer_null_label_conflict_patch.install()
