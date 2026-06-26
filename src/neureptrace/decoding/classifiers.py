@@ -238,9 +238,14 @@ def _fit_classifier_model(
 
     try:
         model.fit(features, labels, sample_weight=sample_weight)
-    except (TypeError, ValueError) as exc:
+    except TypeError as exc:
         if not hasattr(model, "steps") or not getattr(model, "steps"):
             raise TypeError(f"{model.__class__.__name__} does not support sample_weight.") from exc
+        final_step_name = model.steps[-1][0]
+        model.fit(features, labels, **{f"{final_step_name}__sample_weight": sample_weight})
+    except ValueError:
+        if not hasattr(model, "steps") or not getattr(model, "steps"):
+            raise
         final_step_name = model.steps[-1][0]
         model.fit(features, labels, **{f"{final_step_name}__sample_weight": sample_weight})
     return model
