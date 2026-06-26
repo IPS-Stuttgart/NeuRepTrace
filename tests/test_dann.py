@@ -107,15 +107,50 @@ def test_fit_dann_accepts_single_column_source_labels():
     np.testing.assert_allclose(result.probabilities.sum(axis=1), 1.0, atol=1e-6)
 
 
-def test_fit_dann_rejects_multi_column_source_labels():
-    with pytest.raises(ValueError, match="source_labels must be one-dimensional"):
-        fit_dann_predict_proba(
-            source_features=np.zeros((4, 3)),
-            source_labels=np.zeros((4, 2)),
-            target_features=np.zeros((2, 3)),
-            max_epochs=1,
-            device="cpu",
-        )
+def test_fit_dann_accepts_composite_source_labels():
+    pytest.importorskip("torch")
+    source_features = np.asarray(
+        [
+            [-1.0, 0.0, 0.1],
+            [-0.8, 0.1, -0.1],
+            [1.0, 0.0, 0.1],
+            [0.8, -0.1, -0.1],
+        ],
+        dtype=float,
+    )
+    source_labels = np.asarray(
+        [
+            ["face", "left"],
+            ["face", "left"],
+            ["house", "right"],
+            ["house", "right"],
+        ],
+        dtype=object,
+    )
+    target_features = np.asarray(
+        [
+            [-0.9, 0.0, 0.0],
+            [0.9, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    result = fit_dann_predict_proba(
+        source_features=source_features,
+        source_labels=source_labels,
+        target_features=target_features,
+        hidden_units=4,
+        embedding_dim=2,
+        max_epochs=1,
+        batch_size=2,
+        patience=1,
+        validation_fraction=0.0,
+        random_state=7,
+        device="cpu",
+    )
+
+    assert result.probabilities.shape == (2, 2)
+    np.testing.assert_allclose(result.probabilities.sum(axis=1), 1.0, atol=1e-6)
 
 
 def test_fit_dann_rejects_feature_dimension_mismatch():
