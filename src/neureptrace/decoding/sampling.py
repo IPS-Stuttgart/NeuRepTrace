@@ -54,7 +54,7 @@ def select_class_limited_indices(
         selected = []
         counts: list[int] = []
         seen: list[object] = []
-        for index, label in enumerate(labels):
+        for index, label in enumerate(_label_vector(labels)):
             position = _label_position(seen, label)
             if position is None:
                 seen.append(label)
@@ -79,11 +79,14 @@ def _label_vector(labels) -> np.ndarray:
     """Return labels as a one-dimensional object vector without splitting tuples."""
 
     if isinstance(labels, np.ndarray):
+        original_dtype = labels.dtype
         array = labels.astype(object, copy=False)
         if array.ndim == 0:
             return array.reshape(1)
         if array.ndim == 1:
             return array
+        if np.issubdtype(original_dtype, np.object_) and array.ndim == 2 and array.shape[1] > 0:
+            return _row_tuple_label_vector(array)
         return array.reshape(-1)
 
     if isinstance(labels, (str, bytes)):
@@ -99,6 +102,14 @@ def _label_vector(labels) -> np.ndarray:
         vector[:] = items
         return vector
     return np.asarray(items, dtype=object).reshape(-1)
+
+
+def _row_tuple_label_vector(array: np.ndarray) -> np.ndarray:
+    """Interpret an object row matrix as one composite label per input row."""
+
+    vector = np.empty(array.shape[0], dtype=object)
+    vector[:] = [tuple(row) for row in array.tolist()]
+    return vector
 
 
 def _ordered_unique_labels(labels) -> list[object]:
