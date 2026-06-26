@@ -44,3 +44,25 @@ def test_aggregate_reliability_bins_prefers_sample_weight_when_available(tmp_pat
     assert aggregated["accuracy"].tolist() == pytest.approx([0.1])
     assert aggregated["confidence"].tolist() == pytest.approx([0.18])
     assert aggregated["gap"].tolist() == pytest.approx([-0.08])
+
+
+def test_aggregate_reliability_bins_normalizes_sample_weight_fraction_per_time(tmp_path: Path) -> None:
+    bins_csv = tmp_path / "weighted_bins.csv"
+    pd.DataFrame(
+        {
+            "decoder": ["logistic", "logistic", "logistic", "logistic"],
+            "time": [0.1, 0.1, 0.2, 0.2],
+            "bin": [0, 1, 0, 1],
+            "bin_left": [0.0, 0.5, 0.0, 0.5],
+            "bin_right": [0.5, 1.0, 0.5, 1.0],
+            "n_samples": [2, 8, 1, 3],
+            "sample_weight": [2.0, 8.0, 1.0, 3.0],
+            "accuracy": [1.0, 0.5, 0.0, 0.75],
+            "confidence": [0.25, 0.75, 0.2, 0.8],
+        }
+    ).to_csv(bins_csv, index=False)
+
+    aggregated = aggregate_reliability_bins([bins_csv]).sort_values(["time", "bin"]).reset_index(drop=True)
+
+    assert aggregated["sample_weight_fraction"].tolist() == pytest.approx([0.2, 0.8, 0.25, 0.75])
+    assert aggregated.groupby("time")["sample_weight_fraction"].sum().tolist() == pytest.approx([1.0, 1.0])
