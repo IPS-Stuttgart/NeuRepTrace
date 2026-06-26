@@ -300,8 +300,27 @@ def _object_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, 
         raise ValueError(f"{name} must contain one value per source row: {len(items)} != {expected_length}.")
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
-        vector[index] = value
+        vector[index] = _hashable_identifier(value, name=name)
     return vector
+
+
+def _hashable_identifier(value: Any, *, name: str) -> Hashable:
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _hashable_identifier(value.item(), name=name)
+        return tuple(_hashable_identifier(item, name=name) for item in value.tolist())
+    if isinstance(value, np.generic):
+        return _hashable_identifier(value.item(), name=name)
+    if isinstance(value, Mapping):
+        items = [(_hashable_identifier(key, name=name), _hashable_identifier(item, name=name)) for key, item in value.items()]
+        return ("__mapping__", tuple(sorted(items, key=lambda pair: repr(pair[0]))))
+    if isinstance(value, (list, tuple)):
+        return tuple(_hashable_identifier(item, name=name) for item in value)
+    try:
+        hash(value)
+    except TypeError as exc:
+        raise ValueError(f"{name} values must be hashable or supported composite identifiers; got {value!r}.") from exc
+    return value
 
 
 def _validate_hashable(values: np.ndarray, *, name: str) -> None:
