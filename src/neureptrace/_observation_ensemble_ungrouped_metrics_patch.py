@@ -37,8 +37,7 @@ def install() -> None:
     def summarize_ensemble_metrics(observations: pd.DataFrame, *, ece_bins: int = 10) -> pd.DataFrame:
         """Summarize ensemble observation rows, including valid tables without group columns."""
 
-        if ece_bins < 1:
-            raise ValueError("ece_bins must be positive.")
+        ece_bins_value = observation_ensemble._validate_positive_integer(ece_bins, name="ece_bins")
         prob_columns = observation_ensemble.probability_columns(observations)
         if "true_label" not in observations.columns or not prob_columns:
             raise ValueError("Ensemble observations must contain true_label and prob_class_* columns.")
@@ -67,7 +66,7 @@ def install() -> None:
                     "top3_accuracy": observation_ensemble._top_k_accuracy_from_label_values(probabilities, true_label_values, label_values, k=3),
                     "log_loss": log_loss(true_label_values, probabilities, labels=list(label_values)),
                     "brier": brier_score_multiclass(probabilities, true_positions),
-                    "ece": expected_calibration_error(probabilities, true_positions, n_bins=ece_bins),
+                    "ece": expected_calibration_error(probabilities, true_positions, n_bins=ece_bins_value),
                     "n_train": "",
                     "n_test": int(len(group)),
                     "n_classes": int(len(prob_columns)),
