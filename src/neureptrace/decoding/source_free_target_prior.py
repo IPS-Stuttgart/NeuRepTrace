@@ -5,25 +5,85 @@ from typing import Any, Literal
 
 import numpy as np
 
-from neureptrace.decoding.source_free import SourceFreeAdaptationResult, fit_source_free_predict_proba
+from neureptrace.decoding.source_free import (
+    SourceFreeAdaptationResult,
+    _as_2d_array,
+    _bounded_float,
+    _normalize_probability_rows,
+    _predict_source_probabilities,
+    _resolve_classes,
+    fit_source_free_predict_proba,
+)
 
 _EPS = 1e-12
 TargetPriorCorrection = Literal["none", "balanced"]
+TargetPriorCorrectionStage = Literal["post", "pre", "both"]
 
 
 @dataclass(frozen=True, slots=True)
 class SourceFreeTargetPriorCorrectionResult:
     """Source-free adaptation result with optional unlabeled target-prior correction.
 
-    ``base_result`` is the uncorrected source-free adaptation result.  The final
-    ``probabilities`` may be target-prior corrected, and ``metadata`` keeps the
-    same protocol-hygiene contract: target labels and source rows are not used by
-    the correction step.
+    ``base_result`` is the uncorrected or pre-corrected source-free adaptation
+    result. The final ``probabilities`` may be target-prior corrected, and
+    ``metadata`` keeps the same protocol-hygiene contract: target labels and
+    source rows are not used by the correction step.
     """
 
     base_result: SourceFreeAdaptationResult
     probabilities: np.ndarray
     metadata: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class FittedTargetPriorCorrection:
+    """Fitted target-prior correction estimated from unlabeled target predictions."""
+
+    classes: np.ndarray
+    prior: np.ndarray
+    mode: str
+    strength: float
+
+    def correct_probabilities(self, probabilities: np.ndarray) -> np.ndarray:
+        """Return row-normalized probabilities after applying this correction."""
+
+        corrected, _ = apply_target_prior_correction(
+            probabilities,
+            mode=self.mode,
+            strength=self.strength,
+            prior=self.prior,
+        )
+        return corrected
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "source_free_target_prior_correction": self.mode,
+            "source_free_target_prior_strength": float(self.strength),
+            "source_free_target_class_prior": format_target_prior(self.prior),
+            "source_free_target_prior_classes": _format_classes(self.classes),
+            "source_free_target_prior_uses_target_features": self.mode != "none" and self.strength > 0.0,
+            "source_free_target_prior_uses_target_labels": False,
+            "source_free_target_prior_uses_source_rows": False,
+            "source_free_target_prior_valid_for_benchmark": True,
+        }
+
+
+class TargetPriorCorrectedSourceModel:
+    """Source-model wrapper whose probabilities are corrected before adaptation."""
+
+    def __init__(self, source_model: Any, correction: FittedTargetPriorCorrection):
+        self.source_model = source_model
+        self.correction = correction
+        self.classes_ = np.asarray(correction.classes, dtype=object)
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        features = _as_2d_array(features, "features")
+        probabilities = _predict_source_probabilities(self.source_model, features, self.classes_)
+        return self.correction.correct_probabilities(probabilities)
+
+    def decision_function(self, features: np.ndarray) -> np.ndarray:
+        probabilities = self.predict_proba(features)
+        return np.log(np.clip(probabilities, _EPS, 1.0))
 
 
 def fit_source_free_target_prior_predict_proba(
@@ -41,19 +101,45 @@ def fit_source_free_target_prior_predict_proba(
     feature_space: Literal["input", "model_preprocessor", "auto"] = "auto",
     target_prior_correction: TargetPriorCorrection = "balanced",
     target_prior_strength: float = 1.0,
+    target_prior_correction_stage: TargetPriorCorrectionStage = "post",
+    pseudo_label_selection: Literal["confidence", "balanced_topk"] = "confidence",
+    balanced_topk_per_class: int | None = None,
 ) -> SourceFreeTargetPriorCorrectionResult:
-    """Fit source-free adaptation and correct target priors from unlabeled predictions.
+    """Fit source-free adaptation with optional unlabeled target-prior correction.
 
-    The target-prior correction estimates only the marginal predicted class
-    distribution on the unlabeled target batch.  It never accepts target labels,
-    source samples, or source labels during adaptation/correction, so it remains
-    compatible with Protocol 2 / 2.5 style OpenNeuro runs.
+    ``target_prior_correction_stage`` controls where the correction is applied:
+
+    - ``post`` preserves the original behavior and corrects final probabilities.
+    - ``pre`` wraps the frozen source model before pseudo-label/prototype fitting.
+    - ``both`` applies the train-free wrapper before adaptation and a final row
+      renormalization with the same target prior.
+
+    All modes estimate the target prior from source-model predictions on
+    unlabeled target features only.  Target labels remain scoring-only.
     """
 
+    mode = _target_prior_correction_mode(target_prior_correction)
+    strength = _bounded_strength(target_prior_strength)
+    stage = _target_prior_correction_stage(target_prior_correction_stage)
+
+    correction: FittedTargetPriorCorrection | None = None
+    model_for_adaptation = source_model
+    classes_for_adaptation = classes
+    if mode != "none" and strength > 0.0 and stage in {"pre", "both"}:
+        correction = fit_target_prior_correction(
+            source_model=source_model,
+            target_features=target_features,
+            classes=classes,
+            mode=mode,
+            strength=strength,
+        )
+        model_for_adaptation = TargetPriorCorrectedSourceModel(source_model, correction)
+        classes_for_adaptation = correction.classes
+
     base_result = fit_source_free_predict_proba(
-        source_model=source_model,
+        source_model=model_for_adaptation,
         target_features=target_features,
-        classes=classes,
+        classes=classes_for_adaptation,
         confidence_threshold=confidence_threshold,
         max_iterations=max_iterations,
         min_class_count=min_class_count,
@@ -62,19 +148,38 @@ def fit_source_free_target_prior_predict_proba(
         prototype_temperature=prototype_temperature,
         standardize_target=standardize_target,
         feature_space=feature_space,
+        pseudo_label_selection=pseudo_label_selection,
+        balanced_topk_per_class=balanced_topk_per_class,
     )
-    probabilities, target_prior = apply_target_prior_correction(
-        base_result.probabilities,
-        mode=target_prior_correction,
-        strength=target_prior_strength,
-    )
+
+    probabilities = base_result.probabilities
+    if mode != "none" and strength > 0.0 and stage in {"post", "both"}:
+        if correction is None:
+            probabilities, target_prior = apply_target_prior_correction(
+                base_result.probabilities,
+                mode=mode,
+                strength=strength,
+            )
+            correction = FittedTargetPriorCorrection(
+                classes=np.asarray(base_result.adapter.classes_, dtype=object),
+                prior=target_prior,
+                mode=mode,
+                strength=strength,
+            )
+        else:
+            probabilities = correction.correct_probabilities(base_result.probabilities)
+    elif correction is None:
+        correction = FittedTargetPriorCorrection(
+            classes=np.asarray(base_result.adapter.classes_, dtype=object),
+            prior=estimate_target_class_prior(base_result.probabilities),
+            mode=mode,
+            strength=0.0 if mode == "none" else strength,
+        )
+
     metadata = {
         **base_result.metadata,
-        "source_free_target_prior_correction": _target_prior_correction_mode(target_prior_correction),
-        "source_free_target_prior_strength": _bounded_strength(target_prior_strength),
-        "source_free_target_class_prior": format_target_prior(target_prior),
-        "source_free_target_prior_uses_target_labels": False,
-        "source_free_target_prior_uses_source_rows": False,
+        **correction.metadata(),
+        "source_free_target_prior_correction_stage": stage if mode != "none" and strength > 0.0 else "none",
         "source_free_valid_for_benchmark": True,
     }
     return SourceFreeTargetPriorCorrectionResult(
@@ -82,6 +187,47 @@ def fit_source_free_target_prior_predict_proba(
         probabilities=probabilities,
         metadata=metadata,
     )
+
+
+def fit_target_prior_correction(
+    *,
+    source_model: Any,
+    target_features: np.ndarray,
+    classes: np.ndarray | list[Any] | tuple[Any, ...] | None = None,
+    mode: TargetPriorCorrection | str = "balanced",
+    strength: float = 1.0,
+) -> FittedTargetPriorCorrection:
+    """Fit a target-prior correction from unlabeled source-model predictions."""
+
+    x_target = _as_2d_array(target_features, "target_features")
+    classes_array = _resolve_classes(source_model, classes)
+    probabilities = _predict_source_probabilities(source_model, x_target, classes_array)
+    return FittedTargetPriorCorrection(
+        classes=classes_array,
+        prior=estimate_target_class_prior(probabilities),
+        mode=_target_prior_correction_mode(mode),
+        strength=_bounded_strength(strength),
+    )
+
+
+def fit_target_prior_corrected_source_model(
+    *,
+    source_model: Any,
+    target_features: np.ndarray,
+    classes: np.ndarray | list[Any] | tuple[Any, ...] | None = None,
+    mode: TargetPriorCorrection | str = "balanced",
+    strength: float = 1.0,
+) -> TargetPriorCorrectedSourceModel:
+    """Return a source-model wrapper that applies pre-adaptation prior correction."""
+
+    correction = fit_target_prior_correction(
+        source_model=source_model,
+        target_features=target_features,
+        classes=classes,
+        mode=mode,
+        strength=strength,
+    )
+    return TargetPriorCorrectedSourceModel(source_model, correction)
 
 
 def apply_target_prior_correction(
@@ -125,6 +271,17 @@ def _target_prior_correction_mode(value: Any) -> str:
     raise ValueError("target_prior_correction must be one of: none, balanced.")
 
 
+def _target_prior_correction_stage(value: Any) -> str:
+    stage = str(value).strip().lower().replace("-", "_")
+    if stage in {"post", "after", "after_adaptation", "final"}:
+        return "post"
+    if stage in {"pre", "before", "before_adaptation", "source_model"}:
+        return "pre"
+    if stage in {"both", "pre_and_post", "source_and_final"}:
+        return "both"
+    raise ValueError("target_prior_correction_stage must be one of: post, pre, both.")
+
+
 def _bounded_strength(value: Any) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError("target_prior_strength must be finite in [0, 1].")
@@ -158,10 +315,18 @@ def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
     return array / row_sums
 
 
+def _format_classes(classes: np.ndarray) -> str:
+    return "|".join(str(class_label) for class_label in np.asarray(classes, dtype=object).tolist())
+
+
 __all__ = [
+    "FittedTargetPriorCorrection",
     "SourceFreeTargetPriorCorrectionResult",
+    "TargetPriorCorrectedSourceModel",
     "apply_target_prior_correction",
     "estimate_target_class_prior",
     "fit_source_free_target_prior_predict_proba",
+    "fit_target_prior_corrected_source_model",
+    "fit_target_prior_correction",
     "format_target_prior",
 ]
