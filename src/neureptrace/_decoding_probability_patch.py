@@ -191,12 +191,54 @@ def _patch_decision_probability_helper(module_name: str, function_name: str) -> 
     setattr(module, function_name, _probabilities_or_none)
 
 
+def _patch_class_score_matrix() -> None:
+    class_scores = importlib.import_module("neureptrace.decoding.class_scores")
+    original = class_scores.as_class_score_matrix
+    if getattr(original, _BINARY_DECISION_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def as_class_score_matrix(raw_scores, classes, *, n_samples: int):
+        class_order = class_scores._label_vector(classes)
+        scores = np.asarray(raw_scores, dtype=float)
+        if scores.ndim == 1 and scores.shape[0] == n_samples and class_order.size == 2:
+            return _binary_decision_scores_to_logits(scores)
+        if scores.ndim == 2 and scores.shape == (n_samples, 1) and class_order.size == 2:
+            return _binary_decision_scores_to_logits(scores[:, 0])
+        return original(raw_scores, classes, n_samples=n_samples)
+
+    setattr(as_class_score_matrix, _BINARY_DECISION_PATCH_MARKER, True)
+    class_scores.as_class_score_matrix = as_class_score_matrix
+
+
+def _patch_decoded_label_classifier() -> None:
+    classifiers = importlib.import_module("neureptrace.decoding.classifiers")
+    cls = classifiers.DecodedLabelClassifier
+    original = cls.decision_function
+    if getattr(original, _BINARY_DECISION_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def decision_function(self, features):
+        if hasattr(self.model, "decision_function"):
+            scores = np.asarray(self.model.decision_function(features), dtype=float)
+            if scores.ndim == 1 and self.classes_.shape[0] == 2:
+                return _binary_decision_scores_to_logits(scores)
+            return scores
+        return original(self, features)
+
+    setattr(decision_function, _BINARY_DECISION_PATCH_MARKER, True)
+    cls.decision_function = decision_function
+
+
 def _patch_binary_decision_probability_fallbacks() -> None:
     _patch_source_free_decision_fallback()
     _patch_source_ensemble_decision_fallback()
     _patch_decision_probability_helper("neureptrace.decoding.subspace_alignment", "_probabilities_or_none")
     _patch_decision_probability_helper("neureptrace.decoding.transfer_components", "_predict_probabilities_or_none")
     _patch_decision_probability_helper("neureptrace.decoding.transfer_component_analysis", "_predict_probabilities_or_none")
+    _patch_class_score_matrix()
+    _patch_decoded_label_classifier()
 
 
 def install() -> None:
