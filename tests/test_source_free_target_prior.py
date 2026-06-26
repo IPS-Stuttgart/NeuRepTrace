@@ -19,6 +19,15 @@ class _BiasedSourceModel:
         return probabilities
 
 
+class _ImbalancedPseudoLabelSourceModel:
+    classes_ = np.array([0, 1])
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probabilities = np.tile(np.array([[0.94, 0.06]], dtype=float), (features.shape[0], 1))
+        probabilities[features[:, 0] > 0.0] = np.array([0.42, 0.58], dtype=float)
+        return probabilities
+
+
 def test_balanced_target_prior_correction_uses_unlabeled_target_predictions():
     target_features = np.array(
         [
@@ -52,6 +61,30 @@ def test_balanced_target_prior_correction_uses_unlabeled_target_predictions():
     assert corrected.metadata["source_free_valid_for_benchmark"] is True
     assert corrected.probabilities[:, 1].mean() > uncorrected.probabilities[:, 1].mean()
     assert np.allclose(corrected.probabilities.sum(axis=1), 1.0)
+
+
+def test_target_prior_wrapper_forwards_balanced_topk_selection():
+    target_features = np.vstack([np.full((10, 2), -1.0), np.full((4, 2), 1.0)])
+
+    result = fit_source_free_target_prior_predict_proba(
+        source_model=_ImbalancedPseudoLabelSourceModel(),
+        target_features=target_features,
+        confidence_threshold=0.80,
+        max_iterations=2,
+        min_class_count=2,
+        min_active_classes=2,
+        prototype_weight=0.5,
+        pseudo_label_selection="balanced_topk",
+        balanced_topk_per_class=2,
+        target_prior_correction="none",
+    )
+
+    metadata = result.metadata
+    assert metadata["source_free_pseudo_label_selection"] == "balanced_topk"
+    assert metadata["source_free_balanced_topk_per_class"] == 2
+    assert metadata["source_free_active_classes"] == 2
+    assert result.base_result.adapter.prototype_class_counts_.tolist() == [2, 2]
+    assert result.base_result.adapter.selected_.sum() == 4
 
 
 def test_target_prior_strength_interpolates_correction():
