@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from neureptrace.decoding.source_free import SourceFreeAdaptationResult, fit_source_free_predict_proba
+from neureptrace.decoding.source_free import PseudoLabelSelection, SourceFreeAdaptationResult, fit_source_free_predict_proba
 
 _EPS = 1e-12
 TargetPriorCorrection = Literal["none", "balanced"]
@@ -39,6 +39,8 @@ def fit_source_free_target_prior_predict_proba(
     prototype_temperature: float = 1.0,
     standardize_target: bool = True,
     feature_space: Literal["input", "model_preprocessor", "auto"] = "auto",
+    pseudo_label_selection: PseudoLabelSelection = "confidence",
+    balanced_topk_per_class: int | None = None,
     target_prior_correction: TargetPriorCorrection = "balanced",
     target_prior_strength: float = 1.0,
 ) -> SourceFreeTargetPriorCorrectionResult:
@@ -62,6 +64,8 @@ def fit_source_free_target_prior_predict_proba(
         prototype_temperature=prototype_temperature,
         standardize_target=standardize_target,
         feature_space=feature_space,
+        pseudo_label_selection=pseudo_label_selection,
+        balanced_topk_per_class=balanced_topk_per_class,
     )
     probabilities, target_prior = apply_target_prior_correction(
         base_result.probabilities,
