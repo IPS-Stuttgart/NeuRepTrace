@@ -1,18 +1,8 @@
-"""Sampled geodesic-flow features for Category-2 transfer.
-
-This module implements a compact sampled-geodesic approximation to classic
-geodesic-flow domain adaptation.  PCA bases are fitted on source features and on
-unlabeled target features.  Intermediate bases are sampled by QR-orthonormalizing
-linear interpolants between the two bases, and feature rows are represented by the
-concatenation of projections onto those bases.
-
-The public API intentionally has no target-label argument.  Target features are
-used only to estimate the target subspace, making this a Category-2 protocol.
-"""
+"""Sampled geodesic-flow features for Category-2 transfer."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,6 +14,8 @@ DEFAULT_GEODESIC_COMPONENTS = 16
 DEFAULT_GEODESIC_STEPS = 5
 TARGET_FEATURE_SOURCE_TRANSDUCTIVE = "target_test_features_transductive"
 TARGET_FEATURE_SOURCE_CALIBRATION = "target_adaptation_features"
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,33 +55,14 @@ class GeodesicFlowResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-# pylint: disable-next=too-many-arguments,too-many-locals
-
 def fit_sampled_geodesic_flow_features(
     *,
     source_features: Sequence[Sequence[float]] | np.ndarray,
     target_test_features: Sequence[Sequence[float]] | np.ndarray,
-    config: GeodesicFlowConfig | dict[str, Any] | None = None,
+    config: GeodesicFlowConfig | Mapping[str, Any] | None = None,
     target_adaptation_features: Sequence[Sequence[float]] | np.ndarray | None = None,
 ) -> GeodesicFlowResult:
-    """Fit sampled geodesic-flow features from source and unlabeled target data.
-
-    Parameters
-    ----------
-    source_features:
-        Source feature matrix.  Source labels are used only later by the
-        downstream classifier.
-    target_test_features:
-        Held-out target rows to transform.  If no separate
-        ``target_adaptation_features`` are supplied, these rows are also used to
-        estimate the target subspace, which is a transductive Category-2 setting.
-    config:
-        Geodesic-flow options.  Mappings are normalized through
-        :func:`geodesic_flow_config`.
-    target_adaptation_features:
-        Optional unlabeled target calibration rows for estimating the target
-        subspace separately from scored target rows.
-    """
+    """Fit sampled geodesic-flow features from source and unlabeled target data."""
 
     cfg = geodesic_flow_config() if config is None else _coerce_config(config)
     source = _feature_matrix(source_features, name="source_features")
@@ -116,6 +89,7 @@ def fit_sampled_geodesic_flow_features(
     bases = sample_geodesic_bases(source_components, target_components, n_steps=n_steps, include_endpoints=cfg.include_endpoints)
     train_features = transform_with_geodesic_bases(source_prepared, bases, normalize_blocks=cfg.normalize_blocks)
     test_features = transform_with_geodesic_bases(target_test_prepared, bases, normalize_blocks=cfg.normalize_blocks)
+
     metadata = _metadata(
         cfg,
         n_source_rows=source.shape[0],
@@ -144,10 +118,10 @@ def geodesic_flow_config(
     *,
     n_components: int | str | float = DEFAULT_GEODESIC_COMPONENTS,
     n_steps: int | str = DEFAULT_GEODESIC_STEPS,
-    center: bool = True,
-    scale: bool = False,
-    include_endpoints: bool = True,
-    normalize_blocks: bool = True,
+    center: bool | str | int = True,
+    scale: bool | str | int = False,
+    include_endpoints: bool | str | int = True,
+    normalize_blocks: bool | str | int = True,
     epsilon: float | str = 1e-8,
 ) -> GeodesicFlowConfig:
     """Normalize public sampled-geodesic options."""
@@ -155,10 +129,10 @@ def geodesic_flow_config(
     return GeodesicFlowConfig(
         n_components=n_components,
         n_steps=_positive_int(n_steps, name="n_steps"),
-        center=bool(center),
-        scale=bool(scale),
-        include_endpoints=bool(include_endpoints),
-        normalize_blocks=bool(normalize_blocks),
+        center=_boolean_option(center, name="center"),
+        scale=_boolean_option(scale, name="scale"),
+        include_endpoints=_boolean_option(include_endpoints, name="include_endpoints"),
+        normalize_blocks=_boolean_option(normalize_blocks, name="normalize_blocks"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -168,7 +142,7 @@ def sample_geodesic_bases(
     target_components: Sequence[Sequence[float]] | np.ndarray,
     *,
     n_steps: int | str = DEFAULT_GEODESIC_STEPS,
-    include_endpoints: bool = True,
+    include_endpoints: bool | str | int = True,
 ) -> tuple[GeodesicFlowBasis, ...]:
     """Sample orthonormal bases between source and target PCA bases."""
 
@@ -177,8 +151,9 @@ def sample_geodesic_bases(
     if source.shape != target.shape:
         raise ValueError(f"source_components and target_components must have the same shape: {source.shape} != {target.shape}.")
     steps = _positive_int(n_steps, name="n_steps")
-    positions = np.linspace(0.0, 1.0, steps if include_endpoints else steps + 2)
-    if not include_endpoints:
+    endpoints = _boolean_option(include_endpoints, name="include_endpoints")
+    positions = np.linspace(0.0, 1.0, steps if endpoints else steps + 2)
+    if not endpoints:
         positions = positions[1:-1]
     bases = []
     for position in positions:
@@ -193,7 +168,7 @@ def transform_with_geodesic_bases(
     features: Sequence[Sequence[float]] | np.ndarray,
     bases: Sequence[GeodesicFlowBasis],
     *,
-    normalize_blocks: bool = True,
+    normalize_blocks: bool | str | int = True,
 ) -> np.ndarray:
     """Concatenate projections onto sampled geodesic bases."""
 
@@ -201,22 +176,52 @@ def transform_with_geodesic_bases(
     basis_tuple = tuple(bases)
     if not basis_tuple:
         raise ValueError("At least one geodesic basis is required.")
+    normalize = _boolean_option(normalize_blocks, name="normalize_blocks")
     blocks = []
     for basis in basis_tuple:
         basis_matrix = _component_matrix(basis.basis, name="basis")
         if basis_matrix.shape[1] != matrix.shape[1]:
             raise ValueError(f"basis width {basis_matrix.shape[1]} does not match feature width {matrix.shape[1]}.")
         block = matrix @ basis_matrix.T
-        if normalize_blocks:
+        if normalize:
             block = block / np.sqrt(len(basis_tuple))
         blocks.append(block)
     return np.hstack(blocks).astype(np.float32, copy=False)
 
 
-def _coerce_config(config: GeodesicFlowConfig | dict[str, Any]) -> GeodesicFlowConfig:
+def _coerce_config(config: GeodesicFlowConfig | Mapping[str, Any]) -> GeodesicFlowConfig:
     if isinstance(config, GeodesicFlowConfig):
-        return config
+        return geodesic_flow_config(
+            n_components=config.n_components,
+            n_steps=config.n_steps,
+            center=config.center,
+            scale=config.scale,
+            include_endpoints=config.include_endpoints,
+            normalize_blocks=config.normalize_blocks,
+            epsilon=config.epsilon,
+        )
     return geodesic_flow_config(**dict(config))
+
+
+def _boolean_option(value: object, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE_STRINGS:
+            return True
+        if text in _FALSE_STRINGS:
+            return False
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _boolean_option(value.item(), name=name)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
+        return bool(value)
+    if isinstance(value, (float, np.floating)) and np.isfinite(value) and float(value) in {0.0, 1.0}:
+        return bool(value)
+    raise ValueError(f"{name} must be a boolean value.")
 
 
 def _prepare_domain(matrix: np.ndarray, *, center: bool, scale: bool, epsilon: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -295,6 +300,8 @@ def _max_single_domain_components(matrix: np.ndarray, *, center: bool) -> int:
 
 
 def _effective_components(value: int | str | float, *, max_components: int) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("n_components must be a positive integer, 'all', or infinity.")
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"", "default"}:
@@ -352,3 +359,16 @@ def _positive_float(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
+
+
+__all__ = [
+    "GEODESIC_FLOW_CATEGORY",
+    "GEODESIC_FLOW_PROTOCOL",
+    "GeodesicFlowBasis",
+    "GeodesicFlowConfig",
+    "GeodesicFlowResult",
+    "fit_sampled_geodesic_flow_features",
+    "geodesic_flow_config",
+    "sample_geodesic_bases",
+    "transform_with_geodesic_bases",
+]
