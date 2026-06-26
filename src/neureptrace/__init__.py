@@ -47,6 +47,7 @@ from . import (  # noqa: E402
     _joint_distribution_adaptation_config_bool_patch,
     _kernel_mean_matching_bool_validation_patch,
     _label_shift_source_prior_patch,
+    _label_shift_source_label_metadata_patch,
     _label_proportion_block_ids_patch,
     _label_proportion_tuple_prediction_patch,
     _lora_few_shot_numeric_config_patch,
@@ -126,6 +127,7 @@ _generative_augmentation_composite_labels_patch.install()
 _kernel_mean_matching_bool_validation_patch.install()
 _joint_distribution_adaptation_config_bool_patch.install()
 _label_shift_source_prior_patch.install()
+_label_shift_source_label_metadata_patch.install()
 _label_proportion_block_ids_patch.install()
 _label_proportion_tuple_prediction_patch.install()
 _lora_few_shot_tuple_subject_patch.install()
