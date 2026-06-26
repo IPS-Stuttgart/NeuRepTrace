@@ -102,6 +102,7 @@ from . import (  # noqa: E402
     _source_free_tuple_labels_patch,
     _source_label_vector_patch,
     _source_mixup_boolean_config_patch,
+    _source_mixup_random_state_patch,
     _source_mixstyle_tuple_labels_patch,
     _source_mixstyle_tuple_vectors_patch,
     _source_selection_class_balance_patch,
@@ -214,6 +215,7 @@ _source_free_soft_prototypes_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_label_vector_patch.install()
 _source_mixup_boolean_config_patch.install()
+_source_mixup_random_state_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
 _source_mixstyle_tuple_vectors_patch.install()
 _random_state_config_patch.install()
@@ -224,7 +226,6 @@ _source_selection_composite_ids_patch.install()
 _source_selection_class_balance_patch.install()
 _source_selection_optional_bounds_patch.install()
 _source_selection_temperature_patch.install()
-_source_selection_vector_shape_patch.install()
 _source_weighting_enabled_alias_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _subspace_bool_config_patch.install()
