@@ -48,6 +48,7 @@ from . import (  # noqa: E402
     _label_proportion_block_ids_patch,
     _label_proportion_tuple_prediction_patch,
     _lora_few_shot_tuple_subject_patch,
+    _mcca_component_count_patch,
     _mcca_repetition_count_patch,
     _mekt_vector_validation_patch,
     _metadata_column_validation_patch,
@@ -143,6 +144,7 @@ _bushmeg_protocol3_index_validation_patch.install()
 _reconstruction_encoder_config_patch.install()
 _reconstruction_tuple_labels_patch.install()
 _bushmeg_source_loso_prototype_patch.install()
+_mcca_component_count_patch.install()
 _mcca_repetition_count_patch.install()
 _mekt_vector_validation_patch.install()
 _source_alignment_anchor_patch.install()
