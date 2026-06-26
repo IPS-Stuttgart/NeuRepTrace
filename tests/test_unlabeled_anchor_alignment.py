@@ -60,6 +60,31 @@ def test_unlabeled_anchor_alignment_transforms_source_and_target_without_labels(
     assert np.all(np.isfinite(result.test_features))
 
 
+def test_unlabeled_anchor_alignment_preserves_tuple_domains_and_anchors() -> None:
+    anchors, _base, source_a, source_b, target_calibration, target_test = _source_and_target_features()
+    tuple_anchors = [("movie", str(anchor)) for anchor in anchors.tolist()]
+    source_features = np.vstack([source_a, source_b])
+    source_domains = [("subject", "a")] * len(anchors) + [("subject", "b")] * len(anchors)
+    source_anchor_values = tuple_anchors + tuple_anchors
+
+    result = fit_unlabeled_anchor_alignment(
+        source_features=source_features,
+        source_domains=source_domains,
+        source_anchor_values=source_anchor_values,
+        target_calibration_features=target_calibration,
+        target_calibration_anchor_values=tuple_anchors,
+        target_test_features=target_test,
+        n_components=2,
+    )
+
+    assert result.train_features.shape == (8, 2)
+    assert result.test_features.shape == (5, 2)
+    assert result.common_anchors == tuple(tuple_anchors)
+    assert set(result.source_projections) == {("subject", "a"), ("subject", "b")}
+    assert np.all(np.isfinite(result.train_features))
+    assert np.all(np.isfinite(result.test_features))
+
+
 def test_target_projection_maps_calibration_anchor_rows_near_template() -> None:
     anchors, _base, source_a, source_b, target_calibration, _target_test = _source_and_target_features()
     source_features = np.vstack([source_a, source_b])
