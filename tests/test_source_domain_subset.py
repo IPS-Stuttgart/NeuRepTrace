@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from neureptrace.decoding.source_domain_subset import apply_source_domain_subset, source_domain_subset_mask
+
+
+def test_source_domain_subset_mask_is_deterministic() -> None:
+    domains = ["a", "a", "b", "b", "c", "c", "d", "d"]
+
+    first = source_domain_subset_mask(domains, omit_fraction=0.5, min_domains=2, random_state=7)
+    second = source_domain_subset_mask(domains, omit_fraction=0.5, min_domains=2, random_state=7)
+
+    assert first.selected_mask.tolist() == second.selected_mask.tolist()
+    assert first.selected_domains == second.selected_domains
+    assert first.omitted_domains == second.omitted_domains
+    assert len(first.selected_domains) == 2
+    assert len(first.omitted_domains) == 2
+    assert int(np.sum(first.selected_mask)) == 4
+
+
+def test_source_domain_subset_respects_min_domains() -> None:
+    domains = ["a", "a", "b", "b", "c", "c"]
+
+    result = source_domain_subset_mask(domains, omit_fraction=1.0, min_domains=2, random_state=1)
+
+    assert len(result.selected_domains) == 2
+    assert len(result.omitted_domains) == 1
+    assert int(np.sum(result.selected_mask)) == 4
+
+
+def test_apply_source_domain_subset_filters_features_and_labels() -> None:
+    features = np.asarray([[0.0], [1.0], [2.0], [3.0], [4.0], [5.0]])
+    labels = [("x", 1), ("x", 1), ("y", 2), ("y", 2), ("z", 3), ("z", 3)]
+    domains = ["a", "a", "b", "b", "c", "c"]
+
+    selected_features, selected_labels, result = apply_source_domain_subset(
+        features,
+        labels,
+        domains,
+        omit_fraction=1 / 3,
+        min_domains=2,
+        random_state=3,
+    )
+
+    assert selected_features.shape == (4, 1)
+    assert selected_labels.shape == (4,)
+    assert len(result.selected_domains) == 2
+    assert all(domain in result.selected_domains for domain in np.asarray(domains, dtype=object)[result.selected_mask])
+
+
+def test_source_domain_subset_guardrails() -> None:
+    with pytest.raises(ValueError):
+        source_domain_subset_mask([], omit_fraction=0.5)
+    with pytest.raises(ValueError):
+        source_domain_subset_mask(["a", "b"], omit_fraction=-0.1)
+    with pytest.raises(ValueError):
+        source_domain_subset_mask(["a", "b"], min_domains=3)
+    with pytest.raises(ValueError):
+        apply_source_domain_subset([[0.0], [1.0]], [0], ["a", "b"])

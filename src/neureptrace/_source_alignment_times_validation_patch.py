@@ -20,8 +20,15 @@ def _boolean_time_error() -> ValueError:
     return ValueError("alignment_times must contain finite numeric time centers, not booleans.")
 
 
+def _install_source_selection_temperature_patch() -> None:
+    source_selection_temperature_patch = importlib.import_module("neureptrace._source_selection_temperature_patch")
+    source_selection_temperature_patch.install()
+
+
 def install() -> None:
     """Patch source-alignment time parsing to reject boolean scalars."""
+
+    _install_source_selection_temperature_patch()
 
     source_alignment = importlib.import_module("neureptrace.decoding.source_alignment")
     if getattr(source_alignment, _PATCH_MARKER, False):
