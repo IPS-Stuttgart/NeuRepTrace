@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from neureptrace.behavior.reaction_time import (
+from neureptrace import _reaction_time_trial_index_base_patch
+
+_reaction_time_trial_index_base_patch.install()
+
+from neureptrace.behavior.reaction_time import (  # noqa: E402
     REACTION_TIME_FIELD_CANDIDATES,
     ReactionTimeCsvConfig,
     ReactionTimeUnavailableError,

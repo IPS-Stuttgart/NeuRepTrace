@@ -364,12 +364,20 @@ def _resolve_path(value: str | os.PathLike[str], *, base_dir: Path) -> Path:
     return path.resolve()
 
 
+def _reject_boolean_participant_identifier(value: Any) -> None:
+    if isinstance(value, bool):
+        raise ValueError("participants.ids must not contain boolean identifiers")
+
+
 def _expand_participant_token(token: Any) -> list[str]:
+    _reject_boolean_participant_identifier(token)
     if isinstance(token, Mapping):
         if "range" in token:
             return _expand_range_value(token["range"])
         if "id" in token:
-            return [str(token["id"])]
+            identifier = token["id"]
+            _reject_boolean_participant_identifier(identifier)
+            return [str(identifier)]
         raise ValueError(f"Unsupported participant token mapping: {token}")
 
     if isinstance(token, int):
@@ -384,10 +392,14 @@ def _expand_participant_token(token: Any) -> list[str]:
 
 
 def _expand_range_value(value: Any) -> list[str]:
+    _reject_boolean_participant_identifier(value)
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         if len(value) != 2:
             raise ValueError(f"Participant range sequences must contain exactly two values: {value}")
-        return _range_ids(str(value[0]), str(value[1]))
+        start, stop = value
+        _reject_boolean_participant_identifier(start)
+        _reject_boolean_participant_identifier(stop)
+        return _range_ids(str(start), str(stop))
 
     text = str(value).strip()
     match = _RANGE_PATTERN.match(text)

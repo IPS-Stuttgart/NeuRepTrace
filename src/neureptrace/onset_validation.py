@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,16 @@ DEFAULT_CHUNKS = (
 )
 
 
+def _finite_chunk_bound(value: object, *, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"Chunk {name} must be finite.") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"Chunk {name} must be finite.")
+    return parsed
+
+
 def parse_chunk_spec(spec: str) -> OnsetChunk:
     """Parse a chunk specification of the form ``name:start:stop[:expected]``."""
 
@@ -42,13 +53,16 @@ def parse_chunk_spec(spec: str) -> OnsetChunk:
     if len(parts) not in (3, 4):
         raise ValueError("Chunk specs must have the form name:start:stop[:expected].")
     name, raw_start, raw_stop = parts[:3]
+    name = name.strip()
     if not name:
         raise ValueError("Chunk name must not be empty.")
-    start = float(raw_start)
-    stop = float(raw_stop)
+    start = _finite_chunk_bound(raw_start, name="start")
+    stop = _finite_chunk_bound(raw_stop, name="stop")
     if start > stop:
         raise ValueError("Chunk start must be less than or equal to chunk stop.")
-    expected = parts[3] if len(parts) == 4 else "unknown"
+    expected = parts[3].strip() if len(parts) == 4 else "unknown"
+    if not expected:
+        raise ValueError("Chunk expected response must not be empty.")
     return OnsetChunk(name=name, start=start, stop=stop, expected_response=expected)
 
 

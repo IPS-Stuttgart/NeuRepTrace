@@ -248,14 +248,15 @@ def _as_2d_array(features: np.ndarray, name: str) -> np.ndarray:
 
 def _resolve_classes(model: Any, classes: np.ndarray | list[Any] | tuple[Any, ...] | None) -> np.ndarray:
     if classes is not None:
-        resolved = np.asarray(classes)
+        resolved = _as_label_vector(classes, "classes")
     elif hasattr(model, "classes_"):
-        resolved = np.asarray(model.classes_)
+        resolved = _as_label_vector(getattr(model, "classes_"), "source_model.classes_")
     else:
         raise ValueError("classes must be supplied when source_model does not expose classes_.")
     if resolved.ndim != 1 or resolved.shape[0] < 2:
         raise ValueError("Source-free adaptation needs at least two classes.")
-    if len(set(map(str, resolved))) != resolved.shape[0]:
+    keys = [_label_key(class_label) for class_label in resolved.tolist()]
+    if len(set(keys)) != resolved.shape[0]:
         raise ValueError("classes must be unique.")
     return resolved
 
@@ -270,7 +271,7 @@ def _predict_source_probabilities(model: Any, features: np.ndarray, classes: np.
         probabilities = _softmax_rows(scores)
     else:
         raise ValueError("source_model must expose predict_proba or decision_function.")
-    model_classes = np.asarray(getattr(model, "classes_", classes))
+    model_classes = _as_label_vector(getattr(model, "classes_", classes), "source_model.classes_")
     return _align_probability_columns(probabilities, model_classes=model_classes, classes=classes)
 
 
@@ -281,12 +282,64 @@ def _align_probability_columns(probabilities: np.ndarray, *, model_classes: np.n
     if probabilities.shape[1] != model_classes.shape[0]:
         raise ValueError("source_model probability columns do not match source_model.classes_.")
     aligned = np.zeros((probabilities.shape[0], classes.shape[0]), dtype=float)
-    lookup = {class_label: index for index, class_label in enumerate(model_classes.tolist())}
+    model_class_values = model_classes.tolist()
+    lookup = {_label_key(class_label): index for index, class_label in enumerate(model_class_values)}
+    if len(lookup) != model_classes.shape[0]:
+        raise ValueError("source_model.classes_ must contain unique classes.")
     for output_index, class_label in enumerate(classes.tolist()):
-        if class_label not in lookup:
+        key = _label_key(class_label)
+        if key not in lookup:
             raise ValueError(f"source_model is missing requested class {class_label!r}.")
-        aligned[:, output_index] = probabilities[:, lookup[class_label]]
+        aligned[:, output_index] = probabilities[:, lookup[key]]
     return _normalize_probability_rows(aligned)
+
+
+def _as_label_vector(labels: np.ndarray | list[Any] | tuple[Any, ...], name: str) -> np.ndarray:
+    if isinstance(labels, np.ndarray):
+        if labels.ndim == 0:
+            raise ValueError(f"{name} must be a sequence of class labels.")
+        if labels.ndim == 1:
+            values = labels.tolist()
+        else:
+            flattened = labels.reshape(labels.shape[0], -1)
+            values = [_sequence_label_from_row(row) for row in flattened]
+    else:
+        try:
+            values = list(labels)
+        except TypeError as exc:
+            raise ValueError(f"{name} must be a sequence of class labels.") from exc
+    vector = np.empty(len(values), dtype=object)
+    vector[:] = values
+    return vector
+
+
+def _sequence_label_from_row(row: np.ndarray) -> Any:
+    if row.size == 1:
+        value = row[0]
+        return value.item() if isinstance(value, np.generic) else value
+    return tuple(value.item() if isinstance(value, np.generic) else value for value in row.tolist())
+
+
+def _label_key(label: Any) -> tuple[Any, ...]:
+    if isinstance(label, np.generic):
+        return _label_key(label.item())
+    if isinstance(label, np.ndarray):
+        return ("sequence", tuple(_label_key(value) for value in label.reshape(-1).tolist()))
+    if isinstance(label, (list, tuple)):
+        return ("sequence", tuple(_label_key(value) for value in label))
+    if isinstance(label, float) and np.isnan(label):
+        return ("nan",)
+    if isinstance(label, bytes):
+        return ("bytes", label)
+    if isinstance(label, str):
+        return ("str", label)
+    if isinstance(label, (bool, np.bool_)):
+        return ("bool", bool(label))
+    try:
+        hash(label)
+    except TypeError:
+        return ("repr", type(label).__module__, type(label).__qualname__, repr(label))
+    return ("scalar", label)
 
 
 def _target_embedding(model: Any, features: np.ndarray, *, feature_space: str) -> tuple[np.ndarray, str]:
@@ -443,9 +496,9 @@ def _positive_float(value: Any, name: str) -> float:
 
 def _bounded_float(value: Any, name: str, *, lower: float, upper: float, include_upper: bool) -> float:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')'}.")
+        raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')'}." )
     number = float(value)
     upper_ok = number <= upper if include_upper else number < upper
     if not np.isfinite(number) or number < lower or not upper_ok:
-        raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')'}.")
+        raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')'}." )
     return number
