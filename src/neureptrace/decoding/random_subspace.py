@@ -109,6 +109,9 @@ def fit_random_subspace_ensemble(
     classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
     if classes.shape[0] < 2:
         raise ValueError("Random-subspace ensemble requires at least two classes.")
+    class_to_code = {class_label: index for index, class_label in enumerate(classes.tolist())}
+    label_codes = np.asarray([class_to_code[class_label] for class_label in labels.tolist()], dtype=int)
+    encoded_classes = np.arange(classes.shape[0], dtype=int)
     weights = None if sample_weight is None else _sample_weight(sample_weight, expected_length=train.shape[0])
     rng = np.random.default_rng(cfg.random_state)
     feature_subspaces = sample_feature_subspaces(
@@ -133,10 +136,10 @@ def fit_random_subspace_ensemble(
         model = clone(model_template)
         fit_kwargs = {} if weights is None else {"sample_weight": weights[row_indices]}
         try:
-            model.fit(train[row_indices][:, feature_indices], labels[row_indices], **fit_kwargs)
+            model.fit(train[row_indices][:, feature_indices], label_codes[row_indices], **fit_kwargs)
         except TypeError:
-            model.fit(train[row_indices][:, feature_indices], labels[row_indices])
-        probabilities = _aligned_probabilities(model, test[:, feature_indices], classes=classes, epsilon=cfg.epsilon)
+            model.fit(train[row_indices][:, feature_indices], label_codes[row_indices])
+        probabilities = _aligned_probabilities(model, test[:, feature_indices], classes=encoded_classes, epsilon=cfg.epsilon)
         members.append(
             RandomSubspaceMember(
                 estimator_index=int(estimator_index),
