@@ -9,11 +9,12 @@ import numpy as np
 
 import neureptrace.decoding.label_proportions as _label_proportions
 
-_PATCH_MARKER = "_neureptrace_label_proportion_block_ids_patch_installed"
+_BLOCK_ID_PATCH_MARKER = "_neureptrace_label_proportion_block_ids_patch_installed"
+_ZERO_SUPPORT_PATCH_MARKER = "_neureptrace_label_proportion_zero_support_patch_installed"
 
 
-def _object_block_vector(values: Sequence[Hashable] | np.ndarray) -> np.ndarray:
-    """Return one hashable block id per probability row without flattening tuples."""
+def _object_block_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int | None = None) -> np.ndarray:
+    """Return one hashable block id per probability row without flattening composite ids."""
 
     if isinstance(values, np.ndarray):
         array = np.asarray(values, dtype=object)
@@ -21,12 +22,18 @@ def _object_block_vector(values: Sequence[Hashable] | np.ndarray) -> np.ndarray:
             items = [array.item()]
         elif array.ndim == 1:
             items = array.tolist()
-        elif array.ndim == 2 and 1 in array.shape:
-            items = array.reshape(-1).tolist()
         elif array.ndim == 2:
-            items = [tuple(row.tolist()) for row in array]
+            if array.shape[1] == 1:
+                items = array.reshape(-1).tolist()
+            elif array.shape[0] == 1 and expected_length is not None and array.shape[1] == expected_length and expected_length != 1:
+                items = array.reshape(-1).tolist()
+            else:
+                items = [tuple(row.tolist()) for row in array]
         else:
-            raise ValueError(f"block_ids must be one-dimensional or a two-dimensional composite-id matrix; got shape {array.shape}.")
+            raise ValueError(
+                "block_ids must be one-dimensional, a single-column vector, a row vector with one id per probability row, "
+                f"or a row-shaped composite-id matrix; got shape {array.shape}."
+            )
     elif isinstance(values, (str, bytes)):
         items = [values]
     else:
@@ -40,7 +47,7 @@ def _object_block_vector(values: Sequence[Hashable] | np.ndarray) -> np.ndarray:
         try:
             hash(item)
         except TypeError as exc:
-            raise ValueError(f"block_ids must contain hashable identifiers; got {item!r}.") from exc
+            raise ValueError(f"block_ids must contain hashable block identifiers; got {item!r}.") from exc
         vector[index] = item
     return vector
 
@@ -70,6 +77,17 @@ def _unique_blocks(block_vector: np.ndarray) -> tuple[Hashable, ...]:
     return tuple(blocks)
 
 
+def _apply_class_bias(probabilities: np.ndarray, class_bias: np.ndarray, *, epsilon: float) -> np.ndarray:
+    """Apply class-bias factors while preserving the epsilon support floor."""
+
+    del epsilon
+    weighted = probabilities * class_bias.reshape(1, -1)
+    row_sums = np.sum(weighted, axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("Label-proportion calibration produced a zero-probability row; check proportions and input probabilities.")
+    return weighted / row_sums
+
+
 def _adjust_probability_blocks_to_label_proportions(
     probabilities: Sequence[Sequence[float]] | np.ndarray,
     block_ids: Sequence[Hashable] | np.ndarray,
@@ -84,7 +102,7 @@ def _adjust_probability_blocks_to_label_proportions(
     """Apply block-wise label-proportion calibration with atomic block ids."""
 
     matrix = _label_proportions._as_probability_matrix(probabilities, epsilon=epsilon)
-    block_vector = _object_block_vector(block_ids)
+    block_vector = _object_block_vector(block_ids, expected_length=matrix.shape[0])
     if block_vector.shape[0] != matrix.shape[0]:
         raise ValueError("block_ids must have the same row count as probabilities.")
     if not isinstance(target_proportions_by_block, Mapping):
@@ -163,13 +181,17 @@ def _adjust_probability_blocks_to_label_proportions(
 
 
 def install() -> None:
-    """Install tuple-safe block-id handling for weak label-proportion calibration."""
+    """Install robust weak label-proportion calibration helpers."""
 
-    current = _label_proportions.adjust_probability_blocks_to_label_proportions
-    if getattr(current, _PATCH_MARKER, False):
-        return
-    setattr(_adjust_probability_blocks_to_label_proportions, _PATCH_MARKER, True)
-    _label_proportions.adjust_probability_blocks_to_label_proportions = _adjust_probability_blocks_to_label_proportions
+    current_block = _label_proportions.adjust_probability_blocks_to_label_proportions
+    if not getattr(current_block, _BLOCK_ID_PATCH_MARKER, False):
+        setattr(_adjust_probability_blocks_to_label_proportions, _BLOCK_ID_PATCH_MARKER, True)
+        _label_proportions.adjust_probability_blocks_to_label_proportions = _adjust_probability_blocks_to_label_proportions
+
+    current_bias = _label_proportions._apply_class_bias
+    if not getattr(current_bias, _ZERO_SUPPORT_PATCH_MARKER, False):
+        setattr(_apply_class_bias, _ZERO_SUPPORT_PATCH_MARKER, True)
+        _label_proportions._apply_class_bias = _apply_class_bias
 
 
 __all__ = ["install"]

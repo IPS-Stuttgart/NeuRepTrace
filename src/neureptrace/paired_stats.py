@@ -59,6 +59,14 @@ def _normalise_emission_mode(frame: pd.DataFrame) -> pd.DataFrame:
     return normalised
 
 
+def _paired_statistic_group_columns(subject_metrics: pd.DataFrame) -> list[str]:
+    """Return condition columns that define independent paired comparisons."""
+    columns = [column for column in SUMMARY_GROUP_COLUMNS if column != "decoder" and column in subject_metrics.columns]
+    if "emission_mode" not in columns:
+        columns.insert(0, "emission_mode")
+    return columns
+
+
 def _as_tuple(value: object) -> tuple[object, ...]:
     if isinstance(value, tuple):
         return value
@@ -212,20 +220,24 @@ def paired_decoder_statistics(
         raise ValueError(f"Subject metrics are missing required columns: {missing}")
 
     subject_metrics = _normalise_emission_mode(subject_metrics)
+    pairing_columns = _paired_statistic_group_columns(subject_metrics)
+    for column in pairing_columns:
+        subject_metrics[column] = subject_metrics[column].where(pd.notna(subject_metrics[column]), "").astype(str)
     subject_metrics["decoder"] = subject_metrics["decoder"].astype(str)
     subject_metrics["subject"] = subject_metrics["subject"].astype(str)
-    pairing_columns = ["emission_mode"]
     identity_columns = [*pairing_columns, "decoder", "subject"]
     duplicates = subject_metrics.duplicated(identity_columns, keep=False)
     if duplicates.any():
         duplicate_keys = subject_metrics.loc[duplicates, identity_columns].drop_duplicates().to_dict("records")
         raise ValueError(
-            "Subject metrics must contain at most one row per emission mode, decoder, and subject. "
+            "Subject metrics must contain at most one row per paired-statistic condition, decoder, and subject. "
             f"Duplicate keys: {duplicate_keys}"
         )
 
     rows = []
-    for emission_mode, group in subject_metrics.groupby("emission_mode", sort=True):
+    grouper = pairing_columns[0] if len(pairing_columns) == 1 else pairing_columns
+    for group_key, group in subject_metrics.groupby(grouper, sort=True, dropna=False):
+        group_values = dict(zip(pairing_columns, _as_tuple(group_key), strict=True))
         decoders = sorted(group["decoder"].unique())
         if len(decoders) < 2:
             continue
@@ -236,7 +248,7 @@ def paired_decoder_statistics(
             if len(paired) < 2:
                 raise ValueError(
                     f"Need at least two paired subjects for {decoder_a} vs {decoder_b} "
-                    f"in emission mode {emission_mode}."
+                    f"in paired-statistic condition {group_values}."
                 )
             for metric in metrics:
                 a_values = paired[f"{metric}_a"].to_numpy(dtype=float)
@@ -251,7 +263,7 @@ def paired_decoder_statistics(
                     better = decoder_a if mean_a > mean_b else decoder_b
                 rows.append(
                     {
-                        "emission_mode": str(emission_mode),
+                        **{column: str(group_values[column]) for column in pairing_columns},
                         "decoder_a": decoder_a,
                         "decoder_b": decoder_b,
                         "metric": metric,

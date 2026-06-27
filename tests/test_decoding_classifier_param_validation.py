@@ -28,3 +28,15 @@ def test_make_decoder_rejects_boolean_classifier_params(decoder, classifier_para
 def test_make_decoder_rejects_malformed_positive_classifier_params(classifier_param):
     with pytest.raises(ValueError, match="positive finite"):
         make_decoder("logistic", classifier_param=classifier_param)
+
+
+def test_make_decoder_allows_zero_torch_mlp_weight_decay():
+    decoder = make_decoder("torch_mlp", classifier_param=0.0)
+
+    assert decoder.named_steps["torchmlpclassifier"].weight_decay == 0.0
+
+
+@pytest.mark.parametrize("classifier_param", [-1, np.nan, np.inf, "not-a-number"])
+def test_make_decoder_rejects_malformed_torch_mlp_weight_decay(classifier_param):
+    with pytest.raises(ValueError, match="non-negative finite"):
+        make_decoder("torch_mlp", classifier_param=classifier_param)

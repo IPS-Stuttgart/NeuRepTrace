@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 _INTEGER_PATCH_MARKER = "_neureptrace_classifier_integer_params_patch_installed"
+_NONNEGATIVE_FLOAT_PARAM_NAMES = {"TorchMLP weight_decay"}
 
 
 def _strict_positive_float_classifier_param(
@@ -15,7 +16,13 @@ def _strict_positive_float_classifier_param(
     default: float,
     name: str,
 ) -> float:
-    """Normalize positive float classifier parameters without bool coercion."""
+    """Normalize float classifier parameters without bool coercion.
+
+    Most decoder scalar parameters are regularization strengths such as ``C`` and
+    therefore must be strictly positive.  ``torch_mlp`` is the exception: its
+    scalar ``classifier_param`` is forwarded as weight decay, where zero is a
+    valid value to disable the penalty.
+    """
 
     if classifier_param is None:
         value = float(default)
@@ -25,9 +32,13 @@ def _strict_positive_float_classifier_param(
         try:
             value = float(classifier_param)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"{name} must be a positive finite value.") from exc
+            adjective = "non-negative" if name in _NONNEGATIVE_FLOAT_PARAM_NAMES else "positive"
+            raise ValueError(f"{name} must be a {adjective} finite value.") from exc
 
-    if not np.isfinite(value) or value <= 0.0:
+    if name in _NONNEGATIVE_FLOAT_PARAM_NAMES:
+        if not np.isfinite(value) or value < 0.0:
+            raise ValueError(f"{name} must be a non-negative finite value.")
+    elif not np.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be a positive finite value.")
     return value
 
@@ -59,6 +70,7 @@ def install() -> None:
     original_knn = classifiers._build_knn
     original_random_forest = classifiers._build_random_forest
     original_shrinkage = classifiers._normalize_lda_shrinkage
+    original_xgboost = classifiers._build_xgboost
     original_legacy_gradient_boosting = classifiers.train_gradient_boosting
 
     def build_gradient_boosting(features, labels, classifier_param, random_state):
@@ -78,6 +90,10 @@ def install() -> None:
             raise ValueError("shrinkage-lda classifier_param must be numeric, not boolean.")
         return original_shrinkage(classifier_param)
 
+    def build_xgboost(features, labels, classifier_param, random_state):
+        classifier_param = _strict_positive_int_classifier_param(classifier_param, name="xgboost classifier_param")
+        return original_xgboost(features, labels, classifier_param, random_state)
+
     def train_gradient_boosting(train_features, train_labels, classifier_param, random_state=None):
         classifier_param = _strict_positive_int_classifier_param(classifier_param, name="gradient_boosting classifier_param")
         return original_legacy_gradient_boosting(train_features, train_labels, classifier_param, random_state)
@@ -86,8 +102,10 @@ def install() -> None:
     classifiers._build_knn = build_knn
     classifiers._build_random_forest = build_random_forest
     classifiers._normalize_lda_shrinkage = normalize_shrinkage
+    classifiers._build_xgboost = build_xgboost
     classifiers.train_gradient_boosting = train_gradient_boosting
     classifiers.CLASSIFIER_REGISTRY["gradient-boosting"] = classifiers.ClassifierSpec(build_gradient_boosting)
     classifiers.CLASSIFIER_REGISTRY["knn"] = classifiers.ClassifierSpec(build_knn)
     classifiers.CLASSIFIER_REGISTRY["random-forest"] = classifiers.ClassifierSpec(build_random_forest)
+    classifiers.CLASSIFIER_REGISTRY["xgboost"] = classifiers.ClassifierSpec(build_xgboost)
     setattr(classifiers, _INTEGER_PATCH_MARKER, True)

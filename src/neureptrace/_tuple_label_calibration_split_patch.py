@@ -14,6 +14,7 @@ _FEW_SHOT_PATCH_MARKER = "_neureptrace_tuple_label_few_shot_patch_installed"
 _INDEX_ERROR = "{name} must contain integer row indices."
 _BOOLEAN_INDEX_ERROR = "{name} must contain integer row indices, not booleans or a boolean mask."
 _DUPLICATE_INDEX_ERROR = "{name} must not contain duplicate target row indices."
+_SHAPE_INDEX_ERROR = "{name} must be one-dimensional."
 
 
 def _object_value_vector(values: Sequence[Any]) -> np.ndarray:
@@ -29,13 +30,16 @@ def _atomic_label_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np
     ``np.asarray([("run-1", "face"), ...], dtype=object)`` has shape
     ``(n, 2)``.  For class labels, each row is one composite value rather than
     two independent labels, so collapse row-shaped label arrays into tuple
-    objects before downstream class counting or equality checks.
+    objects before downstream class counting or equality checks.  In contrast,
+    ``(n, 1)`` arrays are column vectors of scalar labels and are flattened.
     """
 
     array = np.asarray(values, dtype=object)
     if array.ndim == 0:
         return _object_value_vector([array.item()])
     if array.ndim == 1:
+        return array.reshape(-1)
+    if array.ndim == 2 and array.shape[1] == 1:
         return array.reshape(-1)
     rows = [tuple(row.tolist()) for row in array.reshape(array.shape[0], -1)]
     return _object_value_vector(rows)
@@ -76,6 +80,8 @@ def _normalize_manual_split_indices(values: Sequence[int] | np.ndarray, *, name:
     array = np.asarray(values)
     if array.ndim == 0:
         array = array.reshape(1)
+    if array.ndim != 1:
+        raise ValueError(_SHAPE_INDEX_ERROR.format(name=name))
     flat = array.reshape(-1)
     if flat.dtype == np.bool_ or any(isinstance(value, (bool, np.bool_)) for value in flat.tolist()):
         raise ValueError(_BOOLEAN_INDEX_ERROR.format(name=name))
@@ -338,6 +344,13 @@ def _patch_few_shot() -> None:
 
     @wraps(original_fit)
     def fit_few_shot_target_calibrated_decoder(*args: Any, **kwargs: Any):
+        split = kwargs.get("split")
+        if split is not None:
+            kwargs = dict(kwargs)
+            kwargs["split"] = few_shot.FewShotTargetCalibrationSplit(
+                evaluation_indices=_normalize_manual_split_indices(split.evaluation_indices, name="evaluation_indices"),
+                calibration_indices=_normalize_manual_split_indices(split.calibration_indices, name="calibration_indices"),
+            )
         if kwargs.get("classes") is not None:
             kwargs = dict(kwargs)
             kwargs["classes"] = _atomic_label_vector(kwargs["classes"], name="classes")

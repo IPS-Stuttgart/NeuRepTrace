@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_source_domain_generalization_composite_patch_installed"
 
@@ -45,6 +46,41 @@ def _values_equal(left: object, right: object) -> bool:
         return False
 
 
+def _is_missing_domain_value(value: Any) -> bool:
+    """Return true when a scalar or composite source-domain id is missing."""
+
+    if value is None:
+        return True
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _is_missing_domain_value(value.item())
+        return any(_is_missing_domain_value(item) for item in value.reshape(-1).tolist())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_is_missing_domain_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(_is_missing_domain_value(key) or _is_missing_domain_value(item) for key, item in value.items())
+
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    if isinstance(missing, (bool, np.bool_)):
+        return bool(missing)
+    try:
+        return bool(np.any(missing))
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_missing_domain_array(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    """Vectorized missing-domain detector that also handles composite IDs."""
+
+    flattened = np.asarray(values, dtype=object).reshape(-1)
+    return np.asarray([_is_missing_domain_value(value) for value in flattened], dtype=bool)
+
+
 def _ordered_unique(values: Sequence[Any] | np.ndarray) -> np.ndarray:
     unique: list[object] = []
     for value in _atomic_vector(values, name="values"):
@@ -68,6 +104,8 @@ def install() -> None:
     module = importlib.import_module("neureptrace.decoding.source_domain_generalization")
     if getattr(module, _PATCH_MARKER, False):
         return
+
+    module._is_missing_domain_array = _is_missing_domain_array
 
     def _encode_inputs(source_features: np.ndarray, source_labels: np.ndarray, source_domains: np.ndarray, *, name: str):
         x = np.asarray(source_features, dtype=np.float32)

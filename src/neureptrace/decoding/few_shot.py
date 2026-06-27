@@ -47,12 +47,21 @@ class FewShotTargetCalibrationResult:
 
 
 def _as_1d_object_array(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
-    array = np.asarray(values, dtype=object)
-    if array.ndim == 0:
-        return array.reshape(1)
-    if array.ndim != 1:
-        raise ValueError(f"{name} must be one-dimensional.")
-    return array.reshape(-1)
+    if isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            return values.reshape(1)
+        if values.ndim != 1:
+            raise ValueError(f"{name} must be one-dimensional.")
+        return values.reshape(-1)
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+    if any(isinstance(item, tuple) for item in items):
+        vector = np.empty(len(items), dtype=object)
+        vector[:] = items
+        return vector
+    return np.asarray(items).reshape(-1)
 
 
 def _as_feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
@@ -111,6 +120,8 @@ def _normalize_index_vector(values: Sequence[int] | np.ndarray, *, name: str) ->
     array = np.asarray(values)
     if array.ndim == 0:
         array = array.reshape(1)
+    if array.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional.")
     flat = array.reshape(-1)
     if flat.dtype == np.bool_ or any(isinstance(value, (bool, np.bool_)) for value in flat.tolist()):
         raise ValueError(f"{name} must contain integer row indices, not booleans or a boolean mask.")
@@ -121,6 +132,11 @@ def _normalize_index_vector(values: Sequence[int] | np.ndarray, *, name: str) ->
     if not np.all(np.isfinite(numeric)) or not np.all(numeric % 1.0 == 0.0):
         raise ValueError(f"{name} must contain integer row indices.")
     return numeric.astype(int, copy=False)
+
+
+def _reject_duplicate_indices(indices: np.ndarray, *, name: str) -> None:
+    if np.unique(indices).size != indices.size:
+        raise ValueError(f"{name} contains duplicate target row indices.")
 
 
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
@@ -192,6 +208,7 @@ def select_few_shot_target_calibration_split(
         raise ValueError("few-shot target calibration requires at least one target row.")
     if np.any(indices < 0) or np.any(indices >= label_vector.shape[0]):
         raise ValueError("target_indices contains an out-of-range row index.")
+    _reject_duplicate_indices(indices, name="target_indices")
 
     per_class_count = _normalize_positive_int(per_class, name="few_shot_target_calibration_per_class")
     min_eval = _normalize_nonnegative_int(min_evaluation_per_class, name="few_shot_min_evaluation_per_class")
@@ -319,6 +336,7 @@ def fit_few_shot_target_calibrated_decoder(
     for name, indices in {"calibration_indices": calibration_indices, "evaluation_indices": evaluation_indices}.items():
         if np.any(indices < 0) or np.any(indices >= target_matrix.shape[0]):
             raise ValueError(f"{name} contains an out-of-range target row index.")
+        _reject_duplicate_indices(indices, name=name)
     if np.intersect1d(calibration_indices, evaluation_indices).size:
         raise ValueError("few-shot calibration and evaluation indices must be disjoint.")
 

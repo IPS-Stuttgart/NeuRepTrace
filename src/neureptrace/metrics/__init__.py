@@ -50,6 +50,18 @@ def _validate_non_negative_finite_float(value: object, name: str) -> float:
     return numeric
 
 
+def _validate_positive_finite_float(value: object, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive finite value")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive finite value") from exc
+    if not np.isfinite(numeric) or numeric <= 0.0:
+        raise ValueError(f"{name} must be a positive finite value")
+    return numeric
+
+
 def _validate_positive_integer(value: object, name: str) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a positive integer")
@@ -94,20 +106,7 @@ def validate_probability_inputs(
     require_normalized: bool = True,
     normalization_atol: float = 1e-6,
 ) -> tuple[np.ndarray, np.ndarray | None]:
-    """Validate and coerce probability-matrix inputs used by scoring metrics.
-
-    Parameters
-    ----------
-    probabilities:
-        Array-like object with shape ``(n_samples, n_classes)``.
-    labels:
-        Optional integer class labels of shape ``(n_samples,)``.
-    require_normalized:
-        If true, each probability row must sum to one within
-        ``normalization_atol``.
-    normalization_atol:
-        Absolute tolerance for row-sum checks.
-    """
+    """Validate and coerce probability-matrix inputs used by scoring metrics."""
     normalization_atol = _validate_non_negative_finite_float(normalization_atol, "normalization_atol")
     probabilities = np.asarray(probabilities, dtype=float)
     if probabilities.ndim != 2:
@@ -118,10 +117,14 @@ def validate_probability_inputs(
         raise ValueError("probabilities must contain only finite values")
     if np.any(probabilities < -normalization_atol):
         raise ValueError("probabilities must be non-negative")
+    if np.any(probabilities < 0.0):
+        probabilities = np.maximum(probabilities, 0.0)
 
     row_sums = probabilities.sum(axis=1)
-    if require_normalized and not np.allclose(row_sums, 1.0, atol=normalization_atol, rtol=0.0):
-        raise ValueError("probability rows must sum to one")
+    if require_normalized:
+        if not np.allclose(row_sums, 1.0, atol=normalization_atol, rtol=0.0):
+            raise ValueError("probability rows must sum to one")
+        probabilities = probabilities / row_sums[:, None]
 
     if labels is None:
         return probabilities, None
@@ -137,23 +140,8 @@ def validate_probability_inputs(
     return probabilities, labels
 
 
-def expected_calibration_error(
-    probabilities: np.ndarray,
-    labels: np.ndarray,
-    *,
-    n_bins: int = 10,
-) -> float:
-    """Compute top-label expected calibration error.
-
-    Parameters
-    ----------
-    probabilities:
-        Array of shape ``(n_samples, n_classes)`` with predicted class probabilities.
-    labels:
-        Integer class labels of shape ``(n_samples,)``.
-    n_bins:
-        Number of equally spaced confidence bins.
-    """
+def expected_calibration_error(probabilities: np.ndarray, labels: np.ndarray, *, n_bins: int = 10) -> float:
+    """Compute top-label expected calibration error."""
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
     n_bins = _validate_positive_integer(n_bins, "n_bins")
@@ -178,12 +166,7 @@ def expected_calibration_error(
     return float(ece)
 
 
-def reliability_bins(
-    probabilities: np.ndarray,
-    labels: np.ndarray,
-    *,
-    n_bins: int = 10,
-) -> list[dict[str, float | int]]:
+def reliability_bins(probabilities: np.ndarray, labels: np.ndarray, *, n_bins: int = 10) -> list[dict[str, float | int]]:
     """Summarize top-label reliability bins for calibration plots."""
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
@@ -235,21 +218,24 @@ def negative_log_likelihood(probabilities: np.ndarray, labels: np.ndarray, *, ep
     """Compute mean categorical negative log-likelihood from probabilities."""
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
-    eps = float(eps)
-    if not np.isfinite(eps) or eps <= 0.0:
-        raise ValueError("eps must be a positive finite value")
+    eps = _validate_positive_finite_float(eps, "eps")
 
     true_probabilities = probabilities[np.arange(labels.shape[0]), labels]
     return float(-np.mean(np.log(np.clip(true_probabilities, eps, 1.0))))
 
 
 def top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int = 1) -> float:
-    """Compute top-k classification accuracy from probability rows."""
+    """Compute top-k classification accuracy from probability rows.
+
+    Probability ties are resolved deterministically by class-index order. This
+    keeps the selected top-k set size equal to ``k`` and prevents uniform or
+    exactly tied probability rows from being counted as correct for every class.
+    """
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
     k = _validate_positive_integer(k, "k")
     if k >= probabilities.shape[1]:
         return 1.0
 
-    top_k = np.argpartition(probabilities, kth=probabilities.shape[1] - k, axis=1)[:, -k:]
+    top_k = np.argsort(-probabilities, axis=1, kind="mergesort")[:, :k]
     return float(np.mean(np.any(top_k == labels[:, None], axis=1)))

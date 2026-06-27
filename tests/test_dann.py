@@ -73,6 +73,86 @@ def test_fit_dann_predict_proba_marks_unlabeled_target_adaptation():
     assert result.metadata["dann_target_rows"] == 10
 
 
+def test_fit_dann_accepts_single_column_source_labels():
+    pytest.importorskip("torch")
+    rng = np.random.default_rng(23)
+    source_features = np.vstack(
+        [
+            rng.normal(loc=-1.0, scale=0.2, size=(8, 3)),
+            rng.normal(loc=1.0, scale=0.2, size=(8, 3)),
+        ]
+    )
+    source_labels = np.repeat([0, 1], 8).reshape(-1, 1)
+    target_features = np.vstack(
+        [
+            rng.normal(loc=-0.8, scale=0.2, size=(3, 3)),
+            rng.normal(loc=0.8, scale=0.2, size=(3, 3)),
+        ]
+    )
+
+    result = fit_dann_predict_proba(
+        source_features=source_features,
+        source_labels=source_labels,
+        target_features=target_features,
+        hidden_units=8,
+        embedding_dim=4,
+        max_epochs=3,
+        batch_size=4,
+        patience=1,
+        random_state=7,
+        device="cpu",
+    )
+
+    assert result.probabilities.shape == (6, 2)
+    np.testing.assert_allclose(result.probabilities.sum(axis=1), 1.0, atol=1e-6)
+
+
+def test_fit_dann_accepts_composite_source_labels():
+    pytest.importorskip("torch")
+    source_features = np.asarray(
+        [
+            [-1.0, 0.0, 0.1],
+            [-0.8, 0.1, -0.1],
+            [1.0, 0.0, 0.1],
+            [0.8, -0.1, -0.1],
+        ],
+        dtype=float,
+    )
+    source_labels = np.asarray(
+        [
+            ["face", "left"],
+            ["face", "left"],
+            ["house", "right"],
+            ["house", "right"],
+        ],
+        dtype=object,
+    )
+    target_features = np.asarray(
+        [
+            [-0.9, 0.0, 0.0],
+            [0.9, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    result = fit_dann_predict_proba(
+        source_features=source_features,
+        source_labels=source_labels,
+        target_features=target_features,
+        hidden_units=4,
+        embedding_dim=2,
+        max_epochs=1,
+        batch_size=2,
+        patience=1,
+        validation_fraction=0.0,
+        random_state=7,
+        device="cpu",
+    )
+
+    assert result.probabilities.shape == (2, 2)
+    np.testing.assert_allclose(result.probabilities.sum(axis=1), 1.0, atol=1e-6)
+
+
 def test_fit_dann_rejects_feature_dimension_mismatch():
     with pytest.raises(ValueError, match="same feature dimension"):
         fit_dann_predict_proba(

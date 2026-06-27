@@ -7,6 +7,15 @@ from collections.abc import Sequence
 import numpy as np
 
 
+def _both_nan(left: object, right: object) -> bool:
+    """Return whether both scalar labels are NaN sentinels."""
+
+    try:
+        return bool(np.isscalar(left) and np.isscalar(right) and np.isnan(left) and np.isnan(right))
+    except (TypeError, ValueError):
+        return False
+
+
 def values_equal(left: object, right: object) -> bool:
     """Compare labels without leaking tuple/list/array-valued equality."""
 
@@ -14,6 +23,9 @@ def values_equal(left: object, right: object) -> bool:
         left = left.item()
     if isinstance(right, np.generic):
         right = right.item()
+
+    if _both_nan(left, right):
+        return True
 
     if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
         try:

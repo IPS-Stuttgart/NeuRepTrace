@@ -89,3 +89,16 @@ def test_is_correct_detection_rejects_fractional_numeric_labels():
 def test_is_correct_detection_rejects_boolean_labels():
     assert not is_correct_detection(pd.Series({"true_label": True, "predicted_label": 1}))
     assert not is_correct_detection(pd.Series({"true_label": 1, "predicted_label": np.bool_(True)}))
+
+
+def test_is_correct_detection_falls_back_to_classes_when_numeric_labels_are_unusable():
+    assert is_correct_detection(
+        pd.Series(
+            {
+                "true_label": 0.5,
+                "predicted_label": "face",
+                "true_class": "face",
+                "predicted_class": "face",
+            }
+        )
+    )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
+import pytest
 
 import neureptrace  # noqa: F401  # installs runtime compatibility patches
 from neureptrace.decoding import source_domain_generalization as sdg
@@ -56,3 +58,29 @@ def test_source_domain_generalization_encoder_counts_composite_classes_not_field
     assert classes.shape == (2,)
     assert encoded_labels.shape == (4,)
     assert set(encoded_labels.tolist()) == {0, 1}
+
+
+def test_source_domain_generalization_missing_domain_detector_handles_pandas_and_composite_values() -> None:
+    values = np.empty(4, dtype=object)
+    values[0] = "sub-01"
+    values[1] = pd.NA
+    values[2] = ("subject", pd.NA)
+    values[3] = ("subject", "02")
+
+    mask = sdg._is_missing_domain_array(values)
+
+    assert mask.tolist() == [False, True, True, False]
+
+
+def test_source_domain_generalization_encoder_rejects_pandas_missing_composite_domains() -> None:
+    features = np.ones((4, 2), dtype=float)
+    labels = [0, 1, 0, 1]
+    domains = [
+        ("subject", "01"),
+        ("subject", "01"),
+        ("subject", pd.NA),
+        ("subject", "02"),
+    ]
+
+    with pytest.raises(ValueError, match="source_domains must not contain missing values"):
+        sdg._encode_inputs(features, labels, domains, name="source_domain_generalization")

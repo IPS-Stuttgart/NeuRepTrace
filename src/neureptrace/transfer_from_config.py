@@ -94,6 +94,36 @@ def _check_time_bounds(tmin: float | None, tmax: float | None) -> None:
         raise ValueError("preprocessing.tmax must be greater than or equal to preprocessing.tmin.")
 
 
+def _encode_transfer_labels(raw_labels: Sequence[Any], train_mask: np.ndarray, test_mask: np.ndarray) -> tuple[LabelEncoder, np.ndarray, np.ndarray]:
+    """Encode only labels selected by the configured transfer split.
+
+    Dataset configs often contain auxiliary or unlabeled rows that are outside the
+    configured train/test split.  Those rows must not create phantom label classes
+    because the transfer metrics and observation schema are defined only for the
+    selected transfer task.
+    """
+
+    raw_labels = np.asarray(raw_labels, dtype=object)
+    train_mask = np.asarray(train_mask, dtype=bool)
+    test_mask = np.asarray(test_mask, dtype=bool)
+    active_mask = train_mask | test_mask
+    labeled_mask = pd.notna(raw_labels)
+    if labeled_mask.ndim != 1:
+        raise ValueError("transfer.label_column must contain one scalar label per trial.")
+    if np.any(active_mask & ~labeled_mask):
+        raise ValueError("transfer train_filter/test_filter selected unlabeled trials.")
+    fit_mask = active_mask & labeled_mask
+    if not np.any(fit_mask):
+        raise ValueError("transfer train_filter/test_filter selected no labeled trials.")
+
+    encoder = LabelEncoder()
+    encoder.fit(raw_labels[fit_mask])
+    labels = np.full(raw_labels.shape[0], -1, dtype=int)
+    labels[fit_mask] = encoder.transform(raw_labels[fit_mask])
+    classes = np.arange(len(encoder.classes_))
+    return encoder, labels, classes
+
+
 def _observation_rows(
     *,
     metadata: pd.DataFrame,
@@ -181,9 +211,7 @@ def run_transfer_from_config(
     if np.any(train_mask & test_mask):
         raise ValueError("transfer train_filter and test_filter overlap; use disjoint train/test subsets.")
 
-    encoder = LabelEncoder()
-    labels = encoder.fit_transform(dataset.metadata[label_column].to_numpy())
-    classes = np.arange(len(encoder.classes_))
+    encoder, labels, classes = _encode_transfer_labels(dataset.metadata[label_column].to_numpy(), train_mask, test_mask)
     decoder_name = normalize_decoder_name(transfer.get("decoder", transfer.get("classifier", _section(config, "decoding").get("classifier", "logistic"))))
     emission_mode = normalize_emission_mode(transfer.get("emission_mode", _section(config, "decoding").get("emission_mode", "calibrated")))
     feature_preprocessor = normalize_feature_preprocessor(

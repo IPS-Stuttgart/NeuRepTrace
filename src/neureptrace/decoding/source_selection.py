@@ -1,9 +1,9 @@
 """Source-domain selection and weighting for cross-subject transfer.
 
 This module implements a generic Category-2 source-domain selection helper that
-can be used outside the MEKT-specific transfer path.  Source subjects are scored
+can be used outside the MEKT-specific transfer path. Source subjects are scored
 by similarity to an unlabeled held-out target feature distribution, then converted
-into a selected-domain mask and optional sample weights.  Target labels are not
+into a selected-domain mask and optional sample weights. Target labels are not
 accepted by the public API.
 """
 
@@ -25,25 +25,7 @@ _MIN_SCALE = 1e-12
 
 @dataclass(frozen=True, slots=True)
 class SourceDomainSelectionResult:
-    """Target-similarity source-domain selection result.
-
-    Attributes
-    ----------
-    selected_domains:
-        Source domain identifiers retained for training.
-    domain_distances:
-        Per-domain target-similarity distances.  Lower is more target-like.
-    domain_scores:
-        Softmax-like scores derived from distances.  Higher is more target-like.
-    sample_weights:
-        One weight per source row.  Rows from non-selected domains receive zero.
-        Selected rows are normalized to have mean weight one unless all selected
-        scores are zero, which is guarded against internally.
-    selected_mask:
-        Boolean mask over source rows indicating rows from selected domains.
-    metadata:
-        Protocol/provenance fields suitable for metrics or observation tables.
-    """
+    """Target-similarity source-domain selection result."""
 
     selected_domains: tuple[Hashable, ...]
     domain_distances: Mapping[Hashable, float]
@@ -54,7 +36,6 @@ class SourceDomainSelectionResult:
 
 
 # pylint: disable-next=too-many-arguments,too-many-locals
-
 def select_source_domains_by_target_similarity(
     source_features: Sequence[Sequence[float]] | np.ndarray,
     source_domains: Sequence[Hashable] | np.ndarray,
@@ -68,49 +49,7 @@ def select_source_domains_by_target_similarity(
     source_labels: Sequence[Any] | np.ndarray | None = None,
     class_balance: bool = False,
 ) -> SourceDomainSelectionResult:
-    """Select or weight source domains by similarity to unlabeled target features.
-
-    Parameters
-    ----------
-    source_features:
-        Source feature rows pooled across source subjects/domains.
-    source_domains:
-        One domain identifier per source feature row, typically the source subject.
-    target_features:
-        Unlabeled held-out target rows used only to estimate the target feature
-        distribution.  The function intentionally has no ``target_labels``
-        argument.
-    metric:
-        Similarity metric.  ``"mean"`` compares feature means, ``"covariance"``
-        compares covariance matrices, ``"mean_covariance"`` adds both terms, and
-        ``"mmd"`` uses an RBF-kernel maximum mean discrepancy distance.
-    top_k:
-        Optional maximum number of most target-like source domains to retain.
-    max_distance:
-        Optional distance threshold.  If too few domains pass the threshold, the
-        nearest domains are added until ``min_selected_domains`` is satisfied.
-    min_selected_domains:
-        Minimum number of source domains to retain.
-    softmax_temperature:
-        Temperature for converting distances to positive scores.  ``"auto"`` uses
-        the median positive distance gap from the nearest domain.
-    source_labels:
-        Optional source labels used only when ``class_balance=True`` to equalize
-        total selected sample weight per source class.
-    class_balance:
-        Whether to rebalance selected source-row weights across source classes.
-
-    Returns
-    -------
-    SourceDomainSelectionResult
-        Selected domains, per-row sample weights, and protocol metadata.
-
-    Notes
-    -----
-    This is a Category-2 protocol: it uses ``X_s``, source domain ids, optional
-    ``y_s`` for class balancing, and unlabeled ``X_t``.  It never accepts or uses
-    target labels ``y_t``.
-    """
+    """Select or weight source domains by similarity to unlabeled target features."""
 
     source_matrix = _feature_matrix(source_features, name="source_features")
     target_matrix = _feature_matrix(target_features, name="target_features")
@@ -119,21 +58,23 @@ def select_source_domains_by_target_similarity(
             "source_features and target_features must have the same feature width: "
             f"{source_matrix.shape[1]} != {target_matrix.shape[1]}."
         )
+
     domain_vector = _domain_vector(source_domains, expected_length=source_matrix.shape[0])
     domains = _unique_domains(domain_vector)
     selected_min = _normalize_positive_int(min_selected_domains, name="min_selected_domains")
     if selected_min > len(domains):
         raise ValueError(f"min_selected_domains={selected_min} exceeds the number of available source domains ({len(domains)}).")
+
     resolved_top_k = _normalize_optional_positive_int(top_k, name="top_k")
     if resolved_top_k is not None and resolved_top_k > len(domains):
         raise ValueError(f"top_k={resolved_top_k} exceeds the number of available source domains ({len(domains)}).")
     if resolved_top_k is not None and resolved_top_k < selected_min:
         raise ValueError("top_k must be greater than or equal to min_selected_domains.")
+
     resolved_max_distance = _normalize_optional_nonnegative_float(max_distance, name="max_distance")
     normalized_metric = normalize_source_selection_metric(metric)
-
     distances = {
-        domain: _domain_distance(source_matrix[domain_vector == domain], target_matrix, metric=normalized_metric)
+        domain: _domain_distance(source_matrix[_object_equal_mask(domain_vector, domain)], target_matrix, metric=normalized_metric)
         for domain in domains
     }
     ordered_domains = tuple(sorted(domains, key=lambda domain: (distances[domain], repr(domain))))
@@ -149,7 +90,7 @@ def select_source_domains_by_target_similarity(
     selected_mask = np.asarray([domain in selected_set for domain in domain_vector.tolist()], dtype=bool)
     sample_weights = np.zeros(source_matrix.shape[0], dtype=float)
     for domain in selected:
-        sample_weights[domain_vector == domain] = scores[domain]
+        sample_weights[_object_equal_mask(domain_vector, domain)] = scores[domain]
     if class_balance:
         if source_labels is None:
             raise ValueError("source_labels are required when class_balance=True.")
@@ -237,7 +178,7 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _object_vector(values, name="source_domains")
     if vector.shape[0] != expected_length:
         raise ValueError(f"source_domains must contain one value per source row: {vector.shape[0]} != {expected_length}.")
     for domain in vector.tolist():
@@ -249,10 +190,38 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: 
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _object_vector(values, name="source_labels")
     if vector.shape[0] != expected_length:
         raise ValueError(f"source_labels must contain one value per source row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
+    """Return a one-dimensional object vector without flattening composite IDs.
+
+    A Python list of tuples should represent tuple-valued IDs, while a genuine
+    two-dimensional NumPy object matrix is ambiguous and must be rejected except
+    for single-row/single-column vectors.
+    """
+
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            return array.reshape(1)
+        if array.ndim == 1:
+            return array.reshape(-1)
+        if array.ndim == 2 and 1 in array.shape:
+            return array.reshape(-1)
+        raise ValueError(f"{name} must be one-dimensional; got shape {array.shape}.")
+
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
+    return vector
+
+
+def _object_equal_mask(values: np.ndarray, expected: Any) -> np.ndarray:
+    return np.asarray([value == expected for value in values.tolist()], dtype=bool)
 
 
 def _unique_domains(domain_vector: np.ndarray) -> tuple[Hashable, ...]:
@@ -379,7 +348,7 @@ def _class_balanced_weights(sample_weights: np.ndarray, source_labels: Sequence[
         return balanced
     target_mass = float(np.sum(balanced[positive_mask]) / len(selected_labels))
     for label in selected_labels:
-        class_mask = positive_mask & (labels == label)
+        class_mask = positive_mask & _object_equal_mask(labels, label)
         class_mass = float(np.sum(balanced[class_mask]))
         if class_mass > 0.0:
             balanced[class_mask] *= target_mass / class_mass

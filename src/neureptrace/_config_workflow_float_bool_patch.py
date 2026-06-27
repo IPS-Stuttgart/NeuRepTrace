@@ -11,9 +11,15 @@ from typing import Any
 _PATCH_MARKER = "_neureptrace_config_workflow_float_bool_patch_installed"
 
 
+def _install_domain_importance_bool_config_patch() -> None:
+    domain_patch = importlib.import_module("neureptrace._domain_importance_bool_config_patch")
+    domain_patch.install()
+
+
 def install() -> None:
     """Install tolerant boolean parsing for generated dataset workflow configs."""
 
+    _install_domain_importance_bool_config_patch()
     config_workflow = importlib.import_module("neureptrace.config_workflow")
     original = config_workflow._as_bool
     if getattr(original, _PATCH_MARKER, False):

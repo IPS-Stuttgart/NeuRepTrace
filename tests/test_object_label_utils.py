@@ -11,6 +11,23 @@ def test_values_equal_accepts_numpy_array_labels() -> None:
     assert not values_equal(np.array(["left", 2]), np.array([["left", 2]]))
 
 
+def test_values_equal_treats_nan_labels_as_matching() -> None:
+    assert values_equal(float("nan"), np.nan)
+    assert values_equal(np.array(["trial", np.nan], dtype=object), np.array(["trial", np.nan], dtype=object))
+    assert not values_equal(np.array(["trial", np.nan], dtype=object), np.array(["trial", 1.0], dtype=object))
+
+
+def test_label_helpers_match_and_count_nan_labels() -> None:
+    labels = np.array([np.nan, 1.0, np.nan], dtype=object)
+
+    assert label_equal_mask(labels, np.nan).tolist() == [True, False, True]
+
+    unique, counts = label_counts(labels)
+    assert counts.tolist() == [2, 1]
+    assert values_equal(unique[0], np.nan)
+    assert values_equal(unique[1], 1.0)
+
+
 def test_label_helpers_match_and_count_numpy_array_labels() -> None:
     labels = [np.array(["subject-a", 1]), np.array(["subject-a", 1]), np.array(["subject-b", 2])]
 

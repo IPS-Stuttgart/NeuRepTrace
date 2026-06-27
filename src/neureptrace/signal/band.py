@@ -21,11 +21,13 @@ def _is_bool_like(value: object) -> bool:
 
 
 def _normalize_axis(axis: int, ndim: int) -> int:
-    if _is_bool_like(axis) or not isinstance(axis, (int, np.integer)):
+    if _is_bool_like(axis):
+        raise ValueError("axis must be an integer, not boolean.")
+    if not isinstance(axis, (int, np.integer)):
         raise ValueError("axis must be an integer.")
+    axis = int(axis)
     if ndim <= 0:
         raise ValueError("array must have at least one dimension.")
-    axis = int(axis)
     if axis < 0:
         axis += ndim
     if axis < 0 or axis >= ndim:
@@ -36,7 +38,14 @@ def _normalize_axis(axis: int, ndim: int) -> int:
 def validate_time_axis(time_vector) -> np.ndarray:
     """Return a validated, one-dimensional, uniformly sampled time axis."""
 
-    time_vector = np.asarray(time_vector, dtype=float).ravel()
+    time_vector = np.asarray(time_vector, dtype=float)
+    if time_vector.ndim == 0:
+        raise ValueError("time_vector must contain at least two samples.")
+    if time_vector.ndim != 1:
+        non_singleton_axes = sum(size > 1 for size in time_vector.shape)
+        if non_singleton_axes != 1:
+            raise ValueError("time_vector must be one-dimensional.")
+        time_vector = time_vector.reshape(-1)
     if time_vector.size < 2:
         raise ValueError("time_vector must contain at least two samples.")
     if not np.all(np.isfinite(time_vector)):
@@ -73,7 +82,7 @@ def validate_sampling_rate(sampling_rate) -> float:
     """Return a positive finite sampling rate in Hz."""
 
     if _is_bool_like(sampling_rate):
-        raise ValueError("sampling_rate must be a positive finite value.")
+        raise ValueError("sampling_rate must be a positive finite value, not boolean.")
     try:
         sampling_rate = float(sampling_rate)
     except (TypeError, ValueError) as exc:
@@ -107,7 +116,7 @@ def validate_band_hz(band_hz: Sequence[float], sampling_rate) -> BandHz:
         raise ValueError("band_hz must contain exactly two cutoff frequencies.") from exc
 
     if _is_bool_like(lowcut) or _is_bool_like(highcut):
-        raise ValueError("Cutoff frequencies must be finite numbers.")
+        raise ValueError("Cutoff frequencies must be finite numbers, not boolean.")
     lowcut = float(lowcut)
     highcut = float(highcut)
     if not np.isfinite(lowcut) or not np.isfinite(highcut):
@@ -123,7 +132,9 @@ def validate_band_hz(band_hz: Sequence[float], sampling_rate) -> BandHz:
 
 
 def _validate_filter_order(order) -> int:
-    if _is_bool_like(order) or not isinstance(order, (int, np.integer)):
+    if _is_bool_like(order):
+        raise ValueError("filter order must be a positive integer, not boolean.")
+    if not isinstance(order, (int, np.integer)):
         raise ValueError("filter order must be a positive integer.")
     order = int(order)
     if order <= 0:

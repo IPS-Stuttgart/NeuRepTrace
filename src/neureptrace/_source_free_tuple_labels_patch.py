@@ -19,10 +19,9 @@ def _as_label_vector(labels: Any, *, name: str) -> np.ndarray:
             values = [labels.item()]
         elif labels.ndim == 1:
             values = labels.tolist()
-        elif labels.dtype == object:
-            values = [tuple(row) for row in labels.tolist()]
         else:
-            raise ValueError(f"{name} must be a one-dimensional sequence of class labels.")
+            flattened = labels.reshape(labels.shape[0], -1)
+            values = [_sequence_label_from_row(row) for row in flattened]
     else:
         try:
             values = list(labels)
@@ -31,6 +30,13 @@ def _as_label_vector(labels: Any, *, name: str) -> np.ndarray:
     vector = np.empty(len(values), dtype=object)
     vector[:] = values
     return vector
+
+
+def _sequence_label_from_row(row: np.ndarray) -> Any:
+    if row.size == 1:
+        value = row[0]
+        return value.item() if isinstance(value, np.generic) else value
+    return tuple(value.item() if isinstance(value, np.generic) else value for value in row.tolist())
 
 
 def _labels_equal(left: Any, right: Any) -> bool:

@@ -1,4 +1,4 @@
-"""Preserve tuple-valued row groups in source-weight sample expansion."""
+"""Preserve tuple-valued row groups in source-weight helpers."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from typing import Any
 
 import numpy as np
 
-_PATCH_MARKER = "_neureptrace_source_weighting_tuple_row_groups_patch_installed"
+_SAMPLE_WEIGHTS_PATCH_MARKER = "_neureptrace_source_weighting_tuple_row_groups_patch_installed"
+_GROUP_LIST_PATCH_MARKER = "_neureptrace_source_weighting_tuple_group_list_patch_installed"
 
 
 def _hashable_group_value(value: Any) -> Any:
@@ -60,31 +61,44 @@ def install() -> None:
     """Patch source weighting to keep composite row-group keys atomic."""
 
     source_weighting = importlib.import_module("neureptrace.decoding.source_weighting")
+
     original_sample_weights = source_weighting.sample_weights_from_group_weights
-    if getattr(original_sample_weights, _PATCH_MARKER, False):
-        return
+    if not getattr(original_sample_weights, _SAMPLE_WEIGHTS_PATCH_MARKER, False):
 
-    @wraps(original_sample_weights)
-    def sample_weights_from_group_weights(
-        row_groups: Sequence[Any] | np.ndarray,
-        group_weights: dict[Any, float] | None,
-        *,
-        default: float = 1.0,
-        normalize: bool = True,
-    ) -> np.ndarray | None:
-        if group_weights is None:
-            return None
-        rows = _row_group_vector(row_groups)
-        lookup = {group: source_weighting._nonnegative_float(weight, name="source_group_weight") for group, weight in group_weights.items()}
-        default_value = source_weighting._nonnegative_float(default, name="source_group_weight_default")
-        weights = np.asarray([lookup.get(group, default_value) for group in rows.tolist()], dtype=np.float64)
-        if normalize:
-            weights = source_weighting._mean_one(weights)
-        return weights
+        @wraps(original_sample_weights)
+        def sample_weights_from_group_weights(
+            row_groups: Sequence[Any] | np.ndarray,
+            group_weights: dict[Any, float] | None,
+            *,
+            default: float = 1.0,
+            normalize: bool = True,
+        ) -> np.ndarray | None:
+            if group_weights is None:
+                return None
+            rows = _row_group_vector(row_groups)
+            lookup = {group: source_weighting._nonnegative_float(weight, name="source_group_weight") for group, weight in group_weights.items()}
+            default_value = source_weighting._nonnegative_float(default, name="source_group_weight_default")
+            weights = np.asarray([lookup.get(group, default_value) for group in rows.tolist()], dtype=np.float64)
+            if normalize:
+                weights = source_weighting._mean_one(weights)
+            return weights
 
-    setattr(sample_weights_from_group_weights, _PATCH_MARKER, True)
+        setattr(sample_weights_from_group_weights, _SAMPLE_WEIGHTS_PATCH_MARKER, True)
+        source_weighting.sample_weights_from_group_weights = sample_weights_from_group_weights
+
+    original_group_list = source_weighting._group_list
+    if not getattr(original_group_list, _GROUP_LIST_PATCH_MARKER, False):
+
+        @wraps(original_group_list)
+        def _group_list(groups: Sequence[Any] | np.ndarray | None, *, source_scores=None, source_features=None):
+            if groups is not None:
+                return list(dict.fromkeys(_row_group_vector(groups).tolist()))
+            return original_group_list(groups, source_scores=source_scores, source_features=source_features)
+
+        setattr(_group_list, _GROUP_LIST_PATCH_MARKER, True)
+        source_weighting._group_list = _group_list
+
     source_weighting._row_group_vector = _row_group_vector
-    source_weighting.sample_weights_from_group_weights = sample_weights_from_group_weights
 
 
 __all__ = ["install"]

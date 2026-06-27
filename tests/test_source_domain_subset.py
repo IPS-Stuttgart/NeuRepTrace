@@ -30,6 +30,25 @@ def test_source_domain_subset_respects_min_domains() -> None:
     assert int(np.sum(result.selected_mask)) == 4
 
 
+def test_source_domain_subset_preserves_matrix_composite_domains() -> None:
+    domains = np.asarray(
+        [
+            ["subject1", "run1"],
+            ["subject1", "run1"],
+            ["subject1", "run2"],
+            ["subject1", "run2"],
+        ],
+        dtype=object,
+    )
+
+    result = source_domain_subset_mask(domains, omit_fraction=0.5, min_domains=1, random_state=2)
+
+    assert set(result.selected_domains).union(result.omitted_domains) == {("subject1", "run1"), ("subject1", "run2")}
+    assert len(result.selected_domains) == 1
+    assert len(result.omitted_domains) == 1
+    assert int(np.sum(result.selected_mask)) == 2
+
+
 def test_apply_source_domain_subset_filters_features_and_labels() -> None:
     features = np.asarray([[0.0], [1.0], [2.0], [3.0], [4.0], [5.0]])
     labels = [("x", 1), ("x", 1), ("y", 2), ("y", 2), ("z", 3), ("z", 3)]
@@ -48,6 +67,33 @@ def test_apply_source_domain_subset_filters_features_and_labels() -> None:
     assert selected_labels.shape == (4,)
     assert len(result.selected_domains) == 2
     assert all(domain in result.selected_domains for domain in np.asarray(domains, dtype=object)[result.selected_mask])
+
+
+def test_apply_source_domain_subset_preserves_matrix_composite_domains() -> None:
+    features = np.asarray([[0.0], [1.0], [2.0], [3.0]])
+    labels = ["a", "a", "b", "b"]
+    domains = np.asarray(
+        [
+            ["subject1", "run1"],
+            ["subject1", "run1"],
+            ["subject1", "run2"],
+            ["subject1", "run2"],
+        ],
+        dtype=object,
+    )
+
+    selected_features, selected_labels, result = apply_source_domain_subset(
+        features,
+        labels,
+        domains,
+        omit_fraction=0.5,
+        min_domains=1,
+        random_state=2,
+    )
+
+    assert selected_features.shape == (2, 1)
+    assert selected_labels.shape == (2,)
+    assert set(result.selected_domains).union(result.omitted_domains) == {("subject1", "run1"), ("subject1", "run2")}
 
 
 def test_source_domain_subset_guardrails() -> None:

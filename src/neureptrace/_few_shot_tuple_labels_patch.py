@@ -22,14 +22,17 @@ def _as_label_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.nda
     """Return a one-dimensional object vector without expanding tuple labels."""
 
     if isinstance(values, np.ndarray):
-        if values.ndim == 0:
-            items = [values.item()]
-        elif values.ndim == 1:
-            items = values.tolist()
-        elif values.dtype == object:
-            items = [tuple(row) for row in values.tolist()]
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            items = array.tolist()
+        elif array.ndim == 2 and array.shape[1] == 1:
+            items = array.reshape(-1).tolist()
+        elif array.ndim == 2:
+            items = [tuple(row.tolist()) for row in array]
         else:
-            raise ValueError(f"{name} must be one-dimensional.")
+            raise ValueError(f"{name} must be one-dimensional or a two-dimensional composite-label matrix.")
     elif isinstance(values, (str, bytes)):
         items = [values]
     else:

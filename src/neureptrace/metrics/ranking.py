@@ -21,6 +21,8 @@ def rank_class_scores(
     rank summaries are undefined and returned as ``NaN``.
     """
 
+    if classes is not None and _has_incompatible_array_label_shape(y_true, classes):
+        raise ValueError("y_true must be one-dimensional.")
     y_true = _label_vector(y_true, name="y_true")
     top_k = tuple(_validate_integer(k, name="top_k", minimum=1) for k in top_k)
     row_top_k = _validate_integer(row_top_k, name="row_top_k", minimum=0)
@@ -31,9 +33,11 @@ def rank_class_scores(
         return _empty_class_rank_result(y_true, top_k)
 
     score_matrix = np.asarray(scores, dtype=float)
-    class_order = _label_vector(classes, name="classes")
     if score_matrix.ndim != 2:
         raise ValueError("scores must be a two-dimensional matrix.")
+    if _has_incompatible_class_matrix(classes, expected_n_classes=score_matrix.shape[1]):
+        raise ValueError("classes must be one-dimensional.")
+    class_order = _label_vector(classes, name="classes")
     if score_matrix.shape[0] != y_true.shape[0]:
         raise ValueError("scores and y_true must contain the same samples.")
     if score_matrix.shape[1] != class_order.size:
@@ -76,6 +80,22 @@ def rank_class_scores(
     }
 
 
+def _has_incompatible_array_label_shape(y_true: object, classes: object) -> bool:
+    if not _is_matrix_label_array(y_true):
+        return False
+    if not _is_matrix_label_array(classes):
+        return True
+    return y_true.shape[1:] != classes.shape[1:]
+
+
+def _has_incompatible_class_matrix(classes: object, *, expected_n_classes: int) -> bool:
+    return _is_matrix_label_array(classes) and classes.shape[0] != expected_n_classes
+
+
+def _is_matrix_label_array(values: object) -> bool:
+    return isinstance(values, np.ndarray) and values.ndim > 1
+
+
 def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
     if isinstance(values, np.ndarray):
         vector = values.astype(object, copy=False)
@@ -83,10 +103,10 @@ def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
             return vector.reshape(1)
         if vector.ndim == 1:
             return vector
-        if min(vector.shape) > 1:
-            rows = [tuple(row.tolist()) for row in vector.reshape(vector.shape[0], -1)]
-            return _object_vector(rows)
-        raise ValueError(f"{name} must be one-dimensional.")
+        if vector.ndim == 2 and vector.shape[1] == 1:
+            raise ValueError(f"{name} must be one-dimensional.")
+        rows = [tuple(row.tolist()) for row in vector.reshape(vector.shape[0], -1)]
+        return _object_vector(rows)
 
     if isinstance(values, (str, bytes)):
         return np.asarray([values], dtype=object)
