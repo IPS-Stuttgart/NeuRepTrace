@@ -99,7 +99,8 @@ def _binary_decision_scores_to_logits(scores) -> np.ndarray:
     """Convert 1-D binary decision margins to two logits without changing margin."""
 
     margins = np.asarray(scores, dtype=float).reshape(-1)
-    return np.column_stack([-margins, margins])
+    half_margins = 0.5 * margins
+    return np.column_stack([-half_margins, half_margins])
 
 
 def _patch_source_free_decision_fallback() -> None:
@@ -238,41 +239,3 @@ def _patch_binary_decision_probability_fallbacks() -> None:
     _patch_decision_probability_helper("neureptrace.decoding.transfer_component_analysis", "_predict_probabilities_or_none")
     _patch_class_score_matrix()
     _patch_decoded_label_classifier()
-
-
-def install() -> None:
-    """Install robust probability, regularization-grid, and decision-score helpers."""
-
-    from neureptrace import decoding
-
-    if not getattr(decoding, _PATCH_MARKER, False):
-        original_predict_emission_probabilities = decoding.predict_emission_probabilities
-        original_parse_c_grid = decoding.parse_c_grid
-
-        def predict_emission_probabilities(model, features: np.ndarray, *, emission_mode: str = "calibrated") -> np.ndarray:
-            emission_mode_normalized = decoding.normalize_emission_mode(emission_mode)
-            if hasattr(model, "predict_proba") and not (
-                emission_mode_normalized == "uncalibrated" and hasattr(model, "decision_function")
-            ):
-                probabilities = model.predict_proba(features)
-            else:
-                probabilities = original_predict_emission_probabilities(
-                    model,
-                    features,
-                    emission_mode=emission_mode_normalized,
-                )
-            return _sanitize_probability_matrix(probabilities, model=model, features=features)
-
-        def parse_c_grid(values: Sequence[float] | str | None) -> tuple[float, ...]:
-            grid = original_parse_c_grid(values)
-            if any((not np.isfinite(value)) or value <= 0.0 for value in grid):
-                raise ValueError("All C values must be positive finite numbers.")
-            return grid
-
-        predict_emission_probabilities.__doc__ = original_predict_emission_probabilities.__doc__
-        parse_c_grid.__doc__ = original_parse_c_grid.__doc__
-        decoding.predict_emission_probabilities = predict_emission_probabilities
-        decoding.parse_c_grid = parse_c_grid
-        setattr(decoding, _PATCH_MARKER, True)
-
-    _patch_binary_decision_probability_fallbacks()
