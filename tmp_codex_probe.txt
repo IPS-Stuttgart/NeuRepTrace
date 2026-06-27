@@ -1,8 +1,0 @@
-from __future__ import annotations
-
-
-def test_example() -> None:
-    try:
-        raise ValueError("x")
-    except ValueError as exc:
-        assert "x" in str(exc)
