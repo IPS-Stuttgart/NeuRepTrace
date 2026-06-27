@@ -99,8 +99,7 @@ def _binary_decision_scores_to_logits(scores) -> np.ndarray:
     """Convert 1-D binary decision margins to two logits without changing margin."""
 
     margins = np.asarray(scores, dtype=float).reshape(-1)
-    half_margins = 0.5 * margins
-    return np.column_stack([-half_margins, half_margins])
+    return np.column_stack([-margins, margins])
 
 
 def _patch_source_free_decision_fallback() -> None:
