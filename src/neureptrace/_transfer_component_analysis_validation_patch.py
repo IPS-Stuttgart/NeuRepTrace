@@ -8,9 +8,33 @@ from typing import Any
 import numpy as np
 
 _BOOL_TYPES = (bool, np.bool_)
+_TRUE_BOOL_ALIASES = {"1", "true", "yes", "y", "on", "enable", "enabled"}
+_FALSE_BOOL_ALIASES = {"0", "false", "no", "n", "off", "disable", "disabled"}
 _GAMMA_ERROR = "gamma must be positive, 'median', or None, not a boolean value."
 _COMPONENTS_ERROR = "n_components must be a positive integer, 'all', or infinity, not a boolean value."
 _SAMPLE_WEIGHT_ERROR = "sample_weight must be a one-dimensional numeric weight vector, not a boolean mask or matrix."
+
+
+def _normalize_bool(value: Any, *, name: str) -> bool:
+    if isinstance(value, _BOOL_TYPES):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower().replace("-", "_")
+        if text in _TRUE_BOOL_ALIASES:
+            return True
+        if text in _FALSE_BOOL_ALIASES:
+            return False
+    if isinstance(value, (int, np.integer)) and value in (0, 1):
+        return bool(value)
+    raise ValueError(f"{name} must be a boolean value.")
+
+
+def _normalize_bool_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(kwargs)
+    for name in ("standardize", "normalize_components"):
+        if name in normalized:
+            normalized[name] = _normalize_bool(normalized[name], name=name)
+    return normalized
 
 
 def _reject_bool_gamma(gamma: Any) -> None:
@@ -50,7 +74,7 @@ def _sample_weight_vector(sample_weight: Any, *, expected_length: int) -> np.nda
 
 
 def install() -> None:
-    """Install strict validation for TCA hyperparameters and source weights."""
+    """Install strict validation for TCA hyperparameters, boolean flags, and source weights."""
 
     import neureptrace.decoding.transfer_component_analysis as tca
 
@@ -64,22 +88,24 @@ def install() -> None:
 
     @wraps(original_transfer_component_analysis_features)
     def transfer_component_analysis_features(*args: Any, **kwargs: Any):
-        if "gamma" in kwargs:
-            _reject_bool_gamma(kwargs["gamma"])
-        if "n_components" in kwargs:
-            _reject_bool_components(kwargs["n_components"])
-        return original_transfer_component_analysis_features(*args, **kwargs)
+        normalized_kwargs = _normalize_bool_kwargs(kwargs)
+        if "gamma" in normalized_kwargs:
+            _reject_bool_gamma(normalized_kwargs["gamma"])
+        if "n_components" in normalized_kwargs:
+            _reject_bool_components(normalized_kwargs["n_components"])
+        return original_transfer_component_analysis_features(*args, **normalized_kwargs)
 
     @wraps(original_fit_tca_transfer_classifier)
     def fit_tca_transfer_classifier(*args: Any, sample_weight: Any = None, **kwargs: Any):
-        if "gamma" in kwargs:
-            _reject_bool_gamma(kwargs["gamma"])
-        if "n_components" in kwargs:
-            _reject_bool_components(kwargs["n_components"])
-        if sample_weight is not None and not args and "source_features" in kwargs:
-            n_source = tca._feature_matrix(kwargs["source_features"], name="source_features").shape[0]
+        normalized_kwargs = _normalize_bool_kwargs(kwargs)
+        if "gamma" in normalized_kwargs:
+            _reject_bool_gamma(normalized_kwargs["gamma"])
+        if "n_components" in normalized_kwargs:
+            _reject_bool_components(normalized_kwargs["n_components"])
+        if sample_weight is not None and not args and "source_features" in normalized_kwargs:
+            n_source = tca._feature_matrix(normalized_kwargs["source_features"], name="source_features").shape[0]
             sample_weight = _sample_weight_vector(sample_weight, expected_length=n_source)
-        return original_fit_tca_transfer_classifier(*args, sample_weight=sample_weight, **kwargs)
+        return original_fit_tca_transfer_classifier(*args, sample_weight=sample_weight, **normalized_kwargs)
 
     @wraps(original_resolve_gamma)
     def _resolve_gamma(matrix: np.ndarray, *, gamma: Any, kernel: str, epsilon: float):
