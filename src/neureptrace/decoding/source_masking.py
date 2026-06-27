@@ -191,7 +191,7 @@ def source_feature_masking_config(
     block_size: int | str | None = None,
     fill_mode: str | None = "feature_mean",
     noise_std: float | str = 0.0,
-    preserve_original: bool = True,
+    preserve_original: bool | int | str = True,
     random_state: int | str | None = 13,
 ) -> SourceFeatureMaskingConfig:
     """Normalize public feature-masking options."""
@@ -203,7 +203,7 @@ def source_feature_masking_config(
         block_size=None if block_size in {None, "", "none", "None"} else _positive_int(block_size, name="block_size"),
         fill_mode=normalize_fill_mode(fill_mode),
         noise_std=_nonnegative_float(noise_std, name="noise_std"),
-        preserve_original=bool(preserve_original),
+        preserve_original=_bool_value(preserve_original, name="preserve_original"),
         random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
     )
 
@@ -357,3 +357,18 @@ def _float_value(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed):
         raise ValueError(f"{name} must be finite.")
     return parsed
+
+
+def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean.")
