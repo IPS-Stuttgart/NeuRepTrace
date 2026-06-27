@@ -130,7 +130,7 @@ def _patch_module(module: ModuleType) -> None:
     @wraps(decode_kwargs)
     def patched_decode_kwargs(config: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
         decoded = decode_kwargs(config, *args, **kwargs)
-        if isinstance(decoded.get("dataset_name"), Mapping):
+        if decoded.get("dataset_name") is None or isinstance(decoded.get("dataset_name"), Mapping):
             decoded = dict(decoded)
             decoded["dataset_name"] = _dataset_name_from_config(config)
         return decoded
