@@ -4,4 +4,5 @@ import importlib
 
 
 def install() -> None:
-    importlib.import_module("math")
+    module = importlib.import_module("math")
+    module.example = True
