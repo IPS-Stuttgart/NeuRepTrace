@@ -41,12 +41,51 @@ OPTIONAL_DEPENDENCIES: tuple[tuple[str, str], ...] = (
     ("pytorch-lightning", "pytorch_lightning"),
 )
 
+MODULE_DISTRIBUTION_ALIASES: dict[str, str] = {
+    module_name: distribution_name
+    for distribution_name, module_name in CORE_DEPENDENCIES + OPTIONAL_DEPENDENCIES
+}
+
 
 def _distribution_version(distribution_name: str) -> str | None:
     try:
         return importlib.metadata.version(distribution_name)
     except importlib.metadata.PackageNotFoundError:
         return None
+
+
+def _candidate_distribution_names_for_module(module_name: str) -> tuple[str, ...]:
+    """Return plausible installed-distribution names for an import module."""
+
+    root_module = module_name.partition(".")[0]
+    candidates: list[str] = []
+    for candidate in (
+        MODULE_DISTRIBUTION_ALIASES.get(module_name),
+        MODULE_DISTRIBUTION_ALIASES.get(root_module),
+        module_name,
+        root_module if root_module != module_name else None,
+    ):
+        if candidate:
+            candidates.append(candidate)
+
+    try:
+        package_distributions = importlib.metadata.packages_distributions()
+    except Exception:  # pragma: no cover - defensive against metadata backend failures
+        package_distributions = {}
+    for package_name in (module_name, root_module):
+        candidates.extend(package_distributions.get(package_name, ()))
+
+    return tuple(dict.fromkeys(candidates))
+
+
+def _distribution_version_for_module(module_name: str) -> tuple[str | None, str | None]:
+    """Return ``(distribution_name, version)`` for an import module when known."""
+
+    for distribution_name in _candidate_distribution_names_for_module(module_name):
+        version = _distribution_version(distribution_name)
+        if version is not None:
+            return distribution_name, version
+    return None, None
 
 
 def _import_module_for_diagnostics(module_name: str) -> tuple[bool, str | None]:
@@ -97,8 +136,12 @@ def _check_dependency(distribution_name: str, module_name: str, *, required: boo
 def _check_required_module(module_name: str) -> DoctorCheck:
     module_available, import_error = _import_module_for_diagnostics(module_name)
     if module_available:
-        version = _distribution_version(module_name)
-        details = f"{module_name} {version}" if version else f"{module_name} is importable"
+        distribution_name, version = _distribution_version_for_module(module_name)
+        details = (
+            f"{module_name} is importable ({distribution_name} {version})"
+            if distribution_name and version
+            else f"{module_name} is importable"
+        )
         return DoctorCheck(f"module:{module_name}", "ok", details)
     details = f"Required module '{module_name}' is not importable"
     if import_error:
