@@ -105,3 +105,15 @@ def test_enabled_aliases_select_source_reliability_mode():
     assert cfg.mode == "source_reliability"
     assert cfg.protocol == "strict_source_only"
     assert cfg.uses_unlabeled_target_data is False
+
+
+def test_numeric_enabled_aliases_toggle_source_reliability_mode():
+    assert normalize_source_group_weighting_mode(1) == "source_reliability"
+    assert normalize_source_group_weighting_mode("1") == "source_reliability"
+    assert normalize_source_group_weighting_mode(0) == "none"
+    assert normalize_source_group_weighting_mode("0") == "none"
+
+    assert source_group_weighting_config({"enabled": 1}).mode == "source_reliability"
+    assert source_group_weighting_config({"enabled": "1"}).mode == "source_reliability"
+    assert source_group_weighting_config({"enabled": 0}).mode == "none"
+    assert source_group_weighting_config({"enabled": "0"}).mode == "none"
