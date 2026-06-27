@@ -50,6 +50,58 @@ def _fake_dataset():
     )
 
 
+def _fake_dataset_with_unused_missing_row():
+    base = _fake_dataset()
+    return SimpleNamespace(
+        data=np.concatenate([base.data, base.data[:1]], axis=0),
+        times=base.times,
+        metadata=pd.concat(
+            [
+                base.metadata,
+                pd.DataFrame({"condition": [pd.NA], "split": ["unused"]}),
+            ],
+            ignore_index=True,
+        ),
+    )
+
+
+def _fake_dataset_with_missing_test_row():
+    base = _fake_dataset()
+    metadata = base.metadata.copy()
+    metadata.loc[3, "condition"] = pd.NA
+    return SimpleNamespace(data=base.data, times=base.times, metadata=metadata)
+
+
+def test_transfer_from_config_ignores_missing_labels_outside_selected_split(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "neureptrace.transfer_from_config.load_epoch_dataset_from_config",
+        lambda *args, **kwargs: _fake_dataset_with_unused_missing_row(),
+    )
+    config_path = _write_config(tmp_path)
+
+    results = run_transfer_from_config(config_path)
+
+    assert results["n_classes"].unique().tolist() == [2]
+    assert results["class_names"].unique().tolist() == ["face|object"]
+
+
+def test_transfer_from_config_rejects_missing_labels_inside_selected_split(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "neureptrace.transfer_from_config.load_epoch_dataset_from_config",
+        lambda *args, **kwargs: _fake_dataset_with_missing_test_row(),
+    )
+    config_path = _write_config(tmp_path)
+
+    with pytest.raises(ValueError, match="selected"):
+        run_transfer_from_config(config_path)
+
+
 @pytest.mark.parametrize(
     ("preprocessing", "transfer", "message"),
     [
