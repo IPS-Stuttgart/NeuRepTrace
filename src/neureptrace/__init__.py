@@ -9,9 +9,11 @@ __all__ = ["__version__"]
 __version__ = "0.1.1"
 
 from . import (  # noqa: E402
+    _adaptive_normalization_bool_config_patch,
     _adversarial_composite_labels_patch,
     _alignment_window_config_patch,
     _bushmeg_all_protocols_prediction_metric_patch,
+    _bushmeg_all_protocols_topk_tie_patch,
     _bushmeg_all_protocols_subject_loader_patch,
     _bushmeg_all_protocols_timeout_patch,
     _bushmeg_smoke_enabled_bool_patch,
@@ -26,6 +28,7 @@ from . import (  # noqa: E402
     _category2_autoencoder_max_folds_patch,
     _classifier_tuple_labels_patch,
     _config_workflow_float_bool_patch,
+    _conditional_coral_bool_config_patch,
     _confusion_metadata_lookup_patch,
     _confusion_permutation_seed_patch,
     _correlation_prototype_sample_weight_patch,
@@ -55,6 +58,7 @@ from . import (  # noqa: E402
     _label_proportion_tuple_prediction_patch,
     _lora_few_shot_numeric_config_patch,
     _lora_few_shot_tuple_subject_patch,
+    _loso_diagnostics_finite_time_selection_patch,
     _mcca_component_count_patch,
     _mcca_repetition_count_patch,
     _mcca_subject_pca_components_patch,
@@ -66,12 +70,14 @@ from . import (  # noqa: E402
     _mne_pseudo_alignment_fallback_validity_patch,
     _mne_time_decode_ensemble_param_validation_patch,
     _nll_eps_validation_patch,
+    _observation_ensemble_missing_label_patch,
     _observation_ensemble_partial_class_columns_patch,
     _observation_ensemble_string_groups_patch,
     _observation_ensemble_ungrouped_metrics_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
     _observation_schema_string_columns_patch,
+    _openneuro_real_shuffle_time_selection_patch,
     _paired_stats_tie_patch,
     _pls_da_composite_labels_patch,
     _probability_stacking_group_summary_patch,
@@ -93,6 +99,7 @@ from . import (  # noqa: E402
     _source_alignment_oracle_patch,
     _source_alignment_pseudo_calibration_patch,
     _source_alignment_pseudo_repetition_patch,
+    _source_alignment_target_seed_patch,
     _source_alignment_times_validation_patch,
     _source_domain_generalization_composite_patch,
     _source_free_standardize_target_patch,
@@ -101,6 +108,7 @@ from . import (  # noqa: E402
     _source_free_tuple_labels_patch,
     _source_label_vector_patch,
     _source_mixup_boolean_config_patch,
+    _source_mixup_random_state_patch,
     _source_mixstyle_tuple_labels_patch,
     _source_mixstyle_tuple_vectors_patch,
     _source_selection_class_balance_patch,
@@ -114,6 +122,7 @@ from . import (  # noqa: E402
     _subspace_adaptation_config_bool_patch,
     _temporal_generalization_string_groups_patch,
     _temporal_smoothing_singleton_sequence_patch,
+    _temporal_smoothing_topk_tie_patch,
     _torch_weight_validation_patch,
     _transfer_array_label_null_patch,
     _transfer_components_validation_patch,
@@ -126,6 +135,7 @@ from . import (  # noqa: E402
     _windowed_composite_labels_patch,
 )
 
+_adaptive_normalization_bool_config_patch.install()
 _adversarial_composite_labels_patch.install()
 _alignment_window_config_patch.install()
 _dataset_config_participant_patch.install()
@@ -139,6 +149,7 @@ _confusion_permutation_seed_patch.install()
 _correlation_prototype_sample_weight_patch.install()
 _classifier_tuple_labels_patch.install()
 _config_workflow_float_bool_patch.install()
+_conditional_coral_bool_config_patch.install()
 _event_detection_extensions.install()
 _fieldtrip_sampleinfo_validation_patch.install()
 _few_shot_split_validation_patch.install()
@@ -152,6 +163,7 @@ _label_shift_source_label_metadata_patch.install()
 _label_proportion_block_ids_patch.install()
 _label_proportion_tuple_prediction_patch.install()
 _lora_few_shot_tuple_subject_patch.install()
+_loso_diagnostics_finite_time_selection_patch.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
@@ -165,6 +177,7 @@ _observation_schema_string_columns_patch.install()
 _observation_ensemble_partial_class_columns_patch.install()
 _observation_ensemble_string_groups_patch.install()
 _observation_ensemble_ungrouped_metrics_patch.install()
+_observation_ensemble_missing_label_patch.install()
 _probability_stacking_group_summary_patch.install()
 _pls_da_composite_labels_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
@@ -174,6 +187,7 @@ _category2_autoencoder_max_folds_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_smoke_enabled_bool_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
+_bushmeg_all_protocols_topk_tie_patch.install()
 _bushmeg_protocol3_index_validation_patch.install()
 _bushmeg_protocol_selection_patch.install()
 _reconstruction_encoder_config_patch.install()
@@ -204,6 +218,7 @@ _riemannian_vector_validation_patch.install()
 _source_alignment_times_validation_patch.install()
 _source_alignment_contrastive_patch.install()
 _source_alignment_oracle_patch.install()
+_source_alignment_target_seed_patch.install()
 _source_alignment_cli_choices_patch.install()
 _source_domain_generalization_composite_patch.install()
 _source_free_standardize_target_patch.install()
@@ -212,6 +227,7 @@ _source_free_soft_prototypes_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_label_vector_patch.install()
 _source_mixup_boolean_config_patch.install()
+_source_mixup_random_state_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
 _source_mixstyle_tuple_vectors_patch.install()
 _random_state_config_patch.install()
@@ -229,6 +245,7 @@ _subspace_bool_config_patch.install()
 _subspace_adaptation_config_bool_patch.install()
 _temporal_generalization_string_groups_patch.install()
 _temporal_smoothing_singleton_sequence_patch.install()
+_temporal_smoothing_topk_tie_patch.install()
 _torch_weight_validation_patch.install()
 _transfer_array_label_null_patch.install()
 _transfer_components_validation_patch.install()
@@ -241,7 +258,4 @@ _unlabeled_anchor_tuple_patch.install()
 _vrex_numeric_config_patch.install()
 _windowed_composite_labels_patch.install()
 _bushmeg_cue_temporal_bins_patch.install()
-
-from . import _openneuro_real_shuffle_time_selection_patch  # noqa: E402
-
 _openneuro_real_shuffle_time_selection_patch.install()

@@ -70,6 +70,25 @@ def _class_name_index_map(group: pd.DataFrame) -> dict[str, int]:
     return mapping
 
 
+def _label_indices_from_named_column(group: pd.DataFrame, column: str) -> np.ndarray | None:
+    if column not in group.columns:
+        return None
+
+    label_indices = _numeric_label_indices(group[column])
+    if label_indices is not None:
+        return label_indices
+
+    class_index_by_name = _class_name_index_map(group)
+    if class_index_by_name:
+        resolved: list[int] = []
+        for value in group[column].astype(str):
+            if value not in class_index_by_name:
+                raise ValueError(f"{column} value {value!r} is absent from class_<index> columns.")
+            resolved.append(class_index_by_name[value])
+        return np.asarray(resolved, dtype=int)
+    return None
+
+
 def _label_indices_from_group(group: pd.DataFrame) -> np.ndarray:
     if "true_label_index" in group.columns:
         label_indices = _numeric_label_indices(group["true_label_index"])
@@ -79,23 +98,53 @@ def _label_indices_from_group(group: pd.DataFrame) -> np.ndarray:
     if "true_label" not in group.columns:
         raise ValueError("Prediction metrics require true_label or true_label_index.")
 
-    label_indices = _numeric_label_indices(group["true_label"])
+    label_indices = _label_indices_from_named_column(group, "true_label")
     if label_indices is not None:
         return label_indices
-
-    class_index_by_name = _class_name_index_map(group)
-    if class_index_by_name:
-        resolved: list[int] = []
-        for value in group["true_label"].astype(str):
-            if value not in class_index_by_name:
-                raise ValueError(f"true_label value {value!r} is absent from class_<index> columns.")
-            resolved.append(class_index_by_name[value])
-        return np.asarray(resolved, dtype=int)
 
     raise ValueError(
         "Prediction metrics cannot infer numeric class indices from non-numeric true_label values; "
         "include true_label_index or class_<index> columns."
     )
+
+
+def _raw_label_values(group: pd.DataFrame, *, index_column: str, label_column: str, role: str) -> np.ndarray:
+    if index_column in group.columns:
+        numeric = _numeric_label_indices(group[index_column])
+        if numeric is not None:
+            return numeric
+    if label_column in group.columns:
+        return group[label_column].astype(object).to_numpy()
+    raise ValueError(f"Prediction metrics require {label_column} or {index_column} for {role} labels.")
+
+
+def _label_only_metric_vectors(group: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Return comparable true/predicted vectors when probabilities are absent."""
+
+    true_indices = None
+    predicted_indices = None
+    if "true_label_index" in group.columns or "true_label" in group.columns:
+        true_indices = _label_indices_from_named_column(group, "true_label")
+        if true_indices is None and "true_label_index" in group.columns:
+            true_indices = _numeric_label_indices(group["true_label_index"])
+    if "predicted_label_index" in group.columns or "predicted_label" in group.columns:
+        predicted_indices = _label_indices_from_named_column(group, "predicted_label")
+        if predicted_indices is None and "predicted_label_index" in group.columns:
+            predicted_indices = _numeric_label_indices(group["predicted_label_index"])
+
+    if true_indices is not None and predicted_indices is not None:
+        return true_indices, predicted_indices
+
+    true_values = _raw_label_values(group, index_column="true_label_index", label_column="true_label", role="true")
+    predicted_values = _raw_label_values(
+        group,
+        index_column="predicted_label_index",
+        label_column="predicted_label",
+        role="predicted",
+    )
+    if true_values.shape[0] != predicted_values.shape[0]:
+        raise ValueError("Prediction metrics require true and predicted labels to have the same row count.")
+    return true_values.astype(str), predicted_values.astype(str)
 
 
 def _probability_class_indices(prob_columns: Sequence[str]) -> np.ndarray:
@@ -130,33 +179,51 @@ def _prediction_group_columns(predictions: pd.DataFrame) -> list[str]:
 def _prediction_metric_frame(predictions: pd.DataFrame) -> pd.DataFrame:
     all_protocols = importlib.import_module("neureptrace.bushmeg_all_protocols")
     prob_columns = all_protocols._probability_columns(predictions)
-    if predictions.empty or not prob_columns or ("true_label" not in predictions.columns and "true_label_index" not in predictions.columns):
+    has_truth = "true_label" in predictions.columns or "true_label_index" in predictions.columns
+    has_predictions = "predicted_label" in predictions.columns or "predicted_label_index" in predictions.columns
+    if predictions.empty or not has_truth or (not prob_columns and not has_predictions):
         return pd.DataFrame()
 
-    prob_class_indices = _probability_class_indices(prob_columns)
+    prob_class_indices = _probability_class_indices(prob_columns) if prob_columns else np.asarray([], dtype=int)
     group_columns = _prediction_group_columns(predictions)
     rows: list[dict[str, Any]] = []
     groupby_key: str | list[str] = group_columns[0] if len(group_columns) == 1 else group_columns
     for group_key, group in predictions.groupby(groupby_key, sort=False, dropna=False):
-        probabilities = group[prob_columns].astype(float).to_numpy()
-        label_indices = _label_indices_from_group(group)
-        labels = _labels_to_probability_positions(label_indices, prob_class_indices)
-        predicted = probabilities.argmax(axis=1)
         key_values = group_key if isinstance(group_key, tuple) else (group_key,)
         row = {column: value for column, value in zip(group_columns, key_values, strict=True)}
         row["outer_test_subject"] = str(row.pop("heldout_subject", row.get("outer_test_subject", "")))
-        rows.append(
-            {
-                **row,
-                "accuracy": float(accuracy_score(labels, predicted)),
-                "balanced_accuracy": float(balanced_accuracy_score(labels, predicted)),
-                "top2_accuracy": _top_k_accuracy(probabilities, labels, k=2),
-                "top3_accuracy": _top_k_accuracy(probabilities, labels, k=3),
-                "log_loss": float(log_loss(labels, probabilities, labels=np.arange(probabilities.shape[1]))),
-                "brier": float(brier_score_multiclass(probabilities, labels)),
-                "ece": float(expected_calibration_error(probabilities, labels)),
-            }
-        )
+
+        if prob_columns:
+            probabilities = group[prob_columns].astype(float).to_numpy()
+            label_indices = _label_indices_from_group(group)
+            labels = _labels_to_probability_positions(label_indices, prob_class_indices)
+            predicted = probabilities.argmax(axis=1)
+            rows.append(
+                {
+                    **row,
+                    "accuracy": float(accuracy_score(labels, predicted)),
+                    "balanced_accuracy": float(balanced_accuracy_score(labels, predicted)),
+                    "top2_accuracy": _top_k_accuracy(probabilities, labels, k=2),
+                    "top3_accuracy": _top_k_accuracy(probabilities, labels, k=3),
+                    "log_loss": float(log_loss(labels, probabilities, labels=np.arange(probabilities.shape[1]))),
+                    "brier": float(brier_score_multiclass(probabilities, labels)),
+                    "ece": float(expected_calibration_error(probabilities, labels)),
+                }
+            )
+        else:
+            labels, predicted = _label_only_metric_vectors(group)
+            rows.append(
+                {
+                    **row,
+                    "accuracy": float(accuracy_score(labels, predicted)),
+                    "balanced_accuracy": float(balanced_accuracy_score(labels, predicted)),
+                    "top2_accuracy": np.nan,
+                    "top3_accuracy": np.nan,
+                    "log_loss": np.nan,
+                    "brier": np.nan,
+                    "ece": np.nan,
+                }
+            )
     return pd.DataFrame(rows)
 
 

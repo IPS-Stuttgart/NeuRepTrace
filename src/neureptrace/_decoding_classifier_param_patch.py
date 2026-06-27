@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 _INTEGER_PATCH_MARKER = "_neureptrace_classifier_integer_params_patch_installed"
+_NONNEGATIVE_FLOAT_PARAM_NAMES = {"TorchMLP weight_decay"}
 
 
 def _strict_positive_float_classifier_param(
@@ -15,7 +16,13 @@ def _strict_positive_float_classifier_param(
     default: float,
     name: str,
 ) -> float:
-    """Normalize positive float classifier parameters without bool coercion."""
+    """Normalize float classifier parameters without bool coercion.
+
+    Most decoder scalar parameters are regularization strengths such as ``C`` and
+    therefore must be strictly positive.  ``torch_mlp`` is the exception: its
+    scalar ``classifier_param`` is forwarded as weight decay, where zero is a
+    valid value to disable the penalty.
+    """
 
     if classifier_param is None:
         value = float(default)
@@ -25,9 +32,13 @@ def _strict_positive_float_classifier_param(
         try:
             value = float(classifier_param)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"{name} must be a positive finite value.") from exc
+            adjective = "non-negative" if name in _NONNEGATIVE_FLOAT_PARAM_NAMES else "positive"
+            raise ValueError(f"{name} must be a {adjective} finite value.") from exc
 
-    if not np.isfinite(value) or value <= 0.0:
+    if name in _NONNEGATIVE_FLOAT_PARAM_NAMES:
+        if not np.isfinite(value) or value < 0.0:
+            raise ValueError(f"{name} must be a non-negative finite value.")
+    elif not np.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be a positive finite value.")
     return value
 

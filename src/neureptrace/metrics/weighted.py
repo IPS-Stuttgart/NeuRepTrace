@@ -85,6 +85,8 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
         raise ValueError("probabilities must have shape (n_samples, n_classes)")
     if probabilities.shape[0] == 0 or probabilities.shape[1] == 0:
         raise ValueError("probabilities must contain at least one sample and one class")
+    if labels.ndim == 2 and labels.shape[1] == 1:
+        labels = labels.reshape(-1)
     if labels.ndim != 1:
         raise ValueError("labels must have shape (n_samples,)")
     if probabilities.shape[0] != labels.shape[0]:
@@ -168,10 +170,9 @@ def weighted_top_k_accuracy(
 ) -> float:
     """Compute weighted top-k classification accuracy.
 
-    Classes tied at the k-th score are counted as being in the top-k set. This
-    avoids arbitrary false negatives for uniform or otherwise tied probability
-    rows, where ``argpartition`` would choose one of the tied columns by array
-    implementation detail rather than model evidence.
+    Probability ties are resolved deterministically by class-index order. This
+    keeps the selected top-k set size equal to ``k`` and prevents uniform or
+    exactly tied probability rows from being counted as correct for every class.
     """
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
@@ -179,9 +180,8 @@ def weighted_top_k_accuracy(
     if k >= probabilities.shape[1]:
         return 1.0
 
-    kth_scores = np.partition(probabilities, kth=probabilities.shape[1] - k, axis=1)[:, -k]
-    true_scores = probabilities[np.arange(labels.shape[0]), labels]
-    correct = (true_scores >= kth_scores).astype(float)
+    top_k = np.argsort(-probabilities, axis=1, kind="mergesort")[:, :k]
+    correct = np.any(top_k == labels[:, None], axis=1).astype(float)
     return float(np.average(correct, weights=weights))
 
 

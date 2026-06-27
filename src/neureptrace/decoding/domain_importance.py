@@ -132,16 +132,16 @@ def fit_domain_classifier_importance_weights(
 def domain_importance_config(
     *,
     clip: Sequence[float] | str | None = DEFAULT_WEIGHT_CLIP,
-    normalize: bool = True,
-    account_for_sample_priors: bool = True,
+    normalize: bool | str = True,
+    account_for_sample_priors: bool | str = True,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> DomainImportanceConfig:
     """Normalize public domain-importance options."""
 
     return DomainImportanceConfig(
         clip=_normalize_clip(clip),
-        normalize=bool(normalize),
-        account_for_sample_priors=bool(account_for_sample_priors),
+        normalize=_boolean(normalize, name="normalize"),
+        account_for_sample_priors=_boolean(account_for_sample_priors, name="account_for_sample_priors"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -262,6 +262,18 @@ def _normalize_clip(value: Sequence[float] | str | None) -> tuple[float, float] 
     if not np.isfinite(lower) or not np.isfinite(upper) or lower < 0.0 or upper <= 0.0 or lower > upper:
         raise ValueError("clip bounds must be finite non-negative values with lower <= upper and upper > 0.")
     return lower, upper
+
+
+def _boolean(value: bool | str, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean.")
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:

@@ -42,6 +42,7 @@ def fit_source_free_target_prior_predict_proba(
     feature_space: Literal["input", "model_preprocessor", "auto"] = "auto",
     pseudo_label_selection: PseudoLabelSelection = "confidence",
     balanced_topk_per_class: int | None = None,
+    prototype_estimator: str = "hard",
     target_prior_correction: TargetPriorCorrection = "balanced",
     target_prior_strength: float = 1.0,
     target_prior_estimator: TargetPriorEstimator = "mean",
@@ -76,6 +77,7 @@ def fit_source_free_target_prior_predict_proba(
         feature_space=feature_space,
         pseudo_label_selection=pseudo_label_selection,
         balanced_topk_per_class=balanced_topk_per_class,
+        prototype_estimator=prototype_estimator,
     )
     raw_target_prior = estimate_target_class_prior(
         base_result.probabilities,
@@ -131,8 +133,15 @@ def apply_target_prior_correction(
     parsed_mode = _target_prior_correction_mode(mode)
     parsed_strength = _bounded_strength(strength)
     if parsed_mode == "none":
+        if prior is None:
+            raw_prior = estimate_target_class_prior(normalized, estimator=estimator)
+        else:
+            try:
+                raw_prior = _validate_prior(prior, n_classes=normalized.shape[1])
+            except (TypeError, ValueError):
+                raw_prior = estimate_target_class_prior(normalized, estimator=estimator)
         target_prior = stabilize_target_class_prior(
-            estimate_target_class_prior(normalized, estimator=estimator),
+            raw_prior,
             smoothing=smoothing,
             floor=floor,
         )
