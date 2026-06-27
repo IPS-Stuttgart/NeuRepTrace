@@ -21,6 +21,8 @@ def rank_class_scores(
     rank summaries are undefined and returned as ``NaN``.
     """
 
+    if classes is not None and _has_incompatible_array_label_shape(y_true, classes):
+        raise ValueError("y_true must be one-dimensional.")
     y_true = _label_vector(y_true, name="y_true")
     top_k = tuple(_validate_integer(k, name="top_k", minimum=1) for k in top_k)
     row_top_k = _validate_integer(row_top_k, name="row_top_k", minimum=0)
@@ -31,9 +33,11 @@ def rank_class_scores(
         return _empty_class_rank_result(y_true, top_k)
 
     score_matrix = np.asarray(scores, dtype=float)
-    class_order = _label_vector(classes, name="classes")
     if score_matrix.ndim != 2:
         raise ValueError("scores must be a two-dimensional matrix.")
+    if _has_incompatible_class_matrix(classes, expected_n_classes=score_matrix.shape[1]):
+        raise ValueError("classes must be one-dimensional.")
+    class_order = _label_vector(classes, name="classes")
     if score_matrix.shape[0] != y_true.shape[0]:
         raise ValueError("scores and y_true must contain the same samples.")
     if score_matrix.shape[1] != class_order.size:
@@ -74,6 +78,22 @@ def rank_class_scores(
         "median_true_label_rank": _finite_nanmedian(true_label_ranks),
         "rows": rows,
     }
+
+
+def _has_incompatible_array_label_shape(y_true: object, classes: object) -> bool:
+    if not _is_matrix_label_array(y_true):
+        return False
+    if not _is_matrix_label_array(classes):
+        return True
+    return y_true.shape[1:] != classes.shape[1:]
+
+
+def _has_incompatible_class_matrix(classes: object, *, expected_n_classes: int) -> bool:
+    return _is_matrix_label_array(classes) and classes.shape[0] != expected_n_classes
+
+
+def _is_matrix_label_array(values: object) -> bool:
+    return isinstance(values, np.ndarray) and values.ndim > 1
 
 
 def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
