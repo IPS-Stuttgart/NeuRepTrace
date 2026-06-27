@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from neureptrace.decoding.source_free_grid import fit_source_free_grid_predict_proba, score_probability_shape
 
@@ -51,6 +52,21 @@ def test_source_free_grid_can_rank_balanced_topk_variants():
     assert len(result.ranked) >= 2
     assert result.metadata["source_free_grid_candidate_count"] == len(result.ranked)
     assert result.metadata["source_free_uses_target_labels"] is False
+
+
+def test_source_free_grid_rejects_boolean_prior_strength():
+    target_features = np.vstack([np.full((2, 2), -1.0), np.full((2, 2), 1.0)])
+
+    with pytest.raises(ValueError, match="prior_strength"):
+        fit_source_free_grid_predict_proba(
+            source_model=_BiasedSourceModel(),
+            target_features=target_features,
+            max_iterations=0,
+            prototype_weights=(0.0,),
+            confidence_thresholds=(0.75,),
+            prior_strengths=(True,),
+            pseudo_label_selections=("confidence",),
+        )
 
 
 def test_probability_shape_score_prefers_active_classes_when_other_terms_match():
