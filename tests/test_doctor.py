@@ -72,6 +72,35 @@ def test_doctor_summary_counts_statuses():
     assert summary["error"] == 0
 
 
+def test_check_required_module_reports_known_distribution_version(monkeypatch):
+    versions = {"scikit-learn": "1.2.3"}
+
+    monkeypatch.setattr(doctor, "_distribution_version", lambda distribution_name: versions.get(distribution_name))
+    monkeypatch.setattr(doctor, "_import_module_for_diagnostics", lambda module_name: (True, None))
+
+    check = doctor._check_required_module("sklearn")
+
+    assert check.name == "module:sklearn"
+    assert check.status == "ok"
+    assert "sklearn is importable" in check.details
+    assert "scikit-learn 1.2.3" in check.details
+
+
+def test_check_required_module_uses_package_distribution_mapping(monkeypatch):
+    versions = {"custom-dist": "4.5.6"}
+
+    monkeypatch.setattr(doctor, "_distribution_version", lambda distribution_name: versions.get(distribution_name))
+    monkeypatch.setattr(doctor.importlib.metadata, "packages_distributions", lambda: {"custom_adapter": ["custom-dist"]})
+    monkeypatch.setattr(doctor, "_import_module_for_diagnostics", lambda module_name: (True, None))
+
+    check = doctor._check_required_module("custom_adapter")
+
+    assert check.name == "module:custom_adapter"
+    assert check.status == "ok"
+    assert "custom_adapter is importable" in check.details
+    assert "custom-dist 4.5.6" in check.details
+
+
 def test_doctor_can_validate_entry_points(capsys):
     code = doctor_main(["--json", "--skip-optional", "--check-entry-points"])
 
