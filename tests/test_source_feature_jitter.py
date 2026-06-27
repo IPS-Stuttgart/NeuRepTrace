@@ -72,6 +72,51 @@ def test_jitter_can_return_only_synthetic_rows() -> None:
     assert result.labels.tolist().count(1) == 3
 
 
+def test_string_false_preserve_original_returns_only_synthetic_rows() -> None:
+    features = np.asarray([[0.0], [1.0], [10.0], [11.0]], dtype=float)
+    labels = np.asarray([0, 0, 1, 1], dtype=object)
+
+    result = augment_source_with_feature_jitter(
+        features,
+        labels,
+        config={"synthetic_per_class": 2, "preserve_original": "false", "random_state": 3},
+    )
+
+    assert result.features.shape == (4, 1)
+    assert result.synthetic_mask.tolist() == [True] * 4
+    assert result.metadata["source_feature_jitter_preserve_original"] is False
+    assert result.metadata["source_feature_jitter_n_output_rows"] == 4
+
+
+def test_composite_labels_and_domains_are_preserved_as_row_values() -> None:
+    features = np.asarray(
+        [
+            [0.0, 0.1],
+            [0.2, 0.3],
+            [10.0, 10.1],
+            [10.2, 10.3],
+        ],
+        dtype=float,
+    )
+    labels = np.asarray([("visual", 1), ("visual", 1), ("auditory", 2), ("auditory", 2)], dtype=object)
+    domains = np.asarray([("subject", 1), ("subject", 1), ("subject", 2), ("subject", 2)], dtype=object)
+
+    result = augment_source_with_feature_jitter(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "scale_mode": "class", "random_state": 5},
+    )
+
+    assert result.features.shape == (6, 2)
+    assert result.labels.shape == (6,)
+    assert result.metadata["source_feature_jitter_n_classes"] == 2
+    assert result.metadata["source_feature_jitter_n_source_domains"] == 2
+    assert all(isinstance(label, tuple) for label in result.labels.tolist())
+    assert result.labels.tolist().count(("visual", 1)) == 3
+    assert result.labels.tolist().count(("auditory", 2)) == 3
+
+
 def test_disabled_jitter_returns_original_rows_only() -> None:
     features = np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=float)
     labels = np.asarray([0, 1])
@@ -108,3 +153,6 @@ def test_scale_mode_aliases_and_invalid_values() -> None:
 
     with pytest.raises(ValueError, match="noise_scale"):
         source_feature_jitter_config(noise_scale=-1.0)
+
+    with pytest.raises(ValueError, match="preserve_original"):
+        source_feature_jitter_config(preserve_original="maybe")
