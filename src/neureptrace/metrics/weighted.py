@@ -85,6 +85,8 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
         raise ValueError("probabilities must have shape (n_samples, n_classes)")
     if probabilities.shape[0] == 0 or probabilities.shape[1] == 0:
         raise ValueError("probabilities must contain at least one sample and one class")
+    if labels.ndim == 2 and labels.shape[1] == 1:
+        labels = labels.reshape(-1)
     if labels.ndim != 1:
         raise ValueError("labels must have shape (n_samples,)")
     if probabilities.shape[0] != labels.shape[0]:
