@@ -94,6 +94,9 @@ def fit_source_bagging_decoder(
     classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
+    class_to_code = {class_label: index for index, class_label in enumerate(classes.tolist())}
+    label_codes = np.asarray([class_to_code[class_label] for class_label in labels.tolist()], dtype=int)
+    encoded_classes = np.arange(classes.shape[0], dtype=int)
     template = _default_estimator(cfg) if estimator is None else estimator
     rng = np.random.default_rng(cfg.random_state)
 
@@ -105,8 +108,8 @@ def fit_source_bagging_decoder(
         rows = _sample_rows(labels, classes=classes, cfg=cfg, rng=rng)
         feats = _sample_features(source.shape[1], cfg=cfg, rng=rng)
         model = clone(template)
-        model.fit(source[rows][:, feats], labels[rows])
-        probabilities.append(_aligned_probabilities(model, test[:, feats], classes=classes, epsilon=cfg.epsilon))
+        model.fit(source[rows][:, feats], label_codes[rows])
+        probabilities.append(_aligned_probabilities(model, test[:, feats], classes=encoded_classes, epsilon=cfg.epsilon))
         estimators.append(model)
         row_indices.append(rows.astype(int, copy=False))
         feature_indices.append(feats.astype(int, copy=False))
