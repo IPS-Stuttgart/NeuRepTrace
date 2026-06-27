@@ -133,9 +133,9 @@ def source_bagging_config(
     n_estimators: int | str = DEFAULT_N_ESTIMATORS,
     sample_fraction: float | str = DEFAULT_SAMPLE_FRACTION,
     feature_fraction: float | str = DEFAULT_FEATURE_FRACTION,
-    bootstrap_rows: bool = True,
-    bootstrap_features: bool = False,
-    class_balanced: bool = True,
+    bootstrap_rows: bool | str = True,
+    bootstrap_features: bool | str = False,
+    class_balanced: bool | str = True,
     random_state: int | str | None = 13,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> SourceBaggingConfig:
@@ -145,9 +145,9 @@ def source_bagging_config(
         n_estimators=_positive_int(n_estimators, name="n_estimators"),
         sample_fraction=_positive_float(sample_fraction, name="sample_fraction"),
         feature_fraction=_positive_float(feature_fraction, name="feature_fraction"),
-        bootstrap_rows=bool(bootstrap_rows),
-        bootstrap_features=bool(bootstrap_features),
-        class_balanced=bool(class_balanced),
+        bootstrap_rows=_boolean(bootstrap_rows, name="bootstrap_rows"),
+        bootstrap_features=_boolean(bootstrap_features, name="bootstrap_features"),
+        class_balanced=_boolean(class_balanced, name="class_balanced"),
         random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
@@ -259,6 +259,18 @@ def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, n
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _boolean(value: bool | str, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean value.")
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
