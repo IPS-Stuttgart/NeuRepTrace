@@ -28,9 +28,16 @@ def _install_onset_boolean_summary_patch() -> None:
     _onset_boolean_summary_patch.install()
 
 
+def _install_stimulus_detection_boolean_summary_patch() -> None:
+    from neureptrace import _stimulus_detection_boolean_summary_patch
+
+    _stimulus_detection_boolean_summary_patch.install()
+
+
 def install() -> None:
     """Install strict epsilon validation for public NLL helpers."""
     _install_onset_boolean_summary_patch()
+    _install_stimulus_detection_boolean_summary_patch()
 
     import neureptrace.metrics as metrics
     import neureptrace.metrics.weighted as weighted_metrics
