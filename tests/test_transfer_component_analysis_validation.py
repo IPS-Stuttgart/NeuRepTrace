@@ -54,6 +54,35 @@ def test_tca_rejects_boolean_component_counts(n_components):
         )
 
 
+def test_tca_boolean_string_flags_are_normalized():
+    source, target, _labels = _tca_toy_data()
+
+    result = transfer_component_analysis_features(
+        source,
+        target,
+        n_components=1,
+        standardize="false",
+        normalize_components="0",
+    )
+
+    assert result.metadata["tca_standardize"] is False
+    assert result.metadata["tca_normalize_components"] is False
+    np.testing.assert_array_equal(result.model.feature_mean, np.zeros(source.shape[1], dtype=np.float32))
+    np.testing.assert_array_equal(result.model.feature_scale, np.ones(source.shape[1], dtype=np.float32))
+
+
+def test_tca_rejects_invalid_boolean_string_flags():
+    source, target, _labels = _tca_toy_data()
+
+    with pytest.raises(ValueError, match="standardize"):
+        transfer_component_analysis_features(
+            source,
+            target,
+            n_components=1,
+            standardize="sometimes",
+        )
+
+
 def test_tca_classifier_rejects_boolean_sample_weight_masks():
     source, target, labels = _tca_toy_data()
 
