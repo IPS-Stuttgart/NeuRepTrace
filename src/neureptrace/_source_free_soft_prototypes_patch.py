@@ -132,7 +132,8 @@ def _fit(self, target_features: np.ndarray, *, source_model: Any | None = None, 
                 balanced_topk_per_class=balanced_topk_per_class,
                 min_class_count=min_class_count,
             )
-            signature = _sf._pseudo_label_signature(selected, pseudo_labels)
+            prototype_rows = np.ones_like(selected, dtype=bool) if prototype_estimator == "soft_all" else selected
+            signature = _sf._pseudo_label_signature(prototype_rows, pseudo_labels)
             if signature in seen_signatures:
                 stop_reason = "selection_repeated"
                 break
@@ -146,7 +147,7 @@ def _fit(self, target_features: np.ndarray, *, source_model: Any | None = None, 
                 min_class_count=min_class_count,
                 prototype_estimator=prototype_estimator,
             )
-            if not np.any(selected) and prototype_estimator != "soft_all":
+            if not np.any(prototype_rows):
                 stop_reason = "none_selected"
                 break
             if int(np.count_nonzero(active_classes)) < min_active_classes:

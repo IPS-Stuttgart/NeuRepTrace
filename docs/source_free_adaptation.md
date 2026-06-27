@@ -66,7 +66,9 @@ result = fit_source_free_predict_proba(
 )
 ```
 
-`balanced_topk` still uses only source-model probabilities on the unlabeled target features. For each predicted pseudo-class, it keeps up to `balanced_topk_per_class` rows with the highest posterior confidence. If fewer than `min_class_count` rows for a predicted pseudo-class exceed the threshold, the selector falls back to that class's top-confidence rows so minority prototypes can remain active. This is useful as a Protocol-2/2.5 candidate for OpenNeuro datasets where the source model is confident mostly on the dominant target pseudo-class.
+`balanced_topk` still uses only source-model probabilities on the unlabeled target features. For each predicted pseudo-class, it keeps up to `balanced_topk_per_class` rows with the highest posterior confidence. If fewer than `min_class_count` rows for a predicted pseudo-class exceed the threshold, the selector falls back to that class's top-confidence rows so minority prototypes can remain active.
+
+This is useful as a Protocol-2/2.5 candidate for OpenNeuro datasets where the source model is confident mostly on the dominant target pseudo-class.
 
 The metadata records the selector as:
 
