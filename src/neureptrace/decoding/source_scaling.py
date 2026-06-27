@@ -182,7 +182,7 @@ def source_feature_scaling_config(
     scale_std: float | str = DEFAULT_SCALE_STD,
     scaling_mode: str | None = "row",
     distribution: str | None = "lognormal",
-    preserve_original: bool = True,
+    preserve_original: bool | str = True,
     random_state: int | str | None = 13,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> SourceFeatureScalingConfig:
@@ -193,7 +193,7 @@ def source_feature_scaling_config(
         scale_std=_nonnegative_float(scale_std, name="scale_std"),
         scaling_mode=normalize_scaling_mode(scaling_mode),
         distribution=normalize_scaling_distribution(distribution),
-        preserve_original=bool(preserve_original),
+        preserve_original=_boolean_value(preserve_original, name="preserve_original"),
         random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
@@ -329,3 +329,14 @@ def _float_value(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed):
         raise ValueError(f"{name} must be finite.")
     return parsed
+
+
+def _boolean_value(value: bool | str, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value.")
