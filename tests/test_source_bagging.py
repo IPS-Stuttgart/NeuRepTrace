@@ -50,3 +50,14 @@ def test_source_bagging_config_validation() -> None:
 
     with pytest.raises(ValueError, match="n_estimators"):
         source_bagging_config(n_estimators=0)
+
+
+def test_source_bagging_boolean_string_config() -> None:
+    cfg = source_bagging_config(bootstrap_rows="false", bootstrap_features="yes", class_balanced="0")
+
+    assert cfg.bootstrap_rows is False
+    assert cfg.bootstrap_features is True
+    assert cfg.class_balanced is False
+
+    with pytest.raises(ValueError, match="bootstrap_rows"):
+        source_bagging_config(bootstrap_rows="not-a-bool")
