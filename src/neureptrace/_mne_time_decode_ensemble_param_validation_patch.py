@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Sequence
 from functools import wraps
 from typing import Any
@@ -27,8 +28,15 @@ def _coerce_numpy_metadata_sequence(value: Any) -> Any:
     return tuple(value.reshape(-1).tolist())
 
 
+def _install_mne_time_decode_float_sequence_validation_patch() -> None:
+    patch = importlib.import_module("neureptrace._mne_time_decode_float_sequence_validation_patch")
+    patch.install()
+
+
 def install() -> None:
     """Reject invalid ensemble options and normalize NumPy metadata kwargs."""
+
+    _install_mne_time_decode_float_sequence_validation_patch()
 
     from neureptrace import mne_time_decode_ensemble as ensemble
 
