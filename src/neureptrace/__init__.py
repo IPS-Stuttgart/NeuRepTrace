@@ -69,6 +69,7 @@ from . import (  # noqa: E402
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
     _mne_time_decode_ensemble_param_validation_patch,
+    _mne_time_decode_float_sequence_validation_patch,
     _nll_eps_validation_patch,
     _observation_ensemble_missing_label_patch,
     _observation_ensemble_partial_class_columns_patch,
@@ -255,6 +256,7 @@ _transfer_cross_validation_label_patch.install()
 _transfer_null_fallback_patch.install()
 _transfer_null_label_conflict_patch.install()
 _mne_time_decode_ensemble_param_validation_patch.install()
+_mne_time_decode_float_sequence_validation_patch.install()
 _tuple_label_calibration_split_patch.install()
 _unlabeled_anchor_tuple_patch.install()
 _vrex_numeric_config_patch.install()
