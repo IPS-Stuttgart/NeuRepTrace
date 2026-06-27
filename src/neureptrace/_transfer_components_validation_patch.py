@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import replace
 from functools import wraps
 from typing import Any
@@ -60,8 +61,15 @@ def _sample_weight_vector(sample_weight: Any, *, expected_length: int) -> np.nda
     return weights
 
 
+def _install_transfer_component_analysis_validation() -> None:
+    patch = importlib.import_module("neureptrace._transfer_component_analysis_validation_patch")
+    patch.install()
+
+
 def install() -> None:
     """Install stricter validation for transfer-component configuration and source weights."""
+
+    _install_transfer_component_analysis_validation()
 
     import neureptrace.decoding.transfer_components as transfer_components
 
