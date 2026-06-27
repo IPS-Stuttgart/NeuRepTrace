@@ -20,6 +20,8 @@ SOURCE_JITTER_CATEGORY = "1_strict_source_only"
 SCALE_MODES = ("global", "class", "unit")
 DEFAULT_NOISE_SCALE = 0.05
 DEFAULT_EPSILON = 1e-8
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +150,7 @@ def source_feature_jitter_config(
     synthetic_per_class: int | str = 0,
     noise_scale: float | str = DEFAULT_NOISE_SCALE,
     scale_mode: str | None = "global",
-    preserve_original: bool = True,
+    preserve_original: bool | str = True,
     random_state: int | str | None = 13,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> SourceFeatureJitterConfig:
@@ -158,7 +160,7 @@ def source_feature_jitter_config(
         synthetic_per_class=_nonnegative_int(synthetic_per_class, name="synthetic_per_class"),
         noise_scale=_nonnegative_float(noise_scale, name="noise_scale"),
         scale_mode=normalize_jitter_scale_mode(scale_mode),
-        preserve_original=bool(preserve_original),
+        preserve_original=_boolean(preserve_original, name="preserve_original"),
         random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
@@ -297,3 +299,15 @@ def _float_value(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed):
         raise ValueError(f"{name} must be finite.")
     return parsed
+
+
+def _boolean(value: Any, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE_STRINGS:
+            return True
+        if text in _FALSE_STRINGS:
+            return False
+    raise ValueError(f"{name} must be a boolean value.")
