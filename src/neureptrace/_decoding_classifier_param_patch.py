@@ -70,6 +70,7 @@ def install() -> None:
     original_knn = classifiers._build_knn
     original_random_forest = classifiers._build_random_forest
     original_shrinkage = classifiers._normalize_lda_shrinkage
+    original_xgboost = classifiers._build_xgboost
     original_legacy_gradient_boosting = classifiers.train_gradient_boosting
 
     def build_gradient_boosting(features, labels, classifier_param, random_state):
@@ -89,6 +90,10 @@ def install() -> None:
             raise ValueError("shrinkage-lda classifier_param must be numeric, not boolean.")
         return original_shrinkage(classifier_param)
 
+    def build_xgboost(features, labels, classifier_param, random_state):
+        classifier_param = _strict_positive_int_classifier_param(classifier_param, name="xgboost classifier_param")
+        return original_xgboost(features, labels, classifier_param, random_state)
+
     def train_gradient_boosting(train_features, train_labels, classifier_param, random_state=None):
         classifier_param = _strict_positive_int_classifier_param(classifier_param, name="gradient_boosting classifier_param")
         return original_legacy_gradient_boosting(train_features, train_labels, classifier_param, random_state)
@@ -97,8 +102,10 @@ def install() -> None:
     classifiers._build_knn = build_knn
     classifiers._build_random_forest = build_random_forest
     classifiers._normalize_lda_shrinkage = normalize_shrinkage
+    classifiers._build_xgboost = build_xgboost
     classifiers.train_gradient_boosting = train_gradient_boosting
     classifiers.CLASSIFIER_REGISTRY["gradient-boosting"] = classifiers.ClassifierSpec(build_gradient_boosting)
     classifiers.CLASSIFIER_REGISTRY["knn"] = classifiers.ClassifierSpec(build_knn)
     classifiers.CLASSIFIER_REGISTRY["random-forest"] = classifiers.ClassifierSpec(build_random_forest)
+    classifiers.CLASSIFIER_REGISTRY["xgboost"] = classifiers.ClassifierSpec(build_xgboost)
     setattr(classifiers, _INTEGER_PATCH_MARKER, True)
