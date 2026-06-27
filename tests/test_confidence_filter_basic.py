@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from neureptrace.decoding.confidence_filter import confidence_filter, probability_entropy
 
@@ -20,3 +21,23 @@ def test_entropy_and_row_normalization() -> None:
     assert np.allclose(entropy, [1.0, 0.0], atol=1e-6)
     assert np.allclose(result.confidence, [0.5, 1.0])
     assert result.accepted_mask.tolist() == [False, True]
+
+
+def test_entropy_normalization_accepts_string_boolean_config() -> None:
+    rows = np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype=float)
+
+    entropy = probability_entropy(rows, normalize="false")
+    result = confidence_filter(rows, max_entropy=0.8, normalize_entropy="false")
+
+    assert np.allclose(entropy, [np.log(2.0), 0.0], atol=1e-6)
+    assert result.accepted_mask.tolist() == [True, True]
+    assert result.metadata["confidence_filter_entropy_normalized"] is False
+
+
+def test_entropy_normalization_rejects_invalid_boolean_config() -> None:
+    rows = np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="normalize"):
+        probability_entropy(rows, normalize="sometimes")
+    with pytest.raises(ValueError, match="normalize_entropy"):
+        confidence_filter(rows, normalize_entropy="sometimes")

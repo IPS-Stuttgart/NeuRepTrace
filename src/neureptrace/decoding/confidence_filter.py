@@ -30,7 +30,7 @@ def confidence_filter(
     min_confidence: float | str = 0.0,
     min_margin: float | str = 0.0,
     max_entropy: float | str | None = None,
-    normalize_entropy: bool = True,
+    normalize_entropy: bool | str = True,
 ) -> ConfidenceFilterResult:
     """Return a row mask from confidence, margin, and optional entropy rules.
 
@@ -43,6 +43,7 @@ def confidence_filter(
     confidence_threshold = _unit_interval(min_confidence, name="min_confidence")
     margin_threshold = _unit_interval(min_margin, name="min_margin")
     entropy_threshold = None if max_entropy in {None, "", "none", "None"} else _nonnegative_float(max_entropy, name="max_entropy")
+    normalize = _boolean(normalize_entropy, name="normalize_entropy")
     order = np.argsort(matrix, axis=1)
     top = order[:, -1]
     second = order[:, -2]
@@ -50,7 +51,7 @@ def confidence_filter(
     confidence = matrix[row_index, top]
     margin = confidence - matrix[row_index, second]
     accepted = (confidence >= confidence_threshold) & (margin >= margin_threshold)
-    entropy = probability_entropy(matrix, normalize=normalize_entropy)
+    entropy = probability_entropy(matrix, normalize=normalize)
     if entropy_threshold is not None:
         accepted &= entropy <= entropy_threshold
     metadata = {
@@ -59,7 +60,7 @@ def confidence_filter(
         "confidence_filter_min_confidence": float(confidence_threshold),
         "confidence_filter_min_margin": float(margin_threshold),
         "confidence_filter_max_entropy": "" if entropy_threshold is None else float(entropy_threshold),
-        "confidence_filter_entropy_normalized": bool(normalize_entropy),
+        "confidence_filter_entropy_normalized": normalize,
         "confidence_filter_n_rows": int(matrix.shape[0]),
         "confidence_filter_n_classes": int(matrix.shape[1]),
         "confidence_filter_n_accepted": int(np.count_nonzero(accepted)),
@@ -77,12 +78,12 @@ def confidence_filter(
     )
 
 
-def probability_entropy(probabilities: Sequence[Sequence[float]] | np.ndarray, *, normalize: bool = True) -> np.ndarray:
+def probability_entropy(probabilities: Sequence[Sequence[float]] | np.ndarray, *, normalize: bool | str = True) -> np.ndarray:
     """Return entropy for each probability row."""
 
     matrix = _probability_matrix(probabilities)
     entropy = -np.sum(matrix * np.log(np.maximum(matrix, 1e-12)), axis=1)
-    if normalize:
+    if _boolean(normalize, name="normalize"):
         entropy = entropy / np.log(matrix.shape[1])
     return entropy.astype(np.float32, copy=False)
 
@@ -111,3 +112,29 @@ def _nonnegative_float(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be non-negative and finite.")
     return parsed
+
+
+def _boolean(value: bool | str, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        return _boolean(value.item(), name=name)
+    if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
+        integer = int(value)
+        if integer in {0, 1}:
+            return bool(integer)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if np.isfinite(numeric) and numeric in {0.0, 1.0}:
+            return bool(numeric)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean value.")
