@@ -43,6 +43,7 @@ from . import (  # noqa: E402
     _decoding_grouped_cv_patch,
     _decoding_probability_patch,
     _decoding_regularization_patch,
+    _ensemble_unique_decoder_patch,
     _event_detection_extensions,
     _fieldtrip_sampleinfo_validation_patch,
     _few_shot_split_validation_patch,
@@ -257,6 +258,7 @@ _transfer_null_fallback_patch.install()
 _transfer_null_label_conflict_patch.install()
 _mne_time_decode_ensemble_param_validation_patch.install()
 _mne_time_decode_float_sequence_validation_patch.install()
+_ensemble_unique_decoder_patch.install()
 _tuple_label_calibration_split_patch.install()
 _unlabeled_anchor_tuple_patch.install()
 _vrex_numeric_config_patch.install()
