@@ -22,8 +22,16 @@ def _validate_eps(eps: object) -> float:
     return numeric
 
 
+def _install_onset_boolean_summary_patch() -> None:
+    from neureptrace import _onset_boolean_summary_patch
+
+    _onset_boolean_summary_patch.install()
+
+
 def install() -> None:
     """Install strict epsilon validation for public NLL helpers."""
+    _install_onset_boolean_summary_patch()
+
     import neureptrace.metrics as metrics
     import neureptrace.metrics.weighted as weighted_metrics
 
