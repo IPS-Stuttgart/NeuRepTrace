@@ -78,7 +78,7 @@ def _metadata_columns_from_config(io_fieldtrip_mat: Any, config: Mapping[str, An
         specs.append(
             io_fieldtrip_mat.MetadataColumnSpec(
                 name=str(column["name"]),
-                index=int(column["index"]),
+                index=io_fieldtrip_mat._metadata_column_index(column["index"]),
                 optional=parse_bool_config(column.get("optional", False), name=f"metadata.columns[{column_index}].optional"),
             )
         )
