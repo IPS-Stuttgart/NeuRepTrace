@@ -99,7 +99,20 @@ def test_target_prior_strength_interpolates_correction():
     assert none[:, 1].mean() < partial[:, 1].mean() < full[:, 1].mean()
 
 
-def test_disabled_target_prior_correction_ignores_irrelevant_prior_argument():
+def test_disabled_target_prior_correction_uses_valid_supplied_prior_for_metadata():
+    probabilities = np.array([[0.90, 0.10], [0.70, 0.30]], dtype=float)
+
+    corrected, prior = apply_target_prior_correction(
+        probabilities,
+        mode="none",
+        prior=np.array([0.60, 0.40]),
+    )
+
+    assert np.allclose(corrected, probabilities)
+    assert np.allclose(prior, [0.60, 0.40])
+
+
+def test_disabled_target_prior_correction_ignores_invalid_irrelevant_prior_argument():
     probabilities = np.array([[0.90, 0.10], [0.70, 0.30]], dtype=float)
 
     corrected, prior = apply_target_prior_correction(
@@ -172,6 +185,24 @@ def test_target_prior_metadata_records_raw_and_stabilized_prior():
     assert metadata["source_free_target_prior_floor"] == 0.05
     assert metadata["source_free_target_raw_class_prior"] != metadata["source_free_target_class_prior"]
     assert result.probabilities.shape == (4, 2)
+
+
+def test_disabled_target_prior_metadata_uses_requested_estimator():
+    target_features = np.array([[-2.0, 0.0], [-1.0, 0.2], [0.25, 0.0], [1.0, 0.1]], dtype=float)
+
+    result = fit_source_free_target_prior_predict_proba(
+        source_model=_BiasedSourceModel(),
+        target_features=target_features,
+        max_iterations=0,
+        target_prior_correction="none",
+        target_prior_estimator="confidence_weighted",
+    )
+
+    metadata = result.metadata
+    assert metadata["source_free_target_prior_correction"] == "none"
+    assert metadata["source_free_target_prior_estimator"] == "confidence_weighted"
+    assert metadata["source_free_target_raw_class_prior"] == metadata["source_free_target_class_prior"]
+    assert np.allclose(result.probabilities, result.base_result.probabilities)
 
 
 def test_target_class_prior_is_normalized_and_validated():
