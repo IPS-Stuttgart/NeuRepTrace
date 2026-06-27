@@ -15,7 +15,7 @@ import importlib.abc
 import importlib.machinery
 import math
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from functools import wraps
 from numbers import Real
 from types import ModuleType
@@ -30,6 +30,12 @@ _BOOL_PATCH_MARKER = "_neureptrace_config_workflow_numeric_bool_patch_installed"
 _FINDER_MARKER = "_neureptrace_dataset_name_config_finder"
 
 
+def _is_container_dataset_name(value: Any) -> bool:
+    return isinstance(value, Mapping) or (
+        isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+    )
+
+
 def _dataset_name_from_config(config: Any, *, default: str = "") -> str:
     if not isinstance(config, Mapping):
         return default
@@ -38,7 +44,7 @@ def _dataset_name_from_config(config: Any, *, default: str = "") -> str:
         value = dataset.get("name", default)
     else:
         value = dataset
-    if value is None or isinstance(value, Mapping):
+    if value is None or _is_container_dataset_name(value):
         return default
     return str(value)
 
@@ -74,9 +80,13 @@ def _patch_module(module: ModuleType) -> None:
     @wraps(decode_kwargs)
     def patched_decode_kwargs(config: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
         decoded = decode_kwargs(config, *args, **kwargs)
-        if isinstance(decoded.get("dataset_name"), Mapping):
+        dataset_name = decoded.get("dataset_name")
+        if dataset_name is None or _is_container_dataset_name(dataset_name):
             decoded = dict(decoded)
             decoded["dataset_name"] = _dataset_name_from_config(config)
+        elif not isinstance(dataset_name, str):
+            decoded = dict(decoded)
+            decoded["dataset_name"] = str(dataset_name)
         return decoded
 
     module._decode_kwargs = patched_decode_kwargs
