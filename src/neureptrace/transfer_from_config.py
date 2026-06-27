@@ -12,6 +12,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss
 from sklearn.preprocessing import LabelEncoder
 
+from neureptrace._object_label_utils import label_counts, values_equal
 from neureptrace.dataset_config import apply_overrides, effective_config, load_config, load_epoch_dataset_from_config
 from neureptrace.decode_from_config import _bool_value, _resolve_output, _section, _window_ms, _write_provenance_sidecars
 from neureptrace.decoding import (
@@ -94,6 +95,23 @@ def _check_time_bounds(tmin: float | None, tmax: float | None) -> None:
         raise ValueError("preprocessing.tmax must be greater than or equal to preprocessing.tmin.")
 
 
+def _labels_missing_from_train(train_labels: Sequence[Any] | np.ndarray, test_labels: Sequence[Any] | np.ndarray) -> list[Any]:
+    train_unique, _ = label_counts(train_labels)
+    test_unique, _ = label_counts(test_labels)
+    missing: list[Any] = []
+    for test_label in test_unique:
+        if not any(values_equal(test_label, train_label) for train_label in train_unique):
+            missing.append(test_label)
+    return missing
+
+
+def _format_label_preview(labels: Sequence[Any], *, limit: int = 10) -> str:
+    preview = ", ".join(repr(label) for label in labels[:limit])
+    if len(labels) > limit:
+        preview = f"{preview}, ..."
+    return preview
+
+
 def _encode_transfer_labels(raw_labels: Sequence[Any], train_mask: np.ndarray, test_mask: np.ndarray) -> tuple[LabelEncoder, np.ndarray, np.ndarray]:
     """Encode only labels selected by the configured transfer split.
 
@@ -101,6 +119,10 @@ def _encode_transfer_labels(raw_labels: Sequence[Any], train_mask: np.ndarray, t
     configured train/test split.  Those rows must not create phantom label classes
     because the transfer metrics and observation schema are defined only for the
     selected transfer task.
+
+    A configured transfer split must also contain every evaluation label in the
+    training subset; otherwise the downstream classifier cannot assign calibrated
+    probabilities to the evaluation-only class.
     """
 
     raw_labels = np.asarray(raw_labels, dtype=object)
@@ -115,6 +137,14 @@ def _encode_transfer_labels(raw_labels: Sequence[Any], train_mask: np.ndarray, t
     fit_mask = active_mask & labeled_mask
     if not np.any(fit_mask):
         raise ValueError("transfer train_filter/test_filter selected no labeled trials.")
+
+    missing_test_labels = _labels_missing_from_train(raw_labels[train_mask & labeled_mask], raw_labels[test_mask & labeled_mask])
+    if missing_test_labels:
+        raise ValueError(
+            "transfer test_filter contains label(s) absent from train_filter: "
+            f"{_format_label_preview(missing_test_labels)}. "
+            "Every evaluation class must have at least one training row."
+        )
 
     encoder = LabelEncoder()
     encoder.fit(raw_labels[fit_mask])
