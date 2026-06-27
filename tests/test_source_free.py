@@ -197,6 +197,8 @@ def test_soft_all_prototypes_keep_classes_active_when_argmax_collapses():
     assert metadata["source_free_uses_target_labels"] is False
     assert metadata["source_free_valid_for_benchmark"] is True
     assert metadata["source_free_active_classes"] == 2
+    assert metadata["source_free_stop_reason"] != "selection_repeated"
+    assert metadata["source_free_iterations"] >= 2
     assert np.all(np.isfinite(soft_adapter.prototypes_))
     assert np.allclose(soft_adapter.predict_proba(target_features).sum(axis=1), 1.0)
 
