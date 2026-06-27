@@ -8,11 +8,13 @@ training matrix before fitting an ordinary decoder.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+
+from neureptrace._object_label_utils import label_counts, label_equal_mask
 
 SOURCE_JITTER_AUGMENTATION = "source_feature_jitter"
 SOURCE_JITTER_PROTOCOL = "strict_source_only_feature_jitter_augmentation"
@@ -20,6 +22,8 @@ SOURCE_JITTER_CATEGORY = "1_strict_source_only"
 SCALE_MODES = ("global", "class", "unit")
 DEFAULT_NOISE_SCALE = 0.05
 DEFAULT_EPSILON = 1e-8
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,11 +91,19 @@ def augment_source_with_feature_jitter(
     features = _feature_matrix(source_features, name="source_features")
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=labels.dtype if labels.dtype != object else object)
+    classes, _class_counts = label_counts(labels)
+    n_source_domains = int(label_counts(domains)[0].shape[0])
     scale_by_class = _scale_by_class(features, labels, classes=classes, mode=cfg.scale_mode, epsilon=cfg.epsilon)
 
     if not cfg.enabled:
-        metadata = _metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=0, n_classes=classes.shape[0], n_source_domains=np.unique(domains).shape[0], feature_dim=features.shape[1])
+        metadata = _metadata(
+            cfg,
+            n_source_rows=features.shape[0],
+            n_synthetic_rows=0,
+            n_classes=classes.shape[0],
+            n_source_domains=n_source_domains,
+            feature_dim=features.shape[1],
+        )
         return SourceFeatureJitterResult(
             features=features.astype(np.float32, copy=False),
             labels=labels.copy(),
@@ -106,12 +118,11 @@ def augment_source_with_feature_jitter(
     synthetic_labels: list[Any] = []
     content_indices: list[int] = []
     noise_rows: list[np.ndarray] = []
-    class_to_position = {class_label: index for index, class_label in enumerate(classes.tolist())}
-    for class_label in classes.tolist():
-        class_indices = np.flatnonzero(labels == class_label)
+    for class_position, class_label in enumerate(classes.tolist()):
+        class_indices = np.flatnonzero(label_equal_mask(labels, class_label))
         if class_indices.size == 0:
             continue
-        class_scale = scale_by_class[class_to_position[class_label]]
+        class_scale = scale_by_class[class_position]
         for _ in range(cfg.synthetic_per_class):
             row_index = int(rng.choice(class_indices))
             noise = rng.normal(0.0, cfg.noise_scale, size=features.shape[1]) * class_scale
@@ -121,7 +132,7 @@ def augment_source_with_feature_jitter(
             noise_rows.append(noise)
 
     synthetic_features = np.vstack(synthetic_rows).astype(np.float32, copy=False) if synthetic_rows else np.empty((0, features.shape[1]), dtype=np.float32)
-    synthetic_labels_array = np.asarray(synthetic_labels, dtype=labels.dtype if labels.dtype != object else object)
+    synthetic_labels_array = _label_output_vector(synthetic_labels, dtype=labels.dtype)
     noise_matrix = np.vstack(noise_rows).astype(np.float32, copy=False) if noise_rows else np.empty((0, features.shape[1]), dtype=np.float32)
     if cfg.preserve_original:
         output_features = np.vstack([features, synthetic_features]).astype(np.float32, copy=False)
@@ -132,7 +143,14 @@ def augment_source_with_feature_jitter(
         output_labels = synthetic_labels_array
         synthetic_mask = np.ones(synthetic_features.shape[0], dtype=bool)
 
-    metadata = _metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=synthetic_features.shape[0], n_classes=classes.shape[0], n_source_domains=np.unique(domains).shape[0], feature_dim=features.shape[1])
+    metadata = _metadata(
+        cfg,
+        n_source_rows=features.shape[0],
+        n_synthetic_rows=synthetic_features.shape[0],
+        n_classes=classes.shape[0],
+        n_source_domains=n_source_domains,
+        feature_dim=features.shape[1],
+    )
     return SourceFeatureJitterResult(
         features=output_features,
         labels=output_labels,
@@ -148,7 +166,7 @@ def source_feature_jitter_config(
     synthetic_per_class: int | str = 0,
     noise_scale: float | str = DEFAULT_NOISE_SCALE,
     scale_mode: str | None = "global",
-    preserve_original: bool = True,
+    preserve_original: bool | str = True,
     random_state: int | str | None = 13,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> SourceFeatureJitterConfig:
@@ -158,7 +176,7 @@ def source_feature_jitter_config(
         synthetic_per_class=_nonnegative_int(synthetic_per_class, name="synthetic_per_class"),
         noise_scale=_nonnegative_float(noise_scale, name="noise_scale"),
         scale_mode=normalize_jitter_scale_mode(scale_mode),
-        preserve_original=bool(preserve_original),
+        preserve_original=_boolean(preserve_original, name="preserve_original"),
         random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
@@ -189,7 +207,7 @@ def _scale_by_class(features: np.ndarray, labels: np.ndarray, *, classes: np.nda
     if mode == "class":
         rows = []
         for class_label in classes.tolist():
-            class_rows = features[labels == class_label]
+            class_rows = features[label_equal_mask(labels, class_label)]
             rows.append(_feature_scale(class_rows, epsilon=epsilon))
         return np.vstack(rows)
     raise ValueError(f"Unhandled scale mode {mode!r}.")
@@ -240,24 +258,72 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
-    return vector
+    return _atomic_value_vector(values, expected_length=expected_length, name=name, require_hashable=False)
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"source_domains must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
-    for value in vector.tolist():
-        try:
-            hash(value)
-        except TypeError as exc:
-            raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
+    return _atomic_value_vector(values, expected_length=expected_length, name="source_domains", require_hashable=True)
+
+
+def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str, require_hashable: bool) -> np.ndarray:
+    if isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            if array.shape[0] == expected_length:
+                items = array.tolist()
+            elif expected_length == 1:
+                items = [tuple(array.tolist())]
+            else:
+                items = array.reshape(-1).tolist()
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if rows.shape[1] == 1:
+                items = rows[:, 0].tolist()
+            else:
+                items = [tuple(row.tolist()) for row in rows]
+    if len(items) != expected_length:
+        raise ValueError(f"{name} must contain one value per feature row: {len(items)} != {expected_length}.")
+    if require_hashable:
+        for value in items:
+            try:
+                hash(value)
+            except TypeError as exc:
+                raise ValueError(f"{name} must be hashable; got {value!r}.") from exc
+    if _contains_composite_value(items):
+        return _object_vector(items)
+    return np.asarray(items).reshape(-1)
+
+
+def _object_vector(values: Iterable[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
     return vector
+
+
+def _label_output_vector(values: Sequence[Any], *, dtype: np.dtype) -> np.ndarray:
+    if _contains_composite_value(values):
+        return _object_vector(values)
+    return np.asarray(values, dtype=dtype if dtype != object else object)
+
+
+def _contains_composite_value(values: Sequence[Any]) -> bool:
+    return any(_is_composite_value(value) for value in values)
+
+
+def _is_composite_value(value: Any) -> bool:
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.ndarray):
+        return value.ndim != 0
+    return isinstance(value, (tuple, list, dict))
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
@@ -297,3 +363,15 @@ def _float_value(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed):
         raise ValueError(f"{name} must be finite.")
     return parsed
+
+
+def _boolean(value: Any, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE_STRINGS:
+            return True
+        if text in _FALSE_STRINGS:
+            return False
+    raise ValueError(f"{name} must be a boolean value.")
