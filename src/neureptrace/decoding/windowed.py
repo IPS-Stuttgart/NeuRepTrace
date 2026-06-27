@@ -338,6 +338,8 @@ def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: s
         raise ValueError(f"{name} must contain at least one row.")
     if matrix.shape[1] == 0:
         raise ValueError(f"{name} must contain at least one column.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(f"{name} must contain only finite values.")
     return matrix
 
 
