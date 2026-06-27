@@ -112,6 +112,8 @@ def _entropy(probabilities: np.ndarray) -> float:
 
 
 def _bounded_unit(value: Any, name: str) -> float:
+    if isinstance(value, bool) or (isinstance(value, np.generic) and isinstance(value.item(), bool)):
+        raise ValueError(f"{name} must be finite in [0, 1]")
     number = float(value)
     if not np.isfinite(number) or number < 0.0 or number > 1.0:
         raise ValueError(f"{name} must be finite in [0, 1]")
