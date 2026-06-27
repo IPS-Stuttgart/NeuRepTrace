@@ -311,7 +311,7 @@ def _object_vector(values: Iterable[Any]) -> np.ndarray:
 def _label_output_vector(values: Sequence[Any], *, dtype: np.dtype) -> np.ndarray:
     if _contains_composite_value(values):
         return _object_vector(values)
-    return np.asarray(values, dtype=dtype if dtype != object else object)
+    return np.asarray(values, dtype=dtype if dtype is not object else object)
 
 
 def _contains_composite_value(values: Sequence[Any]) -> bool:
