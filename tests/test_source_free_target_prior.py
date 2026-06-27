@@ -125,6 +125,27 @@ def test_disabled_target_prior_correction_ignores_invalid_irrelevant_prior_argum
     assert np.allclose(prior, [0.8, 0.2])
 
 
+@pytest.mark.parametrize("mode", ["0", 0, "no", "off", False])
+def test_target_prior_correction_accepts_false_like_disable_aliases(mode):
+    probabilities = np.array([[0.90, 0.10], [0.70, 0.30]], dtype=float)
+
+    corrected, prior = apply_target_prior_correction(probabilities, mode=mode)
+
+    assert np.allclose(corrected, probabilities)
+    assert np.allclose(prior, [0.8, 0.2])
+
+
+@pytest.mark.parametrize("mode", ["1", 1, "yes", "on", True])
+def test_target_prior_correction_accepts_true_like_balanced_aliases(mode):
+    probabilities = np.array([[0.90, 0.10], [0.70, 0.30]], dtype=float)
+
+    corrected, prior = apply_target_prior_correction(probabilities, mode=mode)
+
+    assert np.allclose(prior, [0.8, 0.2])
+    assert corrected[:, 1].mean() > probabilities[:, 1].mean()
+    assert np.allclose(corrected.sum(axis=1), 1.0)
+
+
 def test_smoothed_target_prior_makes_balancing_less_aggressive():
     probabilities = np.array([[0.98, 0.02], [0.92, 0.08]], dtype=float)
 
