@@ -225,13 +225,17 @@ def negative_log_likelihood(probabilities: np.ndarray, labels: np.ndarray, *, ep
 
 
 def top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int = 1) -> float:
-    """Compute top-k classification accuracy from probability rows."""
+    """Compute top-k classification accuracy from probability rows.
+
+    Probability ties are resolved deterministically by class-index order. This
+    keeps the selected top-k set size equal to ``k`` and prevents uniform or
+    exactly tied probability rows from being counted as correct for every class.
+    """
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
     k = _validate_positive_integer(k, "k")
     if k >= probabilities.shape[1]:
         return 1.0
 
-    kth_scores = np.partition(probabilities, kth=probabilities.shape[1] - k, axis=1)[:, -k]
-    true_scores = probabilities[np.arange(labels.shape[0]), labels]
-    return float(np.mean(true_scores >= kth_scores))
+    top_k = np.argsort(-probabilities, axis=1, kind="mergesort")[:, :k]
+    return float(np.mean(np.any(top_k == labels[:, None], axis=1)))

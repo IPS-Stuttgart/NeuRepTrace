@@ -83,8 +83,8 @@ def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
             return vector.reshape(1)
         if vector.ndim == 1:
             return vector
-        if vector.shape[1] == 1:
-            return vector.reshape(-1)
+        if vector.ndim == 2 and vector.shape[1] == 1:
+            raise ValueError(f"{name} must be one-dimensional.")
         rows = [tuple(row.tolist()) for row in vector.reshape(vector.shape[0], -1)]
         return _object_vector(rows)
 

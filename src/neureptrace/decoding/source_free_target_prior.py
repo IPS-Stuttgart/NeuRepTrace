@@ -133,8 +133,15 @@ def apply_target_prior_correction(
     parsed_mode = _target_prior_correction_mode(mode)
     parsed_strength = _bounded_strength(strength)
     if parsed_mode == "none":
+        if prior is None:
+            raw_prior = estimate_target_class_prior(normalized, estimator=estimator)
+        else:
+            try:
+                raw_prior = _validate_prior(prior, n_classes=normalized.shape[1])
+            except (TypeError, ValueError):
+                raw_prior = estimate_target_class_prior(normalized, estimator=estimator)
         target_prior = stabilize_target_class_prior(
-            estimate_target_class_prior(normalized, estimator=estimator),
+            raw_prior,
             smoothing=smoothing,
             floor=floor,
         )

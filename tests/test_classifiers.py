@@ -115,7 +115,7 @@ def test_train_multiclass_classifier_encodes_nonzero_labels_and_decodes_outputs(
     np.testing.assert_array_equal(seen["labels"], np.asarray([0, 1], dtype=int))
     np.testing.assert_array_equal(model.classes_, np.asarray([10, 20], dtype=int))
     np.testing.assert_array_equal(model.predict(np.zeros((2, 2))), np.asarray([10, 20], dtype=int))
-    np.testing.assert_allclose(model.decision_function(np.zeros((2, 2))), np.asarray([[-0.25, 0.25], [0.50, -0.50]], dtype=float))
+    np.testing.assert_allclose(model.decision_function(np.zeros((2, 2))), np.asarray([[-0.125, 0.125], [0.25, -0.25]], dtype=float))
 
 
 def test_correlation_prototype_predicts_by_nearest_class_pattern():
