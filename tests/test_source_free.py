@@ -33,8 +33,8 @@ class _CollapsedPseudoLabelSourceModel:
     classes_ = np.array([0, 1])
 
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
-        probabilities = np.tile(np.array([[0.64, 0.36]], dtype=float), (features.shape[0], 1))
-        probabilities[features[:, 0] > 0.0] = np.array([0.56, 0.44], dtype=float)
+        probabilities = np.tile(np.array([[0.55, 0.45]], dtype=float), (features.shape[0], 1))
+        probabilities[features[:, 0] > 0.0] = np.array([0.51, 0.49], dtype=float)
         return probabilities
 
 
@@ -188,6 +188,7 @@ def test_soft_all_prototypes_keep_classes_active_when_argmax_collapses():
         min_class_count=2,
         min_active_classes=2,
         prototype_weight=0.5,
+        prototype_temperature=0.1,
         pseudo_label_selection="confidence",
         prototype_estimator="soft_all",
     ).fit(target_features)
