@@ -12,6 +12,8 @@ project wrappers, not hard-coded in NeuRepTrace.
 
 from __future__ import annotations
 
+import math
+import numbers
 import re
 import warnings
 from collections.abc import Iterable, Mapping, Sequence
@@ -383,11 +385,36 @@ def _metadata_columns_from_config(config: Mapping[str, Any]) -> tuple[MetadataCo
         specs.append(
             MetadataColumnSpec(
                 name=str(column["name"]),
-                index=int(column["index"]),
+                index=_metadata_column_index(column["index"]),
                 optional=bool(column.get("optional", False)),
             )
         )
     return tuple(specs)
+
+
+def _metadata_column_index(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("metadata.columns.index must be a non-negative integer, not a boolean.")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError("metadata.columns.index must be a non-negative integer.")
+        try:
+            index = int(text)
+        except ValueError as exc:
+            raise ValueError(f"metadata.columns.index must be a non-negative integer; got {value!r}.") from exc
+    elif isinstance(value, numbers.Integral):
+        index = int(value)
+    elif isinstance(value, numbers.Real):
+        numeric = float(value)
+        if not math.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(f"metadata.columns.index must be a non-negative integer; got {value!r}.")
+        index = int(numeric)
+    else:
+        raise ValueError(f"metadata.columns.index must be a non-negative integer; got {value!r}.")
+    if index < 0:
+        raise ValueError("metadata.columns.index must be non-negative.")
+    return index
 
 
 def _metadata_maps(config: Mapping[str, Any]) -> dict[str, Any]:
