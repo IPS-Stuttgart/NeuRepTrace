@@ -51,9 +51,9 @@ def select_confident_probability_rows(
 
     cfg = confidence_selection_config() if config is None else _coerce_config(config)
     matrix = _probability_matrix(probabilities, epsilon=cfg.epsilon)
-    order = np.argsort(matrix, axis=1)
-    predicted = order[:, -1]
-    second = order[:, -2] if matrix.shape[1] > 1 else order[:, -1]
+    order = np.argsort(-matrix, axis=1, kind="mergesort")
+    predicted = order[:, 0]
+    second = order[:, 1] if matrix.shape[1] > 1 else order[:, 0]
     row_indices = np.arange(matrix.shape[0])
     confidences = matrix[row_indices, predicted]
     margins = confidences - matrix[row_indices, second]
@@ -113,7 +113,7 @@ def _top_k_mask(values: np.ndarray, k: int) -> np.ndarray:
     k = max(0, min(int(k), values.shape[0]))
     mask = np.zeros(values.shape[0], dtype=bool)
     if k:
-        mask[np.argsort(values)[::-1][:k]] = True
+        mask[np.argsort(-values, kind="mergesort")[:k]] = True
     return mask
 
 
@@ -122,7 +122,7 @@ def _per_class_top_k_mask(values: np.ndarray, predicted: np.ndarray, n_classes: 
     for class_index in range(n_classes):
         rows = np.flatnonzero(predicted == class_index)
         if rows.size:
-            keep = rows[np.argsort(values[rows])[::-1][: min(int(k), rows.size)]]
+            keep = rows[np.argsort(-values[rows], kind="mergesort")[: min(int(k), rows.size)]]
             mask[keep] = True
     return mask
 
