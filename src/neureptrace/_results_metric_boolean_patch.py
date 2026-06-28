@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Sequence
 
 import numpy as np
@@ -17,7 +18,7 @@ def _boolean_mask(values: pd.Series) -> pd.Series:
 def install() -> None:
     """Install a guard for aggregate result metric columns."""
 
-    from neureptrace import results
+    results = importlib.import_module("neureptrace.results")
 
     original = results._coerce_finite_metric_columns
     if getattr(original, _PATCH_ATTR, False):
