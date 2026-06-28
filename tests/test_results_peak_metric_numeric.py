@@ -40,7 +40,8 @@ def test_peak_metric_rows_rejects_nonfinite_selection_values(column: str, value:
             "participant": ["s1", "s1"],
             "time": ["0.1", "0.2"],
             "accuracy": ["0.9", "0.8"],
-        }
+        },
+        dtype=object,
     )
     frame.loc[0, column] = value
 
