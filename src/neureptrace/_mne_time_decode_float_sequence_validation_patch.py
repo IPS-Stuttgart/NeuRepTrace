@@ -1,4 +1,4 @@
-"""Validate MNE time-decode floating-point time sequences."""
+"""Validate MNE time-decode floating-point time sequences and boolean controls."""
 
 from __future__ import annotations
 
@@ -13,10 +13,54 @@ _PATCH_MARKER = "_neureptrace_mne_time_decode_float_sequence_validation_patch_in
 _DEFAULT_NAME = "decode_candidate_times"
 _ENSEMBLE_PARSE_PATCH_MARKER = "_neureptrace_ensemble_unique_source_decoder_validation_patch_installed"
 _OBSERVATION_ENSEMBLE_PATCH_MARKER = "_neureptrace_observation_unique_decoder_validation_patch_installed"
+_BOOL_KWARG_PATCH_MARKER = "_neureptrace_mne_time_decode_bool_kwarg_validation_patch_installed"
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 def _is_bool_scalar(value: Any) -> bool:
     return isinstance(value, (bool, np.bool_))
+
+
+def _bool_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be a boolean value.")
+
+
+def _normalize_bool(value: Any, *, name: str) -> bool:
+    """Normalize YAML/CLI-style boolean tokens while rejecting ambiguous truthiness."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise _bool_error(name)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise _bool_error(name)
+        return _normalize_bool(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise _bool_error(name)
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise _bool_error(name)
+    raise _bool_error(name)
+
+
+def _normalize_boolean_kwargs(kwargs: dict[str, Any], names: Sequence[str]) -> dict[str, Any]:
+    if not any(name in kwargs for name in names):
+        return kwargs
+    normalized = dict(kwargs)
+    for name in names:
+        if name in normalized:
+            normalized[name] = _normalize_bool(normalized[name], name=name)
+    return normalized
 
 
 def _validation_error(name: str) -> ValueError:
@@ -108,6 +152,35 @@ def _install_time_sequence_validation() -> None:
     module._parse_float_sequence = _parse_float_sequence
 
 
+def _wrap_time_decode_boolean_kwargs(module_name: str, parameter_names: Sequence[str]) -> None:
+    module = importlib.import_module(module_name)
+    original_run_time_resolved_decode = module.run_time_resolved_decode
+    if getattr(original_run_time_resolved_decode, _BOOL_KWARG_PATCH_MARKER, False):
+        return
+
+    @wraps(original_run_time_resolved_decode)
+    def run_time_resolved_decode(*args: Any, **kwargs: Any):
+        return original_run_time_resolved_decode(*args, **_normalize_boolean_kwargs(kwargs, parameter_names))
+
+    setattr(run_time_resolved_decode, _BOOL_KWARG_PATCH_MARKER, True)
+    module.run_time_resolved_decode = run_time_resolved_decode
+
+
+def _install_time_decode_boolean_validation() -> None:
+    _wrap_time_decode_boolean_kwargs(
+        "neureptrace.mne_time_decode",
+        ("label_shuffle_control", "pseudo_label_self_training"),
+    )
+    _wrap_time_decode_boolean_kwargs(
+        "neureptrace.mne_time_decode_foldlocal",
+        ("label_shuffle_control",),
+    )
+    _wrap_time_decode_boolean_kwargs(
+        "neureptrace.mne_time_decode_ensemble",
+        ("label_shuffle_control", "pseudo_label_self_training", "ensemble_source_baseline_debiasing"),
+    )
+
+
 def _install_time_decode_ensemble_validation() -> None:
     time_decode_ensemble = importlib.import_module("neureptrace.mne_time_decode_ensemble")
     original_parse_source_decoders = time_decode_ensemble._parse_source_decoders
@@ -152,9 +225,10 @@ def _install_observation_ensemble_validation() -> None:
 
 
 def install() -> None:
-    """Patch candidate-time parsing and duplicate ensemble-source validation."""
+    """Patch candidate-time parsing, boolean controls, and duplicate ensemble-source validation."""
 
     _install_time_sequence_validation()
+    _install_time_decode_boolean_validation()
     _install_time_decode_ensemble_validation()
     _install_observation_ensemble_validation()
 
