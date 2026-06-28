@@ -48,7 +48,13 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     return float(np.mean(hits))
 
 
+def _contains_boolean_token(values: pd.Series) -> bool:
+    return any(isinstance(value, (bool, np.bool_)) for value in values.to_numpy(dtype=object))
+
+
 def _numeric_label_indices(values: pd.Series) -> np.ndarray | None:
+    if _contains_boolean_token(values):
+        return None
     numeric = pd.to_numeric(values, errors="coerce")
     if numeric.isna().any():
         return None
