@@ -49,6 +49,9 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
 def install() -> None:
     """Patch all-protocol prediction metric recomputation to keep top-k exact."""
 
+    report_patch = importlib.import_module("neureptrace._bushmeg_all_protocols_report_protocol_labels_patch")
+    report_patch.install()
+
     all_protocols = importlib.import_module("neureptrace.bushmeg_all_protocols")
     if getattr(all_protocols, _PATCH_MARKER, False):
         return
