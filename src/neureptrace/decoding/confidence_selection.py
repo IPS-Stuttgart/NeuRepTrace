@@ -11,6 +11,7 @@ import numpy as np
 CONFIDENCE_SELECTION_PROTOCOL = "unlabeled_probability_confidence_selection"
 CONFIDENCE_SELECTION_CATEGORY = "2_unlabeled_target_adaptive"
 SELECTION_MODES = ("threshold", "top_k", "per_class_top_k")
+_OPTIONAL_INT_SENTINELS = {"", "none", "null", "all", "full"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +54,9 @@ def select_confident_probability_rows(
     order = np.argsort(matrix, axis=1)
     predicted = order[:, -1]
     second = order[:, -2] if matrix.shape[1] > 1 else order[:, -1]
-    confidences = matrix[np.arange(matrix.shape[0]), predicted]
-    margins = confidences - matrix[np.arange(matrix.shape[0]), second]
+    row_indices = np.arange(matrix.shape[0])
+    confidences = matrix[row_indices, predicted]
+    margins = confidences - matrix[row_indices, second]
     selected = margins >= cfg.min_margin
     if cfg.mode == "threshold":
         selected &= confidences >= cfg.threshold
@@ -83,9 +85,8 @@ def confidence_selection_config(
     min_margin: float | str = 0.0,
     epsilon: float | str = 1e-12,
 ) -> ConfidenceSelectionConfig:
-    mode_name = normalize_selection_mode(mode)
     return ConfidenceSelectionConfig(
-        mode=mode_name,
+        mode=normalize_selection_mode(mode),
         threshold=_unit_interval_float(threshold, name="threshold"),
         top_k=_optional_positive_int(top_k, name="top_k"),
         per_class_top_k=_optional_positive_int(per_class_top_k, name="per_class_top_k"),
@@ -162,7 +163,9 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
 
 
 def _optional_positive_int(value: int | str | None, *, name: str) -> int | None:
-    if value in {None, "", "none", "None", "all"}:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in _OPTIONAL_INT_SENTINELS:
         return None
     return _positive_int(value, name=name)
 
