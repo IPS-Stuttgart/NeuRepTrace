@@ -131,7 +131,7 @@ def fit_domain_classifier_importance_weights(
 
 def domain_importance_config(
     *,
-    clip: Sequence[float] | str | None = DEFAULT_WEIGHT_CLIP,
+    clip: Sequence[float] | str | bool | None = DEFAULT_WEIGHT_CLIP,
     normalize: bool | str = True,
     account_for_sample_priors: bool | str = True,
     epsilon: float | str = DEFAULT_EPSILON,
@@ -243,9 +243,13 @@ def _metadata(
     }
 
 
-def _normalize_clip(value: Sequence[float] | str | None) -> tuple[float, float] | None:
+def _normalize_clip(value: Sequence[float] | str | bool | None) -> tuple[float, float] | None:
     if value is None:
         return None
+    if isinstance(value, (bool, np.bool_)):
+        if not bool(value):
+            return None
+        raise ValueError("clip must be disabled with false/off/none or contain exactly two numeric bounds.")
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"", "none", "off", "false", "null"}:

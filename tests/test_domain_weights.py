@@ -48,6 +48,16 @@ def test_domain_weights_record_clip_none() -> None:
     assert np.isclose(result.sample_weights.mean(), 1.0)
 
 
+def test_domain_importance_config_treats_boolean_false_clip_as_disabled() -> None:
+    assert domain_importance_config(clip=False).clip is None
+    assert domain_importance_config(clip=np.bool_(False)).clip is None
+
+
+def test_domain_importance_config_rejects_boolean_true_clip() -> None:
+    with pytest.raises(ValueError, match="clip"):
+        domain_importance_config(clip=True)
+
+
 def test_apply_domain_weights_preserves_composite_source_labels() -> None:
     features, labels, weights = apply_domain_importance_weights(
         [[0.0, 0.1], [1.0, 1.1]],
