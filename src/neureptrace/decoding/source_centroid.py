@@ -17,6 +17,8 @@ SOURCE_CENTROID_PROTOCOL = "strict_source_only_centroid_decoder"
 SOURCE_CENTROID_CATEGORY = "1_strict_source_only"
 DEFAULT_TEMPERATURE = 1.0
 DEFAULT_EPSILON = 1e-8
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +99,7 @@ def fit_source_centroid_decoder(
 def source_centroid_config(
     *,
     temperature: float | str = DEFAULT_TEMPERATURE,
-    use_diagonal_scale: bool = True,
+    use_diagonal_scale: bool | str | int | float = True,
     shrinkage: float | str = 0.0,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> SourceCentroidConfig:
@@ -105,7 +107,7 @@ def source_centroid_config(
 
     return SourceCentroidConfig(
         temperature=_positive_float(temperature, name="temperature"),
-        use_diagonal_scale=bool(use_diagonal_scale),
+        use_diagonal_scale=_boolean(use_diagonal_scale, name="use_diagonal_scale"),
         shrinkage=_unit_interval_float(shrinkage, name="shrinkage"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
@@ -186,6 +188,31 @@ def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, n
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _boolean(value: Any, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        return _boolean(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    raise ValueError(f"{name} must be a boolean value.")
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
