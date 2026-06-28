@@ -207,9 +207,16 @@ class ProbabilityObservationTable:
         if "train_time" not in result.columns and "time" in result.columns:
             result["train_time"] = result["time"]
         for column in STANDARD_OBSERVATION_COLUMNS:
+            fill_value = defaults.get(column, "")
             if column not in result.columns:
-                result[column] = defaults.get(column, "")
+                result[column] = fill_value
+                continue
+            missing = _empty_or_missing(result[column])
+            if bool(missing.any()):
+                result.loc[missing, column] = fill_value
         for column, value in defaults.items():
+            if column in STANDARD_OBSERVATION_COLUMNS:
+                continue
             if column not in result.columns:
                 result[column] = value
                 continue
