@@ -23,12 +23,44 @@ def _iter_metric_groups(frame: pd.DataFrame, group_columns: Sequence[str]) -> It
     yield from frame.groupby(list(group_columns), dropna=False, sort=True)
 
 
+def _top_k_accuracy_from_label_values(
+    probabilities: np.ndarray,
+    true_labels: np.ndarray,
+    label_values: Sequence[int],
+    *,
+    k: int,
+) -> float:
+    """Return top-k accuracy with deterministic class-column tie handling."""
+
+    observation_ensemble = importlib.import_module("neureptrace.observation_ensemble")
+    probabilities = np.asarray(probabilities, dtype=float)
+    true_labels = np.asarray(true_labels, dtype=int).reshape(-1)
+    label_values_array = np.asarray(label_values, dtype=int)
+    if probabilities.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional array.")
+    if probabilities.shape[0] != true_labels.shape[0]:
+        raise ValueError("probabilities and true_labels must contain the same number of rows.")
+    if probabilities.shape[1] != label_values_array.shape[0]:
+        raise ValueError("label_values must contain one label per probability column.")
+    k = observation_ensemble._validate_positive_integer(k, name="k")
+
+    effective_k = min(k, probabilities.shape[1])
+    if effective_k >= probabilities.shape[1]:
+        valid_labels = np.isin(true_labels, label_values_array)
+        return float(np.mean(valid_labels))
+
+    top_positions = np.argsort(-probabilities, axis=1, kind="mergesort")[:, :effective_k]
+    top_labels = label_values_array[top_positions]
+    return float(np.mean(np.any(top_labels == true_labels[:, None], axis=1)))
+
+
 def install() -> None:
     """Patch ensemble metric summaries so ungrouped tables produce one global row."""
 
     importlib.import_module("neureptrace._observation_ensemble_string_groups_patch").install()
 
     observation_ensemble = importlib.import_module("neureptrace.observation_ensemble")
+    observation_ensemble._top_k_accuracy_from_label_values = _top_k_accuracy_from_label_values
     original_summarize = observation_ensemble.summarize_ensemble_metrics
     if getattr(original_summarize, _PATCH_MARKER, False):
         return
