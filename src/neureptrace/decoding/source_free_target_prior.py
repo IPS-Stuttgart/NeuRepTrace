@@ -218,9 +218,22 @@ def format_target_prior(prior: np.ndarray) -> str:
 
 def _target_prior_correction_mode(value: Any) -> str:
     mode = str(value).strip().lower().replace("-", "_")
-    if mode in {"", "none", "off", "false"}:
+    if mode in {"", "none", "off", "false", "no", "0", "disabled", "disable"}:
         return "none"
-    if mode in {"balanced", "uniform", "train_uniform", "target_balanced", "balanced_smoothed", "smoothed_balanced"}:
+    if mode in {
+        "balanced",
+        "uniform",
+        "train_uniform",
+        "target_balanced",
+        "balanced_smoothed",
+        "smoothed_balanced",
+        "on",
+        "true",
+        "yes",
+        "1",
+        "enabled",
+        "enable",
+    }:
         return "balanced"
     raise ValueError("target_prior_correction must be one of: none, balanced.")
 
