@@ -12,6 +12,7 @@ from . import (  # noqa: E402
     _adaptive_normalization_bool_config_patch,
     _adversarial_composite_labels_patch,
     _alignment_window_config_patch,
+    _bushmeg_all_protocols_audit_list_values_patch,
     _bushmeg_all_protocols_prediction_metric_patch,
     _bushmeg_all_protocols_report_protocol_labels_patch,
     _bushmeg_all_protocols_topk_tie_patch,
@@ -208,6 +209,7 @@ _category2_autoencoder_all_protocols_patch.install()
 _category2_autoencoder_max_folds_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_smoke_enabled_bool_patch.install()
+_bushmeg_all_protocols_audit_list_values_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
 _bushmeg_all_protocols_report_protocol_labels_patch.install()
 _bushmeg_all_protocols_topk_tie_patch.install()
