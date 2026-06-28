@@ -53,6 +53,8 @@ def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_sample
         weights = raw_weights.astype(float, copy=False)
     except (TypeError, ValueError) as exc:
         raise ValueError("sample_weight must contain numeric weights") from exc
+    if weights.ndim == 2 and weights.shape[1] == 1:
+        weights = weights.reshape(-1)
     if weights.ndim != 1:
         raise ValueError("sample_weight must have shape (n_samples,)")
     if weights.shape[0] != n_samples:
