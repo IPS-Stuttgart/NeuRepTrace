@@ -139,11 +139,62 @@ def install() -> None:
             raise KeyError(f"Precomputed feature table is missing {len(missing)} requested row id(s): {preview}.")
         return table.features[[index[row_id] for row_id in requested]].astype(np.float32, copy=False)
 
+    def fit_precomputed_foundation_probe(
+        *,
+        feature_table,
+        train_row_ids,
+        train_labels,
+        test_row_ids,
+        classifier=None,
+        classifier_C: float = 1.0,
+        classifier_max_iter: int = 1000,
+        classifier_class_weight="balanced",
+        sample_weight=None,
+    ):
+        labels = module._label_vector(train_labels)
+        train_ids = _row_id_tuple(train_row_ids, expected_length=labels.shape[0], name="train_row_ids")
+        test_ids = _row_id_tuple(test_row_ids, name="test_row_ids")
+        if labels.shape[0] != len(train_ids):
+            raise ValueError(f"train_labels must contain one value per train row id: {labels.shape[0]} != {len(train_ids)}.")
+        if labels.shape[0] < 1 or np.unique(labels).shape[0] < 2:
+            raise ValueError("train_labels must contain at least two classes.")
+        train_features = align_precomputed_foundation_features(feature_table, train_ids)
+        test_features = align_precomputed_foundation_features(feature_table, test_ids)
+        weights = None if sample_weight is None else np.asarray(sample_weight, dtype=float).reshape(-1)
+        if weights is not None:
+            if weights.shape[0] != labels.shape[0]:
+                raise ValueError(f"sample_weight must contain one value per train row: {weights.shape[0]} != {labels.shape[0]}.")
+            if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
+                raise ValueError("sample_weight must contain finite non-negative values.")
+
+        model = module.clone(classifier) if classifier is not None else module.LogisticRegression(
+            C=module._positive_float(classifier_C, name="classifier_C"),
+            max_iter=module._positive_int(classifier_max_iter, name="classifier_max_iter"),
+            class_weight=classifier_class_weight,
+            random_state=13,
+        )
+        fit_kwargs = {} if weights is None else {"sample_weight": weights}
+        model.fit(train_features, labels, **fit_kwargs)
+        predictions = np.asarray(model.predict(test_features))
+        probabilities = module._predict_probabilities_or_none(model, test_features)
+        classes = np.asarray(getattr(model, "classes_", np.unique(labels)))
+        metadata = module._probe_metadata(feature_table, n_train_rows=len(train_ids), n_test_rows=len(test_ids), classifier=model)
+        return module.PrecomputedFoundationProbeResult(
+            train_features=train_features,
+            test_features=test_features,
+            predictions=predictions,
+            probabilities=probabilities,
+            classes=classes,
+            classifier=model,
+            metadata=metadata,
+        )
+
     module._row_id_tuple = _row_id_tuple
     module.PrecomputedFoundationFeatureTable.__post_init__ = __post_init__
     module._load_npz_features = _load_npz_features
     module.make_precomputed_foundation_feature_table = make_precomputed_foundation_feature_table
     module.align_precomputed_foundation_features = align_precomputed_foundation_features
+    module.fit_precomputed_foundation_probe = fit_precomputed_foundation_probe
     setattr(module, _PATCH_MARKER, True)
 
 
