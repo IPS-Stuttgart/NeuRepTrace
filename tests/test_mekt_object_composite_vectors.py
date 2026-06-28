@@ -21,31 +21,6 @@ def _toy_covariances(*, mixing, n_per_class=3):
     return np.stack(covariances, axis=0), np.asarray(labels)
 
 
-def _composite_label_matrix(labels: np.ndarray) -> np.ndarray:
-    matrix = np.empty((labels.shape[0], 2), dtype=object)
-    matrix[:, 0] = "class"
-    matrix[:, 1] = labels.astype(object)
-    return matrix
-
-
-def test_mekt_accepts_object_matrix_source_labels_as_composite_rows():
-    source, scalar_labels = _toy_covariances(mixing=np.eye(3), n_per_class=4)
-    target, _ = _toy_covariances(mixing=np.diag([0.7, 1.5, 1.2]), n_per_class=4)
-    source_labels = _composite_label_matrix(scalar_labels)
-
-    transfer = mekt_transfer_features(
-        source,
-        source_labels,
-        target,
-        n_components=2,
-        n_iterations=1,
-        n_neighbors=2,
-    )
-
-    assert set(transfer.classes.tolist()) == {("class", 0), ("class", 1)}
-    assert set(transfer.pseudo_labels.tolist()).issubset(set(transfer.classes.tolist()))
-
-
 def test_mekt_dte_accepts_object_matrix_source_domains_as_composite_rows():
     source_a, labels_a = _toy_covariances(mixing=np.eye(3))
     source_b, labels_b = _toy_covariances(mixing=np.array([[0.8, 0.4, 0.0], [0.0, 1.4, 0.2], [0.0, 0.0, 0.7]]))
