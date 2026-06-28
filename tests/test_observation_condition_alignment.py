@@ -1,10 +1,15 @@
+from pathlib import Path
+
 import pandas as pd
 
-from neureptrace.results import subject_time_metrics
+from neureptrace.results import aggregate_time_decode_csvs
 
 
-def test_observations_inherit_singleton_nondefault_condition():
-    results = pd.DataFrame(
+def test_observations_inherit_singleton_nondefault_condition_from_csv(tmp_path: Path):
+    result_csv = tmp_path / "result.csv"
+    observation_csv = tmp_path / "observations.csv"
+    summary_csv = tmp_path / "summary.csv"
+    pd.DataFrame(
         {
             "subject": ["s1", "s1"],
             "time": [0.1, 0.1],
@@ -14,8 +19,8 @@ def test_observations_inherit_singleton_nondefault_condition():
             "ece": [0.9, 0.9],
             "emission_mode": ["uncalibrated", "uncalibrated"],
         }
-    )
-    observations = pd.DataFrame(
+    ).to_csv(result_csv, index=False)
+    pd.DataFrame(
         {
             "subject": ["s1", "s1"],
             "time": [0.1, 0.1],
@@ -23,9 +28,9 @@ def test_observations_inherit_singleton_nondefault_condition():
             "prob_class_0": [0.8, 0.2],
             "prob_class_1": [0.2, 0.8],
         }
-    )
+    ).to_csv(observation_csv, index=False)
 
-    metrics = subject_time_metrics(results, observations=observations)
+    summary = aggregate_time_decode_csvs([result_csv], summary_csv, observation_csv_paths=[observation_csv])
 
-    assert metrics["emission_mode"].tolist() == ["uncalibrated"]
-    assert metrics["ece"].round(6).tolist() == [0.2]
+    assert summary["emission_mode"].tolist() == ["uncalibrated"]
+    assert summary["ece_mean"].round(6).tolist() == [0.2]
