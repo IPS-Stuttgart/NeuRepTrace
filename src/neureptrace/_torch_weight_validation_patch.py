@@ -35,18 +35,63 @@ def _labels_from_call(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any | No
     return kwargs.get("labels", kwargs.get("y"))
 
 
+def _label_vector(labels: Any) -> np.ndarray:
+    """Return one label object per sample, preserving composite labels."""
+
+    labels_array = np.asarray(labels, dtype=object)
+    if labels_array.ndim == 0:
+        vector = np.empty(1, dtype=object)
+        vector[0] = labels_array.item()
+        return vector
+    if labels_array.ndim == 1:
+        return labels_array.reshape(-1)
+
+    rows = labels_array.reshape(labels_array.shape[0], -1)
+    if rows.shape[1] == 1:
+        return rows[:, 0].reshape(-1)
+    vector = np.empty(rows.shape[0], dtype=object)
+    for index, row in enumerate(rows):
+        vector[index] = tuple(row.tolist())
+    return vector
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
+
+
+def _class_counts(labels: np.ndarray) -> list[int]:
+    counts: list[int] = []
+    classes: list[Any] = []
+    for label in labels.tolist():
+        for index, class_label in enumerate(classes):
+            if _values_equal(label, class_label):
+                counts[index] += 1
+                break
+        else:
+            classes.append(label)
+            counts.append(1)
+    return counts
+
+
 def _small_stratified_holdout(labels: Any, fraction_value: Any) -> bool:
     fraction = _valid_fraction(fraction_value)
     if fraction is None:
         return False
-    labels_array = np.asarray(labels).reshape(-1)
+    labels_array = _label_vector(labels)
     if labels_array.size < 2:
         return True
-    classes, counts = np.unique(labels_array, return_counts=True)
-    if classes.shape[0] < 2 or counts.min() < 2:
+    counts = _class_counts(labels_array)
+    if len(counts) < 2 or min(counts) < 2:
         return True
     holdout_count = int(np.ceil(labels_array.size * fraction))
-    return holdout_count < classes.shape[0] or labels_array.size - holdout_count < classes.shape[0]
+    return holdout_count < len(counts) or labels_array.size - holdout_count < len(counts)
 
 
 def _install_fit_guard(class_object: type, *attribute_names: str) -> None:
