@@ -226,6 +226,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"unrecognized arguments: {' '.join(remaining)}")
 
     if args.list_commands:
+        if args.command is not None or remaining:
+            extras = [arg for arg in (args.command, *remaining) if arg is not None]
+            parser.error("--list-commands/--list does not accept workflow names or extra arguments: " + " ".join(extras))
         print(_command_listing(args.list_format))
         return 0
 

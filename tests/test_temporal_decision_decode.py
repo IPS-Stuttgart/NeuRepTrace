@@ -38,6 +38,16 @@ def _synthetic_grouped_dataset() -> EpochDataset:
     )
 
 
+def _with_metadata(dataset: EpochDataset, metadata: pd.DataFrame) -> EpochDataset:
+    return EpochDataset(
+        data=dataset.data,
+        times=dataset.times,
+        channel_names=dataset.channel_names,
+        metadata=metadata,
+        name=dataset.name,
+    )
+
+
 def test_decoders_supports_logistic_svm_ensemble_alias():
     assert _decoders("logistic-svm-ensemble") == ("multinomial-logistic", "linear_svm")
 
@@ -105,6 +115,45 @@ def test_temporal_decision_decode_runs_leave_one_group_out(tmp_path):
     probability_columns = [column for column in observations.columns if column.startswith("prob_class_")]
     assert len(probability_columns) == 3
     np.testing.assert_allclose(observations[probability_columns].sum(axis=1), 1.0, atol=1e-8)
+
+
+def test_temporal_decision_decode_rejects_empty_labeled_grouped_subset(tmp_path: Path) -> None:
+    dataset = _synthetic_grouped_dataset()
+    metadata = dataset.metadata.copy()
+    metadata["stimulus"] = np.nan
+    dataset = _with_metadata(dataset, metadata)
+
+    with pytest.raises(ValueError, match="no rows with non-missing"):
+        run_temporal_decision_decode_dataset(
+            dataset,
+            label_column="stimulus",
+            group_column="participant",
+            out_path=tmp_path / "summary.csv",
+            emission_mode="uncalibrated",
+        )
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "message"),
+    [
+        ("stimulus", 0, "at least two classes"),
+        ("participant", "p0", "at least two groups"),
+    ],
+)
+def test_temporal_decision_decode_rejects_degenerate_loso_inputs(tmp_path: Path, column: str, value: object, message: str) -> None:
+    dataset = _synthetic_grouped_dataset()
+    metadata = dataset.metadata.copy()
+    metadata[column] = value
+    dataset = _with_metadata(dataset, metadata)
+
+    with pytest.raises(ValueError, match=message):
+        run_temporal_decision_decode_dataset(
+            dataset,
+            label_column="stimulus",
+            group_column="participant",
+            out_path=tmp_path / "summary.csv",
+            emission_mode="uncalibrated",
+        )
 
 
 @pytest.mark.parametrize(
