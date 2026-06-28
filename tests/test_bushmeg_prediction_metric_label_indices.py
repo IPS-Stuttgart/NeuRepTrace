@@ -20,3 +20,9 @@ def test_prediction_metric_label_indices_reject_fractional_near_integer_values()
 
 def test_prediction_metric_label_indices_reject_nonfinite_values() -> None:
     assert _numeric_label_indices(pd.Series([0.0, np.inf, 2.0])) is None
+
+
+def test_prediction_metric_label_indices_reject_bool_typed_values() -> None:
+    values = pd.Series([0 == 1, 1 == 1])
+
+    assert _numeric_label_indices(values) is None
