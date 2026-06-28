@@ -45,6 +45,7 @@ from . import (  # noqa: E402
     _decoding_c_grid_patch,
     _decoding_classifier_param_patch,
     _decoding_grouped_cv_patch,
+    _decoding_option_type_validation_patch,
     _decoding_probability_patch,
     _decoding_regularization_patch,
     _event_detection_extensions,
@@ -191,6 +192,7 @@ _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
 _decoding_classifier_param_patch.install()
 _decoding_grouped_cv_patch.install()
+_decoding_option_type_validation_patch.install()
 _decoding_probability_patch.install()
 _few_shot_target_index_patch.install()
 _observation_schema_probability_patch.install()
