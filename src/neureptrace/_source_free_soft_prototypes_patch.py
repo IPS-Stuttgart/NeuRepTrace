@@ -170,6 +170,8 @@ def _fit(self, target_features: np.ndarray, *, source_model: Any | None = None, 
         balanced_topk_per_class=balanced_topk_per_class,
         min_class_count=min_class_count,
     )
+    if prototype_estimator == "soft_all" and max_iterations > 0 and prototype_weight > 0.0:
+        final_selected = np.ones_like(final_selected, dtype=bool)
     self.source_model_ = model
     self.classes_ = classes_array
     self.n_features_in_ = x_target.shape[1]
