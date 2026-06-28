@@ -91,6 +91,52 @@ def _labels_to_probability_positions(group: pd.DataFrame, prob_columns: Sequence
     return np.asarray(positions, dtype=int)
 
 
+def _label_only_metric_vectors(group: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Return comparable true/predicted vectors when probabilities are absent.
+
+    The label-only path must mirror the probability path: explicit
+    ``*_label_index`` columns are canonical when both true and predicted indices
+    are available. Raw dataset labels can be numeric without being zero-based
+    class positions, so resolving them before explicit indices corrupts metrics.
+    """
+
+    metric_patch = importlib.import_module("neureptrace._bushmeg_all_protocols_prediction_metric_patch")
+    if "true_label_index" in group.columns and "predicted_label_index" in group.columns:
+        true_indices = metric_patch._numeric_label_indices(group["true_label_index"])
+        predicted_indices = metric_patch._numeric_label_indices(group["predicted_label_index"])
+        if true_indices is not None and predicted_indices is not None:
+            if true_indices.shape[0] != predicted_indices.shape[0]:
+                raise ValueError("Prediction metrics require true and predicted labels to have the same row count.")
+            return true_indices, predicted_indices
+
+    true_indices = None
+    predicted_indices = None
+    if "true_label" in group.columns:
+        true_indices = metric_patch._label_indices_from_named_column(group, "true_label")
+    if true_indices is None and "true_label_index" in group.columns:
+        true_indices = metric_patch._numeric_label_indices(group["true_label_index"])
+    if "predicted_label" in group.columns:
+        predicted_indices = metric_patch._label_indices_from_named_column(group, "predicted_label")
+    if predicted_indices is None and "predicted_label_index" in group.columns:
+        predicted_indices = metric_patch._numeric_label_indices(group["predicted_label_index"])
+
+    if true_indices is not None and predicted_indices is not None:
+        if true_indices.shape[0] != predicted_indices.shape[0]:
+            raise ValueError("Prediction metrics require true and predicted labels to have the same row count.")
+        return true_indices, predicted_indices
+
+    true_values = metric_patch._raw_label_values(group, index_column="true_label_index", label_column="true_label", role="true")
+    predicted_values = metric_patch._raw_label_values(
+        group,
+        index_column="predicted_label_index",
+        label_column="predicted_label",
+        role="predicted",
+    )
+    if true_values.shape[0] != predicted_values.shape[0]:
+        raise ValueError("Prediction metrics require true and predicted labels to have the same row count.")
+    return true_values.astype(str), predicted_values.astype(str)
+
+
 def install() -> None:
     """Patch all-protocol prediction metric recomputation edge cases."""
 
@@ -104,8 +150,10 @@ def install() -> None:
     metric_patch = importlib.import_module("neureptrace._bushmeg_all_protocols_prediction_metric_patch")
     metric_patch._top_k_accuracy = _top_k_accuracy
     metric_patch._labels_to_probability_positions = _labels_to_probability_positions
+    metric_patch._label_only_metric_vectors = _label_only_metric_vectors
     all_protocols._top_k_accuracy = _top_k_accuracy
     all_protocols._labels_to_probability_positions = _labels_to_probability_positions
+    all_protocols._label_only_metric_vectors = _label_only_metric_vectors
     setattr(all_protocols, _PATCH_MARKER, True)
 
 
