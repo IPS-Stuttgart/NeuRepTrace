@@ -15,6 +15,7 @@ from neureptrace.metrics import brier_score_multiclass, expected_calibration_err
 
 _PATCH_MARKER = "_neureptrace_bushmeg_all_protocols_prediction_metric_patch_installed"
 _CLASS_COLUMN_RE = re.compile(r"^class_(\d+)$")
+_PROBABILITY_COLUMN_PREFIX = "prob_class_"
 _METRIC_JOIN_COLUMNS = (
     "fold_index",
     "target_calibration_per_class",
@@ -58,6 +59,51 @@ def _numeric_label_indices(values: pd.Series) -> np.ndarray | None:
     return as_int
 
 
+def _coerce_integer_token(value: Any) -> int | None:
+    """Return an integer for scalar class-index tokens, otherwise ``None``."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    if isinstance(value, np.generic):
+        value = value.item()
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    try:
+        parsed = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
+        return None
+    return int(parsed)
+
+
+def _probability_column_suffix(column: Any) -> str:
+    text = str(column)
+    if not text.startswith(_PROBABILITY_COLUMN_PREFIX):
+        raise ValueError(f"Probability column {text!r} does not start with {_PROBABILITY_COLUMN_PREFIX!r}.")
+    return text[len(_PROBABILITY_COLUMN_PREFIX) :]
+
+
+def _probability_column_sort_key(column: Any) -> tuple[int, int | str, str]:
+    suffix = _probability_column_suffix(column)
+    numeric = _coerce_integer_token(suffix)
+    if numeric is not None:
+        return (0, numeric, suffix)
+    return (1, suffix, suffix)
+
+
+def _probability_columns(frame: pd.DataFrame) -> list[str]:
+    """Return deterministic probability columns for numeric or named classes."""
+
+    columns = [str(column) for column in frame.columns if str(column).startswith(_PROBABILITY_COLUMN_PREFIX)]
+    return sorted(columns, key=_probability_column_sort_key)
+
+
 def _class_name_index_map(group: pd.DataFrame) -> dict[str, int]:
     mapping: dict[str, int] = {}
     for column in group.columns:
@@ -68,6 +114,10 @@ def _class_name_index_map(group: pd.DataFrame) -> dict[str, int]:
         if len(values) == 1:
             mapping[str(values[0])] = int(match.group(1))
     return mapping
+
+
+def _class_index_name_map(group: pd.DataFrame) -> dict[int, str]:
+    return {class_index: name for name, class_index in _class_name_index_map(group).items()}
 
 
 def _label_indices_from_named_column(group: pd.DataFrame, column: str) -> np.ndarray | None:
@@ -148,17 +198,89 @@ def _label_only_metric_vectors(group: pd.DataFrame) -> tuple[np.ndarray, np.ndar
 
 
 def _probability_class_indices(prob_columns: Sequence[str]) -> np.ndarray:
-    return np.asarray([int(str(column).rsplit("_", 1)[-1]) for column in prob_columns], dtype=int)
+    indices: list[int] = []
+    for column in prob_columns:
+        suffix = _probability_column_suffix(column)
+        class_index = _coerce_integer_token(suffix)
+        if class_index is None:
+            raise ValueError(f"Probability column {column!r} does not encode a numeric class index.")
+        indices.append(class_index)
+    return np.asarray(indices, dtype=int)
 
 
-def _labels_to_probability_positions(label_indices: np.ndarray, prob_class_indices: np.ndarray) -> np.ndarray:
-    position_by_class = {int(class_index): position for position, class_index in enumerate(prob_class_indices)}
+def _probability_position_lookup(prob_columns: Sequence[str]) -> dict[Any, int]:
+    lookup: dict[Any, int] = {}
+    for position, column in enumerate(prob_columns):
+        suffix = _probability_column_suffix(column)
+        lookup[suffix] = position
+        numeric = _coerce_integer_token(suffix)
+        if numeric is not None:
+            lookup[numeric] = position
+            lookup[str(numeric)] = position
+    return lookup
+
+
+def _candidate_label_keys(value: Any) -> list[Any]:
+    if isinstance(value, np.generic):
+        value = value.item()
+    try:
+        if pd.isna(value):
+            return []
+    except (TypeError, ValueError):
+        pass
+    keys: list[Any] = [value, str(value)]
+    numeric = _coerce_integer_token(value)
+    if numeric is not None:
+        keys.extend([numeric, str(numeric)])
+    deduplicated: list[Any] = []
+    for key in keys:
+        if key not in deduplicated:
+            deduplicated.append(key)
+    return deduplicated
+
+
+def _resolve_probability_position(value: Any, lookup: Mapping[Any, int], class_name_by_index: Mapping[int, str]) -> int | None:
+    for key in _candidate_label_keys(value):
+        if key in lookup:
+            return int(lookup[key])
+    numeric = _coerce_integer_token(value)
+    if numeric is not None and numeric in class_name_by_index:
+        class_name = class_name_by_index[numeric]
+        for key in _candidate_label_keys(class_name):
+            if key in lookup:
+                return int(lookup[key])
+    return None
+
+
+def _labels_to_probability_positions(group: pd.DataFrame, prob_columns: Sequence[str]) -> np.ndarray:
+    lookup = _probability_position_lookup(prob_columns)
+    class_index_by_name = _class_name_index_map(group)
+    class_name_by_index = {index: name for name, index in class_index_by_name.items()}
+    label_columns = [column for column in ("true_label", "true_label_index") if column in group.columns]
+    if not label_columns:
+        raise ValueError("Prediction metrics require true_label or true_label_index.")
+
     positions: list[int] = []
-    for label_index in label_indices:
-        class_index = int(label_index)
-        if class_index not in position_by_class:
-            raise ValueError(f"true_label_index {class_index} is absent from probability columns.")
-        positions.append(position_by_class[class_index])
+    missing: list[Any] = []
+    for _, row in group.iterrows():
+        resolved: int | None = None
+        for column in label_columns:
+            value = row[column]
+            resolved = _resolve_probability_position(value, lookup, class_name_by_index)
+            if resolved is not None:
+                break
+            class_index = class_index_by_name.get(str(value))
+            if class_index is not None:
+                resolved = _resolve_probability_position(class_index, lookup, class_name_by_index)
+                if resolved is not None:
+                    break
+        if resolved is None:
+            missing.append(row[label_columns[0]])
+        else:
+            positions.append(resolved)
+    if missing:
+        preview = ", ".join(repr(value) for value in missing[:5])
+        raise ValueError(f"Prediction metrics cannot map true label(s) to probability columns: {preview}.")
     return np.asarray(positions, dtype=int)
 
 
@@ -184,7 +306,6 @@ def _prediction_metric_frame(predictions: pd.DataFrame) -> pd.DataFrame:
     if predictions.empty or not has_truth or (not prob_columns and not has_predictions):
         return pd.DataFrame()
 
-    prob_class_indices = _probability_class_indices(prob_columns) if prob_columns else np.asarray([], dtype=int)
     group_columns = _prediction_group_columns(predictions)
     rows: list[dict[str, Any]] = []
     groupby_key: str | list[str] = group_columns[0] if len(group_columns) == 1 else group_columns
@@ -195,8 +316,7 @@ def _prediction_metric_frame(predictions: pd.DataFrame) -> pd.DataFrame:
 
         if prob_columns:
             probabilities = group[prob_columns].astype(float).to_numpy()
-            label_indices = _label_indices_from_group(group)
-            labels = _labels_to_probability_positions(label_indices, prob_class_indices)
+            labels = _labels_to_probability_positions(group, prob_columns)
             predicted = probabilities.argmax(axis=1)
             rows.append(
                 {
@@ -341,13 +461,14 @@ def _normalize_summary(
 
 
 def install() -> None:
-    """Patch all-protocol metric recomputation to respect explicit class indices."""
+    """Patch all-protocol metric recomputation to respect explicit class labels."""
 
     all_protocols = importlib.import_module("neureptrace.bushmeg_all_protocols")
     if getattr(all_protocols, _PATCH_MARKER, False):
         return
 
     all_protocols._top_k_accuracy = _top_k_accuracy
+    all_protocols._probability_columns = _probability_columns
     all_protocols._prediction_metric_frame = _prediction_metric_frame
     all_protocols._normalize_summary = _normalize_summary
     setattr(all_protocols, _PATCH_MARKER, True)
