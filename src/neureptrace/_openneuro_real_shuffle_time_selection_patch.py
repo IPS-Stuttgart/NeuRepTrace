@@ -19,17 +19,21 @@ BOOLEAN_MANIFEST_COMPATIBILITY_COLUMNS = {
     "ensemble_source_baseline_debiasing",
     "label_shuffle_control",
 }
-_TRUE_TOKENS = {"1", "true", "yes", "y", "on"}
-_FALSE_TOKENS = {"0", "false", "no", "n", "off"}
+_TRUE_TOKENS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_TOKENS = {"0", "false", "f", "no", "n", "off"}
 
 
 def _bool_token(value: Any) -> str | None:
-    if isinstance(value, bool):
-        return "true" if value else "false"
+    if isinstance(value, (bool, np.bool_)):
+        return "true" if bool(value) else "false"
     if value is None:
         return None
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and value in {0, 1}:
-        return "true" if bool(value) else "false"
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        if numeric == 0.0:
+            return "false"
+        if numeric == 1.0:
+            return "true"
     text = str(value).strip().lower()
     if text in _TRUE_TOKENS:
         return "true"
