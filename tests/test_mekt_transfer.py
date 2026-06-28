@@ -86,26 +86,31 @@ def test_mekt_accepts_single_column_source_domain_vectors():
     assert transfer.source_features.shape == (8, 6)
 
 
-def test_mekt_rejects_matrix_shaped_labels_but_accepts_rowwise_composite_source_domains():
+def test_mekt_rejects_matrix_labels_but_preserves_rowwise_domain_matrices():
     source, labels = _toy_covariances(mixing=np.eye(3))
     target, _ = _toy_covariances(mixing=np.eye(3))
     label_matrix = np.asarray([[0, 1], [0, 1], [0, 1], [0, 1]], dtype=int)
+    object_label_matrix = np.asarray([("class", str(label)) for label in labels], dtype=object)
     domain_matrix = np.column_stack(
         [
-            np.asarray(["s1"] * 4 + ["s2"] * 4),
-            np.asarray(["run-a"] * source.shape[0]),
+            np.asarray(["subject-a"] * 4 + ["subject-b"] * 4),
+            np.asarray(["run-1"] * 4 + ["run-2"] * 4),
         ]
     )
 
     with pytest.raises(ValueError, match="source_labels must be a one-dimensional vector"):
         mekt_transfer_features(source, label_matrix, target, n_iterations=1, n_neighbors=2)
 
+    with pytest.raises(ValueError, match="source_labels must be a one-dimensional vector"):
+        mekt_transfer_features(source, object_label_matrix, target, n_iterations=1, n_neighbors=2)
+
     transfer = centroid_aligned_tangent_features(source, target, source_domains=domain_matrix)
 
     assert labels.shape[0] == source.shape[0]
     assert transfer.source_domains.shape == (source.shape[0],)
-    assert transfer.source_domains[0] == ("s1", "run-a")
-    assert transfer.source_domains[-1] == ("s2", "run-a")
+    assert transfer.source_domains[:4].tolist() == [("subject-a", "run-1")] * 4
+    assert transfer.source_domains[4:].tolist() == [("subject-b", "run-2")] * 4
+    assert transfer.source_features.shape == (8, 6)
 
 
 def test_mekt_domain_transferability_scores_and_selection():
