@@ -7,6 +7,8 @@ import importlib
 import numpy as np
 import pandas as pd
 
+from . import _openneuro_empty_runs_patch
+
 _PATCH_MARKER = "_neureptrace_openneuro_pre_stimulus_finite_patch_installed"
 
 
@@ -32,6 +34,8 @@ def _finite_max(values: np.ndarray) -> float:
 
 def install() -> None:
     """Make the OpenNeuro pre-stimulus sanity summary finite-aware."""
+
+    _openneuro_empty_runs_patch.install()
 
     module = importlib.import_module("neureptrace.openneuro_real_shuffle_report")
     original = module._pre_stimulus_summary
