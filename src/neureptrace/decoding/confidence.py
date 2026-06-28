@@ -29,9 +29,11 @@ def confidence_scores(probabilities: Sequence[Sequence[float]] | np.ndarray) -> 
     """
 
     matrix = _probability_matrix(probabilities)
-    order = np.argsort(matrix, axis=1)
-    top = order[:, -1]
-    second = order[:, -2]
+    # Use a stable descending order so exact probability ties follow NumPy's
+    # argmax convention and select the first/lowest class index.
+    order = np.argsort(-matrix, axis=1, kind="mergesort")
+    top = order[:, 0]
+    second = order[:, 1]
     rows = np.arange(matrix.shape[0])
     confidence = matrix[rows, top]
     margin = confidence - matrix[rows, second]
