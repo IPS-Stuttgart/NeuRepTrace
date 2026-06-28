@@ -81,6 +81,20 @@ def test_bootstrap_rows_records_smaller_member_row_counts() -> None:
     assert result.metadata["random_subspace_row_fraction"] == 0.5
 
 
+def test_bootstrap_rows_string_false_uses_without_replacement() -> None:
+    train_features, train_labels, test_features = _toy_data()
+
+    result = fit_random_subspace_ensemble(
+        train_features=train_features,
+        train_labels=train_labels,
+        test_features=test_features,
+        config={"n_estimators": 3, "feature_fraction": 1.0, "bootstrap_rows": "false", "row_fraction": 0.5, "random_state": 9},
+    )
+
+    assert result.metadata["random_subspace_bootstrap_rows"] is False
+    assert all(member.row_indices.shape[0] == len(set(member.row_indices.tolist())) for member in result.members)
+
+
 def test_single_class_bootstrap_falls_back_to_all_rows() -> None:
     train_features = np.asarray([[-2.0], [-1.8], [2.0], [2.2]], dtype=float)
     train_labels = np.asarray([0, 0, 1, 1], dtype=object)
@@ -101,6 +115,19 @@ def test_config_validation() -> None:
         random_subspace_ensemble_config(feature_fraction=0.0)
     with pytest.raises(ValueError, match="row_fraction"):
         random_subspace_ensemble_config(row_fraction=2.0)
+
+
+def test_bootstrap_rows_config_normalizes_common_boolean_values() -> None:
+    assert random_subspace_ensemble_config(bootstrap_rows="false").bootstrap_rows is False
+    assert random_subspace_ensemble_config(bootstrap_rows="YES").bootstrap_rows is True
+    assert random_subspace_ensemble_config(bootstrap_rows=np.bool_(False)).bootstrap_rows is False
+    assert random_subspace_ensemble_config(bootstrap_rows=1).bootstrap_rows is True
+
+
+@pytest.mark.parametrize("value", ["maybe", 2, -1, 0.5, np.asarray([False, True])])
+def test_bootstrap_rows_config_rejects_ambiguous_boolean_values(value) -> None:
+    with pytest.raises(ValueError, match="bootstrap_rows"):
+        random_subspace_ensemble_config(bootstrap_rows=value)
 
 
 def test_test_labels_are_not_part_of_public_api() -> None:
