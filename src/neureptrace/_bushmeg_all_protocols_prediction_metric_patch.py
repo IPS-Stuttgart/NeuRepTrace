@@ -53,10 +53,12 @@ def _numeric_label_indices(values: pd.Series) -> np.ndarray | None:
     if numeric.isna().any():
         return None
     as_float = numeric.to_numpy(dtype=float)
-    as_int = as_float.astype(int)
-    if not np.allclose(as_float, as_int):
+    if not np.isfinite(as_float).all():
         return None
-    return as_int
+    rounded = np.rint(as_float)
+    if not np.isclose(as_float, rounded, rtol=0.0, atol=1.0e-12).all():
+        return None
+    return rounded.astype(int)
 
 
 def _coerce_integer_token(value: Any) -> int | None:
