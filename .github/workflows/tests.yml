@@ -47,6 +47,7 @@ jobs:
             matrix:
                 python-version: ["3.11", "3.12", "3.13", "3.14"]
         permissions:
+            contents: read
             checks: write
             pull-requests: write
 
