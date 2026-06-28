@@ -101,4 +101,6 @@ def install() -> None:
     source_weighting._row_group_vector = _row_group_vector
 
 
+install()
+
 __all__ = ["install"]
