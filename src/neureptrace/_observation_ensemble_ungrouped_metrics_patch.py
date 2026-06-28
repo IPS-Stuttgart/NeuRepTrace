@@ -1,4 +1,10 @@
-"""Summarize ensemble metrics without optional grouping columns."""
+"""Summarize ensemble metrics without optional grouping columns.
+
+This patch also keeps observation-ensemble top-k metrics exact under tied
+probabilities.  The unpatched helper sorted probabilities ascending and then
+reversed the sorted columns, so tied rows favored the highest class column rather
+than the stable class-index order used by the other metric summaries.
+"""
 
 from __future__ import annotations
 
@@ -23,12 +29,50 @@ def _iter_metric_groups(frame: pd.DataFrame, group_columns: Sequence[str]) -> It
     yield from frame.groupby(list(group_columns), dropna=False, sort=True)
 
 
+def _validate_positive_integer(value: int, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(numeric)
+
+
+def _top_k_accuracy_from_label_values(
+    probabilities: np.ndarray,
+    true_labels: np.ndarray,
+    label_values: Sequence[int],
+    *,
+    k: int,
+) -> float:
+    """Return exact-k accuracy with stable class-index tie handling."""
+
+    probability_matrix = np.asarray(probabilities, dtype=float)
+    true_label_array = np.asarray(true_labels, dtype=int).reshape(-1)
+    label_values_array = np.asarray(label_values, dtype=int)
+    if probability_matrix.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional array.")
+    if probability_matrix.shape[0] != true_label_array.shape[0]:
+        raise ValueError("probabilities and true_labels must contain the same number of rows.")
+    if probability_matrix.shape[1] != label_values_array.shape[0]:
+        raise ValueError("label_values must contain one label per probability column.")
+
+    effective_k = min(_validate_positive_integer(k, name="k"), probability_matrix.shape[1])
+    top_positions = np.argsort(-probability_matrix, axis=1, kind="mergesort")[:, :effective_k]
+    top_labels = label_values_array[top_positions]
+    return float(np.mean(np.any(top_labels == true_label_array[:, None], axis=1)))
+
+
 def install() -> None:
     """Patch ensemble metric summaries so ungrouped tables produce one global row."""
 
     importlib.import_module("neureptrace._observation_ensemble_string_groups_patch").install()
 
     observation_ensemble = importlib.import_module("neureptrace.observation_ensemble")
+    observation_ensemble._top_k_accuracy_from_label_values = _top_k_accuracy_from_label_values
     original_summarize = observation_ensemble.summarize_ensemble_metrics
     if getattr(original_summarize, _PATCH_MARKER, False):
         return
