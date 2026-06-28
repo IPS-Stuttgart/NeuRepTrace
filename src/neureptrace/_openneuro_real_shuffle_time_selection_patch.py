@@ -1,13 +1,16 @@
-"""Ignore non-finite OpenNeuro real-vs-shuffle time-course rows."""
+"""Apply OpenNeuro real-vs-shuffle and diagnostics runtime patches."""
 
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-_PATCH_MARKER = "_neureptrace_openneuro_real_shuffle_time_selection_patch_installed"
+_TIME_SELECTION_PATCH_MARKER = "_neureptrace_openneuro_real_shuffle_time_selection_patch_installed"
+_PROVENANCE_VALUE_PATCH_MARKER = "_neureptrace_openneuro_provenance_value_patch_installed"
 
 
 def _finite_positions(frame: pd.DataFrame, *columns: str) -> np.ndarray:
@@ -18,12 +21,35 @@ def _finite_positions(frame: pd.DataFrame, *columns: str) -> np.ndarray:
     return np.flatnonzero(mask)
 
 
-def install() -> None:
-    """Make report time selection ignore rows with non-finite time/metric values."""
+def _is_missing_provenance_value(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and value == "")
 
+
+def _install_provenance_value_patch() -> None:
+    module = importlib.import_module("neureptrace.openneuro_decode_diagnostics")
+    original = module._provenance_value
+    if getattr(original, _PROVENANCE_VALUE_PATCH_MARKER, False):
+        return
+
+    def _provenance_value(
+        manifest: Mapping[str, Any],
+        summary_provenance: Mapping[str, str],
+        manifest_key: str,
+        summary_key: str | None = None,
+    ) -> Any:
+        value = manifest.get(manifest_key, "")
+        if not _is_missing_provenance_value(value):
+            return value
+        return summary_provenance.get(summary_key or manifest_key, "")
+
+    setattr(_provenance_value, _PROVENANCE_VALUE_PATCH_MARKER, True)
+    module._provenance_value = _provenance_value
+
+
+def _install_time_selection_patch() -> None:
     module = importlib.import_module("neureptrace.openneuro_real_shuffle_report")
     original_nearest_row = module._nearest_row
-    if getattr(original_nearest_row, _PATCH_MARKER, False):
+    if getattr(original_nearest_row, _TIME_SELECTION_PATCH_MARKER, False):
         return
 
     def _nearest_row(frame: pd.DataFrame, time: float) -> pd.Series:
@@ -48,10 +74,17 @@ def install() -> None:
         best_position = positions[int(np.argmax(values[positions]))]
         return frame.iloc[int(best_position)]
 
-    setattr(_nearest_row, _PATCH_MARKER, True)
-    setattr(_best_time_row, _PATCH_MARKER, True)
+    setattr(_nearest_row, _TIME_SELECTION_PATCH_MARKER, True)
+    setattr(_best_time_row, _TIME_SELECTION_PATCH_MARKER, True)
     module._nearest_row = _nearest_row
     module._best_time_row = _best_time_row
+
+
+def install() -> None:
+    """Install OpenNeuro diagnostics compatibility patches."""
+
+    _install_provenance_value_patch()
+    _install_time_selection_patch()
 
 
 __all__ = ["install"]
