@@ -29,6 +29,8 @@ def _bool_error(name: str) -> ValueError:
 def _normalize_bool(value: Any, *, name: str) -> bool:
     """Normalize YAML/CLI-style boolean tokens while rejecting ambiguous truthiness."""
 
+    if value is None:
+        return False
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, str):
