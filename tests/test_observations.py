@@ -37,6 +37,27 @@ def test_standardized_probability_table_adds_provenance_columns() -> None:
     assert table.probability_columns == ("prob_class_0", "prob_class_1")
 
 
+def test_standardized_probability_table_fills_existing_missing_canonical_columns() -> None:
+    table = ProbabilityObservationTable(
+        pd.DataFrame(
+            {
+                "time": [0.1, 0.2],
+                "session": [pd.NA, ""],
+                "backend": [pd.NA, ""],
+                "decoder": ["logistic", "logistic"],
+                "emission_mode": ["calibrated", "calibrated"],
+                "prob_class_0": [0.4, 0.3],
+                "prob_class_1": [0.6, 0.7],
+            }
+        )
+    ).standardized(defaults={"backend": "sklearn"})
+
+    assert table.frame["session"].tolist() == ["", ""]
+    assert table.frame["backend"].tolist() == ["sklearn", "sklearn"]
+    assert table.frame.loc[0, "train_time"] == 0.1
+    assert table.frame.loc[1, "test_time"] == 0.2
+
+
 def test_from_decoded_fold_builds_valid_canonical_rows() -> None:
     table = ProbabilityObservationTable.from_decoded_fold(
         probabilities=np.array([[0.2, 0.8], [0.9, 0.1]]),

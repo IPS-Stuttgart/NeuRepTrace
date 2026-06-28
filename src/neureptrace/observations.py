@@ -71,8 +71,7 @@ def _value_at(values: Sequence[object] | np.ndarray | pd.Series | None, index: i
 
 def _empty_or_missing(series: pd.Series) -> pd.Series:
     missing = series.isna()
-    if series.dtype == object:
-        missing |= series.astype(str).eq("")
+    missing |= series.astype(object).astype(str).eq("")
     return missing
 
 
@@ -207,9 +206,18 @@ class ProbabilityObservationTable:
         if "train_time" not in result.columns and "time" in result.columns:
             result["train_time"] = result["time"]
         for column in STANDARD_OBSERVATION_COLUMNS:
+            fill_value = defaults.get(column, "")
             if column not in result.columns:
-                result[column] = defaults.get(column, "")
+                result[column] = fill_value
+                continue
+            missing = _empty_or_missing(result[column])
+            if bool(missing.any()):
+                if fill_value == "" and result[column].dtype != object:
+                    result[column] = result[column].astype(object)
+                result.loc[missing, column] = fill_value
         for column, value in defaults.items():
+            if column in STANDARD_OBSERVATION_COLUMNS:
+                continue
             if column not in result.columns:
                 result[column] = value
                 continue
