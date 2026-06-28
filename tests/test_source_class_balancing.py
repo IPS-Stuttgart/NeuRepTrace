@@ -55,6 +55,23 @@ def test_weight_mode_keeps_rows_and_returns_inverse_frequency_weights() -> None:
     assert np.isclose(result.sample_weight[2], 5.0 / 6.0)
 
 
+def test_composite_tuple_labels_are_atomic_for_resampling_and_weights() -> None:
+    features = np.asarray([[0.0], [1.0], [10.0], [11.0], [12.0]], dtype=float)
+    labels = [("face", "early"), ("face", "early"), ("object", "late"), ("object", "late"), ("object", "late")]
+
+    rows = balance_source_classes(features, labels, config={"mode": "oversample", "random_state": 7})
+    weighted = balance_source_classes(features, labels, config={"mode": "weights"})
+
+    assert rows.classes.tolist() == [("face", "early"), ("object", "late")]
+    assert rows.class_counts_before == {("face", "early"): 2, ("object", "late"): 3}
+    assert rows.class_counts_after == {("face", "early"): 3, ("object", "late"): 3}
+    assert rows.labels.tolist().count(("face", "early")) == 3
+    assert rows.labels.tolist().count(("object", "late")) == 3
+    assert weighted.labels.tolist() == labels
+    assert np.isclose(weighted.sample_weight[0], 5.0 / 4.0)
+    assert np.isclose(weighted.sample_weight[2], 5.0 / 6.0)
+
+
 def test_target_count_aliases_and_mode_aliases() -> None:
     assert resolve_target_count([2, 5, 8], "median") == 5
     assert resolve_target_count([2, 5, 8], "mean") == 5
