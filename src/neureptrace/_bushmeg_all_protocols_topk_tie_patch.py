@@ -1,11 +1,13 @@
-"""Resolve tied all-protocol top-k prediction metrics with exact-k semantics."""
+"""Resolve all-protocol prediction metric edge cases."""
 
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_bushmeg_all_protocols_topk_tie_patch_installed"
 
@@ -46,8 +48,51 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     return float(np.mean(hits))
 
 
+def _labels_to_probability_positions(group: pd.DataFrame, prob_columns: Sequence[str]) -> np.ndarray:
+    """Map true labels to probability columns, preferring explicit label indices.
+
+    Prediction tables may carry both a human/dataset-facing ``true_label`` and a
+    model-facing ``true_label_index``.  When raw labels are numeric but not the
+    probability-column indices, resolving ``true_label`` first silently assigns
+    rows to the wrong probability column.  The explicit index column is the
+    canonical metric key whenever it is present; named labels remain supported as
+    a fallback through class_<index> metadata.
+    """
+
+    metric_patch = importlib.import_module("neureptrace._bushmeg_all_protocols_prediction_metric_patch")
+    lookup = metric_patch._probability_position_lookup(prob_columns)
+    class_index_by_name = metric_patch._class_name_index_map(group)
+    class_name_by_index = {index: name for name, index in class_index_by_name.items()}
+    label_columns = [column for column in ("true_label_index", "true_label") if column in group.columns]
+    if not label_columns:
+        raise ValueError("Prediction metrics require true_label or true_label_index.")
+
+    positions: list[int] = []
+    missing: list[Any] = []
+    for _, row in group.iterrows():
+        resolved: int | None = None
+        for column in label_columns:
+            value = row[column]
+            resolved = metric_patch._resolve_probability_position(value, lookup, class_name_by_index)
+            if resolved is not None:
+                break
+            class_index = class_index_by_name.get(str(value))
+            if class_index is not None:
+                resolved = metric_patch._resolve_probability_position(class_index, lookup, class_name_by_index)
+                if resolved is not None:
+                    break
+        if resolved is None:
+            missing.append(row[label_columns[0]])
+        else:
+            positions.append(resolved)
+    if missing:
+        preview = ", ".join(repr(value) for value in missing[:5])
+        raise ValueError(f"Prediction metrics cannot map true label(s) to probability columns: {preview}.")
+    return np.asarray(positions, dtype=int)
+
+
 def install() -> None:
-    """Patch all-protocol prediction metric recomputation to keep top-k exact."""
+    """Patch all-protocol prediction metric recomputation edge cases."""
 
     report_patch = importlib.import_module("neureptrace._bushmeg_all_protocols_report_protocol_labels_patch")
     report_patch.install()
@@ -58,7 +103,9 @@ def install() -> None:
 
     metric_patch = importlib.import_module("neureptrace._bushmeg_all_protocols_prediction_metric_patch")
     metric_patch._top_k_accuracy = _top_k_accuracy
+    metric_patch._labels_to_probability_positions = _labels_to_probability_positions
     all_protocols._top_k_accuracy = _top_k_accuracy
+    all_protocols._labels_to_probability_positions = _labels_to_probability_positions
     setattr(all_protocols, _PATCH_MARKER, True)
 
 
