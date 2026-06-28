@@ -76,7 +76,6 @@ from . import (  # noqa: E402
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
     _observation_schema_string_columns_patch,
-    _observation_ensemble_cli_tolerance_patch,
     _observation_ensemble_missing_label_patch,
     _observation_ensemble_partial_class_columns_patch,
     _observation_ensemble_source_debias_bool_patch,
@@ -199,7 +198,6 @@ _observation_ensemble_partial_class_columns_patch.install()
 _observation_ensemble_source_debias_bool_patch.install()
 _observation_ensemble_string_groups_patch.install()
 _observation_ensemble_ungrouped_metrics_patch.install()
-_observation_ensemble_cli_tolerance_patch.install()
 _observation_ensemble_missing_label_patch.install()
 _probability_stacking_group_summary_patch.install()
 _pls_da_composite_labels_patch.install()
