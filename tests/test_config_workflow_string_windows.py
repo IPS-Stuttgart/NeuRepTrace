@@ -30,7 +30,7 @@ def test_config_workflow_float_pair_rejects_malformed_strings(value: str) -> Non
 def test_legacy_config_workflow_accepts_string_window_controls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 
-    def fake_run_time_resolved_decode(**kwargs):  # noqa: ANN202, ANN003
+    def fake_run_time_resolved_decode(**kwargs: object) -> list[object]:
         captured.update(kwargs)
         return []
 
