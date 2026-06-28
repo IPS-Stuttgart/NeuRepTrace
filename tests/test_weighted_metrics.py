@@ -34,6 +34,20 @@ def test_weighted_probability_metrics_match_manual_averages() -> None:
     assert weighted_expected_calibration_error(probabilities, labels, sample_weight, n_bins=2) == pytest.approx(0.25)
 
 
+def test_weighted_probability_metrics_accept_one_pass_weight_iterables() -> None:
+    probabilities = np.array(
+        [
+            [0.9, 0.1],
+            [0.4, 0.6],
+            [0.8, 0.2],
+        ]
+    )
+    labels = np.array([0, 1, 1])
+
+    np.testing.assert_allclose(validate_sample_weight((value for value in [1.0, 2.0, 3.0]), 3), [1.0, 2.0, 3.0])
+    assert weighted_top_k_accuracy(probabilities, labels, (value for value in [1.0, 2.0, 3.0]), k=1) == pytest.approx(0.5)
+
+
 def test_weighted_reliability_bins_report_weighted_calibration_rows() -> None:
     probabilities = np.array(
         [
