@@ -70,6 +70,22 @@ def _row_id_tuple(values: Any, *, expected_length: int | None = None, name: str 
     return row_ids
 
 
+def _requested_row_ids(values: Any, index: dict[Any, int]) -> tuple[Any, ...]:
+    """Normalize requested row ids, preserving a bare composite-id lookup.
+
+    ``align_precomputed_foundation_features(table, (subject, trial))`` is a
+    natural way to request one composite row id.  Generic sequence normalization
+    would otherwise interpret that tuple as two independent row ids.  If the
+    hashable form is an exact key in the table index, prefer the single-row
+    interpretation; all list/array batches still use the row-wise normalizer.
+    """
+
+    candidate = _hashable_row_id(values)
+    if candidate in index:
+        return (candidate,)
+    return _row_id_tuple(values, name="row_ids")
+
+
 def install() -> None:
     """Patch precomputed foundation-feature row-id normalization."""
 
@@ -131,8 +147,8 @@ def install() -> None:
         return module.PrecomputedFoundationFeatureTable(features=matrix, row_ids=ids, feature_names=names, metadata=metadata)
 
     def align_precomputed_foundation_features(table, row_ids):
-        requested = _row_id_tuple(row_ids, name="row_ids")
         index = table.row_index()
+        requested = _requested_row_ids(row_ids, index)
         missing = [row_id for row_id in requested if row_id not in index]
         if missing:
             preview = ", ".join(repr(row_id) for row_id in missing[:5])
