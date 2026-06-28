@@ -23,12 +23,14 @@ from types import ModuleType
 from typing import Any
 
 _TARGET_MODULES = {
+    "neureptrace.bushmeg_source_loso",
     "neureptrace.config_workflow",
     "neureptrace.decode_from_config",
 }
 _PATCH_MARKER = "_neureptrace_dataset_name_config_patch_installed"
 _BOOL_PATCH_MARKER = "_neureptrace_config_workflow_numeric_bool_patch_installed"
 _OUTPUT_TEMPLATE_PATCH_MARKER = "_neureptrace_dataset_output_template_patch_installed"
+_BUSHMEG_SOURCE_OUTPUT_TEMPLATE_PATCH_MARKER = "_neureptrace_bushmeg_source_output_template_patch_installed"
 _FINDER_MARKER = "_neureptrace_dataset_name_config_finder"
 
 
@@ -58,6 +60,10 @@ def _dataset_template_name_from_config(config: Any, *, default: str = "dataset")
     if value.strip() == "":
         return default
     return value
+
+
+def _uses_default_dataset_template_name(config: Any) -> bool:
+    return _dataset_name_from_config(config, default="").strip() == ""
 
 
 def _config_dataset_name_is_container(config: Any) -> bool:
@@ -100,11 +106,12 @@ def _patch_decode_from_config_output_templates(module: ModuleType) -> None:
     def patched_output_base_dir(config: Mapping[str, Any], *, config_dir):
         outputs = module._section(config, "outputs")
         policy_base = module._base_for_policy(config, config_dir=config_dir)
+        base = config_dir if _uses_default_dataset_template_name(config) else policy_base
         base_dir = outputs.get("base_dir") or outputs.get("dir")
         if base_dir in {None, ""}:
-            return policy_base
+            return base
         dataset_name = _dataset_template_name_from_config(config)
-        return module.expand_path(str(base_dir).format(dataset=dataset_name), base_dir=policy_base)
+        return module.expand_path(str(base_dir).format(dataset=dataset_name), base_dir=base)
 
     @wraps(original_resolve_output)
     def patched_resolve_output(
@@ -132,11 +139,38 @@ def _patch_decode_from_config_output_templates(module: ModuleType) -> None:
     setattr(module, _OUTPUT_TEMPLATE_PATCH_MARKER, True)
 
 
+def _patch_bushmeg_source_loso_output_templates(module: ModuleType) -> None:
+    if module.__name__ != "neureptrace.bushmeg_source_loso" or getattr(module, _BUSHMEG_SOURCE_OUTPUT_TEMPLATE_PATCH_MARKER, False):
+        return
+    original_resolve_output = getattr(module, "_resolve_output", None)
+    if original_resolve_output is None:
+        return
+
+    @wraps(original_resolve_output)
+    def patched_resolve_output(config: Mapping[str, Any], *, config_dir, key: str, default: str):
+        outputs = module._section(config, "outputs")
+        value = outputs.get(key, default)
+        dataset_name = _dataset_template_name_from_config(config)
+        formatted = str(value).format(dataset=dataset_name)
+        path = module.Path(formatted)
+        if path.is_absolute():
+            return path
+        base = outputs.get("base_dir", "results/{dataset}")
+        base_dir = config_dir if _uses_default_dataset_template_name(config) else module.Path.cwd()
+        base_path = module.expand_path(str(base).format(dataset=dataset_name), base_dir=base_dir)
+        return base_path / path
+
+    setattr(patched_resolve_output, _BUSHMEG_SOURCE_OUTPUT_TEMPLATE_PATCH_MARKER, True)
+    module._resolve_output = patched_resolve_output
+    setattr(module, _BUSHMEG_SOURCE_OUTPUT_TEMPLATE_PATCH_MARKER, True)
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
     _patch_config_workflow_bool_parser(module)
     _patch_decode_from_config_output_templates(module)
+    _patch_bushmeg_source_loso_output_templates(module)
     decode_kwargs = getattr(module, "_decode_kwargs", None)
     if decode_kwargs is None:
         setattr(module, _PATCH_MARKER, True)
