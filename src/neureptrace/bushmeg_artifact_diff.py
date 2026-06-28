@@ -110,9 +110,10 @@ def compare_prediction_frames(reference: pd.DataFrame, candidate: pd.DataFrame, 
         )
         ref_true_name = f"{ref_true}_reference" if ref_true == cand_true else ref_true
         cand_true_name = f"{cand_true}_candidate" if ref_true == cand_true else cand_true
-        mismatched = merged[ref_true_name].astype(str) != merged[cand_true_name].astype(str)
+        matched = merged["_merge"] == "both"
+        mismatched = matched & (merged[ref_true_name].astype(str) != merged[cand_true_name].astype(str))
         diagnostics.extend([
-            {"diagnostic": "matched_prediction_rows", "value": int((merged["_merge"] == "both").sum())},
+            {"diagnostic": "matched_prediction_rows", "value": int(matched.sum())},
             {"diagnostic": "reference_only_rows", "value": int((merged["_merge"] == "left_only").sum())},
             {"diagnostic": "candidate_only_rows", "value": int((merged["_merge"] == "right_only").sum())},
             {"diagnostic": "true_label_mismatch_rows", "value": int(mismatched.sum())},
@@ -155,6 +156,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.reference_predictions and args.candidate_predictions:
         diagnostics, per_class = compare_prediction_frames(pd.read_csv(args.reference_predictions), pd.read_csv(args.candidate_predictions), group_columns=(args.group_column,))
+        args.prediction_diagnostics_out.parent.mkdir(parents=True, exist_ok=True)
+        args.per_class_out.parent.mkdir(parents=True, exist_ok=True)
         diagnostics.to_csv(args.prediction_diagnostics_out, index=False)
         per_class.to_csv(args.per_class_out, index=False)
         print(f"Wrote {args.prediction_diagnostics_out} and {args.per_class_out}")
