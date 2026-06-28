@@ -155,11 +155,13 @@ def _validate_aggregate_manifest_compatibility(
 
 
 def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if pd.isna(value):
+    tokens = _bool_tokens(value)
+    if not tokens:
         return False
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    parsed = {_parse_bool_token(token) for token in tokens}
+    if len(parsed) != 1:
+        raise ValueError(f"Inconsistent boolean provenance: {tokens}")
+    return parsed.pop()
 
 
 def _parse_bool_token(value: Any) -> bool:
@@ -174,19 +176,27 @@ def _parse_bool_token(value: Any) -> bool:
 
 
 def _optional_unique_bool(value: Any, *, column: str) -> bool | None:
-    if value in {"", None}:
-        return None
-    tokens = [
-        token.strip()
-        for token in str(value).replace(",", "|").split("|")
-        if token.strip()
-    ]
+    tokens = _bool_tokens(value)
     if not tokens:
         return None
     parsed = {_parse_bool_token(token) for token in tokens}
     if len(parsed) != 1:
         raise ValueError(f"Inconsistent boolean provenance for {column!r}: {tokens}")
     return parsed.pop()
+
+
+def _bool_tokens(value: Any) -> list[str]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [str(token).strip() for token in value if str(token).strip()]
+    if value is None:
+        return []
+    if pd.isna(value):
+        return []
+    return [
+        token.strip()
+        for token in str(value).replace(",", "|").split("|")
+        if token.strip()
+    ]
 
 
 def _as_float(value: Any) -> float | None:
