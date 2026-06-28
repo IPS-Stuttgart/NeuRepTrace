@@ -80,7 +80,7 @@ def install() -> None:
                 bad_values = _bool_mask(frame[metric])
                 if bad_values.any():
                     rows = bad_values[bad_values].index.tolist()[:5]
-                    raise ValueError(f"Metric column '{metric}' must contain finite numeric values; bad row(s): {rows}.")
+                    raise ValueError(f"Metric column '{metric}' must not contain booleans; bad row(s): {rows}.")
             return original(frame, metric_columns)
 
         setattr(_coerce_finite_metric_columns_checked, _PATCH_ATTR, True)
