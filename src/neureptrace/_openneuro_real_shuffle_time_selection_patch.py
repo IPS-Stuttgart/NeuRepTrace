@@ -12,6 +12,7 @@ import pandas as pd
 _TIME_SELECTION_PATCH_MARKER = "_neureptrace_openneuro_real_shuffle_time_selection_patch_installed"
 _MANIFEST_BOOL_PATCH_MARKER = "_neureptrace_openneuro_manifest_bool_token_patch_installed"
 _PROVENANCE_VALUE_PATCH_MARKER = "_neureptrace_openneuro_provenance_value_patch_installed"
+_ALIGNMENT_COMPARE_FIRST_NONEMPTY_PATCH_MARKER = "_neureptrace_openneuro_alignment_compare_first_nonempty_patch_installed"
 
 BOOLEAN_MANIFEST_COMPATIBILITY_COLUMNS = {
     "run_decode",
@@ -94,6 +95,25 @@ def _install_provenance_value_patch() -> None:
     module._provenance_value = _provenance_value
 
 
+def _install_alignment_compare_first_nonempty_patch() -> None:
+    module = importlib.import_module("neureptrace.openneuro_alignment_compare")
+    original = module._first_nonempty
+    if getattr(original, _ALIGNMENT_COMPARE_FIRST_NONEMPTY_PATCH_MARKER, False):
+        return
+
+    def _first_nonempty(*values: Any) -> str:
+        for value in values:
+            if _is_missing_provenance_value(value):
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
+    setattr(_first_nonempty, _ALIGNMENT_COMPARE_FIRST_NONEMPTY_PATCH_MARKER, True)
+    module._first_nonempty = _first_nonempty
+
+
 def _install_time_selection_patch() -> None:
     module = importlib.import_module("neureptrace.openneuro_real_shuffle_report")
     original_nearest_row = module._nearest_row
@@ -133,6 +153,7 @@ def install() -> None:
 
     _install_manifest_bool_token_patch()
     _install_provenance_value_patch()
+    _install_alignment_compare_first_nonempty_patch()
     _install_time_selection_patch()
 
 
