@@ -39,6 +39,18 @@ def test_make_table_preserves_composite_row_ids_for_alignment() -> None:
     assert np.allclose(aligned, np.asarray([[2.0, 2.0], [1.0, 0.0]], dtype=np.float32))
 
 
+def test_align_accepts_bare_composite_row_id_for_single_lookup() -> None:
+    table = make_precomputed_foundation_feature_table(
+        [[1.0, 0.0], [0.0, 1.0]],
+        row_ids=[("sub-01", "trial-0"), ("sub-01", "trial-1")],
+    )
+
+    aligned = align_precomputed_foundation_features(table, ("sub-01", "trial-1"))
+
+    assert aligned.shape == (1, 2)
+    assert np.allclose(aligned, np.asarray([[0.0, 1.0]], dtype=np.float32))
+
+
 def test_npz_loader_preserves_matrix_encoded_composite_row_ids(tmp_path) -> None:
     path = tmp_path / "features_with_composite_row_ids.npz"
     features = np.asarray(
