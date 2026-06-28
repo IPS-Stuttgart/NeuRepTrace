@@ -128,8 +128,9 @@ def test_fieldtrip_sampleinfo_accepts_integral_float_bounds():
     [
         np.array([[1.5, 5.0], [6.0, 10.0]], dtype=float),
         np.array([[True, False], [False, True]], dtype=bool),
+        np.array([[1, 5], [10, 6]], dtype=int),
     ],
 )
-def test_fieldtrip_sampleinfo_rejects_non_integer_bounds(sampleinfo: np.ndarray):
+def test_fieldtrip_sampleinfo_rejects_malformed_bounds(sampleinfo: np.ndarray):
     with pytest.raises(ValueError, match="sampleinfo must contain finite integer sample bounds"):
         _sampleinfo_array(sampleinfo, n_trials=2)
