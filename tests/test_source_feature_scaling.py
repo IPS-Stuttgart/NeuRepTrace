@@ -83,6 +83,24 @@ def test_preserve_original_false_returns_only_generated_rows() -> None:
     assert result.labels.tolist() == ["x", "x", "x"]
 
 
+def test_preserve_original_string_false_returns_only_generated_rows() -> None:
+    features = np.asarray([[1.0, 1.0], [2.0, 2.0]], dtype=float)
+    labels = np.asarray(["x", "x"], dtype=object)
+
+    cfg = source_feature_scaling_config(synthetic_per_class=2, preserve_original="false", random_state=3)
+    result = augment_source_with_feature_scaling(features, labels, config=cfg)
+
+    assert cfg.preserve_original is False
+    assert result.features.shape == (2, 2)
+    assert result.synthetic_mask.tolist() == [True, True]
+    assert result.metadata["source_feature_scaling_preserve_original"] is False
+
+
+def test_preserve_original_rejects_invalid_string() -> None:
+    with pytest.raises(ValueError, match="preserve_original"):
+        source_feature_scaling_config(preserve_original="maybe")
+
+
 def test_disabled_scaling_returns_original_rows_only() -> None:
     features = np.asarray([[0.0], [1.0]], dtype=float)
     labels = np.asarray([0, 1])
