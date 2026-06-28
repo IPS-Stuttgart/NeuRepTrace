@@ -120,3 +120,30 @@ def test_probe_preserves_matrix_encoded_composite_row_ids() -> None:
 
     assert np.allclose(result.train_features, features[[2, 1, 0]].astype(np.float32))
     assert np.allclose(result.test_features, features[[3, 1]].astype(np.float32))
+
+
+def test_probe_accepts_bare_composite_test_row_id() -> None:
+    features = np.asarray(
+        [
+            [0.0, 0.0],
+            [2.0, 2.0],
+            [4.0, 4.0],
+        ],
+        dtype=float,
+    )
+    row_ids = [
+        ("sub-01", "trial-0"),
+        ("sub-02", "trial-0"),
+        ("sub-03", "trial-0"),
+    ]
+    table = make_precomputed_foundation_feature_table(features, row_ids=row_ids)
+
+    result = fit_precomputed_foundation_probe(
+        feature_table=table,
+        train_row_ids=[("sub-01", "trial-0"), ("sub-02", "trial-0")],
+        train_labels=["source", "target"],
+        test_row_ids=("sub-03", "trial-0"),
+    )
+
+    assert result.test_features.shape == (1, 2)
+    assert np.allclose(result.test_features, features[[2]].astype(np.float32))
