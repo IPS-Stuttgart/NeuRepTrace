@@ -164,8 +164,8 @@ def interpolate_rows(content_row: Sequence[float] | np.ndarray, partner_row: Seq
 def source_smote_config(
     *,
     synthetic_per_class: int | str = 0,
-    cross_domain_partner: bool = True,
-    preserve_original: bool = True,
+    cross_domain_partner: bool | int | str = True,
+    preserve_original: bool | int | str = True,
     random_state: int | str | None = 13,
     jitter_std: float | str = 0.0,
 ) -> SourceSmoteConfig:
@@ -173,8 +173,8 @@ def source_smote_config(
 
     return SourceSmoteConfig(
         synthetic_per_class=_nonnegative_int(synthetic_per_class, name="synthetic_per_class"),
-        cross_domain_partner=bool(cross_domain_partner),
-        preserve_original=bool(preserve_original),
+        cross_domain_partner=_bool_value(cross_domain_partner, name="cross_domain_partner"),
+        preserve_original=_bool_value(preserve_original, name="preserve_original"),
         random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
         jitter_std=_nonnegative_float(jitter_std, name="jitter_std"),
     )
@@ -281,3 +281,18 @@ def _float_value(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed):
         raise ValueError(f"{name} must be finite.")
     return parsed
+
+
+def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean.")
