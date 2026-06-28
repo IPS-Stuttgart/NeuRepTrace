@@ -18,6 +18,23 @@ def test_confidence_scores_return_expected_values() -> None:
     assert np.all(entropy <= 1.0)
 
 
+def test_confidence_scores_break_probability_ties_by_lowest_index() -> None:
+    probabilities = np.asarray(
+        [
+            [0.5, 0.5, 0.0],
+            [1.0, 1.0, 1.0],
+            [0.2, 0.8, 0.8],
+        ],
+        dtype=float,
+    )
+
+    confidence, margin, _entropy, predicted = confidence_scores(probabilities)
+
+    assert predicted.tolist() == [0, 0, 1]
+    assert np.allclose(confidence, [0.5, 1 / 3, 4 / 9])
+    assert np.allclose(margin, [0.0, 0.0, 0.0])
+
+
 def test_select_confident_rows_applies_all_thresholds() -> None:
     probabilities = np.asarray([[0.95, 0.05], [0.55, 0.45], [0.7, 0.3]], dtype=float)
 
