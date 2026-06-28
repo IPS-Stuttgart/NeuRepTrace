@@ -142,7 +142,8 @@ class DecodedLabelClassifier:
         if hasattr(self.model, "decision_function"):
             scores = np.asarray(self.model.decision_function(features), dtype=float)
             if scores.ndim == 1 and self.classes_.shape[0] == 2:
-                return np.column_stack((-scores, scores))
+                # A binary estimator's one-dimensional margin is score_pos - score_neg.
+                return np.column_stack((-0.5 * scores, 0.5 * scores))
             return scores
         if hasattr(self.model, "predict_proba"):
             return np.asarray(self.model.predict_proba(features), dtype=float)
