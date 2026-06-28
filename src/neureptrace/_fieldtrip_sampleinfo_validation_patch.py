@@ -25,6 +25,13 @@ def _contains_boolean(value: np.ndarray) -> bool:
     return False
 
 
+def _validate_sample_bound_order(bounds: np.ndarray) -> None:
+    """Reject FieldTrip sample intervals whose end precedes their start."""
+
+    if bounds.ndim == 2 and bounds.shape[1] == 2 and np.any(bounds[:, 1] < bounds[:, 0]):
+        raise ValueError(_SAMPLEINFO_ERROR)
+
+
 def _as_integer_sample_bounds(array: np.ndarray) -> np.ndarray:
     """Validate and return integer FieldTrip sample-bound pairs."""
 
@@ -32,7 +39,9 @@ def _as_integer_sample_bounds(array: np.ndarray) -> np.ndarray:
         raise ValueError(_SAMPLEINFO_ERROR)
 
     if np.issubdtype(array.dtype, np.integer):
-        return array.astype(int, copy=False)
+        bounds = array.astype(int, copy=False)
+        _validate_sample_bound_order(bounds)
+        return bounds
 
     try:
         numeric = np.asarray(array, dtype=float)
@@ -45,7 +54,9 @@ def _as_integer_sample_bounds(array: np.ndarray) -> np.ndarray:
     rounded = np.round(numeric)
     if not np.array_equal(numeric, rounded):
         raise ValueError(_SAMPLEINFO_ERROR)
-    return rounded.astype(int, copy=False)
+    bounds = rounded.astype(int, copy=False)
+    _validate_sample_bound_order(bounds)
+    return bounds
 
 
 def parse_bool_config(value: Any, *, name: str) -> bool:
