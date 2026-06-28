@@ -72,6 +72,32 @@ def test_compare_prediction_frames_does_not_count_unmatched_rows_as_true_label_m
     assert diagnostic_values["true_label_mismatch_rows"] == 0
 
 
+def test_compare_prediction_frames_uses_only_common_recall_group_columns():
+    reference = pd.DataFrame(
+        {
+            "outer_test_subject": ["s1", "s1", "s2", "s2"],
+            "trial_index": [0, 1, 2, 3],
+            "true_label": [0, 1, 0, 1],
+            "predicted_label": [0, 1, 1, 1],
+        }
+    )
+    candidate = pd.DataFrame(
+        {
+            "trial_index": [0, 1, 2, 3],
+            "true_label": [0, 1, 0, 1],
+            "predicted_label": [0, 0, 0, 1],
+        }
+    )
+
+    _, per_class = compare_prediction_frames(reference, candidate, group_columns=("outer_test_subject",))
+
+    assert "outer_test_subject" not in per_class.columns
+    assert set(per_class["true_class"].tolist()) == {0, 1}
+    class0 = per_class.loc[per_class["true_class"] == 0].iloc[0]
+    assert np.isclose(class0["reference_recall"], 0.5)
+    assert np.isclose(class0["candidate_recall"], 1.0)
+
+
 def test_artifact_diff_cli_creates_prediction_output_parents(tmp_path: Path):
     reference_summary = tmp_path / "reference_summary.csv"
     candidate_summary = tmp_path / "candidate_summary.csv"
