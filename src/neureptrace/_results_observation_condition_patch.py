@@ -57,6 +57,10 @@ def _prepare_observations_for_subject_time(
         if len(values) == 1:
             prepared[column] = values[0]
             continue
+        singleton_values = results_frame[column].dropna().astype(str).unique()
+        if len(singleton_values) == 1:
+            prepared[column] = singleton_values[0]
+            continue
 
         raise ValueError(
             "Probability observations are missing condition column "
