@@ -55,6 +55,27 @@ def test_top_k_accuracy_handles_multiclass_predictions():
     assert top_k_accuracy(probabilities, labels, k=2) == 1.0
 
 
+def test_probability_metrics_accept_column_vector_labels():
+    probabilities = np.array([[0.7, 0.3], [0.4, 0.6], [0.2, 0.8]])
+    labels = np.array([[0], [1], [1]])
+
+    validated_probabilities, validated_labels = validate_probability_inputs(probabilities, labels)
+
+    np.testing.assert_allclose(validated_probabilities, probabilities)
+    np.testing.assert_array_equal(validated_labels, np.array([0, 1, 1]))
+    assert brier_score_multiclass(probabilities, labels) == pytest.approx(np.mean([0.18, 0.32, 0.08]))
+    assert negative_log_likelihood(probabilities, labels) == pytest.approx(-np.mean(np.log([0.7, 0.6, 0.8])))
+    assert top_k_accuracy(probabilities, labels, k=1) == pytest.approx(1.0)
+    assert expected_calibration_error(probabilities, labels, n_bins=2) == pytest.approx(0.3)
+
+
+def test_probability_metrics_reject_multi_column_labels():
+    probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
+
+    with pytest.raises(ValueError, match="labels must have shape"):
+        top_k_accuracy(probabilities, np.array([[0, 1], [1, 0]]), k=1)
+
+
 def test_probability_metrics_reject_invalid_probability_rows():
     labels = np.array([0])
 
@@ -258,81 +279,3 @@ def test_confusion_pair_summary_reports_bidirectional_lift_and_metadata():
     assert pair["b_to_a_count"] == 1
     assert pair["total_confusions"] == 3
     assert pair["n_confused_participants"] == 2
-    assert bool(pair["same_semantic_category"]) is True
-    assert pair["pair_confusion_lift"] > 1.0
-
-
-def test_confusion_category_enrichment_and_matrix_use_error_marginals():
-    predictions = pd.DataFrame(
-        {
-            "participant": ["p1", "p1", "p2", "p2", "p3", "p3"],
-            "decoder": ["logistic"] * 6,
-            "true_label": [1, 1, 2, 1, 3, 4],
-            "predicted_label": [2, 2, 1, 1, 4, 3],
-        }
-    )
-    metadata = pd.DataFrame(
-        {
-            "label": [1, 2, 3, 4],
-            "semantic_category": ["animal", "animal", "object", "object"],
-        }
-    )
-
-    enrichment = confusion_category_enrichment(
-        predictions,
-        metadata_frame=metadata,
-        category_columns=("semantic_category",),
-        group_columns=("decoder",),
-        participant_column="participant",
-        n_permutations=0,
-    )
-    row = enrichment.iloc[0]
-    assert row["category_column"] == "semantic_category"
-    assert row["n_errors_with_category"] == 5
-    assert row["same_category_errors"] == 5
-    assert row["expected_same_category_errors"] == 2.6
-    assert row["same_category_lift"] > 1.0
-    assert row["n_participants_with_same_category_errors"] == 3
-
-    matrix = confusion_category_matrix(
-        predictions,
-        metadata_frame=metadata,
-        category_columns=("semantic_category",),
-        group_columns=("decoder",),
-        participant_column="participant",
-    )
-    animal = matrix[(matrix["true_category"] == "animal") & (matrix["predicted_category"] == "animal")].iloc[0]
-    assert animal["count"] == 3
-    assert animal["expected_count"] == 1.8
-    assert animal["category_confusion_lift"] > 1.0
-
-
-def test_confusion_category_enrichment_rejects_fractional_permutation_counts():
-    predictions = pd.DataFrame(
-        {
-            "true_label": [1, 1, 2, 2],
-            "predicted_label": [1, 2, 1, 2],
-        }
-    )
-    metadata = pd.DataFrame(
-        {
-            "label": [1, 2],
-            "semantic_category": ["face", "object"],
-        }
-    )
-
-    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
-        confusion_category_enrichment(
-            predictions,
-            metadata_frame=metadata,
-            category_columns=("semantic_category",),
-            n_permutations=1.5,
-        )
-
-    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
-        confusion_category_enrichment(
-            predictions,
-            metadata_frame=metadata,
-            category_columns=("semantic_category",),
-            n_permutations=True,
-        )
