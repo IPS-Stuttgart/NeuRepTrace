@@ -17,10 +17,49 @@ def _bool_mask(values: pd.Series) -> pd.Series:
     return values.map(lambda value: isinstance(value, (bool, np.bool_))).fillna(False).astype(bool)
 
 
+def _optional_metric_columns(frame: pd.DataFrame) -> list[str]:
+    return [metric for metric in _OPTIONAL_METRICS if metric in frame.columns and frame[metric].notna().any()]
+
+
 def _metric_columns(results_module, frame: pd.DataFrame) -> list[str]:
     metrics = list(results_module.METRIC_COLUMNS)
-    metrics.extend(metric for metric in _OPTIONAL_METRICS if metric in frame.columns and metric not in metrics)
+    metrics.extend(metric for metric in _optional_metric_columns(frame) if metric not in metrics)
     return metrics
+
+
+def _subject_time_keys(results_module, results_frame: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    normalized = results_module._normalize_emission_mode(results_frame)
+    group_columns = [column for column in results_module.SUMMARY_GROUP_COLUMNS if column in normalized.columns]
+    return normalized, [*group_columns, "subject", "time"]
+
+
+def _optional_subject_time_metrics(
+    results_module,
+    results_frame: pd.DataFrame,
+    *,
+    optional_metrics: Sequence[str],
+) -> pd.DataFrame | None:
+    normalized, subject_time_keys = _subject_time_keys(results_module, results_frame)
+    optional_frames: list[pd.DataFrame] = []
+    for metric in optional_metrics:
+        rows_with_metric = normalized.loc[normalized[metric].notna()].copy()
+        if rows_with_metric.empty:
+            continue
+        optional_frames.append(
+            results_module._mean_across_folds(
+                rows_with_metric,
+                subject_time_keys,
+                metric_columns=[metric],
+            )
+        )
+
+    if not optional_frames:
+        return None
+
+    merged = optional_frames[0]
+    for optional_frame in optional_frames[1:]:
+        merged = merged.merge(optional_frame, on=subject_time_keys, how="outer", validate="one_to_one")
+    return merged.sort_values(subject_time_keys).reset_index(drop=True)
 
 
 def install() -> None:
@@ -41,7 +80,7 @@ def install() -> None:
                 bad_values = _bool_mask(frame[metric])
                 if bad_values.any():
                     rows = bad_values[bad_values].index.tolist()[:5]
-                    raise ValueError(f"Metric column '{metric}' must contain finite numeric values; bad row(s): {rows}.")
+                    raise ValueError(f"Metric column '{metric}' must not contain booleans; bad row(s): {rows}.")
             return original(frame, metric_columns)
 
         setattr(_coerce_finite_metric_columns_checked, _PATCH_ATTR, True)
@@ -61,9 +100,28 @@ def install() -> None:
         metric_columns: Sequence[str] | str | None = None,
         ece_bins: int = results.DEFAULT_ECE_BINS,
     ) -> pd.DataFrame:
-        if metric_columns is None:
-            metric_columns = _metric_columns(results, results_frame)
-        return original_subject_time_metrics(results_frame, observations=observations, metric_columns=metric_columns, ece_bins=ece_bins)
+        if metric_columns is not None:
+            return original_subject_time_metrics(
+                results_frame,
+                observations=observations,
+                metric_columns=metric_columns,
+                ece_bins=ece_bins,
+            )
+
+        optional_metrics = _optional_metric_columns(results_frame)
+        if not optional_metrics:
+            return original_subject_time_metrics(results_frame, observations=observations, ece_bins=ece_bins)
+
+        subject_time = original_subject_time_metrics(results_frame, observations=observations, ece_bins=ece_bins)
+        optional_subject_time = _optional_subject_time_metrics(results, results_frame, optional_metrics=optional_metrics)
+        if optional_subject_time is None:
+            return subject_time
+
+        group_columns = [column for column in results.SUMMARY_GROUP_COLUMNS if column in subject_time.columns]
+        subject_time_keys = [*group_columns, "subject", "time"]
+        return subject_time.merge(optional_subject_time, on=subject_time_keys, how="left", validate="one_to_one").sort_values(
+            subject_time_keys
+        ).reset_index(drop=True)
 
     def aggregate_time_decode_results_with_optional_metrics(
         results_frame: pd.DataFrame,
@@ -71,16 +129,12 @@ def install() -> None:
         observations: pd.DataFrame | None = None,
         ece_bins: int = results.DEFAULT_ECE_BINS,
     ) -> pd.DataFrame:
-        metric_columns = _metric_columns(results, results_frame)
-        if metric_columns == list(results.METRIC_COLUMNS):
+        optional_metrics = _optional_metric_columns(results_frame)
+        if not optional_metrics:
             return original_aggregate_time_decode_results(results_frame, observations=observations, ece_bins=ece_bins)
 
-        subject_time = subject_time_metrics_with_optional_metrics(
-            results_frame,
-            observations=observations,
-            metric_columns=metric_columns,
-            ece_bins=ece_bins,
-        )
+        subject_time = subject_time_metrics_with_optional_metrics(results_frame, observations=observations, ece_bins=ece_bins)
+        metric_columns = _metric_columns(results, subject_time)
         group_columns = [column for column in results.SUMMARY_GROUP_COLUMNS if column in subject_time.columns]
         aggregate_keys = [*group_columns, "time"]
         grouped = subject_time.groupby(aggregate_keys, as_index=False, dropna=False)
