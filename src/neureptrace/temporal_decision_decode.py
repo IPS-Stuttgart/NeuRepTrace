@@ -186,12 +186,23 @@ def run_temporal_decision_decode_dataset(dataset: EpochDataset, *, label_column:
         raise ValueError("Configured label_column/group_column is missing from dataset metadata.")
 
     keep = pd.notna(dataset.metadata[label_column].to_numpy()) & pd.notna(dataset.metadata[group_column].to_numpy())
+    if not bool(np.any(keep)):
+        raise ValueError(
+            "temporal decision decoding found no rows with non-missing "
+            f"{label_column!r} and {group_column!r} values."
+        )
     data = np.asarray(dataset.data[keep], dtype=float)
     metadata = dataset.metadata.loc[keep].reset_index(drop=True)
     original_indices = np.arange(len(dataset.metadata))[keep]
-    labels = LabelEncoder().fit_transform(metadata[label_column].to_numpy())
-    class_names = np.unique(metadata[label_column].to_numpy())
+    label_values = metadata[label_column].to_numpy()
     groups = metadata[group_column].to_numpy()
+    encoder = LabelEncoder()
+    labels = encoder.fit_transform(label_values)
+    class_names = encoder.classes_
+    if len(class_names) < 2:
+        raise ValueError("temporal decision decoding requires at least two classes after dropping missing label/group rows.")
+    if len(pd.unique(groups)) < 2:
+        raise ValueError("temporal decision decoding requires at least two groups after dropping missing label/group rows.")
     classes = np.arange(len(class_names))
 
     decoder_names = _decoders(decoders)
