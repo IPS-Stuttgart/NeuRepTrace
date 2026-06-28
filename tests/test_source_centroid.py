@@ -56,6 +56,37 @@ def test_source_centroid_config_validation() -> None:
         source_centroid_config(shrinkage=1.5)
 
 
+def test_source_centroid_string_false_disables_diagonal_scale() -> None:
+    source_features = np.asarray([[0.0, 10.0], [1.0, 12.0], [5.0, 20.0], [6.0, 22.0]], dtype=float)
+    source_labels = np.asarray(["a", "a", "b", "b"], dtype=object)
+    test_features = np.asarray([[0.5, 11.0], [5.5, 21.0]], dtype=float)
+
+    result = fit_source_centroid_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        test_features=test_features,
+        config={"use_diagonal_scale": "false"},
+    )
+
+    assert result.metadata["source_centroid_use_diagonal_scale"] is False
+    assert np.allclose(result.feature_scale, np.ones(source_features.shape[1]))
+
+
+def test_source_centroid_config_normalizes_common_boolean_values() -> None:
+    assert source_centroid_config(use_diagonal_scale="false").use_diagonal_scale is False
+    assert source_centroid_config(use_diagonal_scale="OFF").use_diagonal_scale is False
+    assert source_centroid_config(use_diagonal_scale="YES").use_diagonal_scale is True
+    assert source_centroid_config(use_diagonal_scale=np.bool_(False)).use_diagonal_scale is False
+    assert source_centroid_config(use_diagonal_scale=1).use_diagonal_scale is True
+    assert source_centroid_config(use_diagonal_scale=np.asarray(False)).use_diagonal_scale is False
+
+
+@pytest.mark.parametrize("value", ["maybe", 2, -1, 0.5, np.asarray([False, True])])
+def test_source_centroid_config_rejects_ambiguous_boolean_values(value) -> None:
+    with pytest.raises(ValueError, match="use_diagonal_scale"):
+        source_centroid_config(use_diagonal_scale=value)
+
+
 def test_source_centroid_rejects_shape_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_centroid_decoder(
