@@ -62,6 +62,20 @@ def test_reaction_time_helpers_reject_invalid_scale(tmp_path: Path, reaction_tim
         extract_reaction_times_from_metadata({"rt": [0.1, 0.2]}, reaction_time_scale=reaction_time_scale)
 
 
+def test_reaction_time_helpers_treat_pandas_missing_scalars_as_nan():
+    pd = pytest.importorskip("pandas")
+
+    direct_rows = reaction_time_rows_from_values([0.1, pd.NA, ""], participant="A")
+    metadata_rows = extract_reaction_times_from_metadata(pd.DataFrame({"rt": [0.2, pd.NA, ""]}), participant="B")
+
+    assert direct_rows[0]["reaction_time"] == 0.1
+    assert math.isnan(direct_rows[1]["reaction_time"])
+    assert math.isnan(direct_rows[2]["reaction_time"])
+    assert metadata_rows[0]["reaction_time"] == 0.2
+    assert math.isnan(metadata_rows[1]["reaction_time"])
+    assert math.isnan(metadata_rows[2]["reaction_time"])
+
+
 @pytest.mark.parametrize("trial_value", ["1.5", "nan", "inf", ""])
 def test_load_reaction_time_csv_rejects_invalid_trial_values(tmp_path: Path, trial_value: str):
     csv_path = tmp_path / "rt.csv"
