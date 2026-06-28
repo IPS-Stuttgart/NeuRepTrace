@@ -275,12 +275,19 @@ def _coerce_finite_metric_columns(results: pd.DataFrame, metric_columns: Sequenc
     coerced = results.copy()
     for metric in metric_columns:
         values = pd.to_numeric(coerced[metric], errors="coerce")
-        if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
+        invalid = values.isna() & coerced[metric].notna()
+        if invalid.any():
+            raise ValueError(f"Metric column '{metric}' must contain finite numeric values.")
+        present = values.notna()
+        numeric = values.loc[present].to_numpy(dtype=float)
+        if not np.isfinite(numeric).all():
             raise ValueError(f"Metric column '{metric}' must contain finite numeric values.")
         bounds = METRIC_BOUNDS.get(metric)
         if bounds is not None:
             lower, upper = bounds
-            if (values < lower).any() or (upper is not None and (values > upper).any()):
+            if (values.loc[present] < lower).any() or (
+                upper is not None and (values.loc[present] > upper).any()
+            ):
                 interval = f"[{lower:g}, {upper:g}]" if upper is not None else f">= {lower:g}"
                 raise ValueError(f"Metric column '{metric}' values must be in {interval}.")
         coerced[metric] = values.astype(float)
