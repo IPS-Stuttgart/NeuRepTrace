@@ -88,6 +88,28 @@ def test_string_false_preserve_original_returns_only_synthetic_rows() -> None:
     assert result.metadata["source_feature_jitter_n_output_rows"] == 4
 
 
+def test_numeric_false_preserve_original_returns_only_synthetic_rows() -> None:
+    features = np.asarray([[0.0], [1.0], [10.0], [11.0]], dtype=float)
+    labels = np.asarray([0, 0, 1, 1], dtype=object)
+
+    result = augment_source_with_feature_jitter(
+        features,
+        labels,
+        config={"synthetic_per_class": 2, "preserve_original": 0, "random_state": 3},
+    )
+
+    assert result.features.shape == (4, 1)
+    assert result.synthetic_mask.tolist() == [True] * 4
+    assert result.metadata["source_feature_jitter_preserve_original"] is False
+    assert result.metadata["source_feature_jitter_n_output_rows"] == 4
+
+    cfg = source_feature_jitter_config(preserve_original=np.asarray(1))
+    assert cfg.preserve_original is True
+
+    with pytest.raises(ValueError, match="preserve_original"):
+        source_feature_jitter_config(preserve_original=2)
+
+
 def test_composite_labels_and_domains_are_preserved_as_row_values() -> None:
     features = np.asarray(
         [
