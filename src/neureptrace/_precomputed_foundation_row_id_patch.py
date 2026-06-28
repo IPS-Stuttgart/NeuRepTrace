@@ -139,11 +139,44 @@ def install() -> None:
             raise KeyError(f"Precomputed feature table is missing {len(missing)} requested row id(s): {preview}.")
         return table.features[[index[row_id] for row_id in requested]].astype(np.float32, copy=False)
 
+    original_fit_precomputed_foundation_probe = module.fit_precomputed_foundation_probe
+
+    def _row_id_object_array(values, *, name: str):
+        row_ids = _row_id_tuple(values, name=name)
+        row_array = np.empty(len(row_ids), dtype=object)
+        row_array[:] = row_ids
+        return row_array
+
+    def fit_precomputed_foundation_probe(
+        *,
+        feature_table,
+        train_row_ids,
+        train_labels,
+        test_row_ids,
+        classifier=None,
+        classifier_C: float = 1.0,
+        classifier_max_iter: int = 1000,
+        classifier_class_weight="balanced",
+        sample_weight=None,
+    ):
+        return original_fit_precomputed_foundation_probe(
+            feature_table=feature_table,
+            train_row_ids=_row_id_object_array(train_row_ids, name="train_row_ids"),
+            train_labels=train_labels,
+            test_row_ids=_row_id_object_array(test_row_ids, name="test_row_ids"),
+            classifier=classifier,
+            classifier_C=classifier_C,
+            classifier_max_iter=classifier_max_iter,
+            classifier_class_weight=classifier_class_weight,
+            sample_weight=sample_weight,
+        )
+
     module._row_id_tuple = _row_id_tuple
     module.PrecomputedFoundationFeatureTable.__post_init__ = __post_init__
     module._load_npz_features = _load_npz_features
     module.make_precomputed_foundation_feature_table = make_precomputed_foundation_feature_table
     module.align_precomputed_foundation_features = align_precomputed_foundation_features
+    module.fit_precomputed_foundation_probe = fit_precomputed_foundation_probe
     setattr(module, _PATCH_MARKER, True)
 
 
