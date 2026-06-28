@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
+from neureptrace._torch_weight_validation_patch import _small_stratified_holdout
 from neureptrace.decoding import TorchMLPClassifier
 from neureptrace.decoding.cdan import TorchCDANClassifier
 from neureptrace.decoding.dann import TorchDANNClassifier
@@ -13,6 +15,18 @@ SOURCE_FEATURES = [[0.0], [1.0], [2.0], [3.0]]
 SOURCE_LABELS = [0, 0, 1, 1]
 SOURCE_DOMAINS = ["s1", "s2", "s1", "s2"]
 TARGET_FEATURES = [[0.5], [2.5]]
+
+
+def _many_class_source_target() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    labels = np.repeat(np.arange(16), 2)
+    source_features = np.column_stack(
+        [
+            labels.astype(float),
+            np.tile([0.0, 1.0], 16),
+        ]
+    )
+    target_features = source_features[:5] + np.asarray([0.05, 0.0])
+    return source_features.astype(float), labels, target_features.astype(float)
 
 
 def test_torch_mlp_rejects_unknown_class_weight_before_torch_initialization() -> None:
@@ -55,3 +69,52 @@ def test_source_vrex_rejects_unknown_class_weight() -> None:
 
     with pytest.raises(ValueError, match="class_weight must be None or 'balanced'"):
         model.fit(SOURCE_FEATURES, SOURCE_LABELS, source_domains=SOURCE_DOMAINS)
+
+
+def test_small_stratified_holdout_detects_validation_set_smaller_than_class_count() -> None:
+    labels = np.repeat(np.arange(16), 2)
+
+    assert _small_stratified_holdout(labels, 0.1)
+    assert not _small_stratified_holdout(labels, 0.5)
+
+
+def test_dann_restores_requested_fraction_after_small_validation_fallback() -> None:
+    pytest.importorskip("torch")
+    source_features, source_labels, target_features = _many_class_source_target()
+    model = TorchDANNClassifier(
+        hidden_units=8,
+        embedding_dim=4,
+        max_epochs=1,
+        batch_size=8,
+        patience=1,
+        validation_fraction=0.1,
+        random_state=7,
+        device="cpu",
+    )
+
+    model.fit(source_features, source_labels, target_features=target_features)
+
+    assert model.validation_fraction == 0.1
+    assert model.n_classes_ == 16
+    assert model.source_rows_ == 32
+
+
+def test_cdan_restores_requested_fraction_after_small_validation_fallback() -> None:
+    pytest.importorskip("torch")
+    source_features, source_labels, target_features = _many_class_source_target()
+    model = TorchCDANClassifier(
+        hidden_units=8,
+        embedding_dim=4,
+        max_epochs=1,
+        batch_size=8,
+        patience=1,
+        validation_fraction=0.1,
+        random_state=7,
+        device="cpu",
+    )
+
+    model.fit(source_features, source_labels, target_features=target_features)
+
+    assert model.validation_fraction == 0.1
+    assert model.n_classes_ == 16
+    assert model.source_rows_ == 32
