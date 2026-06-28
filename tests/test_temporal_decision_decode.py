@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from neureptrace.io.dataset import EpochDataset
-from neureptrace.temporal_decision_decode import _combine, _decoders, run_temporal_decision_decode_dataset, run_temporal_decision_decode_from_config
+from neureptrace.temporal_decision_decode import _combine, _decoders, _pair, run_temporal_decision_decode_dataset, run_temporal_decision_decode_from_config
 
 
 def _synthetic_grouped_dataset() -> EpochDataset:
@@ -50,6 +50,22 @@ def _with_metadata(dataset: EpochDataset, metadata: pd.DataFrame) -> EpochDatase
 
 def test_decoders_supports_logistic_svm_ensemble_alias():
     assert _decoders("logistic-svm-ensemble") == ("multinomial-logistic", "linear_svm")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ((0.05, 0.2), (0.05, 0.2)),
+        ([0.05, 0.2], (0.05, 0.2)),
+        ("0.05,0.2", (0.05, 0.2)),
+        ("[0.05, 0.2]", (0.05, 0.2)),
+        ("0.05 0.2", (0.05, 0.2)),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_pair_accepts_cli_string_window_forms(value: object, expected: tuple[float, float] | None) -> None:
+    assert _pair(value, name="temporal_decision.test_window") == expected
 
 
 def test_temporal_decision_combine_rejects_invalid_source_probabilities():
@@ -117,6 +133,29 @@ def test_temporal_decision_decode_runs_leave_one_group_out(tmp_path):
     np.testing.assert_allclose(observations[probability_columns].sum(axis=1), 1.0, atol=1e-8)
 
 
+def test_temporal_decision_decode_accepts_string_test_window(tmp_path: Path) -> None:
+    dataset = _synthetic_grouped_dataset()
+    summary_out = tmp_path / "summary.csv"
+
+    results = run_temporal_decision_decode_dataset(
+        dataset,
+        label_column="stimulus",
+        group_column="participant",
+        out_path=summary_out,
+        decoders=["logistic"],
+        window_ms=100.0,
+        step_ms=50.0,
+        test_window="0.075,0.175",
+        emission_mode="uncalibrated",
+        max_iter=1000,
+    )
+
+    assert summary_out.exists()
+    assert results["n_test_windows"].tolist() == [3, 3, 3]
+    assert results["test_window_start"].tolist() == [0.0, 0.0, 0.0]
+    assert results["test_window_stop"].tolist() == [0.2, 0.2, 0.2]
+
+
 def test_temporal_decision_decode_rejects_empty_labeled_grouped_subset(tmp_path: Path) -> None:
     dataset = _synthetic_grouped_dataset()
     metadata = dataset.metadata.copy()
@@ -166,6 +205,7 @@ def test_temporal_decision_decode_rejects_degenerate_loso_inputs(tmp_path: Path,
         ({"tmin": 0.2, "tmax": 0.1}, "tmax"),
         ({"test_window": [True, 0.1]}, "test_window"),
         ({"test_window": (0.2, 0.1)}, "test_window"),
+        ({"test_window": "0.1,0.2,0.3"}, "test_window"),
         ({"max_iter": True}, "max_iter"),
         ({"max_iter": 100.5}, "max_iter"),
         ({"aggregation": "logmean_typo"}, "aggregation"),
@@ -217,6 +257,7 @@ def _temporal_decision_config(
         ({}, {}, {"calibration_bins": 1.5}, "temporal_decision.calibration_bins"),
         ({}, {"calibration_bins": 0}, {}, "temporal_decision.calibration_bins"),
         ({}, {}, {"test_window": [True, 0.1]}, "temporal_decision.test_window"),
+        ({}, {}, {"test_window": "0.1,0.2,0.3"}, "temporal_decision.test_window"),
         ({"window_ms": True}, {}, {}, "preprocessing.window_ms"),
         ({"step_ms": 0}, {}, {}, "preprocessing.step_ms"),
         ({"tmin": True}, {}, {}, "tmin"),
@@ -237,6 +278,18 @@ def test_temporal_decision_decode_from_config_rejects_malformed_controls(
 
     with pytest.raises(ValueError, match=message):
         run_temporal_decision_decode_from_config(tmp_path / "config.yml")
+
+
+def test_temporal_decision_decode_from_config_accepts_string_decision_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _temporal_decision_config(tmp_path, temporal={"decision_window": "[0.075, 0.175]"})
+    monkeypatch.setattr("neureptrace.temporal_decision_decode.load_config", lambda _path: config)
+    monkeypatch.setattr("neureptrace.temporal_decision_decode.load_epoch_dataset_from_config", lambda *_args, **_kwargs: _synthetic_grouped_dataset())
+
+    results = run_temporal_decision_decode_from_config(tmp_path / "config.yml")
+
+    assert results["n_test_windows"].tolist() == [3, 3, 3]
+    assert results["test_window_start"].tolist() == [0.0, 0.0, 0.0]
+    assert results["test_window_stop"].tolist() == [0.2, 0.2, 0.2]
 
 
 def test_temporal_decision_decode_from_config_rejects_malformed_write_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

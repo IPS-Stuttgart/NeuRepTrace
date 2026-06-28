@@ -49,6 +49,13 @@ def _list(value: Any) -> list[Any]:
 def _pair(value: Any, *, name: str) -> tuple[float, float] | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        value = [part.strip() for comma_part in text.split(",") for part in comma_part.split() if part.strip()]
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 2:
         raise ValueError(f"{name} must contain exactly two numbers.")
     start = _finite_float(value[0], name=name)
@@ -64,14 +71,8 @@ def _baseline_window(value: Any, *, name: str = "baseline_window") -> tuple[floa
     if value is None:
         return _normalize_baseline_window(None)
     if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return _normalize_baseline_window(None)
-        if text.startswith("[") and text.endswith("]"):
-            text = text[1:-1]
-        parts = [part.strip() for comma_part in text.split(",") for part in comma_part.split() if part.strip()]
-        parsed = _pair(parts, name=name)
-        if parsed is None:  # defensive; ``parts`` is never None.
+        parsed = _pair(value, name=name)
+        if parsed is None:
             return _normalize_baseline_window(None)
         return parsed
     return _normalize_baseline_window(value)
