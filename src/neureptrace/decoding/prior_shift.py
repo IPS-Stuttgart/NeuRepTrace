@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -285,13 +285,19 @@ def _hashable_object_value(value: Any) -> Any:
         if value.ndim == 0:
             return _hashable_object_value(value.item())
         return tuple(_hashable_object_value(item) for item in value.tolist())
+    if isinstance(value, Mapping):
+        pairs = ((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items())
+        return tuple(sorted(pairs, key=lambda pair: repr(pair[0])))
+    if isinstance(value, Set) and not isinstance(value, (str, bytes, bytearray)):
+        return tuple(sorted((_hashable_object_value(item) for item in value), key=repr))
     if isinstance(value, list):
         return tuple(_hashable_object_value(item) for item in value)
     if isinstance(value, tuple):
         return tuple(_hashable_object_value(item) for item in value)
-    if isinstance(value, dict):
-        pairs = ((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items())
-        return tuple(sorted(pairs, key=lambda pair: repr(pair[0])))
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
     return value
 
 

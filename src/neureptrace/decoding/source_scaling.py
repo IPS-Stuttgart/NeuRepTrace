@@ -8,11 +8,13 @@ or per-feature gain factors are sampled from source-only settings.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+
+from neureptrace._object_label_utils import label_counts, label_equal_mask
 
 SOURCE_SCALING_AUGMENTATION = "source_feature_scaling"
 SOURCE_SCALING_PROTOCOL = "strict_source_only_feature_scaling_augmentation"
@@ -88,6 +90,8 @@ def augment_source_with_feature_scaling(
     features = _feature_matrix(source_features, name="source_features")
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
+    classes, _class_counts = label_counts(labels)
+    domain_ids, _domain_counts = label_counts(domains)
 
     if not cfg.enabled:
         return SourceFeatureScalingResult(
@@ -96,7 +100,7 @@ def augment_source_with_feature_scaling(
             synthetic_mask=np.zeros(features.shape[0], dtype=bool),
             content_indices=np.empty(0, dtype=int),
             scale_factors=np.empty((0, features.shape[1]), dtype=np.float32),
-            metadata=_metadata(cfg, features.shape[0], 0, np.unique(labels).shape[0], np.unique(domains).shape[0], features.shape[1]),
+            metadata=_metadata(cfg, features.shape[0], 0, classes.shape[0], domain_ids.shape[0], features.shape[1]),
         )
 
     rng = np.random.default_rng(cfg.random_state)
@@ -104,8 +108,8 @@ def augment_source_with_feature_scaling(
     synthetic_labels: list[Any] = []
     content_indices: list[int] = []
     scale_rows: list[np.ndarray] = []
-    for class_label in tuple(dict.fromkeys(labels.tolist())):
-        class_indices = np.flatnonzero(labels == class_label)
+    for class_label in classes.tolist():
+        class_indices = np.flatnonzero(label_equal_mask(labels, class_label))
         if class_indices.size == 0:
             continue
         for _ in range(cfg.synthetic_per_class):
@@ -124,7 +128,7 @@ def augment_source_with_feature_scaling(
             scale_rows.append(scale)
 
     synthetic_features = np.vstack(synthetic_rows).astype(np.float32, copy=False) if synthetic_rows else np.empty((0, features.shape[1]), dtype=np.float32)
-    synthetic_label_array = np.asarray(synthetic_labels, dtype=labels.dtype if labels.dtype != object else object)
+    synthetic_label_array = _label_output_vector(synthetic_labels, dtype=labels.dtype)
     scale_array = np.vstack(scale_rows).astype(np.float32, copy=False) if scale_rows else np.empty((0, features.shape[1]), dtype=np.float32)
     if cfg.preserve_original:
         output_features = np.vstack([features, synthetic_features]).astype(np.float32, copy=False)
@@ -141,7 +145,7 @@ def augment_source_with_feature_scaling(
         synthetic_mask=synthetic_mask,
         content_indices=np.asarray(content_indices, dtype=int),
         scale_factors=scale_array,
-        metadata=_metadata(cfg, features.shape[0], synthetic_features.shape[0], np.unique(labels).shape[0], np.unique(domains).shape[0], features.shape[1]),
+        metadata=_metadata(cfg, features.shape[0], synthetic_features.shape[0], classes.shape[0], domain_ids.shape[0], features.shape[1]),
     )
 
 
@@ -182,7 +186,7 @@ def source_feature_scaling_config(
     scale_std: float | str = DEFAULT_SCALE_STD,
     scaling_mode: str | None = "row",
     distribution: str | None = "lognormal",
-    preserve_original: bool | str = True,
+    preserve_original: bool | int | str = True,
     random_state: int | str | None = 13,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> SourceFeatureScalingConfig:
@@ -193,7 +197,7 @@ def source_feature_scaling_config(
         scale_std=_nonnegative_float(scale_std, name="scale_std"),
         scaling_mode=normalize_scaling_mode(scaling_mode),
         distribution=normalize_scaling_distribution(distribution),
-        preserve_original=_boolean_value(preserve_original, name="preserve_original"),
+        preserve_original=_bool_value(preserve_original, name="preserve_original"),
         random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
@@ -255,6 +259,7 @@ def _metadata(cfg: SourceFeatureScalingConfig, n_source_rows: int, n_synthetic_r
     }
 
 
+# jscpd:ignore-start
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
@@ -265,24 +270,73 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
-    return vector
+    return _atomic_value_vector(values, expected_length=expected_length, name=name, require_hashable=False)
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"source_domains must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
-    for value in vector.tolist():
-        try:
-            hash(value)
-        except TypeError as exc:
-            raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
+    return _atomic_value_vector(values, expected_length=expected_length, name="source_domains", require_hashable=True)
+
+
+def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str, require_hashable: bool) -> np.ndarray:
+    if isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            if array.shape[0] == expected_length:
+                items = array.tolist()
+            elif expected_length == 1:
+                items = [tuple(array.tolist())]
+            else:
+                items = array.reshape(-1).tolist()
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if rows.shape[1] == 1:
+                items = rows[:, 0].tolist()
+            else:
+                items = [tuple(row.tolist()) for row in rows]
+    if len(items) != expected_length:
+        raise ValueError(f"{name} must contain one value per feature row: {len(items)} != {expected_length}.")
+    if require_hashable:
+        for value in items:
+            try:
+                hash(value)
+            except TypeError as exc:
+                raise ValueError(f"{name} must be hashable; got {value!r}.") from exc
+    if _contains_composite_value(items):
+        return _object_vector(items)
+    return np.asarray(items).reshape(-1)
+
+
+def _object_vector(values: Iterable[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
     return vector
+
+
+def _label_output_vector(values: Sequence[Any], *, dtype: np.dtype) -> np.ndarray:
+    if _contains_composite_value(values):
+        return _object_vector(values)
+    return np.asarray(values, dtype=dtype if dtype is not object else object)
+
+
+def _contains_composite_value(values: Sequence[Any]) -> bool:
+    return any(_is_composite_value(value) for value in values)
+
+
+def _is_composite_value(value: Any) -> bool:
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.ndarray):
+        return value.ndim != 0
+    return isinstance(value, (tuple, list, dict))
+# jscpd:ignore-end
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
@@ -331,12 +385,16 @@ def _float_value(value: float | str, *, name: str) -> float:
     return parsed
 
 
-def _boolean_value(value: bool | str, *, name: str) -> bool:
+def _bool_value(value: bool | int | str, *, name: str) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
-    normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "t", "yes", "y", "on"}:
-        return True
-    if normalized in {"0", "false", "f", "no", "n", "off"}:
-        return False
-    raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean.")

@@ -115,13 +115,20 @@ def peak_metric_rows(
     """Select the peak metric row in each group, breaking ties toward a preferred time."""
     group_columns = _normalize_columns(group_columns)
     _require_columns(frame, [metric_column, time_column, *group_columns])
+    preferred = _finite_numeric_scalar(prefer_time, name="prefer_time")
 
     rows: list[pd.Series] = []
     for _, group in _iter_groups(frame, group_columns):
         ranked = group.copy()
-        ranked["_peak_distance_to_prefer_time"] = (pd.to_numeric(ranked[time_column], errors="coerce") - prefer_time).abs()
-        ranked = ranked.sort_values([metric_column, "_peak_distance_to_prefer_time", time_column], ascending=[False, True, True], na_position="last", kind="mergesort")
-        selected = ranked.iloc[0].drop(labels=["_peak_distance_to_prefer_time"])
+        ranked["_peak_metric_numeric"] = _finite_numeric_series(ranked[metric_column], name=metric_column)
+        ranked["_peak_time_numeric"] = _finite_numeric_series(ranked[time_column], name=time_column)
+        ranked["_peak_distance_to_prefer_time"] = (ranked["_peak_time_numeric"] - preferred).abs()
+        ranked = ranked.sort_values(
+            ["_peak_metric_numeric", "_peak_distance_to_prefer_time", "_peak_time_numeric"],
+            ascending=[False, True, True],
+            kind="mergesort",
+        )
+        selected = ranked.iloc[0].drop(labels=["_peak_metric_numeric", "_peak_time_numeric", "_peak_distance_to_prefer_time"])
         selected["peak_distance_to_prefer_time"] = float(ranked.iloc[0]["_peak_distance_to_prefer_time"])
         rows.append(selected)
 
@@ -189,6 +196,29 @@ def _series_summary(values: pd.Series, *, zero_singleton_dispersion: bool) -> tu
 def _finite_array(values: object) -> np.ndarray:
     parsed = pd.to_numeric(pd.Series(values), errors="coerce").to_numpy(dtype=float)
     return parsed[np.isfinite(parsed)]
+
+
+def _finite_numeric_series(values: object, *, name: str) -> pd.Series:
+    series = pd.Series(values)
+    if series.map(_is_boolean_scalar).any():
+        raise ValueError(f"{name} must contain only finite numeric values.")
+    parsed = pd.to_numeric(series, errors="coerce")
+    numeric = parsed.to_numpy(dtype=float)
+    if not np.all(np.isfinite(numeric)):
+        raise ValueError(f"{name} must contain only finite numeric values.")
+    return parsed
+
+
+def _finite_numeric_scalar(value: object, *, name: str) -> float:
+    if _is_boolean_scalar(value):
+        raise ValueError(f"{name} must be a finite numeric value.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a finite numeric value.") from exc
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be a finite numeric value.")
+    return parsed
 
 
 def _numeric_without_booleans(values: object) -> pd.Series:

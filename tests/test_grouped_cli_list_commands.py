@@ -47,6 +47,13 @@ def test_grouped_cli_json_list_exposes_aliases(capsys) -> None:
     assert "stimulus-detection" in commands["stimulus-detect"]["aliases"]
 
 
+def test_grouped_cli_list_rejects_extra_workflow_args() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--list-commands", "benchmark"])
+
+    assert exc_info.value.code == 2
+
+
 def test_command_listing_rejects_unknown_format() -> None:
     with pytest.raises(ValueError, match="Unsupported command listing format: yaml"):
         cli._command_listing("yaml")
