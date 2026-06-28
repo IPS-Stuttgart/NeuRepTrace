@@ -27,37 +27,61 @@ nav:
     - Reference:
           - Benchmark: reference/benchmark.md
           - Calibration: reference/calibration.md
+          - Conditional CORAL: reference/conditional-coral.md
           - Continuous Stimulus Scan: reference/continuous-stimulus-scan.md
           - Covariance Features: reference/covariance-features.md
           - Dataset Specs: reference/dataset-spec.md
           - Decoding: reference/decoding.md
-          - Reconstruction Encoder: reference/reconstruction-encoder.md
-          - Riemannian Procrustes: reference/riemannian-procrustes.md
-          - Source-domain Selection: reference/source-selection.md
-          - Unlabeled Anchor Alignment: reference/unlabeled-anchor-alignment.md
-          - Precomputed Foundation Features: reference/precomputed-foundation-features.md
-          - Transfer Component Analysis: reference/transfer-component-analysis.md
-          - Source MixStyle: reference/source-mixstyle.md
-          - Source Feature Scaling: reference/source-feature-scaling.md
-          - Kernel Mean Matching: reference/kernel-mean-matching.md
-          - Prior-shift Adaptation: reference/prior-shift.md
-          - Selective Prediction: reference/selective-prediction.md
+          - Domain Importance: reference/domain-importance.md
           - Emission Compare: reference/emission-compare.md
+          - Geodesic Flow: reference/geodesic-flow.md
           - Inference: reference/inference.md
+          - Joint Distribution Adaptation: reference/joint-distribution-adaptation.md
+          - Kernel Mean Matching: reference/kernel-mean-matching.md
           - Metadata: reference/metadata.md
           - Metrics: reference/metrics.md
           - Observation Schema: reference/observation-schema.md
           - Onset Detection: reference/onset-detection.md
-          - Onset Validation: reference/onset-validation.md
-          - Stimulus Detection: reference/stimulus-detection.md
-          - Onset Workflow: reference/onset-workflow.md
           - Onset Sensitivity: reference/onset-sensitivity.md
+          - Onset Validation: reference/onset-validation.md
+          - Onset Workflow: reference/onset-workflow.md
           - Paired Statistics: reference/paired-stats.md
-          - Temporal State Workflow: reference/temporal-state-workflow.md
+          - Plotting: reference/plotting.md
+          - Precomputed Foundation Features: reference/precomputed-foundation-features.md
+          - Prior-shift Adaptation: reference/prior-shift.md
+          - Random Subspace: reference/random-subspace.md
+          - Reconstruction Encoder: reference/reconstruction-encoder.md
+          - Report: reference/report.md
           - Results: reference/results.md
+          - Riemannian Procrustes: reference/riemannian-procrustes.md
+          - Selective Prediction: reference/selective-prediction.md
           - Semantic Stages: reference/semantic-stages.md
+          - Source Balance: reference/source-balance.md
+          - Source Bagging: reference/source-bagging.md
+          - Source Centroid: reference/source-centroid.md
+          - Source Correlation Filter: reference/source-correlation-filter.md
+          - Source-domain Ensemble: reference/source-domain-ensemble.md
+          - Source-domain Selection: reference/source-selection.md
+          - Source Feature Clipping: reference/source-feature-clipping.md
+          - Source Feature Masking: reference/source-feature-masking.md
+          - Source Feature Scaling: reference/source-feature-scaling.md
+          - Source MixStyle: reference/source-mixstyle.md
+          - Source MixUp: reference/source-mixup.md
+          - Source Range Selector: reference/source-range-selector.md
+          - Source Robust Scaler: reference/source-robust-scaler.md
+          - Source SMOTE: reference/source-smote.md
+          - Source Variance Filter: reference/source-variance-filter.md
+          - Stimulus Detection: reference/stimulus-detection.md
+          - Subspace Adaptation: reference/subspace-adaptation.md
+          - Subspace Alignment: reference/subspace-alignment.md
           - Temporal Generalization: reference/temporal-generalization.md
           - Temporal Model: reference/temporal-model.md
+          - Temporal Smoothing: reference/temporal-smoothing.md
+          - Temporal State Workflow: reference/temporal-state-workflow.md
+          - Transfer Component Analysis: reference/transfer-component-analysis.md
+          - Unlabeled Anchor Alignment: reference/unlabeled-anchor-alignment.md
+          - Validation: reference/validation.md
+          - V-REx: reference/vrex.md
 
 theme:
     name: material
