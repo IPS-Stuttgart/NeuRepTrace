@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import scipy.io as sio
 
-from neureptrace.fieldtrip_mat import _sampleinfo_array, load_fieldtrip_raw_mat_epochs
+from neureptrace.fieldtrip_mat import _sampleinfo_array, load_fieldtrip_raw_mat_epochs, write_fieldtrip_raw_mat_epochs
 
 
 def _cell_row(values):
@@ -85,6 +85,35 @@ def test_load_fieldtrip_mat_can_fail_on_overlong_labels(tmp_path: Path):
 
     with pytest.raises(ValueError, match="data.label"):
         load_fieldtrip_raw_mat_epochs(mat_path, trim_overlong_labels=False)
+
+
+def test_write_fieldtrip_mat_refuses_existing_metadata_without_overwrite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    class DummyEpochs:
+        def __init__(self) -> None:
+            self.saved_paths: list[tuple[Path, bool]] = []
+
+        def save(self, path: Path, *, overwrite: bool) -> None:
+            self.saved_paths.append((path, overwrite))
+
+    epochs = DummyEpochs()
+    metadata = pd.DataFrame({"trial": [0], "condition": [1]})
+
+    def fake_loader(mat_path: Path | str, **kwargs):
+        return epochs, metadata
+
+    monkeypatch.setattr("neureptrace.fieldtrip_mat.load_fieldtrip_raw_mat_epochs", fake_loader)
+    metadata_out = tmp_path / "already_there.csv"
+    metadata_out.write_text("old\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="Metadata output already exists"):
+        write_fieldtrip_raw_mat_epochs(
+            tmp_path / "dummy.mat",
+            epochs_out=tmp_path / "converted-epo.fif",
+            metadata_out=metadata_out,
+        )
+
+    assert epochs.saved_paths == []
+    assert metadata_out.read_text(encoding="utf-8") == "old\n"
 
 
 def test_fieldtrip_sampleinfo_accepts_integral_float_bounds():
