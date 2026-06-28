@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 
+from neureptrace._bushmeg_all_protocols_report_bool_patch import install
+
+install()
+
 from neureptrace.bushmeg_all_protocols_report import build_leaderboard
 
 
