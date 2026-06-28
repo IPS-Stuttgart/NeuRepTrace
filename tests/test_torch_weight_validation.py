@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from neureptrace._torch_weight_validation_patch import _small_stratified_holdout
 from neureptrace.decoding import TorchMLPClassifier
 from neureptrace.decoding.cdan import TorchCDANClassifier
 from neureptrace.decoding.dann import TorchDANNClassifier
@@ -55,3 +56,14 @@ def test_source_vrex_rejects_unknown_class_weight() -> None:
 
     with pytest.raises(ValueError, match="class_weight must be None or 'balanced'"):
         model.fit(SOURCE_FEATURES, SOURCE_LABELS, source_domains=SOURCE_DOMAINS)
+
+
+def test_torch_mlp_validation_guard_preserves_composite_label_rows() -> None:
+    labels = [
+        ("cue", "left"),
+        ("cue", "left"),
+        ("cue", "right"),
+        ("cue", "right"),
+    ]
+
+    assert _small_stratified_holdout(labels, 0.5) is False
