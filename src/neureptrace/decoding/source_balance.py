@@ -103,7 +103,7 @@ def resample_source_rows_balanced(
 
     cfg = source_balance_config() if config is None else _coerce_config(config)
     features = _feature_matrix(source_features, name="source_features")
-    labels = _vector(source_labels, name="source_labels")
+    labels = _vector(source_labels, name="source_labels", expected_length=features.shape[0])
     if labels.shape[0] != features.shape[0]:
         raise ValueError("source_labels must contain one value per feature row.")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
@@ -115,9 +115,8 @@ def resample_source_rows_balanced(
         indices = np.arange(features.shape[0], dtype=int)
     else:
         picked: list[int] = []
-        key_array = np.asarray(keys, dtype=object)
         for key in tuple(dict.fromkeys(keys)):
-            group_indices = np.flatnonzero(key_array == key)
+            group_indices = np.asarray([index for index, row_key in enumerate(keys) if row_key == key], dtype=int)
             picked.extend(rng.choice(group_indices, size=target_count, replace=group_indices.size < target_count).astype(int).tolist())
         indices = np.asarray(picked, dtype=int)
     out_domains = None if source_domains is None else domains[indices]
@@ -233,8 +232,8 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+def _vector(values: Sequence[Any] | np.ndarray, *, name: str, expected_length: int | None = None) -> np.ndarray:
+    vector = _atomic_value_vector(values, expected_length=expected_length, name=name)
     if vector.shape[0] < 1:
         raise ValueError(f"{name} must contain at least one value.")
     return vector
@@ -243,10 +242,54 @@ def _vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
 def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError("source_domains must contain one value per source row.")
+    return _atomic_value_vector(values, expected_length=expected_length, name="source_domains")
+
+
+def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int | None, name: str) -> np.ndarray:
+    if isinstance(values, (str, bytes)):
+        vector = _object_value_vector([values])
+    else:
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            vector = _object_value_vector([array.item()])
+        elif array.ndim == 1:
+            if expected_length == 1 and array.shape[0] != 1:
+                vector = _object_value_vector([tuple(array.tolist())])
+            else:
+                vector = _object_value_vector(array.reshape(-1).tolist())
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if rows.shape[1] == 1:
+                vector = _object_value_vector(rows[:, 0].tolist())
+            else:
+                vector = _object_value_vector(tuple(row.tolist()) for row in rows)
+    if expected_length is not None and vector.shape[0] != expected_length:
+        raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _object_value_vector(values: Sequence[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = _hashable_value(value)
+    return vector
+
+
+def _hashable_value(value: Any) -> Hashable:
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, list):
+        value = tuple(_hashable_value(item) for item in value)
+    elif isinstance(value, tuple):
+        value = tuple(_hashable_value(item) for item in value)
+    try:
+        hash(value)
+    except TypeError as exc:
+        raise ValueError(f"source balance grouping values must be hashable; got {value!r}.") from exc
+    return value
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
