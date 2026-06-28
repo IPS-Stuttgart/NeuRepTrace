@@ -58,6 +58,39 @@ def test_load_fieldtrip_mat_epochs_maps_trialinfo_columns(tmp_path: Path):
     assert dataset.metadata["participant"].tolist() == [2, 2]
 
 
+def test_load_fieldtrip_mat_epochs_infers_channel_time_trial_stack(tmp_path: Path):
+    mat_path = tmp_path / "stacked.mat"
+    stacked = np.arange(2 * 4 * 3, dtype=float).reshape(2, 4, 3)
+    data = {
+        "trial": stacked,
+        "time": np.array([0.0, 0.01, 0.02, 0.03]),
+        "label": np.array(["MEG001", "MEG002"], dtype=object),
+        "trialinfo": np.array([[1, 10], [2, 20], [3, 30]]),
+    }
+    savemat(mat_path, {"data": data})
+
+    dataset = load_fieldtrip_mat_epochs(
+        mat_path,
+        {
+            "variable": "data",
+            "metadata": {
+                "columns": [
+                    {"name": "stimulus_class", "index": 0},
+                    {"name": "condition", "index": 1},
+                ]
+            },
+        },
+    )
+
+    assert dataset.data.shape == (3, 2, 4)
+    np.testing.assert_allclose(dataset.data[0], stacked[:, :, 0])
+    np.testing.assert_allclose(dataset.data[2], stacked[:, :, 2])
+    assert dataset.channel_names == ["MEG001", "MEG002"]
+    assert dataset.times.tolist() == [0.0, 0.01, 0.02, 0.03]
+    assert dataset.metadata["stimulus_class"].tolist() == [1, 2, 3]
+    assert dataset.metadata["condition"].tolist() == [10, 20, 30]
+
+
 def test_load_fieldtrip_mat_epochs_normalizes_matlab_char_array_labels(tmp_path: Path):
     mat_path = tmp_path / "char_labels.mat"
     data = {
