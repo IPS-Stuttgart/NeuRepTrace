@@ -4,6 +4,7 @@ import numpy as np
 
 from neureptrace.decoding.precomputed_foundation import (
     align_precomputed_foundation_features,
+    fit_precomputed_foundation_probe,
     load_precomputed_foundation_features,
     make_precomputed_foundation_feature_table,
 )
@@ -79,3 +80,43 @@ def test_npz_loader_preserves_matrix_encoded_composite_row_ids(tmp_path) -> None
         ("sub-02", "trial-0"),
     )
     assert np.allclose(aligned, np.asarray([[0.0, 1.0], [2.0, 2.0]], dtype=np.float32))
+
+
+def test_probe_preserves_matrix_encoded_composite_row_ids() -> None:
+    features = np.asarray(
+        [
+            [0.0, 0.0],
+            [0.0, 1.0],
+            [2.0, 2.0],
+            [2.0, 3.0],
+        ],
+        dtype=float,
+    )
+    row_ids = [
+        ("sub-01", "trial-0"),
+        ("sub-01", "trial-1"),
+        ("sub-02", "trial-0"),
+        ("sub-03", "trial-0"),
+    ]
+    table = make_precomputed_foundation_feature_table(features, row_ids=row_ids)
+
+    result = fit_precomputed_foundation_probe(
+        feature_table=table,
+        train_row_ids=np.asarray(
+            [
+                ["sub-02", "trial-0"],
+                ["sub-01", "trial-1"],
+                ["sub-01", "trial-0"],
+            ]
+        ),
+        train_labels=np.asarray(["target", "source", "source"]),
+        test_row_ids=np.asarray(
+            [
+                ["sub-03", "trial-0"],
+                ["sub-01", "trial-1"],
+            ]
+        ),
+    )
+
+    assert np.allclose(result.train_features, features[[2, 1, 0]].astype(np.float32))
+    assert np.allclose(result.test_features, features[[3, 1]].astype(np.float32))
