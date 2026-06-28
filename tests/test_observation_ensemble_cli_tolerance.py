@@ -17,31 +17,28 @@ class _DummyObservationTable:
 
 def test_observation_ensemble_cli_forwards_probability_tolerance(monkeypatch, tmp_path: Path) -> None:
     seen: dict[str, float] = {}
-
-    def fake_reader(paths, *, profile, probability_tolerance, require_normalized):
-        seen["reader_probability_tolerance"] = probability_tolerance
-        return pd.DataFrame(
-            {
-                "decoder": ["logistic", "linear_svm"],
-                "time": [0.0, 0.0],
-                "true_label": [0, 0],
-                "prob_class_0": [0.55, 0.55],
-                "prob_class_1": [0.50, 0.50],
-            }
-        )
+    input_path = tmp_path / "input.csv"
+    pd.DataFrame(
+        {
+            "decoder": ["logistic", "linear_svm"],
+            "time": [0.0, 0.0],
+            "true_label": [0, 0],
+            "prob_class_0": [0.55, 0.55],
+            "prob_class_1": [0.50, 0.50],
+        }
+    ).to_csv(input_path, index=False)
 
     def fake_ensemble(observations, **kwargs):
         seen["ensemble_probability_tolerance"] = kwargs["probability_tolerance"]
         return observations
 
-    monkeypatch.setattr(observation_ensemble, "read_validated_probability_observations", fake_reader)
     monkeypatch.setattr(observation_ensemble, "ensemble_probability_observations", fake_ensemble)
     monkeypatch.setattr(observation_ensemble, "ProbabilityObservationTable", _DummyObservationTable)
 
     out_path = tmp_path / "ensemble.csv"
     exit_code = observation_ensemble.main(
         [
-            "input.csv",
+            str(input_path),
             "--out",
             str(out_path),
             "--probability-tolerance",
@@ -51,5 +48,4 @@ def test_observation_ensemble_cli_forwards_probability_tolerance(monkeypatch, tm
 
     assert exit_code == 0
     assert out_path.read_text(encoding="utf-8") == "ok\n"
-    assert seen["reader_probability_tolerance"] == 0.1
     assert seen["ensemble_probability_tolerance"] == 0.1
