@@ -85,6 +85,7 @@ from . import (  # noqa: E402
     _openneuro_real_shuffle_time_selection_patch,
     _paired_stats_tie_patch,
     _pls_da_composite_labels_patch,
+    _precomputed_foundation_row_id_patch,
     _probability_stacking_group_summary_patch,
     _random_state_config_patch,
     _reaction_time_trial_index_base_patch,
@@ -191,6 +192,7 @@ _observation_ensemble_ungrouped_metrics_patch.install()
 _observation_ensemble_missing_label_patch.install()
 _probability_stacking_group_summary_patch.install()
 _pls_da_composite_labels_patch.install()
+_precomputed_foundation_row_id_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _bushmeg_source_loso_ensemble_numeric_patch.install()
 _category2_autoencoder_all_protocols_patch.install()
