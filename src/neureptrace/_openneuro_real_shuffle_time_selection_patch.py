@@ -1,13 +1,41 @@
-"""Ignore non-finite OpenNeuro real-vs-shuffle time-course rows."""
+"""Apply OpenNeuro real-vs-shuffle and manifest compatibility runtime patches."""
 
 from __future__ import annotations
 
 import importlib
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-_PATCH_MARKER = "_neureptrace_openneuro_real_shuffle_time_selection_patch_installed"
+_TIME_SELECTION_PATCH_MARKER = "_neureptrace_openneuro_real_shuffle_time_selection_patch_installed"
+_MANIFEST_BOOL_PATCH_MARKER = "_neureptrace_openneuro_manifest_bool_token_patch_installed"
+
+BOOLEAN_MANIFEST_COMPATIBILITY_COLUMNS = {
+    "run_decode",
+    "skip_failed_subjects",
+    "temporal_smoothing",
+    "response_window_ensemble",
+    "ensemble_source_baseline_debiasing",
+    "label_shuffle_control",
+}
+_TRUE_TOKENS = {"1", "true", "yes", "y", "on"}
+_FALSE_TOKENS = {"0", "false", "no", "n", "off"}
+
+
+def _bool_token(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value in {0, 1}:
+        return "true" if bool(value) else "false"
+    text = str(value).strip().lower()
+    if text in _TRUE_TOKENS:
+        return "true"
+    if text in _FALSE_TOKENS:
+        return "false"
+    return None
 
 
 def _finite_positions(frame: pd.DataFrame, *columns: str) -> np.ndarray:
@@ -18,12 +46,31 @@ def _finite_positions(frame: pd.DataFrame, *columns: str) -> np.ndarray:
     return np.flatnonzero(mask)
 
 
+def _install_manifest_bool_token_patch() -> None:
+    module = importlib.import_module("neureptrace.openneuro_decode_diagnostics")
+    original = module._manifest_compatibility_token
+    if getattr(original, _MANIFEST_BOOL_PATCH_MARKER, False):
+        return
+
+    def _manifest_compatibility_token(column: str, value: Any) -> str:
+        if column in BOOLEAN_MANIFEST_COMPATIBILITY_COLUMNS:
+            token = _bool_token(value)
+            if token is not None:
+                return token
+        return original(column, value)
+
+    setattr(_manifest_compatibility_token, _MANIFEST_BOOL_PATCH_MARKER, True)
+    module._manifest_compatibility_token = _manifest_compatibility_token
+
+
 def install() -> None:
-    """Make report time selection ignore rows with non-finite time/metric values."""
+    """Install OpenNeuro report and diagnostics compatibility patches."""
+
+    _install_manifest_bool_token_patch()
 
     module = importlib.import_module("neureptrace.openneuro_real_shuffle_report")
     original_nearest_row = module._nearest_row
-    if getattr(original_nearest_row, _PATCH_MARKER, False):
+    if getattr(original_nearest_row, _TIME_SELECTION_PATCH_MARKER, False):
         return
 
     def _nearest_row(frame: pd.DataFrame, time: float) -> pd.Series:
@@ -48,8 +95,8 @@ def install() -> None:
         best_position = positions[int(np.argmax(values[positions]))]
         return frame.iloc[int(best_position)]
 
-    setattr(_nearest_row, _PATCH_MARKER, True)
-    setattr(_best_time_row, _PATCH_MARKER, True)
+    setattr(_nearest_row, _TIME_SELECTION_PATCH_MARKER, True)
+    setattr(_best_time_row, _TIME_SELECTION_PATCH_MARKER, True)
     module._nearest_row = _nearest_row
     module._best_time_row = _best_time_row
 
