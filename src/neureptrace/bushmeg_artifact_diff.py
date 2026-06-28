@@ -151,7 +151,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.summary_out.parent.mkdir(parents=True, exist_ok=True)
     summary.to_csv(args.summary_out, index=False)
     print(f"Wrote {args.summary_out}")
-    for row in summary[summary[args.group_column] == "__mean__"].to_dict("records"):
+    summary_group_column = args.group_column if args.group_column in summary.columns else "row_index"
+    for row in summary[summary[summary_group_column] == "__mean__"].to_dict("records"):
         print(f"{row['metric']}: reference={row['reference']:.6g} candidate={row['candidate']:.6g} delta={row['delta_candidate_minus_reference']:.6g}")
 
     if args.reference_predictions and args.candidate_predictions:
