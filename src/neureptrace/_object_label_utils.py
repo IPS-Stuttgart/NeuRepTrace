@@ -126,7 +126,10 @@ def label_counts(values: Sequence | np.ndarray) -> tuple[np.ndarray, np.ndarray]
 def replace_null_class_predictions(predictions: Sequence | np.ndarray, *, null_label: object = 0, fallback_label: object = 1) -> np.ndarray:
     """Replace null predictions without broadcasting composite fallback labels."""
 
-    repaired = np.asarray(predictions).copy()
+    if isinstance(predictions, np.ndarray) and predictions.dtype != object:
+        repaired = predictions.copy()
+    else:
+        repaired = _object_vector(list(predictions))
     null_mask = label_equal_mask(repaired, null_label)
     if not np.any(null_mask):
         return repaired
