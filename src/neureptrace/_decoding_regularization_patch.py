@@ -8,6 +8,7 @@ removed once the overridden functions are folded directly into
 
 from __future__ import annotations
 
+import importlib
 import inspect
 from collections.abc import Sequence
 from typing import Any
@@ -42,10 +43,19 @@ def _logistic_regularization_kwargs(l1_ratio: float) -> dict[str, float | str]:
     return {"penalty": "elasticnet", "l1_ratio": l1_ratio}
 
 
+def _install_decoding_option_type_validation() -> None:
+    """Install decoder-option type validation alongside the decoder API patch."""
+
+    patch = importlib.import_module("neureptrace._decoding_option_type_validation_patch")
+    patch.install()
+
+
 def install() -> None:
     """Install corrected sparse/elastic-net logistic decoder builders."""
 
     from neureptrace import decoding
+
+    _install_decoding_option_type_validation()
 
     if getattr(decoding, _PATCH_MARKER, False):
         return
