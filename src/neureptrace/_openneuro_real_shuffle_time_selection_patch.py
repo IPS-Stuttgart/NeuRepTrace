@@ -10,7 +10,38 @@ import numpy as np
 import pandas as pd
 
 _TIME_SELECTION_PATCH_MARKER = "_neureptrace_openneuro_real_shuffle_time_selection_patch_installed"
+_MANIFEST_BOOL_PATCH_MARKER = "_neureptrace_openneuro_manifest_bool_token_patch_installed"
 _PROVENANCE_VALUE_PATCH_MARKER = "_neureptrace_openneuro_provenance_value_patch_installed"
+
+BOOLEAN_MANIFEST_COMPATIBILITY_COLUMNS = {
+    "run_decode",
+    "skip_failed_subjects",
+    "temporal_smoothing",
+    "response_window_ensemble",
+    "ensemble_source_baseline_debiasing",
+    "label_shuffle_control",
+}
+_TRUE_TOKENS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_TOKENS = {"0", "false", "f", "no", "n", "off"}
+
+
+def _bool_token(value: Any) -> str | None:
+    if isinstance(value, (bool, np.bool_)):
+        return "true" if bool(value) else "false"
+    if value is None:
+        return None
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        if numeric == 0.0:
+            return "false"
+        if numeric == 1.0:
+            return "true"
+    text = str(value).strip().lower()
+    if text in _TRUE_TOKENS:
+        return "true"
+    if text in _FALSE_TOKENS:
+        return "false"
+    return None
 
 
 def _finite_positions(frame: pd.DataFrame, *columns: str) -> np.ndarray:
@@ -19,6 +50,23 @@ def _finite_positions(frame: pd.DataFrame, *columns: str) -> np.ndarray:
         values = pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
         mask &= np.isfinite(values)
     return np.flatnonzero(mask)
+
+
+def _install_manifest_bool_token_patch() -> None:
+    module = importlib.import_module("neureptrace.openneuro_decode_diagnostics")
+    original = module._manifest_compatibility_token
+    if getattr(original, _MANIFEST_BOOL_PATCH_MARKER, False):
+        return
+
+    def _manifest_compatibility_token(column: str, value: Any) -> str:
+        if column in BOOLEAN_MANIFEST_COMPATIBILITY_COLUMNS:
+            token = _bool_token(value)
+            if token is not None:
+                return token
+        return original(column, value)
+
+    setattr(_manifest_compatibility_token, _MANIFEST_BOOL_PATCH_MARKER, True)
+    module._manifest_compatibility_token = _manifest_compatibility_token
 
 
 def _is_missing_provenance_value(value: Any) -> bool:
@@ -83,6 +131,7 @@ def _install_time_selection_patch() -> None:
 def install() -> None:
     """Install OpenNeuro diagnostics compatibility patches."""
 
+    _install_manifest_bool_token_patch()
     _install_provenance_value_patch()
     _install_time_selection_patch()
 
