@@ -69,11 +69,30 @@ def test_source_correlation_filter_config_validation() -> None:
     assert cfg.max_features == 2
     assert cfg.min_features == 1
 
+    assert source_correlation_filter_config(max_features=" none ").max_features is None
+
     with pytest.raises(ValueError):
         source_correlation_filter_config(max_abs_correlation=1.5)
 
     with pytest.raises(ValueError):
         source_correlation_filter_config(min_features=0)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_abs_correlation": True},
+        {"max_abs_correlation": np.bool_(False)},
+        {"max_features": True},
+        {"max_features": np.bool_(False)},
+        {"min_features": False},
+        {"epsilon": np.bool_(True)},
+    ],
+)
+def test_source_correlation_filter_config_rejects_boolean_numeric_values(kwargs) -> None:
+    option = next(iter(kwargs))
+    with pytest.raises(ValueError, match=option):
+        source_correlation_filter_config(**kwargs)
 
 
 def test_source_correlation_filter_rejects_width_mismatch() -> None:
