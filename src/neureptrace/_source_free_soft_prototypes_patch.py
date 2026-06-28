@@ -48,11 +48,11 @@ def _fit_target_prototypes(
             continue
         row_mask = np.ones(embedding.shape[0], dtype=bool) if estimator == "soft_all" else selected
         weights = np.asarray(probabilities[row_mask, class_index], dtype=float)
-        counts[class_index] = int(np.count_nonzero(weights > _sf._EPS))
         if weights.size == 0:
             continue
         mass = float(np.sum(weights))
         effective_count = (mass * mass) / max(float(np.sum(weights * weights)), _sf._EPS)
+        counts[class_index] = int(np.floor(effective_count + _sf._EPS))
         if effective_count < float(min_class_count):
             continue
         prototypes[class_index] = np.average(embedding[row_mask], axis=0, weights=np.clip(weights, _sf._EPS, None))
