@@ -130,6 +130,8 @@ def validate_probability_inputs(
         return probabilities, None
 
     labels = np.asarray(labels)
+    if labels.ndim == 2 and labels.shape[1] == 1:
+        labels = labels.reshape(-1)
     if labels.ndim != 1:
         raise ValueError("labels must have shape (n_samples,)")
     if probabilities.shape[0] != labels.shape[0]:
