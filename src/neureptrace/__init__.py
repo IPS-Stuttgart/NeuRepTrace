@@ -28,6 +28,7 @@ from . import (  # noqa: E402
     _category2_autoencoder_max_folds_patch,
     _classifier_tuple_labels_patch,
     _config_workflow_float_bool_patch,
+    _decode_from_config_section_validation_patch,
     _conditional_coral_bool_config_patch,
     _confusion_metadata_lookup_patch,
     _confusion_permutation_seed_patch,
@@ -81,9 +82,11 @@ from . import (  # noqa: E402
     _onset_boolean_summary_patch,
     _openneuro_parse_runs_patch,
     _openneuro_pre_stimulus_finite_patch,
+    _openneuro_real_shuffle_bool_patch,
     _openneuro_real_shuffle_time_selection_patch,
     _paired_stats_tie_patch,
     _pls_da_composite_labels_patch,
+    _precomputed_foundation_row_id_patch,
     _probability_stacking_group_summary_patch,
     _random_state_config_patch,
     _reaction_time_trial_index_base_patch,
@@ -91,6 +94,7 @@ from . import (  # noqa: E402
     _reconstruction_encoder_config_patch,
     _reconstruction_tuple_labels_patch,
     _report_finite_metric_selection_patch,
+    _results_metric_boolean_patch,
     _response_window_time_validation_patch,
     _riemannian_vector_validation_patch,
     _sample_weight_validation_patch,
@@ -155,6 +159,7 @@ _confusion_permutation_seed_patch.install()
 _correlation_prototype_sample_weight_patch.install()
 _classifier_tuple_labels_patch.install()
 _config_workflow_float_bool_patch.install()
+_decode_from_config_section_validation_patch.install()
 _conditional_coral_bool_config_patch.install()
 _event_detection_extensions.install()
 _onset_boolean_summary_patch.install()
@@ -188,6 +193,7 @@ _observation_ensemble_ungrouped_metrics_patch.install()
 _observation_ensemble_missing_label_patch.install()
 _probability_stacking_group_summary_patch.install()
 _pls_da_composite_labels_patch.install()
+_precomputed_foundation_row_id_patch.install()
 _bushmeg_category2_autoencoder_config_patch.install()
 _bushmeg_source_loso_ensemble_numeric_patch.install()
 _category2_autoencoder_all_protocols_patch.install()
@@ -220,6 +226,7 @@ _sample_weight_validation_patch.install()
 _sampling_composite_label_array_patch.install()
 _semi_supervised_lora_tuple_labels_patch.install()
 _report_finite_metric_selection_patch.install()
+_results_metric_boolean_patch.install()
 _response_window_time_validation_patch.install()
 _paired_stats_tie_patch.install()
 _riemannian_vector_validation_patch.install()
@@ -270,4 +277,5 @@ _windowed_composite_labels_patch.install()
 _bushmeg_cue_temporal_bins_patch.install()
 _openneuro_parse_runs_patch.install()
 _openneuro_pre_stimulus_finite_patch.install()
+_openneuro_real_shuffle_bool_patch.install()
 _openneuro_real_shuffle_time_selection_patch.install()

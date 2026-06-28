@@ -23,6 +23,15 @@ _PATCH_MARKER = "_neureptrace_probability_patch_installed"
 _BINARY_DECISION_PATCH_MARKER = "_neureptrace_binary_decision_probability_patch_installed"
 
 
+def _n_feature_rows(features) -> int:
+    """Return the number of feature rows for arrays and array-like sequences."""
+
+    shape = getattr(features, "shape", None)
+    if shape is not None and len(shape) >= 1:
+        return int(shape[0])
+    return len(features)
+
+
 def _prediction_fallback_probabilities(
     model,
     features,
@@ -154,7 +163,7 @@ def _patch_source_ensemble_decision_fallback() -> None:
                 model_classes = classes
         else:
             raise ValueError("decision_function output must be one- or two-dimensional.")
-        if scores.shape[0] != features.shape[0]:
+        if scores.shape[0] != _n_feature_rows(features):
             raise ValueError("decision_function output must contain one row per feature row.")
         if scores.shape[1] != model_classes.shape[0]:
             raise ValueError("decision_function output width must match model.classes_.")

@@ -82,3 +82,83 @@ def test_method_config_rejects_ambiguous_smoke_enabled_string() -> None:
             max_folds=1,
             include_heavy=False,
         )
+
+
+def test_method_settings_normalize_quoted_enabled_and_heavy_booleans() -> None:
+    spec = method_registry()["source_loso_logistic"]
+
+    settings = all_protocols._method_settings(
+        {"method_settings": {spec.method: {"enabled": "false", "heavy": "true", "smoke_enabled": "false"}}},
+        spec.method,
+    )
+
+    assert settings["enabled"] is False
+    assert settings["heavy"] is True
+    assert settings["smoke_enabled"] is False
+
+
+def test_method_availability_treats_quoted_false_enabled_as_disabled() -> None:
+    spec = method_registry()["source_loso_logistic"]
+    settings = all_protocols._method_settings(
+        {"method_settings": {spec.method: {"enabled": "false"}}},
+        spec.method,
+    )
+
+    available, reason = all_protocols._method_availability(
+        spec,
+        _base_method_config(),
+        settings=settings,
+        include_heavy=False,
+        max_folds=None,
+    )
+
+    assert not available
+    assert "disabled" in reason
+
+
+def test_method_availability_treats_quoted_false_smoke_enabled_as_false_for_smoke_runs() -> None:
+    spec = method_registry()["source_loso_logistic"]
+    settings = all_protocols._method_settings(
+        {"method_settings": {spec.method: {"enabled": "false", "smoke_enabled": "false"}}},
+        spec.method,
+    )
+
+    available, reason = all_protocols._method_availability(
+        spec,
+        _base_method_config(),
+        settings=settings,
+        include_heavy=False,
+        max_folds=1,
+    )
+
+    assert not available
+    assert "disabled" in reason
+
+
+def test_method_availability_allows_disabled_method_when_quoted_true_smoke_run_is_requested() -> None:
+    spec = method_registry()["source_loso_logistic"]
+    settings = all_protocols._method_settings(
+        {"method_settings": {spec.method: {"enabled": "false", "smoke_enabled": "true"}}},
+        spec.method,
+    )
+
+    available, reason = all_protocols._method_availability(
+        spec,
+        _base_method_config(),
+        settings=settings,
+        include_heavy=False,
+        max_folds=1,
+    )
+
+    assert available
+    assert reason == ""
+
+
+def test_method_settings_rejects_ambiguous_enabled_string() -> None:
+    spec = method_registry()["source_loso_logistic"]
+
+    with pytest.raises(ValueError, match="enabled"):
+        all_protocols._method_settings(
+            {"method_settings": {spec.method: {"enabled": "maybe"}}},
+            spec.method,
+        )

@@ -2,8 +2,24 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from sklearn.base import BaseEstimator
 
-from neureptrace.decoding.domain_importance import DOMAIN_IMPORTANCE_CATEGORY, domain_importance_config, fit_domain_classifier_importance_weights
+from neureptrace.decoding.domain_importance import (
+    DOMAIN_IMPORTANCE_CATEGORY,
+    DomainImportanceResult,
+    apply_domain_importance_weights,
+    domain_importance_config,
+    fit_domain_classifier_importance_weights,
+)
+
+
+def _domain_result(weights: list[float]) -> DomainImportanceResult:
+    return DomainImportanceResult(
+        sample_weights=np.asarray(weights, dtype=float),
+        source_target_probabilities=np.linspace(0.2, 0.8, num=len(weights), dtype=float),
+        target_target_probabilities=np.asarray([0.5], dtype=float),
+        domain_classifier=BaseEstimator(),
+    )
 
 
 def test_domain_weights_are_category2_and_normalized() -> None:
@@ -30,6 +46,42 @@ def test_domain_weights_record_clip_none() -> None:
     assert result.metadata["domain_importance_clip_min"] == ""
     assert result.metadata["domain_importance_clip_max"] == ""
     assert np.isclose(result.sample_weights.mean(), 1.0)
+
+
+def test_apply_domain_weights_preserves_composite_source_labels() -> None:
+    features, labels, weights = apply_domain_importance_weights(
+        [[0.0, 0.1], [1.0, 1.1]],
+        [("face", 1), ("tool", 2)],
+        _domain_result([0.75, 1.25]),
+    )
+
+    assert features.shape == (2, 2)
+    assert labels.shape == (2,)
+    assert labels.dtype == object
+    assert list(labels) == [("face", 1), ("tool", 2)]
+    assert np.allclose(weights, [0.75, 1.25])
+
+
+def test_apply_domain_weights_preserves_list_source_labels_as_tuples() -> None:
+    _, labels, _ = apply_domain_importance_weights(
+        [[0.0], [1.0]],
+        [["face", 1], ["tool", 2]],
+        _domain_result([1.0, 2.0]),
+    )
+
+    assert labels.shape == (2,)
+    assert list(labels) == [("face", 1), ("tool", 2)]
+
+
+def test_apply_domain_weights_preserves_array_source_label_rows() -> None:
+    _, labels, _ = apply_domain_importance_weights(
+        [[0.0], [1.0]],
+        np.asarray([["face", 1], ["tool", 2]], dtype=object),
+        _domain_result([1.0, 2.0]),
+    )
+
+    assert labels.shape == (2,)
+    assert list(labels) == [("face", 1), ("tool", 2)]
 
 
 def test_domain_importance_config_parses_boolean_strings() -> None:

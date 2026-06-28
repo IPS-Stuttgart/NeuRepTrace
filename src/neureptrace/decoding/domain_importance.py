@@ -154,7 +154,7 @@ def apply_domain_importance_weights(
     """Return source features, labels, and checked domain-importance weights."""
 
     features = _feature_matrix(source_features, name="source_features")
-    labels = np.asarray(source_labels).reshape(-1)
+    labels = _label_vector(source_labels)
     if labels.shape[0] != features.shape[0]:
         raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {features.shape[0]}.")
     weights = np.asarray(result.sample_weights, dtype=float).reshape(-1)
@@ -285,6 +285,59 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain only finite values.")
     return matrix
+
+
+def _object_vector(values: Sequence[Any]) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
+    return vector
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    """Return one label per source row without flattening composite labels."""
+
+    if isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            return _object_vector([values.item()])
+        if values.ndim == 1:
+            return values.reshape(-1)
+        if values.ndim == 2 and values.shape[1] == 1:
+            return values.reshape(-1)
+        rows = [tuple(row.tolist()) for row in values.reshape(values.shape[0], -1)]
+        return _object_vector(rows)
+
+    if isinstance(values, (str, bytes)):
+        return _object_vector([values])
+
+    try:
+        items = list(values)
+    except TypeError:
+        return _object_vector([values])
+
+    if any(isinstance(label, (tuple, list, np.ndarray)) for label in items):
+        labels: list[Any] = []
+        for label in items:
+            if isinstance(label, np.ndarray):
+                if label.ndim == 0:
+                    labels.append(label.item())
+                elif label.size == 1:
+                    labels.append(label.reshape(-1)[0])
+                else:
+                    labels.append(tuple(label.reshape(-1).tolist()))
+            elif isinstance(label, list):
+                labels.append(tuple(label))
+            else:
+                labels.append(label)
+        return _object_vector(labels)
+
+    array = np.asarray(items)
+    if array.ndim <= 1:
+        return array.reshape(-1)
+    if array.ndim == 2 and array.shape[1] == 1:
+        return array.reshape(-1)
+    rows = [tuple(row.tolist()) for row in array.reshape(array.shape[0], -1)]
+    return _object_vector(rows)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:

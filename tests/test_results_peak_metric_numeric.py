@@ -29,18 +29,21 @@ def test_peak_metric_rows_sorts_csv_loaded_metric_values_numerically() -> None:
     [
         ("accuracy", "bad"),
         ("accuracy", np.nan),
+        ("accuracy", True),
         ("time", "bad"),
         ("time", np.inf),
+        ("time", True),
     ],
 )
-def test_peak_metric_rows_rejects_nonfinite_selection_values(column: str, value: object) -> None:
+def test_peak_metric_rows_rejects_invalid_selection_values(column: str, value: object) -> None:
     frame = pd.DataFrame(
         {
             "decoder": ["logistic", "logistic"],
             "participant": ["s1", "s1"],
             "time": ["0.1", "0.2"],
             "accuracy": ["0.9", "0.8"],
-        }
+        },
+        dtype=object,
     )
     frame.loc[0, column] = value
 

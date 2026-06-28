@@ -79,6 +79,26 @@ def test_zero_fill_without_preserving_original_returns_only_synthetic_rows() -> 
     assert result.labels.tolist() == ["x", "x"]
 
 
+def test_source_feature_masking_preserves_composite_labels_and_domains() -> None:
+    features = np.arange(20, dtype=float).reshape(4, 5)
+    labels = [("cat", 1), ("cat", 1), ("dog", 2), ("dog", 2)]
+    domains = [("s1", "run1"), ("s1", "run2"), ("s2", "run1"), ("s2", "run2")]
+
+    result = augment_source_with_feature_masking(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "mask_fraction": 0.4, "random_state": 11},
+    )
+
+    assert result.features.shape == (6, 5)
+    assert result.labels.shape == (6,)
+    assert result.labels.tolist()[:4] == labels
+    assert result.labels.tolist()[4:] == [("cat", 1), ("dog", 2)]
+    assert result.metadata["source_feature_masking_n_classes"] == 2
+    assert result.metadata["source_feature_masking_n_source_domains"] == 4
+
+
 def test_block_mask_indices_are_contiguous() -> None:
     rng = np.random.default_rng(13)
     mask = feature_mask_indices(10, mask_fraction=0.5, mask_mode="block", block_size=3, rng=rng)
