@@ -17,9 +17,13 @@ nav:
     - Dependency Maintenance: dependency-maintenance.md
     - Migrating from PyMEGDec: migrating-from-pymegdec.md
     - PyMEGDec Upstreaming: pymegdec-upstreaming.md
+    - PyMEGDec Phase-out Roadmap: pymegdec-phaseout-roadmap.md
     - Transfer from Config: transfer-from-config.md
     - Foundation Model Features: foundation-model-features.md
     - Benchmarking: benchmarking.md
+    - BUSH-MEG Source Pseudotrials: bush_meg_source_pseudotrials.md
+    - BUSH-MEG Temporal Pooling: bush_meg_temporal_pool.md
+    - THINGS-EEG2: things_eeg2.md
     - Few-shot Target Calibration: few_shot_target_calibration.md
     - Semi-supervised LoRA Few-shot: semi_supervised_lora_few_shot.md
     - Examples: examples.md
