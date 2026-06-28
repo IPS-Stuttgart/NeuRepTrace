@@ -108,6 +108,9 @@ def test_bad_probability_rows_are_rejected() -> None:
     with pytest.raises(ValueError, match="finite non-negative"):
         select_confident_probability_rows([[0.5, -0.5]])
 
+    with pytest.raises(ValueError, match="positive total mass"):
+        select_confident_probability_rows([[0.0, 0.0]])
+
 
 def test_true_labels_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
