@@ -39,7 +39,7 @@ def normalize_test_time_adaptation(mode: str | None) -> str:
     """Normalize public names for test-time adaptation modes."""
 
     normalized = "none" if mode is None else str(mode).strip().lower().replace("-", "_")
-    if normalized in {"", "off", "false", "no", "disabled"}:
+    if normalized in {"", "0", "off", "false", "no", "disabled"}:
         return "none"
     if normalized in {"t_time", "test_time", "test_time_adaptation", "online_entropy", "ttime_entropy", "tent", "entropy"}:
         return "ttime"
