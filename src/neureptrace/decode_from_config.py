@@ -153,6 +153,21 @@ def _find_project_root(start: Path) -> Path:
     return Path.cwd()
 
 
+def _dataset_name(config: Mapping[str, Any]) -> str:
+    """Return the configured dataset name, or an empty label when omitted."""
+
+    name = _section(config, "dataset").get("name")
+    if name is None:
+        return ""
+    return str(name)
+
+
+def _dataset_output_token(config: Mapping[str, Any]) -> str:
+    """Return a filesystem-safe token for output templates using ``{dataset}``."""
+
+    return _dataset_name(config) or "dataset"
+
+
 def _base_for_policy(config: Mapping[str, Any], *, config_dir: Path) -> Path:
     paths = _section(config, "paths")
     policy = str(
@@ -173,7 +188,7 @@ def _output_base_dir(config: Mapping[str, Any], *, config_dir: Path) -> Path:
     base_dir = outputs.get("base_dir") or outputs.get("dir")
     if base_dir in {None, ""}:
         return policy_base
-    dataset_name = str(_section(config, "dataset").get("name", "dataset"))
+    dataset_name = _dataset_output_token(config)
     return expand_path(str(base_dir).format(dataset=dataset_name), base_dir=policy_base)
 
 
@@ -188,7 +203,7 @@ def _resolve_output(
     value = outputs.get(key, default)
     if value is None or value == "":
         return None
-    dataset_name = str(_section(config, "dataset").get("name", "dataset"))
+    dataset_name = _dataset_output_token(config)
     formatted = str(value).format(dataset=dataset_name)
     path = Path(formatted)
     if path.is_absolute():
@@ -228,7 +243,7 @@ def _decode_kwargs(config: Mapping[str, Any], *, config_dir: Path) -> dict[str, 
     kwargs = {
         "label_column": decoding["label_column"],
         "group_column": decoding.get("group_column"),
-        "dataset_name": (_section(config, "dataset") or {}).get("name", config.get("dataset", "")),
+        "dataset_name": _dataset_name(config),
         "out_path": _resolve_output(
             config,
             config_dir=config_dir,

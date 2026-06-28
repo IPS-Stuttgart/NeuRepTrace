@@ -60,6 +60,15 @@ def _dataset_template_name_from_config(config: Any, *, default: str = "dataset")
     return value
 
 
+def _config_dataset_name_is_container(config: Any) -> bool:
+    if not isinstance(config, Mapping):
+        return False
+    dataset = config.get("dataset", {})
+    if isinstance(dataset, Mapping):
+        return _is_container_dataset_name(dataset.get("name"))
+    return _is_container_dataset_name(dataset)
+
+
 def _patch_config_workflow_bool_parser(module: ModuleType) -> None:
     if module.__name__ != "neureptrace.config_workflow":
         return
@@ -137,7 +146,11 @@ def _patch_module(module: ModuleType) -> None:
     def patched_decode_kwargs(config: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
         decoded = decode_kwargs(config, *args, **kwargs)
         dataset_name = decoded.get("dataset_name")
-        if dataset_name is None or _is_container_dataset_name(dataset_name):
+        if (
+            dataset_name is None
+            or _is_container_dataset_name(dataset_name)
+            or _config_dataset_name_is_container(config)
+        ):
             decoded = dict(decoded)
             decoded["dataset_name"] = _dataset_name_from_config(config)
         elif not isinstance(dataset_name, str):
