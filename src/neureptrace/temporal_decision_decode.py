@@ -125,13 +125,7 @@ def _windows(times: np.ndarray, *, window_ms: float, step_ms: float, tmin: Any, 
     windows = [window for window in time_windows(times, window_ms=window_ms, step_ms=step_ms) if lower <= window[2] <= upper]
     if decision_window is not None:
         eps = 1.0e-12
-        half_window_s = window_ms / 2000.0
-        windows = [
-            window
-            for window in windows
-            if window[2] + half_window_s >= decision_window[0] - eps
-            and window[2] - half_window_s <= decision_window[1] + eps
-        ]
+        windows = [window for window in windows if decision_window[0] - eps <= window[2] <= decision_window[1] + eps]
     if not windows:
         raise ValueError("No temporal decision windows are available after filtering.")
     return windows
@@ -270,7 +264,7 @@ def run_temporal_decision_decode_dataset(dataset: EpochDataset, *, label_column:
             "pca_components": "" if pca_components_value is None else pca_components_value, "normalization": normalization_name,
             "baseline_window_start": baseline_window_value[0], "baseline_window_stop": baseline_window_value[1],
             "temporal_mode": "temporal_decision_ensemble", "temporal_aggregation": aggregation,
-            "test_window_start": float(min(dataset.times[window[0]] for window in decision_windows)),
+            "test_window_start": float(min(dataset.times[max(0, window[0] - 1)] for window in decision_windows)),
             "test_window_stop": float(max(dataset.times[window[1] - 1] for window in decision_windows)),
             "n_test_windows": len(decision_windows), "n_source_decoders": len(decoder_names),
             "accuracy": accuracy_score(labels[test_idx], predictions), "balanced_accuracy": balanced_accuracy_score(labels[test_idx], predictions),
