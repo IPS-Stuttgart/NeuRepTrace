@@ -6,8 +6,6 @@ from collections.abc import Mapping
 from functools import wraps
 from typing import Any
 
-from neureptrace import decode_from_config
-
 _PATCH_MARKER = "_neureptrace_decode_from_config_section_validation_patch_installed"
 
 
@@ -21,6 +19,8 @@ def _section_mapping(value: Any, *, name: str) -> dict[str, Any]:
 
 def install() -> None:
     """Patch decode-from-config section extraction to reject falsey scalars."""
+
+    from neureptrace import decode_from_config
 
     original_section = decode_from_config._section
     if getattr(original_section, _PATCH_MARKER, False):
