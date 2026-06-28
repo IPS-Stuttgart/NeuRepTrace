@@ -44,3 +44,10 @@ def test_replace_null_class_predictions_promotes_unrepresentable_fallback_label(
 
     assert repaired.dtype == object
     assert repaired.tolist() == ["target", "target"]
+
+
+def test_replace_null_class_predictions_preserves_tuple_label_atoms() -> None:
+    repaired = replace_null_class_predictions([0, ("subject-a", 1), ("subject-b", 2), 0], null_label=0)
+
+    assert repaired.dtype == object
+    assert repaired.tolist() == [("subject-a", 1), ("subject-a", 1), ("subject-b", 2), ("subject-a", 1)]
