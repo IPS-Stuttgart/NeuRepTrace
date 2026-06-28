@@ -708,6 +708,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_temperatures=source_temperatures,
             score_mode=args.score_mode,
             source_baseline_debiasing=args.source_baseline_debiasing,
+            probability_tolerance=args.probability_tolerance,
             output_decoder=args.output_decoder,
             output_emission_mode=args.output_emission_mode,
         )
