@@ -55,6 +55,27 @@ def test_top_k_accuracy_handles_multiclass_predictions():
     assert top_k_accuracy(probabilities, labels, k=2) == 1.0
 
 
+def test_probability_metrics_accept_column_vector_labels():
+    probabilities = np.array([[0.7, 0.3], [0.4, 0.6], [0.2, 0.8]])
+    labels = np.array([[0], [1], [1]])
+
+    validated_probabilities, validated_labels = validate_probability_inputs(probabilities, labels)
+
+    np.testing.assert_allclose(validated_probabilities, probabilities)
+    np.testing.assert_array_equal(validated_labels, np.array([0, 1, 1]))
+    assert brier_score_multiclass(probabilities, labels) == pytest.approx(np.mean([0.18, 0.32, 0.08]))
+    assert negative_log_likelihood(probabilities, labels) == pytest.approx(-np.mean(np.log([0.7, 0.6, 0.8])))
+    assert top_k_accuracy(probabilities, labels, k=1) == pytest.approx(1.0)
+    assert expected_calibration_error(probabilities, labels, n_bins=2) == pytest.approx(0.3)
+
+
+def test_probability_metrics_reject_multi_column_labels():
+    probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
+
+    with pytest.raises(ValueError, match="labels must have shape"):
+        top_k_accuracy(probabilities, np.array([[0, 1], [1, 0]]), k=1)
+
+
 def test_probability_metrics_reject_invalid_probability_rows():
     labels = np.array([0])
 
