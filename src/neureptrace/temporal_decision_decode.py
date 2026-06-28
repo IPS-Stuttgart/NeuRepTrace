@@ -58,6 +58,25 @@ def _pair(value: Any, *, name: str) -> tuple[float, float] | None:
     return start, stop
 
 
+def _baseline_window(value: Any, *, name: str = "baseline_window") -> tuple[float, float]:
+    """Normalize a baseline window accepted from Python, YAML, or ``--set`` overrides."""
+
+    if value is None:
+        return _normalize_baseline_window(None)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return _normalize_baseline_window(None)
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        parts = [part.strip() for comma_part in text.split(",") for part in comma_part.split() if part.strip()]
+        parsed = _pair(parts, name=name)
+        if parsed is None:  # defensive; ``parts`` is never None.
+            return _normalize_baseline_window(None)
+        return parsed
+    return _normalize_baseline_window(value)
+
+
 def _finite_float(value: Any, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be finite.")
@@ -178,7 +197,7 @@ def _observation_rows(probabilities: np.ndarray, labels: np.ndarray, original_in
     return rows
 
 
-def run_temporal_decision_decode_dataset(dataset: EpochDataset, *, label_column: str, out_path: Path, group_column: str | None = None, decoders: Sequence[str] | str | None = None, tmin: float | None = None, tmax: float | None = None, window_ms: float = 100.0, step_ms: float = 25.0, test_window: tuple[float, float] | None = None, max_iter: int = 1000, emission_mode: str = "calibrated", feature_preprocessor: str = "none", pca_components: int | float | str | None = None, normalization: str = "none", baseline_window: tuple[float, float] | None = DEFAULT_BASELINE_WINDOW, aggregation: str = "log_mean", min_probability: float = 1e-12, observation_out_path: Path | None = None, calibration_bins: int = 10) -> pd.DataFrame:
+def run_temporal_decision_decode_dataset(dataset: EpochDataset, *, label_column: str, out_path: Path, group_column: str | None = None, decoders: Sequence[str] | str | None = None, tmin: float | None = None, tmax: float | None = None, window_ms: float = 100.0, step_ms: float = 25.0, test_window: tuple[float, float] | None = None, max_iter: int = 1000, emission_mode: str = "calibrated", feature_preprocessor: str = "none", pca_components: int | float | str | None = None, normalization: str = "none", baseline_window: Any = DEFAULT_BASELINE_WINDOW, aggregation: str = "log_mean", min_probability: float = 1e-12, observation_out_path: Path | None = None, calibration_bins: int = 10) -> pd.DataFrame:
     """Evaluate one temporally aggregated decision per trial with LOSO splits."""
     if group_column is None:
         raise ValueError("temporal decision decoding requires group_column for leave-one-group-out evaluation.")
@@ -211,7 +230,7 @@ def run_temporal_decision_decode_dataset(dataset: EpochDataset, *, label_column:
     feature_preprocessor_name = normalize_feature_preprocessor(feature_preprocessor)
     pca_components_value = _components(feature_preprocessor_name, pca_components)
     normalization_name = normalize_epoch_normalization(normalization)
-    baseline_window_value = _normalize_baseline_window(baseline_window)
+    baseline_window_value = _baseline_window(baseline_window)
     max_iter = _normalize_positive_int(max_iter, name="max_iter")
     calibration_bins = _normalize_positive_int(calibration_bins, name="calibration_bins")
     aggregation = _normalize_aggregation(aggregation)
@@ -308,7 +327,7 @@ def run_temporal_decision_decode_from_config(config_path: str | Path, *, overrid
         feature_preprocessor=temporal.get("feature_preprocessor", decoding.get("feature_preprocessor", preprocessing.get("feature_preprocessor", "none"))),
         pca_components=temporal.get("pca_components", decoding.get("pca_components", preprocessing.get("pca_components"))),
         normalization=temporal.get("normalization", preprocessing.get("normalization", "none")),
-        baseline_window=tuple(baseline_window) if baseline_window is not None else None,
+        baseline_window=baseline_window,
         aggregation=temporal.get("aggregation", "log_mean"),
         min_probability=_normalize_min_probability(temporal.get("min_probability", 1e-12)),
         observation_out_path=observations_out,
