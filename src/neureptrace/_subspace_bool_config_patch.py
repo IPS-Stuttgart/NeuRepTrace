@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_subspace_bool_config_patch_installed"
+_RANDOM_SUBSPACE_PATCH_MARKER = "_neureptrace_random_subspace_bool_config_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
@@ -49,34 +50,48 @@ def install() -> None:
     from neureptrace.decoding import subspace_adaptation as subspace
 
     original_config = subspace.subspace_adaptation_config
-    if getattr(original_config, _PATCH_MARKER, False):
+    if not getattr(original_config, _PATCH_MARKER, False):
+        @wraps(original_config)
+        def subspace_adaptation_config(
+            *,
+            method: str | None = subspace.DEFAULT_SUBSPACE_METHOD,
+            n_components: int | str | None = subspace.DEFAULT_SUBSPACE_COMPONENTS,
+            regularization: float | str = subspace.DEFAULT_SUBSPACE_REGULARIZATION,
+            eigen_ridge: float | str = subspace.DEFAULT_SUBSPACE_EIGEN_RIDGE,
+            standardize: Any = True,
+            class_balance_source: Any = False,
+            normalize_latent: Any = False,
+        ):
+            normalized_method = subspace.normalize_subspace_method(method)
+            requested_balance = _normalize_bool(class_balance_source, name="class_balance_source")
+            return original_config(
+                method=normalized_method,
+                n_components=n_components,
+                regularization=regularization,
+                eigen_ridge=eigen_ridge,
+                standardize=_normalize_bool(standardize, name="standardize"),
+                class_balance_source=(requested_balance or normalized_method == "balanced_tca"),
+                normalize_latent=_normalize_bool(normalize_latent, name="normalize_latent"),
+            )
+
+        setattr(subspace_adaptation_config, _PATCH_MARKER, True)
+        subspace.subspace_adaptation_config = subspace_adaptation_config
+
+    from neureptrace.decoding import random_subspace
+
+    original_random_subspace_config = random_subspace.random_subspace_ensemble_config
+    if getattr(original_random_subspace_config, _RANDOM_SUBSPACE_PATCH_MARKER, False):
         return
 
-    @wraps(original_config)
-    def subspace_adaptation_config(
-        *,
-        method: str | None = subspace.DEFAULT_SUBSPACE_METHOD,
-        n_components: int | str | None = subspace.DEFAULT_SUBSPACE_COMPONENTS,
-        regularization: float | str = subspace.DEFAULT_SUBSPACE_REGULARIZATION,
-        eigen_ridge: float | str = subspace.DEFAULT_SUBSPACE_EIGEN_RIDGE,
-        standardize: Any = True,
-        class_balance_source: Any = False,
-        normalize_latent: Any = False,
-    ):
-        normalized_method = subspace.normalize_subspace_method(method)
-        requested_balance = _normalize_bool(class_balance_source, name="class_balance_source")
-        return original_config(
-            method=normalized_method,
-            n_components=n_components,
-            regularization=regularization,
-            eigen_ridge=eigen_ridge,
-            standardize=_normalize_bool(standardize, name="standardize"),
-            class_balance_source=(requested_balance or normalized_method == "balanced_tca"),
-            normalize_latent=_normalize_bool(normalize_latent, name="normalize_latent"),
-        )
+    @wraps(original_random_subspace_config)
+    def random_subspace_ensemble_config(**kwargs):
+        if "bootstrap_rows" in kwargs:
+            kwargs = dict(kwargs)
+            kwargs["bootstrap_rows"] = _normalize_bool(kwargs["bootstrap_rows"], name="bootstrap_rows")
+        return original_random_subspace_config(**kwargs)
 
-    setattr(subspace_adaptation_config, _PATCH_MARKER, True)
-    subspace.subspace_adaptation_config = subspace_adaptation_config
+    setattr(random_subspace_ensemble_config, _RANDOM_SUBSPACE_PATCH_MARKER, True)
+    random_subspace.random_subspace_ensemble_config = random_subspace_ensemble_config
 
 
 __all__ = ["install"]
