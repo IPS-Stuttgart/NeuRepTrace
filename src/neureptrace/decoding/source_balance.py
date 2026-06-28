@@ -50,7 +50,7 @@ def source_balance_config(
     *,
     strategy: str | None = "class_domain",
     target: str | None = "max",
-    normalize_weights: bool = True,
+    normalize_weights: bool | str | int | float = True,
     random_state: int | str | None = 13,
 ) -> SourceBalanceConfig:
     """Normalize source-balancing options."""
@@ -58,7 +58,7 @@ def source_balance_config(
     return SourceBalanceConfig(
         strategy=normalize_balance_strategy(strategy),
         target=normalize_balance_target(target),
-        normalize_weights=bool(normalize_weights),
+        normalize_weights=_bool_config(normalize_weights, name="normalize_weights"),
         random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
     )
 
@@ -144,6 +144,26 @@ def normalize_balance_target(value: str | None) -> str:
     if normalized not in BALANCE_TARGETS:
         raise ValueError(f"Unknown balance target {value!r}.")
     return normalized
+
+
+def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    if isinstance(value, (int, np.integer)):
+        parsed = int(value)
+        if parsed in {0, 1}:
+            return bool(parsed)
+    if isinstance(value, (float, np.floating)):
+        parsed_float = float(value)
+        if np.isfinite(parsed_float) and parsed_float in {0.0, 1.0}:
+            return bool(parsed_float)
+    raise ValueError(f"{name} must be a boolean value.")
 
 
 def _coerce_config(config: SourceBalanceConfig | Mapping[str, Any]) -> SourceBalanceConfig:
