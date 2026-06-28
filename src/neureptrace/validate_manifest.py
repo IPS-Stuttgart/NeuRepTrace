@@ -122,8 +122,8 @@ def validate_manifest(
     default_n_splits: int = 5,
 ) -> list[ManifestValidation]:
     """Validate staged files and metadata referenced by a benchmark manifest."""
-    if default_n_splits < 1:
-        raise ValueError("default_n_splits must be at least 1")
+    if default_n_splits < 2:
+        raise ValueError("default_n_splits must be at least 2")
     manifest = pd.read_csv(manifest_csv)
     required = {"subject", "epochs"}
     missing_columns = sorted(required.difference(manifest.columns))
