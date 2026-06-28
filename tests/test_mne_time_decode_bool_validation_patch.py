@@ -10,6 +10,7 @@ from neureptrace._mne_time_decode_float_sequence_validation_patch import _normal
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
+        (None, False),
         (True, True),
         (False, False),
         (np.bool_(False), False),
