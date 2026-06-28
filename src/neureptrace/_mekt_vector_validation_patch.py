@@ -4,8 +4,9 @@ The MEKT implementation historically normalized several public vector-like input
 with ``reshape(-1)`` or by checking only the first array dimension.  That could
 turn malformed matrix-shaped labels into apparently valid per-row labels, or let
 matrix-shaped domain arrays reach later NumPy masking operations.  This patch
-keeps genuine vectors accepted, including single-row/single-column CLI vectors,
-while rejecting true matrices at the public boundary.
+keeps genuine vectors accepted, including single-row/single-column CLI vectors
+and explicit ``dtype=object`` matrices whose rows are composite tuple keys, while
+rejecting true numeric/string matrices at the public boundary.
 
 It also keeps tuple-valued source-domain identifiers atomic when DTE source-domain
 selection materializes the top-k domain list.  Without that guard, NumPy can coerce
@@ -43,6 +44,7 @@ def _as_hashable_vector(values: Any, *, name: str) -> np.ndarray:
     """Return a 1-D object vector without silently flattening true matrices."""
 
     if isinstance(values, np.ndarray):
+        raw_array = np.asarray(values)
         array = np.asarray(values, dtype=object)
         if array.ndim == 0:
             items = [array.item()]
@@ -50,6 +52,8 @@ def _as_hashable_vector(values: Any, *, name: str) -> np.ndarray:
             items = array.tolist()
         elif array.ndim == 2 and 1 in array.shape:
             items = array.reshape(-1).tolist()
+        elif array.ndim == 2 and raw_array.dtype == object:
+            items = [tuple(np.asarray(row, dtype=object).reshape(-1).tolist()) for row in array]
         else:
             raise ValueError(f"{name} must be a one-dimensional vector.")
     elif isinstance(values, (str, bytes)):
