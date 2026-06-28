@@ -1,4 +1,4 @@
-"""Reject unsupported class/domain weighting options in torch decoders."""
+"""Reject unsupported class/domain weighting options and guard small torch validation splits."""
 
 from __future__ import annotations
 
@@ -9,6 +9,13 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_torch_weight_validation_patch_installed"
+_ROW_STRATIFIED_FALLBACK_CLASSES = frozenset(
+    {
+        "TorchMLPClassifier",
+        "TorchDANNClassifier",
+        "TorchCDANClassifier",
+    }
+)
 
 
 def _validate_weight_option(value: Any, *, name: str) -> None:
@@ -60,7 +67,12 @@ def _install_fit_guard(class_object: type, *attribute_names: str) -> None:
             _validate_weight_option(getattr(self, attribute_name, None), name=attribute_name)
         labels = _labels_from_call(args, kwargs)
         validation_fraction = getattr(self, "validation_fraction", None)
-        if class_object.__name__ != "TorchMLPClassifier" or labels is None or not _small_stratified_holdout(labels, validation_fraction):
+        needs_training_loss_fallback = (
+            class_object.__name__ in _ROW_STRATIFIED_FALLBACK_CLASSES
+            and labels is not None
+            and _small_stratified_holdout(labels, validation_fraction)
+        )
+        if not needs_training_loss_fallback:
             return original_fit(self, *args, **kwargs)
         self.validation_fraction = 0.0
         try:
