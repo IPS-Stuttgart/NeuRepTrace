@@ -107,7 +107,7 @@ def source_correlation_filter_config(
 
     return SourceCorrelationFilterConfig(
         max_abs_correlation=_unit_interval_float(max_abs_correlation, name="max_abs_correlation"),
-        max_features=None if max_features in {None, "", "none", "None"} else _positive_int(max_features, name="max_features"),
+        max_features=_optional_positive_int(max_features, name="max_features"),
         min_features=_positive_int(min_features, name="min_features"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
@@ -197,22 +197,42 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _optional_positive_int(value: int | str | None, *, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"", "none"}:
+        return None
+    return _positive_int(value, name=name)
+
+
 def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    message = f"{name} must be a positive integer."
+    parsed = _float_value(value, message=message)
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
-        raise ValueError(f"{name} must be a positive integer.")
+        raise ValueError(message)
     return int(parsed)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be positive and finite."
+    parsed = _float_value(value, message=message)
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
 def _unit_interval_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be in [0, 1]."
+    parsed = _float_value(value, message=message)
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
-        raise ValueError(f"{name} must be in [0, 1].")
+        raise ValueError(message)
     return parsed
+
+
+def _float_value(value: object, *, message: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
