@@ -46,6 +46,29 @@ def test_source_smote_appends_same_class_interpolations() -> None:
     assert np.all(domains[result.partner_indices] != domains[result.content_indices])
 
 
+def test_source_smote_preserves_composite_labels_and_domains() -> None:
+    features = np.arange(20, dtype=float).reshape(4, 5)
+    labels = [("cat", 1), ("cat", 1), ("dog", 2), ("dog", 2)]
+    domains = [("s1", "run1"), ("s1", "run2"), ("s2", "run1"), ("s2", "run2")]
+
+    result = augment_source_with_smote(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "cross_domain_partner": True, "random_state": 11},
+    )
+
+    assert result.features.shape == (6, 5)
+    assert result.labels.shape == (6,)
+    assert result.labels.tolist()[:4] == labels
+    assert result.labels.tolist()[4:] == [("cat", 1), ("dog", 2)]
+    assert result.metadata["source_smote_n_classes"] == 2
+    assert result.metadata["source_smote_n_source_domains"] == 4
+    for content_index, partner_index in zip(result.content_indices, result.partner_indices, strict=True):
+        assert labels[content_index] == labels[partner_index]
+        assert domains[content_index] != domains[partner_index]
+
+
 def test_interpolate_rows_returns_convex_interpolation() -> None:
     row = interpolate_rows([0.0, 2.0], [4.0, 6.0], 0.25)
 
