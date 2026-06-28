@@ -91,7 +91,7 @@ def fit_source_bagging_decoder(
     if source.shape[1] != test.shape[1]:
         raise ValueError(f"source_features and test_features must have the same feature width: {source.shape[1]} != {test.shape[1]}.")
     labels = _label_vector(source_labels, expected_length=source.shape[0], name="source_labels")
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+    classes = _unique_labels(labels)
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
     class_to_code = {class_label: index for index, class_label in enumerate(classes.tolist())}
@@ -167,14 +167,14 @@ def _sample_rows(labels: np.ndarray, *, classes: np.ndarray, cfg: SourceBaggingC
     if cfg.class_balanced:
         rows = []
         for class_label in classes.tolist():
-            class_rows = np.flatnonzero(labels == class_label)
+            class_rows = np.flatnonzero(_label_equal_mask(labels, class_label))
             n_take = max(1, int(round(class_rows.size * cfg.sample_fraction)))
             rows.append(rng.choice(class_rows, size=n_take, replace=cfg.bootstrap_rows))
         return rng.permutation(np.concatenate(rows)).astype(int, copy=False)
     n_take = max(classes.shape[0], int(round(labels.shape[0] * cfg.sample_fraction)))
     rows = rng.choice(labels.shape[0], size=n_take, replace=cfg.bootstrap_rows).astype(int, copy=False)
-    if np.unique(labels[rows]).shape[0] < classes.shape[0]:
-        forced = [int(rng.choice(np.flatnonzero(labels == class_label))) for class_label in classes.tolist()]
+    if _unique_label_count(labels[rows]) < classes.shape[0]:
+        forced = [int(rng.choice(np.flatnonzero(_label_equal_mask(labels, class_label)))) for class_label in classes.tolist()]
         rows[: len(forced)] = forced
         rng.shuffle(rows)
     return rows
@@ -255,10 +255,81 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
+    items = _label_values(values)
+    if len(items) != expected_length:
+        raise ValueError(f"{name} must contain one value per row: {len(items)} != {expected_length}.")
+    return _object_array(items)
+
+
+def _label_values(values: Sequence[Any] | np.ndarray) -> list[Any]:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            return [_hashable_label(array.item())]
+        if array.ndim == 1:
+            return [_hashable_label(value) for value in array.tolist()]
+        if array.ndim == 2 and array.shape[1] == 1:
+            return [_hashable_label(value) for value in array.reshape(-1).tolist()]
+        rows = array.reshape(array.shape[0], -1)
+        return [tuple(_hashable_label(value) for value in row.tolist()) for row in rows]
+    if isinstance(values, (str, bytes)):
+        return [values]
+    try:
+        items = list(values)
+    except TypeError:
+        items = [values]
+    return [_hashable_label(value) for value in items]
+
+
+def _hashable_label(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            return _hashable_label(array.item())
+        return tuple(_hashable_label(item) for item in array.tolist())
+    if isinstance(value, list):
+        return tuple(_hashable_label(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_hashable_label(item) for item in value)
+    if isinstance(value, dict):
+        return tuple((key, _hashable_label(item)) for key, item in value.items())
+    return value
+
+
+def _object_array(values: Sequence[Any]) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
     return vector
+
+
+def _unique_labels(labels: np.ndarray) -> np.ndarray:
+    unique: list[Any] = []
+    for label in labels.tolist():
+        if not any(_labels_equal(label, existing) for existing in unique):
+            unique.append(label)
+    return _object_array(unique)
+
+
+def _unique_label_count(labels: np.ndarray) -> int:
+    return int(_unique_labels(labels).shape[0])
+
+
+def _label_equal_mask(labels: np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_labels_equal(label, target) for label in labels.tolist()], dtype=bool)
+
+
+def _labels_equal(left: Any, right: Any) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(equal, (bool, np.bool_)):
+        return bool(equal)
+    try:
+        return bool(np.all(equal))
+    except (TypeError, ValueError):
+        return False
 
 
 def _boolean(value: bool | str, *, name: str) -> bool:

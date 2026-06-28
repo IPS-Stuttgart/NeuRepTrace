@@ -26,6 +26,24 @@ def test_source_bagging_predicts_separated_classes() -> None:
     assert result.metadata["source_bagging_valid_for_strict_source_only"] is True
 
 
+def test_source_bagging_preserves_composite_labels() -> None:
+    source_features = np.asarray([[-2.0], [-1.5], [1.5], [2.0]], dtype=float)
+    source_labels = [["face", "early"], ["face", "early"], ["tool", "late"], ["tool", "late"]]
+    test_features = np.asarray([[-1.8], [1.8]], dtype=float)
+
+    result = fit_source_bagging_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        test_features=test_features,
+        config={"n_estimators": 5, "random_state": 7},
+    )
+
+    assert result.classes.tolist() == [("face", "early"), ("tool", "late")]
+    assert result.predictions.tolist() == [("face", "early"), ("tool", "late")]
+    assert result.probabilities.shape == (2, 2)
+    assert result.metadata["source_bagging_n_classes"] == 2
+
+
 def test_source_bagging_feature_fraction_subsamples_features() -> None:
     source_features = np.asarray([[-2.0, 0.0, 1.0, 0.0], [-1.5, 0.2, 1.1, 0.0], [1.5, 0.1, -1.0, 0.0], [2.0, -0.1, -1.1, 0.0]], dtype=float)
     source_labels = np.asarray([0, 0, 1, 1], dtype=object)
