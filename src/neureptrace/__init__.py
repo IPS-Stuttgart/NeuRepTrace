@@ -13,6 +13,7 @@ from . import (  # noqa: E402
     _adversarial_composite_labels_patch,
     _alignment_window_config_patch,
     _bushmeg_all_protocols_prediction_metric_patch,
+    _bushmeg_all_protocols_report_protocol_labels_patch,
     _bushmeg_all_protocols_topk_tie_patch,
     _bushmeg_all_protocols_subject_loader_patch,
     _bushmeg_all_protocols_timeout_patch,
@@ -77,6 +78,7 @@ from . import (  # noqa: E402
     _observation_schema_string_columns_patch,
     _observation_ensemble_missing_label_patch,
     _observation_ensemble_partial_class_columns_patch,
+    _observation_ensemble_source_debias_bool_patch,
     _observation_ensemble_string_groups_patch,
     _observation_ensemble_ungrouped_metrics_patch,
     _onset_boolean_summary_patch,
@@ -193,6 +195,7 @@ _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
 _observation_schema_string_columns_patch.install()
 _observation_ensemble_partial_class_columns_patch.install()
+_observation_ensemble_source_debias_bool_patch.install()
 _observation_ensemble_string_groups_patch.install()
 _observation_ensemble_ungrouped_metrics_patch.install()
 _observation_ensemble_missing_label_patch.install()
@@ -206,6 +209,7 @@ _category2_autoencoder_max_folds_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_smoke_enabled_bool_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
+_bushmeg_all_protocols_report_protocol_labels_patch.install()
 _bushmeg_all_protocols_topk_tie_patch.install()
 _bushmeg_protocol3_index_validation_patch.install()
 _bushmeg_protocol_selection_patch.install()
