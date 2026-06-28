@@ -13,6 +13,7 @@ from . import (  # noqa: E402
     _adversarial_composite_labels_patch,
     _alignment_window_config_patch,
     _bushmeg_all_protocols_prediction_metric_patch,
+    _bushmeg_all_protocols_report_bool_patch,
     _bushmeg_all_protocols_topk_tie_patch,
     _bushmeg_all_protocols_subject_loader_patch,
     _bushmeg_all_protocols_timeout_patch,
@@ -82,7 +83,6 @@ from . import (  # noqa: E402
     _onset_boolean_summary_patch,
     _openneuro_alignment_compare_missing_context_patch,
     _openneuro_alignment_compare_structured_values_patch,
-    _openneuro_decode_diagnostics_scalar_bool_patch,
     _openneuro_parse_runs_patch,
     _openneuro_pre_stimulus_finite_patch,
     _openneuro_real_shuffle_bool_patch,
@@ -205,6 +205,7 @@ _category2_autoencoder_max_folds_patch.install()
 _bushmeg_all_protocols_timeout_patch.install()
 _bushmeg_smoke_enabled_bool_patch.install()
 _bushmeg_all_protocols_prediction_metric_patch.install()
+_bushmeg_all_protocols_report_bool_patch.install()
 _bushmeg_all_protocols_topk_tie_patch.install()
 _bushmeg_protocol3_index_validation_patch.install()
 _bushmeg_protocol_selection_patch.install()
@@ -286,4 +287,3 @@ _openneuro_parse_runs_patch.install()
 _openneuro_pre_stimulus_finite_patch.install()
 _openneuro_real_shuffle_bool_patch.install()
 _openneuro_real_shuffle_time_selection_patch.install()
-_openneuro_decode_diagnostics_scalar_bool_patch.install()
