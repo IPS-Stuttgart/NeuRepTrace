@@ -169,7 +169,7 @@ def install() -> None:
     ):
         labels = module._label_vector(train_labels)
         train_ids = _row_id_tuple(train_row_ids, expected_length=labels.shape[0], name="train_row_ids")
-        test_ids = _row_id_tuple(test_row_ids, name="test_row_ids")
+        test_ids = _requested_row_ids(test_row_ids, feature_table.row_index())
         if labels.shape[0] != len(train_ids):
             raise ValueError(f"train_labels must contain one value per train row id: {labels.shape[0]} != {len(train_ids)}.")
         if labels.shape[0] < 1 or np.unique(labels).shape[0] < 2:
