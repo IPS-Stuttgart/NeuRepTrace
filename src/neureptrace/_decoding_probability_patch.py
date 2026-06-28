@@ -240,6 +240,51 @@ def _patch_decoded_label_classifier() -> None:
     cls.decision_function = decision_function
 
 
+def _patch_aligned_probability_helper(module_name: str) -> None:
+    module = importlib.import_module(module_name)
+    original = module._aligned_probabilities
+    if getattr(original, _BINARY_DECISION_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def _aligned_probabilities(model, features, *, classes, epsilon):
+        if hasattr(model, "predict_proba") or not hasattr(model, "decision_function"):
+            return original(model, features, classes=classes, epsilon=epsilon)
+
+        scores = np.asarray(model.decision_function(features), dtype=float)
+        model_classes = np.asarray(getattr(model, "classes_", classes), dtype=object)
+        if scores.ndim == 1:
+            if model_classes.shape[0] != 2:
+                raise ValueError("One-dimensional decision_function output requires exactly two model classes.")
+            scores = _binary_decision_scores_to_logits(scores)
+        elif scores.ndim != 2:
+            raise ValueError("decision_function output must be one- or two-dimensional.")
+
+        n_rows = _n_feature_rows(features)
+        if scores.shape[0] != n_rows:
+            raise ValueError("decision_function output must contain one row per feature row.")
+        if scores.shape[1] != model_classes.shape[0]:
+            raise ValueError("decision_function output width must match model.classes_.")
+
+        shifted = scores - np.max(scores, axis=1, keepdims=True)
+        raw = np.exp(np.clip(shifted, -50.0, 50.0))
+        output_classes = np.asarray(classes, dtype=object)
+        aligned = np.full((n_rows, output_classes.shape[0]), float(epsilon), dtype=float)
+        class_to_column = {class_label: index for index, class_label in enumerate(output_classes.tolist())}
+        for source_column, class_label in enumerate(model_classes.tolist()):
+            if class_label in class_to_column:
+                aligned[:, class_to_column[class_label]] = raw[:, source_column]
+        return module._normalize_probability_rows(aligned, epsilon=epsilon)
+
+    setattr(_aligned_probabilities, _BINARY_DECISION_PATCH_MARKER, True)
+    module._aligned_probabilities = _aligned_probabilities
+
+
+def _patch_ensemble_aligned_probability_helpers() -> None:
+    _patch_aligned_probability_helper("neureptrace.decoding.source_bagging")
+    _patch_aligned_probability_helper("neureptrace.decoding.random_subspace")
+
+
 def _patch_binary_decision_probability_fallbacks() -> None:
     _patch_source_free_decision_fallback()
     _patch_source_ensemble_decision_fallback()
@@ -248,6 +293,7 @@ def _patch_binary_decision_probability_fallbacks() -> None:
     _patch_decision_probability_helper("neureptrace.decoding.transfer_component_analysis", "_predict_probabilities_or_none")
     _patch_class_score_matrix()
     _patch_decoded_label_classifier()
+    _patch_ensemble_aligned_probability_helpers()
 
 
 def install() -> None:
