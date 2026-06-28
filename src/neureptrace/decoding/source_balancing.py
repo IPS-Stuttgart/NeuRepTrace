@@ -156,7 +156,7 @@ def source_class_balancing_config(
     mode: str | None = "oversample",
     target_count: int | str = "max",
     random_state: int | str | None = 13,
-    preserve_order: bool = False,
+    preserve_order: bool | str = False,
 ) -> SourceClassBalancingConfig:
     """Normalize public class-balancing options."""
 
@@ -164,7 +164,7 @@ def source_class_balancing_config(
         mode=normalize_balancing_mode(mode),
         target_count=target_count,
         random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
-        preserve_order=bool(preserve_order),
+        preserve_order=_boolean(preserve_order, name="preserve_order"),
     )
 
 
@@ -290,6 +290,18 @@ def _nonnegative_int(value: int | str, *, name: str) -> int:
     if integer < 0:
         raise ValueError(f"{name} must be non-negative.")
     return integer
+
+
+def _boolean(value: bool | str, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean.")
 
 
 def _integer(value: int | str, *, name: str) -> int:
