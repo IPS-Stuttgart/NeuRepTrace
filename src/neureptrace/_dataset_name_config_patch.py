@@ -23,12 +23,14 @@ from types import ModuleType
 from typing import Any
 
 _TARGET_MODULES = {
+    "neureptrace.bushmeg_source_loso",
     "neureptrace.config_workflow",
     "neureptrace.decode_from_config",
 }
 _PATCH_MARKER = "_neureptrace_dataset_name_config_patch_installed"
 _BOOL_PATCH_MARKER = "_neureptrace_config_workflow_numeric_bool_patch_installed"
 _OUTPUT_TEMPLATE_PATCH_MARKER = "_neureptrace_dataset_output_template_patch_installed"
+_BUSHMEG_SOURCE_OUTPUT_TEMPLATE_PATCH_MARKER = "_neureptrace_bushmeg_source_output_template_patch_installed"
 _FINDER_MARKER = "_neureptrace_dataset_name_config_finder"
 
 
@@ -132,11 +134,37 @@ def _patch_decode_from_config_output_templates(module: ModuleType) -> None:
     setattr(module, _OUTPUT_TEMPLATE_PATCH_MARKER, True)
 
 
+def _patch_bushmeg_source_loso_output_templates(module: ModuleType) -> None:
+    if module.__name__ != "neureptrace.bushmeg_source_loso" or getattr(module, _BUSHMEG_SOURCE_OUTPUT_TEMPLATE_PATCH_MARKER, False):
+        return
+    original_resolve_output = getattr(module, "_resolve_output", None)
+    if original_resolve_output is None:
+        return
+
+    @wraps(original_resolve_output)
+    def patched_resolve_output(config: Mapping[str, Any], *, config_dir, key: str, default: str):
+        outputs = module._section(config, "outputs")
+        value = outputs.get(key, default)
+        dataset_name = _dataset_template_name_from_config(config)
+        formatted = str(value).format(dataset=dataset_name)
+        path = module.Path(formatted)
+        if path.is_absolute():
+            return path
+        base = outputs.get("base_dir", "results/{dataset}")
+        base_path = module.expand_path(str(base).format(dataset=dataset_name), base_dir=module.Path.cwd())
+        return base_path / path
+
+    setattr(patched_resolve_output, _BUSHMEG_SOURCE_OUTPUT_TEMPLATE_PATCH_MARKER, True)
+    module._resolve_output = patched_resolve_output
+    setattr(module, _BUSHMEG_SOURCE_OUTPUT_TEMPLATE_PATCH_MARKER, True)
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
     _patch_config_workflow_bool_parser(module)
     _patch_decode_from_config_output_templates(module)
+    _patch_bushmeg_source_loso_output_templates(module)
     decode_kwargs = getattr(module, "_decode_kwargs", None)
     if decode_kwargs is None:
         setattr(module, _PATCH_MARKER, True)
