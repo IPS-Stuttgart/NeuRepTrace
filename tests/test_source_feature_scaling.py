@@ -32,6 +32,24 @@ def test_source_feature_scaling_appends_rows_and_metadata() -> None:
     assert result.metadata["source_feature_scaling_valid_for_strict_source_only"] is True
 
 
+def test_source_feature_scaling_preserves_composite_labels_and_domains() -> None:
+    features = np.asarray([[1.0, 2.0], [2.0, 4.0], [10.0, 20.0], [12.0, 24.0]], dtype=float)
+    labels = [("face", "left"), ("face", "left"), ("scene", "right"), ("scene", "right")]
+    domains = [("subject-1", "run-1"), ("subject-1", "run-1"), ("subject-2", "run-1"), ("subject-2", "run-1")]
+
+    result = augment_source_with_feature_scaling(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "scale_std": 0.1, "random_state": 11},
+    )
+
+    assert result.labels.shape == (6,)
+    assert result.labels.tolist() == labels + [("face", "left"), ("scene", "right")]
+    assert result.metadata["source_feature_scaling_n_classes"] == 2
+    assert result.metadata["source_feature_scaling_n_source_domains"] == 2
+
+
 def test_row_scaling_uses_same_factor_for_all_features() -> None:
     rng = np.random.default_rng(13)
     factors = sample_scaling_factors(5, scale_std=0.1, scaling_mode="row", rng=rng)
@@ -63,6 +81,24 @@ def test_preserve_original_false_returns_only_generated_rows() -> None:
     assert result.features.shape == (3, 2)
     assert result.synthetic_mask.tolist() == [True, True, True]
     assert result.labels.tolist() == ["x", "x", "x"]
+
+
+def test_preserve_original_string_false_returns_only_generated_rows() -> None:
+    features = np.asarray([[1.0, 1.0], [2.0, 2.0]], dtype=float)
+    labels = np.asarray(["x", "x"], dtype=object)
+
+    cfg = source_feature_scaling_config(synthetic_per_class=2, preserve_original="false", random_state=3)
+    result = augment_source_with_feature_scaling(features, labels, config=cfg)
+
+    assert cfg.preserve_original is False
+    assert result.features.shape == (2, 2)
+    assert result.synthetic_mask.tolist() == [True, True]
+    assert result.metadata["source_feature_scaling_preserve_original"] is False
+
+
+def test_preserve_original_rejects_invalid_string() -> None:
+    with pytest.raises(ValueError, match="preserve_original"):
+        source_feature_scaling_config(preserve_original="maybe")
 
 
 def test_disabled_scaling_returns_original_rows_only() -> None:
