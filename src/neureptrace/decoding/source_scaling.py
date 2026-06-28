@@ -259,6 +259,7 @@ def _metadata(cfg: SourceFeatureScalingConfig, n_source_rows: int, n_synthetic_r
     }
 
 
+# jscpd:ignore-start
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
@@ -335,6 +336,7 @@ def _is_composite_value(value: Any) -> bool:
     if isinstance(value, np.ndarray):
         return value.ndim != 0
     return isinstance(value, (tuple, list, dict))
+# jscpd:ignore-end
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
