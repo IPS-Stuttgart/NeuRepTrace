@@ -20,6 +20,19 @@ def _weights_contain_boolean(weights: np.ndarray) -> bool:
     return False
 
 
+def _sample_weight_array(sample_weight: Iterable[float] | np.ndarray) -> np.ndarray:
+    """Return sample weights as an object array without dropping one-pass iterables."""
+
+    try:
+        if isinstance(sample_weight, np.ndarray) or isinstance(sample_weight, (str, bytes)):
+            return np.asarray(sample_weight, dtype=object)
+        return np.asarray(list(sample_weight), dtype=object)
+    except TypeError:
+        return np.asarray(sample_weight, dtype=object)
+    except ValueError as exc:
+        raise ValueError("sample_weight must have shape (n_samples,)") from exc
+
+
 def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_samples: int) -> np.ndarray:
     """Return validated non-negative per-sample weights.
 
@@ -31,7 +44,7 @@ def validate_sample_weight(sample_weight: Iterable[float] | np.ndarray, n_sample
         Expected number of samples.
     """
     try:
-        raw_weights = np.asarray(sample_weight, dtype=object)
+        raw_weights = _sample_weight_array(sample_weight)
     except (TypeError, ValueError) as exc:
         raise ValueError("sample_weight must have shape (n_samples,)") from exc
     if _weights_contain_boolean(raw_weights):
