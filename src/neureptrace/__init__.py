@@ -97,6 +97,7 @@ from . import (  # noqa: E402
     _reconstruction_tuple_labels_patch,
     _report_finite_metric_selection_patch,
     _results_metric_boolean_patch,
+    _results_observation_condition_patch,
     _response_window_time_validation_patch,
     _riemannian_vector_validation_patch,
     _sample_weight_validation_patch,
@@ -158,6 +159,7 @@ _dataset_spec_csv_group_column_patch.install()
 _dataset_spec_numeric_validation_patch.install()
 _metadata_column_validation_patch.install()
 _confusion_metadata_lookup_patch.install()
+_confusion_permutation_seed_patch.install()
 _confusion_permutation_seed_patch.install()
 _correlation_prototype_sample_weight_patch.install()
 _classifier_tuple_labels_patch.install()
@@ -230,6 +232,7 @@ _sampling_composite_label_array_patch.install()
 _semi_supervised_lora_tuple_labels_patch.install()
 _report_finite_metric_selection_patch.install()
 _results_metric_boolean_patch.install()
+_results_observation_condition_patch.install()
 _response_window_time_validation_patch.install()
 _paired_stats_tie_patch.install()
 _riemannian_vector_validation_patch.install()
