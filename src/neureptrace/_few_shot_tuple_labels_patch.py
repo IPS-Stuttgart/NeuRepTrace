@@ -81,6 +81,27 @@ def _normalize_unique_indices(module: ModuleType, values: Sequence[int] | np.nda
     return indices
 
 
+def _observed_few_shot_class_order(
+    module: ModuleType,
+    source_labels: Sequence[Any] | np.ndarray,
+    target_labels: Sequence[Any] | np.ndarray,
+    split: Any,
+) -> np.ndarray:
+    """Return source-plus-calibration classes without sorting object labels."""
+
+    source_vector = _as_label_vector(source_labels, name="source_labels")
+    target_vector = _as_label_vector(target_labels, name="target_labels")
+    calibration_indices = _normalize_unique_indices(module, split.calibration_indices, name="calibration_indices")
+    if np.any(calibration_indices < 0) or np.any(calibration_indices >= target_vector.shape[0]):
+        raise ValueError("calibration_indices contains an out-of-range target row index.")
+
+    calibration_labels = target_vector[calibration_indices]
+    observed = np.empty(source_vector.shape[0] + calibration_labels.shape[0], dtype=object)
+    observed[: source_vector.shape[0]] = source_vector
+    observed[source_vector.shape[0] :] = calibration_labels
+    return _as_label_vector(_unique_labels_in_order(observed), name="classes")
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
@@ -164,10 +185,30 @@ def _patch_module(module: ModuleType) -> None:
 
     @wraps(original_fit)
     def fit_few_shot_target_calibrated_decoder(*args: Any, **kwargs: Any) -> Any:
-        if kwargs.get("classes") is not None:
-            kwargs = dict(kwargs)
+        if args:
+            return original_fit(*args, **kwargs)
+
+        kwargs = dict(kwargs)
+        if kwargs.get("classes") is None and "source_labels" in kwargs and "target_labels" in kwargs:
+            split = kwargs.get("split")
+            if split is None:
+                split = select_few_shot_target_calibration_split(
+                    kwargs["target_labels"],
+                    per_class=kwargs.get("per_class", 1),
+                    seed=kwargs.get("seed", 13),
+                    context=kwargs.get("context", ()),
+                    min_evaluation_per_class=kwargs.get("min_evaluation_per_class", 1),
+                )
+                kwargs["split"] = split
+            kwargs["classes"] = _observed_few_shot_class_order(
+                module,
+                kwargs["source_labels"],
+                kwargs["target_labels"],
+                split,
+            )
+        elif kwargs.get("classes") is not None:
             kwargs["classes"] = _as_label_vector(kwargs["classes"], name="classes")
-        return original_fit(*args, **kwargs)
+        return original_fit(**kwargs)
 
     module._as_1d_object_array = _as_label_vector
     module._align_probability_columns = _align_probability_columns
