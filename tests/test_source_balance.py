@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 import numpy as np
 import pytest
 
@@ -61,6 +63,38 @@ def test_balanced_resampling_can_undersample_to_smallest_group() -> None:
     assert result.features.shape == (2, 1)
     assert result.labels.tolist().count("a") == 1
     assert result.labels.tolist().count("b") == 1
+
+
+def test_class_domain_resampling_uses_whole_tuple_group_keys() -> None:
+    features = np.asarray([[0.0], [1.0], [2.0], [10.0], [11.0]], dtype=float)
+    labels = np.asarray(["a", "a", "a", "b", "b"], dtype=object)
+    domains = np.asarray(["s1", "s1", "s2", "s1", "s2"], dtype=object)
+
+    result = resample_source_rows_balanced(features, labels, source_domains=domains, config={"target": "max", "random_state": 4})
+
+    assert result.features.shape == (8, 1)
+    assert result.source_indices.min() >= 0
+    assert result.source_indices.max() < features.shape[0]
+    assert result.domains is not None
+    assert Counter(zip(result.labels.tolist(), result.domains.tolist(), strict=True)) == {
+        ("a", "s1"): 2,
+        ("a", "s2"): 2,
+        ("b", "s1"): 2,
+        ("b", "s2"): 2,
+    }
+
+
+def test_source_balance_preserves_tuple_valued_class_labels() -> None:
+    labels = [("face", "early"), ("face", "early"), ("object", "late")]
+    features = np.asarray([[0.0], [1.0], [2.0]], dtype=float)
+
+    weights = compute_source_balance_weights(labels, config={"strategy": "class", "target": "max"})
+    rows = resample_source_rows_balanced(features, labels, config={"strategy": "class", "target": "max", "random_state": 1})
+
+    assert weights.group_counts == {("face", "early"): 2, ("object", "late"): 1}
+    assert weights.group_keys == (("face", "early"), ("face", "early"), ("object", "late"))
+    assert rows.labels.tolist().count(("face", "early")) == 2
+    assert rows.labels.tolist().count(("object", "late")) == 2
 
 
 def test_none_strategy_returns_identity_weights_and_rows() -> None:
