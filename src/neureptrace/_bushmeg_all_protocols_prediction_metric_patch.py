@@ -106,6 +106,38 @@ def _probability_columns(frame: pd.DataFrame) -> list[str]:
     return sorted(columns, key=_probability_column_sort_key)
 
 
+def _group_probability_columns(group: pd.DataFrame, prob_columns: Sequence[str]) -> list[str]:
+    """Return probability columns that are populated in this prediction group.
+
+    Aggregated partial prediction tables may contain the union of probability
+    columns emitted by multiple methods, folds, or class vocabularies. Pandas
+    fills non-applicable columns with NaN, so metric recomputation must not pass
+    those group-extraneous columns to log-loss, Brier, ECE, or label-position
+    lookup.
+    """
+
+    active: list[str] = []
+    for column in prob_columns:
+        if column not in group.columns:
+            continue
+        numeric = pd.to_numeric(group[column], errors="coerce")
+        if numeric.notna().any():
+            active.append(str(column))
+    return active
+
+
+def _probability_matrix_from_group(group: pd.DataFrame, prob_columns: Sequence[str]) -> np.ndarray:
+    probability_frame = group.loc[:, list(prob_columns)].apply(pd.to_numeric, errors="coerce")
+    missing = probability_frame.isna()
+    if bool(missing.any().any()):
+        bad_columns = [str(column) for column in probability_frame.columns if bool(missing[column].any())]
+        raise ValueError(
+            "Probability columns must be numeric and non-missing within each prediction metric group; "
+            f"found missing/non-numeric values in {bad_columns[:5]}."
+        )
+    return probability_frame.to_numpy(dtype=float)
+
+
 def _class_name_index_map(group: pd.DataFrame) -> dict[str, int]:
     mapping: dict[str, int] = {}
     for column in group.columns:
@@ -316,9 +348,10 @@ def _prediction_metric_frame(predictions: pd.DataFrame) -> pd.DataFrame:
         row = {column: value for column, value in zip(group_columns, key_values, strict=True)}
         row["outer_test_subject"] = str(row.pop("heldout_subject", row.get("outer_test_subject", "")))
 
-        if prob_columns:
-            probabilities = group[prob_columns].astype(float).to_numpy()
-            labels = _labels_to_probability_positions(group, prob_columns)
+        group_prob_columns = _group_probability_columns(group, prob_columns)
+        if group_prob_columns:
+            probabilities = _probability_matrix_from_group(group, group_prob_columns)
+            labels = _labels_to_probability_positions(group, group_prob_columns)
             predicted = probabilities.argmax(axis=1)
             rows.append(
                 {
