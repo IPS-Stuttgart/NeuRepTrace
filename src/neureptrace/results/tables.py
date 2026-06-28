@@ -199,7 +199,10 @@ def _finite_array(values: object) -> np.ndarray:
 
 
 def _finite_numeric_series(values: object, *, name: str) -> pd.Series:
-    parsed = pd.to_numeric(pd.Series(values), errors="coerce")
+    series = pd.Series(values)
+    if series.map(_is_boolean_scalar).any():
+        raise ValueError(f"{name} must contain only finite numeric values.")
+    parsed = pd.to_numeric(series, errors="coerce")
     numeric = parsed.to_numpy(dtype=float)
     if not np.all(np.isfinite(numeric)):
         raise ValueError(f"{name} must contain only finite numeric values.")

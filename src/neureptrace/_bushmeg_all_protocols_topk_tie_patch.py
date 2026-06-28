@@ -3,10 +3,23 @@
 from __future__ import annotations
 
 import importlib
+from typing import Any
 
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_bushmeg_all_protocols_topk_tie_patch_installed"
+
+
+def _normalize_k(k: Any) -> int:
+    if isinstance(k, (bool, np.bool_)):
+        raise ValueError("k must be a positive integer.")
+    try:
+        k_float = float(k)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("k must be a positive integer.") from exc
+    if not np.isfinite(k_float) or k_float % 1.0 != 0.0 or k_float < 1.0:
+        raise ValueError("k must be a positive integer.")
+    return int(k_float)
 
 
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
@@ -23,7 +36,7 @@ def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) ->
     if probability_matrix.shape[1] == 0:
         return float("nan")
 
-    k_value = min(max(int(k), 1), probability_matrix.shape[1])
+    k_value = min(_normalize_k(k), probability_matrix.shape[1])
     if k_value >= probability_matrix.shape[1]:
         valid_labels = (0 <= label_indices) & (label_indices < probability_matrix.shape[1])
         return float(np.mean(valid_labels))
