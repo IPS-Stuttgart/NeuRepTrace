@@ -180,6 +180,7 @@ def test_soft_all_prototypes_keep_classes_active_when_argmax_collapses():
     ).fit(target_features)
     assert hard_adapter.metadata()["source_free_stop_reason"] == "none_selected"
     assert hard_adapter.metadata()["source_free_active_classes"] == 0
+    assert hard_adapter.metadata()["source_free_n_selected"] == 0
 
     soft_adapter = SourceFreeSubjectAdapter(
         source_model=_CollapsedPseudoLabelSourceModel(),
@@ -198,6 +199,8 @@ def test_soft_all_prototypes_keep_classes_active_when_argmax_collapses():
     assert metadata["source_free_uses_target_labels"] is False
     assert metadata["source_free_valid_for_benchmark"] is True
     assert metadata["source_free_active_classes"] == 2
+    assert metadata["source_free_n_selected"] == target_features.shape[0]
+    assert np.all(soft_adapter.selected_)
     assert metadata["source_free_stop_reason"] != "selection_repeated"
     assert metadata["source_free_iterations"] >= 2
     assert np.all(np.isfinite(soft_adapter.prototypes_))
