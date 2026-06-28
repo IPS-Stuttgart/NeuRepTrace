@@ -5,11 +5,16 @@ import pytest
 
 from neureptrace.decoding.source_balance import (
     SOURCE_BALANCE_CATEGORY,
+    SOURCE_LABEL_SMOOTHING_CATEGORY,
     compute_source_balance_weights,
     normalize_balance_strategy,
     normalize_balance_target,
+    normalize_label_smoothing_prior,
     resample_source_rows_balanced,
+    smooth_source_labels,
     source_balance_config,
+    source_label_prior,
+    source_label_smoothing_config,
 )
 
 
@@ -76,6 +81,49 @@ def test_none_strategy_returns_identity_weights_and_rows() -> None:
     assert rows.source_indices.tolist() == [0, 1, 2]
 
 
+def test_source_label_smoothing_uniform_prior() -> None:
+    labels = np.asarray(["a", "b", "a"], dtype=object)
+
+    result = smooth_source_labels(labels, config={"smoothing": 0.2, "prior": "uniform"})
+
+    assert result.classes.tolist() == ["a", "b"]
+    assert result.distributions.shape == (3, 2)
+    assert np.allclose(result.distributions.sum(axis=1), 1.0)
+    assert np.allclose(result.distributions[0], np.asarray([0.9, 0.1]))
+    assert np.allclose(result.prior_distribution, np.asarray([0.5, 0.5]))
+    assert result.metadata["source_label_smoothing_protocol_category"] == SOURCE_LABEL_SMOOTHING_CATEGORY
+    assert result.metadata["source_label_smoothing_uses_heldout_features"] is False
+    assert result.metadata["source_label_smoothing_uses_heldout_labels"] is False
+    assert result.metadata["source_label_smoothing_valid_for_strict_source_only"] is True
+
+
+def test_source_label_smoothing_empirical_prior_and_explicit_class_order() -> None:
+    labels = np.asarray(["a", "a", "b"], dtype=object)
+
+    result = smooth_source_labels(labels, classes=["b", "a"], config={"smoothing": 0.3, "prior": "empirical"})
+
+    assert result.classes.tolist() == ["b", "a"]
+    assert np.allclose(result.prior_distribution, np.asarray([1.0 / 3.0, 2.0 / 3.0]))
+    assert np.allclose(result.distributions[0], np.asarray([0.1, 0.9]))
+    assert np.allclose(result.distributions[2], np.asarray([0.8, 0.2]))
+
+
+def test_source_label_prior_aliases_and_validation() -> None:
+    assert normalize_label_smoothing_prior("balanced") == "uniform"
+    assert normalize_label_smoothing_prior("frequency") == "empirical"
+    assert source_label_smoothing_config(smoothing="0.25").smoothing == 0.25
+    assert np.allclose(source_label_prior([0, 0, 1], prior="empirical"), np.asarray([2.0 / 3.0, 1.0 / 3.0]))
+
+    with pytest.raises(ValueError, match="label smoothing prior"):
+        normalize_label_smoothing_prior("bad")
+
+    with pytest.raises(ValueError, match="smoothing"):
+        source_label_smoothing_config(smoothing=1.5)
+
+    with pytest.raises(ValueError, match="absent from classes"):
+        smooth_source_labels(["a", "b"], classes=["a"])
+
+
 def test_aliases_and_validation() -> None:
     assert normalize_balance_strategy("labels") == "class"
     assert normalize_balance_strategy("domain-class") == "class_domain"
@@ -92,3 +140,5 @@ def test_aliases_and_validation() -> None:
 def test_heldout_arguments_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
         compute_source_balance_weights([0, 1], heldout_labels=[0, 1])  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        smooth_source_labels([0, 1], heldout_labels=[0, 1])  # type: ignore[call-arg]
