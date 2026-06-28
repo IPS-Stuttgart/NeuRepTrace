@@ -85,6 +85,7 @@ from . import (  # noqa: E402
     _onset_boolean_summary_patch,
     _openneuro_alignment_compare_missing_context_patch,
     _openneuro_alignment_compare_structured_values_patch,
+    _openneuro_decode_diagnostics_scalar_bool_patch,
     _openneuro_parse_runs_patch,
     _openneuro_pre_stimulus_finite_patch,
     _openneuro_real_shuffle_bool_patch,
@@ -293,3 +294,4 @@ _openneuro_parse_runs_patch.install()
 _openneuro_pre_stimulus_finite_patch.install()
 _openneuro_real_shuffle_bool_patch.install()
 _openneuro_real_shuffle_time_selection_patch.install()
+_openneuro_decode_diagnostics_scalar_bool_patch.install()
