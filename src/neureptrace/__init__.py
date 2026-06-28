@@ -145,6 +145,7 @@ from . import (  # noqa: E402
     _temporal_smoothing_topk_tie_patch,
     _torch_weight_validation_patch,
     _transfer_array_label_null_patch,
+    _transfer_component_analysis_validation_patch,
     _transfer_components_validation_patch,
     _transfer_cross_validation_label_patch,
     _transfer_null_fallback_patch,
@@ -281,6 +282,7 @@ _temporal_smoothing_singleton_sequence_patch.install()
 _temporal_smoothing_topk_tie_patch.install()
 _torch_weight_validation_patch.install()
 _transfer_array_label_null_patch.install()
+_transfer_component_analysis_validation_patch.install()
 _transfer_components_validation_patch.install()
 _transfer_cross_validation_label_patch.install()
 _transfer_null_fallback_patch.install()
