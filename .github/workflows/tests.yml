@@ -74,10 +74,12 @@ jobs:
                   PYTHONPATH: ${{ github.workspace }}/src
 
             - name: Upload test result artifact
+              if: always()
               uses: actions/upload-artifact@v7
               with:
                   name: ${{ matrix.python-version }}-test-results
                   path: junit_test_results.xml
+                  if-no-files-found: warn
 
     pymegdec-downstream-smoke:
         name: PyMEGDec downstream smoke
