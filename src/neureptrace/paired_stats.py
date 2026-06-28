@@ -10,6 +10,7 @@ import pandas as pd
 
 from neureptrace.results import (
     DEFAULT_ECE_BINS,
+    GROUP_COLUMN_DEFAULTS,
     SUMMARY_GROUP_COLUMNS,
     read_time_decode_observations,
     read_time_decode_results,
@@ -71,6 +72,50 @@ def _as_tuple(value: object) -> tuple[object, ...]:
     if isinstance(value, tuple):
         return value
     return (value,)
+
+
+def _has_non_default_condition_values(values: pd.Series, column: str) -> bool:
+    default = GROUP_COLUMN_DEFAULTS.get(column)
+    if default is None:
+        return True
+    normalized = values.where(pd.notna(values), "").astype(str).str.strip().str.lower()
+    return bool((normalized != str(default).strip().lower()).any())
+
+
+def _paired_report_condition_columns(statistics: pd.DataFrame) -> list[str]:
+    """Return paired-test condition columns that should be visible in reports."""
+    columns: list[str] = []
+    if "emission_mode" in statistics.columns:
+        columns.append("emission_mode")
+    for column in SUMMARY_GROUP_COLUMNS:
+        if column in {"decoder", "emission_mode"} or column not in statistics.columns:
+            continue
+        if _has_non_default_condition_values(statistics[column], column):
+            columns.append(column)
+    return columns
+
+
+def _report_column_heading(column: str) -> str:
+    acronyms = {"cv": "CV", "ece": "ECE", "pca": "PCA"}
+    words = []
+    for index, part in enumerate(column.split("_")):
+        if part in acronyms:
+            words.append(acronyms[part])
+        elif index == 0:
+            words.append(part.capitalize())
+        else:
+            words.append(part)
+    return " ".join(words)
+
+
+def _markdown_cell(value: object) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).replace("\n", " ").replace("|", r"\|")
+
+
+def _markdown_row(cells: list[str]) -> str:
+    return "| " + " | ".join(cells) + " |"
 
 
 def subject_decoder_metrics(
@@ -295,6 +340,33 @@ def build_paired_stats_report(
     chance: float = 0.5,
 ) -> str:
     """Build a Markdown paired decoder statistics report."""
+    condition_columns = _paired_report_condition_columns(statistics)
+    headers = [
+        *[_report_column_heading(column) for column in condition_columns],
+        "Decoder A",
+        "Decoder B",
+        "Metric",
+        "Preferred",
+        "Subjects",
+        "A mean",
+        "B mean",
+        "A minus B",
+        "Sign-flip p",
+        "Better by mean",
+    ]
+    alignments = [
+        *(["---"] * len(condition_columns)),
+        "---",
+        "---",
+        "---",
+        "---",
+        "---:",
+        "---:",
+        "---:",
+        "---:",
+        "---:",
+        "---",
+    ]
     lines = [
         "# NeuRepTrace Paired Decoder Statistics",
         "",
@@ -303,14 +375,26 @@ def build_paired_stats_report(
         f"- Effect window: {_format_float(effect_window[0])} to {_format_float(effect_window[1])} s",
         "- Test: two-sided paired sign-flip test over subjects",
         "",
-        "| Emission mode | Decoder A | Decoder B | Metric | Preferred | Subjects | A mean | B mean | A minus B | Sign-flip p | Better by mean |",
-        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        _markdown_row(headers),
+        _markdown_row(alignments),
     ]
-    for row in statistics.itertuples(index=False):
+    for _, row in statistics.iterrows():
         lines.append(
-            f"| {row.emission_mode} | {row.decoder_a} | {row.decoder_b} | {row.metric} | {row.preferred_direction} | {row.n_subjects} | "
-            f"{_format_float(row.decoder_a_mean)} | {_format_float(row.decoder_b_mean)} | "
-            f"{_format_float(row.mean_difference_a_minus_b)} | {_format_float(row.sign_flip_p, digits=4)} | {row.better_decoder_by_mean} |"
+            _markdown_row(
+                [
+                    *[_markdown_cell(row[column]) for column in condition_columns],
+                    _markdown_cell(row["decoder_a"]),
+                    _markdown_cell(row["decoder_b"]),
+                    _markdown_cell(row["metric"]),
+                    _markdown_cell(row["preferred_direction"]),
+                    str(int(row["n_subjects"])),
+                    _format_float(row["decoder_a_mean"]),
+                    _format_float(row["decoder_b_mean"]),
+                    _format_float(row["mean_difference_a_minus_b"]),
+                    _format_float(row["sign_flip_p"], digits=4),
+                    _markdown_cell(row["better_decoder_by_mean"]),
+                ]
+            )
         )
     lines.append("")
     return "\n".join(lines)
