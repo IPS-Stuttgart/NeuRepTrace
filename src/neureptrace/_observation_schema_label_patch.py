@@ -60,7 +60,7 @@ def _integer_label_series(observation_schema, frame: pd.DataFrame, column: str, 
             issues,
             "error",
             "non_integer_label",
-            f"Column '{column}' must contain integer class labels when present.",
+            f"Column '{column}' must contain integer labels when present.",
             column=column,
             row=int(row_index),
             value=value,
@@ -148,7 +148,19 @@ def _make_safe_probability_consistency(observation_schema):
                         value=label,
                     )
                     continue
-                expected_probability = float(probabilities.loc[row_index, column])
+                expected_value = probabilities.loc[row_index, column]
+                if pd.isna(expected_value):
+                    observation_schema._issue(
+                        issues,
+                        "error",
+                        "missing_true_label_probability_value",
+                        "Column 'probability_true_class' is present, but the referenced prob_class_<true_label> value is missing.",
+                        column=column,
+                        row=int(row_index),
+                        value=np.nan,
+                    )
+                    continue
+                expected_probability = float(expected_value)
                 observed_probability = float(probability_true_class.loc[row_index])
                 if abs(observed_probability - expected_probability) > tolerance:
                     observation_schema._issue(
