@@ -1,4 +1,4 @@
-"""Allow probability-stacking metric summaries without grouping columns."""
+"""Runtime patches for probability-stacking metric summaries."""
 
 from __future__ import annotations
 
@@ -7,6 +7,52 @@ import pandas as pd
 
 _INSTALLED = False
 _ORIGINAL_SUMMARIZE_STACKED_METRICS = None
+
+
+def _stable_top_k_positions(probabilities: np.ndarray, *, k: int) -> np.ndarray:
+    """Return top-k column positions with deterministic low-index tie breaks."""
+
+    return np.argsort(-probabilities, axis=1, kind="mergesort")[:, :k]
+
+
+def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
+    """Return top-k accuracy with the same tie rule as core metrics."""
+
+    from neureptrace import probability_stacking as ps
+
+    if len(labels) == 0:
+        return float("nan")
+    probabilities = np.asarray(probabilities, dtype=float)
+    labels = np.asarray(labels, dtype=int).reshape(-1)
+    effective_k = min(ps._validate_positive_integer(k, name="k"), probabilities.shape[1])
+    top_columns = _stable_top_k_positions(probabilities, k=effective_k)
+    return float(np.mean(np.any(top_columns == labels[:, None], axis=1)))
+
+
+def _top_k_accuracy_from_label_values(
+    probabilities: np.ndarray,
+    true_labels: np.ndarray,
+    label_values,
+    *,
+    k: int,
+) -> float:
+    """Return top-k accuracy for arbitrary label ids with stable tie breaks."""
+
+    from neureptrace import probability_stacking as ps
+
+    probabilities = np.asarray(probabilities, dtype=float)
+    true_labels = np.asarray(true_labels, dtype=int).reshape(-1)
+    label_values_array = np.asarray(label_values, dtype=int)
+    if probabilities.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional array.")
+    if probabilities.shape[0] != true_labels.shape[0]:
+        raise ValueError("probabilities and true_labels must contain the same number of rows.")
+    if probabilities.shape[1] != label_values_array.shape[0]:
+        raise ValueError("label_values must contain one label per probability column.")
+    effective_k = min(ps._validate_positive_integer(k, name="k"), probabilities.shape[1])
+    top_positions = _stable_top_k_positions(probabilities, k=effective_k)
+    top_labels = label_values_array[top_positions]
+    return float(np.mean(np.any(top_labels == true_labels[:, None], axis=1)))
 
 
 def _summarize_global_metrics(ps, observations: pd.DataFrame) -> pd.DataFrame:
@@ -52,7 +98,7 @@ def _summarize_global_metrics(ps, observations: pd.DataFrame) -> pd.DataFrame:
 
 
 def install() -> None:
-    """Install the ungrouped-summary wrapper once."""
+    """Install probability-stacking metric wrappers once."""
 
     global _INSTALLED, _ORIGINAL_SUMMARIZE_STACKED_METRICS
     if _INSTALLED:
@@ -60,6 +106,8 @@ def install() -> None:
 
     from neureptrace import probability_stacking as ps
 
+    ps._top_k_accuracy = _top_k_accuracy
+    ps._top_k_accuracy_from_label_values = _top_k_accuracy_from_label_values
     _ORIGINAL_SUMMARIZE_STACKED_METRICS = ps.summarize_stacked_metrics
 
     def _summarize_stacked_metrics(observations: pd.DataFrame) -> pd.DataFrame:
