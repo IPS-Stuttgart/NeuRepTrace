@@ -35,6 +35,9 @@ def _install_fit_guard(class_object: type, *attribute_names: str) -> None:
 def install() -> None:
     """Install weight-option validation for torch-backed decoders."""
 
+    decoding = importlib.import_module("neureptrace.decoding")
+    _install_fit_guard(decoding.TorchMLPClassifier, "class_weight")
+
     dann = importlib.import_module("neureptrace.decoding.dann")
     _install_fit_guard(dann.TorchDANNClassifier, "class_weight")
 

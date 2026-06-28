@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from neureptrace.decoding import TorchMLPClassifier
 from neureptrace.decoding.cdan import TorchCDANClassifier
 from neureptrace.decoding.dann import TorchDANNClassifier
 from neureptrace.decoding.source_domain_generalization import TorchSourceDomainGeneralizationClassifier
@@ -12,6 +13,13 @@ SOURCE_FEATURES = [[0.0], [1.0], [2.0], [3.0]]
 SOURCE_LABELS = [0, 0, 1, 1]
 SOURCE_DOMAINS = ["s1", "s2", "s1", "s2"]
 TARGET_FEATURES = [[0.5], [2.5]]
+
+
+def test_torch_mlp_rejects_unknown_class_weight_before_torch_initialization() -> None:
+    model = TorchMLPClassifier(class_weight="balance")
+
+    with pytest.raises(ValueError, match="class_weight must be None or 'balanced'"):
+        model.fit(SOURCE_FEATURES, SOURCE_LABELS)
 
 
 def test_dann_rejects_unknown_class_weight_before_torch_initialization() -> None:
