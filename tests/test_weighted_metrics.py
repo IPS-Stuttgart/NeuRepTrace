@@ -48,6 +48,29 @@ def test_weighted_probability_metrics_accept_one_pass_weight_iterables() -> None
     assert weighted_top_k_accuracy(probabilities, labels, (value for value in [1.0, 2.0, 3.0]), k=1) == pytest.approx(0.5)
 
 
+def test_weighted_probability_metrics_accept_column_vector_sample_weights() -> None:
+    probabilities = np.array(
+        [
+            [0.9, 0.1],
+            [0.4, 0.6],
+            [0.8, 0.2],
+        ]
+    )
+    labels = np.array([0, 1, 1])
+    sample_weight = np.array([[1.0], [2.0], [3.0]])
+
+    np.testing.assert_allclose(validate_sample_weight(sample_weight, 3), [1.0, 2.0, 3.0])
+    assert weighted_top_k_accuracy(probabilities, labels, sample_weight, k=1) == pytest.approx(0.5)
+
+
+def test_weighted_probability_metrics_reject_multi_column_sample_weights() -> None:
+    probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="sample_weight must have shape"):
+        weighted_brier_score_multiclass(probabilities, labels, np.array([[1.0, 0.0], [0.0, 1.0]]))
+
+
 def test_weighted_reliability_bins_report_weighted_calibration_rows() -> None:
     probabilities = np.array(
         [
