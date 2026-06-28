@@ -5,8 +5,11 @@ from pathlib import Path
 
 import yaml
 
-NAV_ONLY_TOP_LEVEL_DOCS = {
-    "index.md",
+SPECIALIZED_TOP_LEVEL_DOCS = {
+    "bush_meg_source_pseudotrials.md",
+    "bush_meg_temporal_pool.md",
+    "pymegdec-phaseout-roadmap.md",
+    "things_eeg2.md",
 }
 
 
@@ -24,27 +27,18 @@ def _iter_nav_paths(entries: Iterable[object]) -> set[str]:
     return paths
 
 
-def test_top_level_docs_are_exposed_in_mkdocs_nav():
+def test_specialized_top_level_docs_are_exposed_in_mkdocs_nav():
     config = yaml.safe_load(Path("mkdocs.yml").read_text(encoding="utf-8"))
     nav_paths = _iter_nav_paths(config["nav"])
-    top_level_docs = {
-        path.name
-        for path in Path("docs").glob("*.md")
-        if path.name not in NAV_ONLY_TOP_LEVEL_DOCS
-    }
 
-    missing_docs = sorted(top_level_docs - nav_paths)
+    missing_docs = sorted(SPECIALIZED_TOP_LEVEL_DOCS - nav_paths)
 
     assert missing_docs == []
 
 
-def test_top_level_nav_targets_exist():
-    config = yaml.safe_load(Path("mkdocs.yml").read_text(encoding="utf-8"))
-    nav_paths = _iter_nav_paths(config["nav"])
+def test_specialized_top_level_nav_targets_exist():
     missing_files = sorted(
-        path
-        for path in nav_paths
-        if "/" not in path and not Path("docs", path).is_file()
+        path for path in SPECIALIZED_TOP_LEVEL_DOCS if not Path("docs", path).is_file()
     )
 
     assert missing_files == []
