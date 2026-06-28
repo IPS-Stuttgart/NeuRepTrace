@@ -4,14 +4,13 @@ The MEKT implementation historically normalized several public vector-like input
 with ``reshape(-1)`` or by checking only the first array dimension.  That could
 turn malformed matrix-shaped labels into apparently valid per-row labels, or let
 matrix-shaped domain arrays reach later NumPy masking operations.  This patch
-keeps genuine vectors accepted, including single-row/single-column CLI vectors
-and explicit ``dtype=object`` matrices whose rows are composite tuple keys, while
-rejecting true numeric/string matrices at the public boundary.
+keeps genuine label vectors accepted, including single-row/single-column CLI
+vectors, while preserving row-wise composite source-domain identifiers.
 
 It also keeps tuple-valued source-domain identifiers atomic when DTE source-domain
 selection materializes the top-k domain list.  Without that guard, NumPy can coerce
-``[(subject, run), ...]`` into a 2-D string array, causing ``np.isin`` to reject
-all matching tuple-valued domain rows.
+``[(subject, run), ...]`` into a 2-D string array, causing matching and domain
+selection to operate on flattened scalar cells instead of per-row domain tuples.
 """
 
 from __future__ import annotations
@@ -71,8 +70,44 @@ def _as_hashable_vector(values: Any, *, name: str) -> np.ndarray:
     return vector
 
 
+def _matrix_rows_as_tuples(array: np.ndarray) -> list[tuple[Any, ...]]:
+    rows = np.asarray(array, dtype=object).reshape(array.shape[0], -1)
+    return [tuple(row.tolist()) for row in rows]
+
+
+def _as_domain_vector(values: Any, *, name: str) -> np.ndarray:
+    """Return a 1-D vector, preserving 2-D rows as composite domain IDs."""
+
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim <= 1 or (array.ndim == 2 and 1 in array.shape):
+            return _as_hashable_vector(array, name=name)
+        items = _matrix_rows_as_tuples(array)
+    elif isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        try:
+            raw_items = list(values)
+        except TypeError as exc:
+            raise ValueError(f"{name} must be a one-dimensional vector or row-wise composite matrix.") from exc
+        if raw_items and all(isinstance(item, (list, tuple, np.ndarray)) for item in raw_items):
+            items = [tuple(np.asarray(item, dtype=object).reshape(-1).tolist()) for item in raw_items]
+        else:
+            items = raw_items
+
+    vector = _object_array(items)
+    for value in vector.tolist():
+        if not isinstance(value, Hashable):
+            raise ValueError(f"{name} entries must be hashable scalar or tuple values.")
+    return vector
+
+
 def _normalize_optional_vector(value: Any, *, name: str) -> np.ndarray | None:
     return None if value is None else _as_hashable_vector(value, name=name)
+
+
+def _normalize_optional_domain_vector(value: Any, *, name: str) -> np.ndarray | None:
+    return None if value is None else _as_domain_vector(value, name=name)
 
 
 def _select_top_domains(scores: Mapping[Any, float], top_k: int) -> np.ndarray:
@@ -92,7 +127,7 @@ def _patch_module(module: ModuleType) -> None:
     def _domain_ids(n_rows: int, source_domains: Any, *, name: str) -> np.ndarray:
         if source_domains is None:
             return np.zeros(n_rows, dtype=int)
-        domains = _as_hashable_vector(source_domains, name=name)
+        domains = _as_domain_vector(source_domains, name=name)
         if domains.shape[0] != n_rows:
             raise ValueError(f"{name} length must match source rows.")
         return domains
@@ -108,7 +143,7 @@ def _patch_module(module: ModuleType) -> None:
         return original_centroid(
             source_covariances,
             target_covariances,
-            source_domains=_normalize_optional_vector(source_domains, name="source_domains"),
+            source_domains=_normalize_optional_domain_vector(source_domains, name="source_domains"),
             epsilon=epsilon,
         )
 
@@ -116,7 +151,7 @@ def _patch_module(module: ModuleType) -> None:
     def mekt_transfer_features(source_covariances: Any, source_labels: Any, target_covariances: Any, **kwargs: Any) -> Any:
         kwargs = dict(kwargs)
         if "source_domains" in kwargs:
-            kwargs["source_domains"] = _normalize_optional_vector(kwargs["source_domains"], name="source_domains")
+            kwargs["source_domains"] = _normalize_optional_domain_vector(kwargs["source_domains"], name="source_domains")
         if kwargs.get("initial_pseudo_labels") is not None:
             kwargs["initial_pseudo_labels"] = _as_hashable_vector(kwargs["initial_pseudo_labels"], name="initial_pseudo_labels")
         return original_transfer(source_covariances, _as_hashable_vector(source_labels, name="source_labels"), target_covariances, **kwargs)
@@ -125,7 +160,7 @@ def _patch_module(module: ModuleType) -> None:
     def fit_predict_mekt_transfer(source_covariances: Any, source_labels: Any, target_covariances: Any, **kwargs: Any) -> Any:
         kwargs = dict(kwargs)
         if "source_domains" in kwargs:
-            kwargs["source_domains"] = _normalize_optional_vector(kwargs["source_domains"], name="source_domains")
+            kwargs["source_domains"] = _normalize_optional_domain_vector(kwargs["source_domains"], name="source_domains")
         return original_fit_predict(source_covariances, _as_hashable_vector(source_labels, name="source_labels"), target_covariances, **kwargs)
 
     @wraps(original_scores)
@@ -134,7 +169,7 @@ def _patch_module(module: ModuleType) -> None:
             source_features,
             _as_hashable_vector(source_labels, name="source_labels"),
             target_features,
-            _as_hashable_vector(source_domains, name="source_domains"),
+            _as_domain_vector(source_domains, name="source_domains"),
             **kwargs,
         )
 
