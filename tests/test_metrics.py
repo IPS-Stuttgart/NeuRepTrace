@@ -279,3 +279,81 @@ def test_confusion_pair_summary_reports_bidirectional_lift_and_metadata():
     assert pair["b_to_a_count"] == 1
     assert pair["total_confusions"] == 3
     assert pair["n_confused_participants"] == 2
+    assert bool(pair["same_semantic_category"]) is True
+    assert pair["pair_confusion_lift"] > 1.0
+
+
+def test_confusion_category_enrichment_and_matrix_use_error_marginals():
+    predictions = pd.DataFrame(
+        {
+            "participant": ["p1", "p1", "p2", "p2", "p3", "p3"],
+            "decoder": ["logistic"] * 6,
+            "true_label": [1, 1, 2, 1, 3, 4],
+            "predicted_label": [2, 2, 1, 1, 4, 3],
+        }
+    )
+    metadata = pd.DataFrame(
+        {
+            "label": [1, 2, 3, 4],
+            "semantic_category": ["animal", "animal", "object", "object"],
+        }
+    )
+
+    enrichment = confusion_category_enrichment(
+        predictions,
+        metadata_frame=metadata,
+        category_columns=("semantic_category",),
+        group_columns=("decoder",),
+        participant_column="participant",
+        n_permutations=0,
+    )
+    row = enrichment.iloc[0]
+    assert row["category_column"] == "semantic_category"
+    assert row["n_errors_with_category"] == 5
+    assert row["same_category_errors"] == 5
+    assert row["expected_same_category_errors"] == 2.6
+    assert row["same_category_lift"] > 1.0
+    assert row["n_participants_with_same_category_errors"] == 3
+
+    matrix = confusion_category_matrix(
+        predictions,
+        metadata_frame=metadata,
+        category_columns=("semantic_category",),
+        group_columns=("decoder",),
+        participant_column="participant",
+    )
+    animal = matrix[(matrix["true_category"] == "animal") & (matrix["predicted_category"] == "animal")].iloc[0]
+    assert animal["count"] == 3
+    assert animal["expected_count"] == 1.8
+    assert animal["category_confusion_lift"] > 1.0
+
+
+def test_confusion_category_enrichment_rejects_fractional_permutation_counts():
+    predictions = pd.DataFrame(
+        {
+            "true_label": [1, 1, 2, 2],
+            "predicted_label": [1, 2, 1, 2],
+        }
+    )
+    metadata = pd.DataFrame(
+        {
+            "label": [1, 2],
+            "semantic_category": ["face", "object"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
+        confusion_category_enrichment(
+            predictions,
+            metadata_frame=metadata,
+            category_columns=("semantic_category",),
+            n_permutations=1.5,
+        )
+
+    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
+        confusion_category_enrichment(
+            predictions,
+            metadata_frame=metadata,
+            category_columns=("semantic_category",),
+            n_permutations=True,
+        )
