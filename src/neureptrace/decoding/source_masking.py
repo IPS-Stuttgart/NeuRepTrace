@@ -12,11 +12,13 @@ are not accepted.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+
+from neureptrace._object_label_utils import label_counts, label_equal_mask
 
 SOURCE_MASKING_AUGMENTATION = "source_feature_masking"
 SOURCE_MASKING_PROTOCOL = "strict_source_only_feature_masking_augmentation"
@@ -65,7 +67,6 @@ class SourceFeatureMaskingResult:
 
 
 # pylint: disable-next=too-many-locals
-
 def augment_source_with_feature_masking(
     source_features: Sequence[Sequence[float]] | np.ndarray,
     source_labels: Sequence[Any] | np.ndarray,
@@ -98,10 +99,19 @@ def augment_source_with_feature_masking(
     features = _feature_matrix(source_features, name="source_features")
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
+    classes, _class_counts = label_counts(labels)
+    domain_ids, _domain_counts = label_counts(domains)
     feature_fill = _feature_fill_values(features, mode=cfg.fill_mode)
 
     if not cfg.enabled:
-        metadata = _metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=0, n_classes=np.unique(labels).shape[0], n_source_domains=np.unique(domains).shape[0], feature_dim=features.shape[1])
+        metadata = _metadata(
+            cfg,
+            n_source_rows=features.shape[0],
+            n_synthetic_rows=0,
+            n_classes=classes.shape[0],
+            n_source_domains=domain_ids.shape[0],
+            feature_dim=features.shape[1],
+        )
         return SourceFeatureMaskingResult(
             features=features.astype(np.float32, copy=False),
             labels=labels.copy(),
@@ -116,8 +126,8 @@ def augment_source_with_feature_masking(
     synthetic_labels: list[Any] = []
     content_indices: list[int] = []
     masked_indices: list[np.ndarray] = []
-    for class_label in tuple(dict.fromkeys(labels.tolist())):
-        class_indices = np.flatnonzero(labels == class_label)
+    for class_label in classes.tolist():
+        class_indices = np.flatnonzero(label_equal_mask(labels, class_label))
         if class_indices.size == 0:
             continue
         for _ in range(cfg.synthetic_per_class):
@@ -137,7 +147,7 @@ def augment_source_with_feature_masking(
             masked_indices.append(mask.astype(int, copy=False))
 
     synthetic_features = np.vstack(synthetic_rows).astype(np.float32, copy=False) if synthetic_rows else np.empty((0, features.shape[1]), dtype=np.float32)
-    synthetic_labels_array = np.asarray(synthetic_labels, dtype=labels.dtype if labels.dtype != object else object)
+    synthetic_labels_array = _object_value_vector(synthetic_labels)
     if cfg.preserve_original:
         output_features = np.vstack([features, synthetic_features]).astype(np.float32, copy=False)
         output_labels = np.concatenate([labels, synthetic_labels_array])
@@ -147,7 +157,14 @@ def augment_source_with_feature_masking(
         output_labels = synthetic_labels_array
         synthetic_mask = np.ones(synthetic_features.shape[0], dtype=bool)
 
-    metadata = _metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=synthetic_features.shape[0], n_classes=np.unique(labels).shape[0], n_source_domains=np.unique(domains).shape[0], feature_dim=features.shape[1])
+    metadata = _metadata(
+        cfg,
+        n_source_rows=features.shape[0],
+        n_synthetic_rows=synthetic_features.shape[0],
+        n_classes=classes.shape[0],
+        n_source_domains=domain_ids.shape[0],
+        feature_dim=features.shape[1],
+    )
     return SourceFeatureMaskingResult(
         features=output_features,
         labels=output_labels,
@@ -286,19 +303,47 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values).reshape(-1)
+def _object_value_vector(values: Iterable[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    if isinstance(values, (str, bytes)):
+        vector = _object_value_vector([values])
+    else:
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            vector = _object_value_vector([array.item()])
+        elif array.ndim == 1:
+            if array.shape[0] == expected_length:
+                vector = array.reshape(-1)
+            elif expected_length == 1:
+                vector = _object_value_vector([tuple(array.tolist())])
+            else:
+                vector = array.reshape(-1)
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if rows.shape[1] == 1:
+                vector = rows[:, 0].reshape(-1)
+            else:
+                vector = _object_value_vector(tuple(row.tolist()) for row in rows)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
     return vector
 
 
+def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    return _atomic_value_vector(values, expected_length=expected_length, name=name)
+
+
 def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"source_domains must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
+    vector = _atomic_value_vector(values, expected_length=expected_length, name="source_domains")
     for value in vector.tolist():
         try:
             hash(value)
