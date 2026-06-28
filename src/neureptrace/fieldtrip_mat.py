@@ -399,10 +399,12 @@ def write_fieldtrip_raw_mat_epochs(
     **kwargs: Any,
 ) -> tuple[Path, Path]:
     epochs, metadata = load_fieldtrip_raw_mat_epochs(mat_path, **kwargs)
-    epochs_out.parent.mkdir(parents=True, exist_ok=True)
-    epochs.save(epochs_out, overwrite=overwrite)
     metadata_path = metadata_out or epochs_out.with_name(f"{epochs_out.stem}_metadata.csv")
+    if metadata_path.exists() and not overwrite:
+        raise FileExistsError(f"Metadata output already exists: {metadata_path}. Pass overwrite=True to replace it.")
+    epochs_out.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    epochs.save(epochs_out, overwrite=overwrite)
     metadata.to_csv(metadata_path, index=False)
     return epochs_out, metadata_path
 
