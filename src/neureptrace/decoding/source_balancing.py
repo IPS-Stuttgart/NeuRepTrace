@@ -8,11 +8,13 @@ uses source features and source labels only, so it is a Protocol-1 helper.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+
+from neureptrace._object_label_utils import label_counts, label_equal_mask
 
 SOURCE_BALANCING_PROTOCOL = "strict_source_only_class_balancing"
 SOURCE_BALANCING_CATEGORY = "1_strict_source_only"
@@ -82,10 +84,10 @@ def balance_source_classes(
     cfg = source_class_balancing_config() if config is None else _coerce_config(config)
     features = _feature_matrix(source_features, name="source_features")
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=labels.dtype if labels.dtype != object else object)
+    classes, class_counts = label_counts(labels)
     if classes.shape[0] < 1:
         raise ValueError("At least one class is required.")
-    counts = {class_label: int(np.count_nonzero(labels == class_label)) for class_label in classes.tolist()}
+    counts = {class_label: int(count) for class_label, count in zip(classes.tolist(), class_counts.tolist(), strict=True)}
     target_count = resolve_target_count(tuple(counts.values()), cfg.target_count)
 
     if cfg.mode == "weights":
@@ -97,7 +99,7 @@ def balance_source_classes(
         selected_parts: list[np.ndarray] = []
         synthetic_parts: list[np.ndarray] = []
         for class_label in classes.tolist():
-            class_indices = np.flatnonzero(labels == class_label)
+            class_indices = np.flatnonzero(label_equal_mask(labels, class_label))
             if cfg.mode == "oversample":
                 if class_indices.size >= target_count:
                     choice = class_indices.copy()
@@ -126,7 +128,7 @@ def balance_source_classes(
 
     output_features = features[selected].astype(np.float32, copy=False)
     output_labels = labels[selected]
-    after_counts = {class_label: int(np.count_nonzero(output_labels == class_label)) for class_label in classes.tolist()}
+    after_counts = {class_label: int(np.count_nonzero(label_equal_mask(output_labels, class_label))) for class_label in classes.tolist()}
     metadata = _metadata(
         cfg,
         n_source_rows=features.shape[0],
@@ -212,7 +214,7 @@ def _inverse_frequency_weights(labels: np.ndarray, counts: Mapping[Any, int]) ->
     n_classes = len(counts)
     weights = np.empty(labels.shape[0], dtype=float)
     for class_label, count in counts.items():
-        weights[labels == class_label] = labels.shape[0] / float(n_classes * count)
+        weights[label_equal_mask(labels, class_label)] = labels.shape[0] / float(n_classes * count)
     return weights
 
 
@@ -272,10 +274,52 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    if isinstance(values, (str, bytes)):
+        vector = _object_value_vector([values])
+    else:
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            vector = _object_value_vector([array.item()])
+        elif array.ndim == 1:
+            if array.shape[0] == expected_length:
+                vector = _object_value_vector(array.reshape(-1).tolist())
+            elif expected_length == 1:
+                vector = _object_value_vector([tuple(array.tolist())])
+            else:
+                vector = _object_value_vector(array.reshape(-1).tolist())
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if rows.shape[1] == 1:
+                vector = _object_value_vector(rows[:, 0].tolist())
+            else:
+                vector = _object_value_vector(tuple(row.tolist()) for row in rows)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _object_value_vector(values: Sequence[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = _hashable_label(value)
+    return vector
+
+
+def _hashable_label(value: Any) -> Hashable:
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, list):
+        value = tuple(_hashable_label(item) for item in value)
+    elif isinstance(value, tuple):
+        value = tuple(_hashable_label(item) for item in value)
+    try:
+        hash(value)
+    except TypeError as exc:
+        raise ValueError(f"source_labels must contain hashable class labels; got {value!r}.") from exc
+    return value
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
