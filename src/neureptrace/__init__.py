@@ -72,13 +72,13 @@ from . import (  # noqa: E402
     _mne_time_decode_ensemble_param_validation_patch,
     _mne_time_decode_float_sequence_validation_patch,
     _nll_eps_validation_patch,
+    _observation_schema_label_patch,
+    _observation_schema_probability_patch,
+    _observation_schema_string_columns_patch,
     _observation_ensemble_missing_label_patch,
     _observation_ensemble_partial_class_columns_patch,
     _observation_ensemble_string_groups_patch,
     _observation_ensemble_ungrouped_metrics_patch,
-    _observation_schema_label_patch,
-    _observation_schema_probability_patch,
-    _observation_schema_string_columns_patch,
     _onset_boolean_summary_patch,
     _openneuro_alignment_compare_structured_values_patch,
     _openneuro_parse_runs_patch,
@@ -116,6 +116,7 @@ from . import (  # noqa: E402
     _source_free_probability_rows_patch,
     _source_free_soft_prototypes_patch,
     _source_free_tuple_labels_patch,
+    _source_jitter_boolean_config_patch,
     _source_label_vector_patch,
     _source_mixup_boolean_config_patch,
     _source_mixup_random_state_patch,
@@ -242,6 +243,7 @@ _source_free_standardize_target_patch.install()
 _source_free_probability_rows_patch.install()
 _source_free_soft_prototypes_patch.install()
 _source_free_tuple_labels_patch.install()
+_source_jitter_boolean_config_patch.install()
 _source_label_vector_patch.install()
 _source_mixup_boolean_config_patch.install()
 _source_mixup_random_state_patch.install()
