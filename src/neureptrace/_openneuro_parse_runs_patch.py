@@ -65,13 +65,13 @@ def install() -> None:
             if not (isinstance(runs, str) and runs.strip().lower() == "all"):
                 entries = _selector_entries(runs)
                 if not entries:
-                    raise ValueError("OpenNeuro run selection must contain at least one run or 'all'.")
+                    raise ValueError("OpenNeuro run selection must include at least one run or 'all'.")
                 for entry in entries:
                     _validate_run_entry(entry)
 
         parsed = original_parse_runs(spec, _normalize_runs_for_original(runs))
         if not parsed:
-            raise ValueError("OpenNeuro run selection must contain at least one run or 'all'.")
+            raise ValueError("OpenNeuro run selection must include at least one run or 'all'.")
         return parsed
 
     setattr(parse_runs, _PATCH_MARKER, True)
