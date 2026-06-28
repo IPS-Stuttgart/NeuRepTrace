@@ -119,7 +119,7 @@ def compare_prediction_frames(reference: pd.DataFrame, candidate: pd.DataFrame, 
             {"diagnostic": "true_label_mismatch_rows", "value": int(mismatched.sum())},
         ])
 
-    group_columns = _existing_columns(reference, group_columns)
+    group_columns = [column for column in group_columns if column in reference.columns and column in candidate.columns]
     ref_recall = per_class_recall_frame(reference, group_columns=group_columns).rename(columns={"recall": "reference_recall", "n_trials": "reference_n_trials", "n_correct": "reference_n_correct"})
     cand_recall = per_class_recall_frame(candidate, group_columns=group_columns).rename(columns={"recall": "candidate_recall", "n_trials": "candidate_n_trials", "n_correct": "candidate_n_correct"})
     join_columns = [*group_columns, "true_class"]
