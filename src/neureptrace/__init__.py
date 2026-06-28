@@ -80,6 +80,7 @@ from . import (  # noqa: E402
     _observation_ensemble_string_groups_patch,
     _observation_ensemble_ungrouped_metrics_patch,
     _onset_boolean_summary_patch,
+    _openneuro_alignment_compare_missing_context_patch,
     _openneuro_alignment_compare_structured_values_patch,
     _openneuro_parse_runs_patch,
     _openneuro_pre_stimulus_finite_patch,
@@ -278,6 +279,7 @@ _unlabeled_anchor_tuple_patch.install()
 _vrex_numeric_config_patch.install()
 _windowed_composite_labels_patch.install()
 _bushmeg_cue_temporal_bins_patch.install()
+_openneuro_alignment_compare_missing_context_patch.install()
 _openneuro_alignment_compare_structured_values_patch.install()
 _openneuro_parse_runs_patch.install()
 _openneuro_pre_stimulus_finite_patch.install()
