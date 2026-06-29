@@ -369,15 +369,21 @@ def _reject_boolean_participant_identifier(value: Any) -> None:
         raise ValueError("participants.ids must not contain boolean identifiers")
 
 
+def _participant_identifier_text(value: Any) -> str:
+    _reject_boolean_participant_identifier(value)
+    text = str(value).strip()
+    if not text:
+        raise ValueError("participants.ids contains an empty identifier")
+    return text
+
+
 def _expand_participant_token(token: Any) -> list[str]:
     _reject_boolean_participant_identifier(token)
     if isinstance(token, Mapping):
         if "range" in token:
             return _expand_range_value(token["range"])
         if "id" in token:
-            identifier = token["id"]
-            _reject_boolean_participant_identifier(identifier)
-            return [str(identifier)]
+            return [_participant_identifier_text(token["id"])]
         raise ValueError(f"Unsupported participant token mapping: {token}")
 
     if isinstance(token, int):
@@ -385,9 +391,7 @@ def _expand_participant_token(token: Any) -> list[str]:
     if isinstance(token, float) and token.is_integer():
         return [str(int(token))]
 
-    text = str(token).strip()
-    if not text:
-        raise ValueError("participants.ids contains an empty identifier")
+    text = _participant_identifier_text(token)
     return _expand_range_value(text)
 
 
@@ -397,11 +401,11 @@ def _expand_range_value(value: Any) -> list[str]:
         if len(value) != 2:
             raise ValueError(f"Participant range sequences must contain exactly two values: {value}")
         start, stop = value
-        _reject_boolean_participant_identifier(start)
-        _reject_boolean_participant_identifier(stop)
-        return _range_ids(str(start), str(stop))
+        start_text = _participant_identifier_text(start)
+        stop_text = _participant_identifier_text(stop)
+        return _range_ids(start_text, stop_text)
 
-    text = str(value).strip()
+    text = _participant_identifier_text(value)
     match = _RANGE_PATTERN.match(text)
     if match is None:
         return [text]
