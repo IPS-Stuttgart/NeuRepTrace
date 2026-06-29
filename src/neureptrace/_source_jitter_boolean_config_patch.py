@@ -1,4 +1,4 @@
-"""Normalize Source Feature Jitter boolean config values."""
+"""Normalize Source Feature Jitter booleans and related source augmentation config."""
 
 from __future__ import annotations
 
@@ -9,10 +9,13 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_source_jitter_boolean_config_patch_installed"
+_MASKING_INT_PATCH_MARKER = "_neureptrace_source_feature_masking_int_config_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
+_NONE_STRINGS = {"", "none", "null"}
 
 
+# Regression-note: this file is intentionally kept import-time patch compatible.
 def _bool_error(name: str) -> ValueError:
     return ValueError(f"{name} must be a boolean value.")
 
@@ -44,9 +47,54 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise _bool_error(name)
 
 
-def install() -> None:
-    """Install numeric/scalar boolean normalization for Source Feature Jitter."""
+def _integer_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be an integer or None.")
 
+
+def _normalize_optional_integer(value: Any, *, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.lower() in _NONE_STRINGS:
+            return None
+        value = text
+    elif isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise _integer_error(name)
+        return _normalize_optional_integer(value.item(), name=name)
+    elif isinstance(value, (list, tuple, dict, set)):
+        raise _integer_error(name)
+    if isinstance(value, (bool, np.bool_)):
+        raise _integer_error(name)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise _integer_error(name) from exc
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
+        raise _integer_error(name)
+    return int(parsed)
+
+
+def _positive_optional_integer(value: Any, *, name: str) -> int | None:
+    parsed = _normalize_optional_integer(value, name=name)
+    if parsed is None:
+        return None
+    if parsed < 1:
+        raise ValueError(f"{name} must be a positive integer or None.")
+    return parsed
+
+
+def _nonnegative_optional_integer(value: Any, *, name: str) -> int | None:
+    parsed = _normalize_optional_integer(value, name=name)
+    if parsed is None:
+        return None
+    if parsed < 0:
+        raise ValueError(f"{name} must be a non-negative integer or None.")
+    return parsed
+
+
+def _install_source_jitter_patch() -> None:
     source_jitter = importlib.import_module("neureptrace.decoding.source_jitter")
 
     original_config = source_jitter.source_feature_jitter_config
@@ -74,6 +122,47 @@ def install() -> None:
 
     setattr(source_feature_jitter_config, _PATCH_MARKER, True)
     source_jitter.source_feature_jitter_config = source_feature_jitter_config
+
+
+def _install_source_masking_patch() -> None:
+    source_masking = importlib.import_module("neureptrace.decoding.source_masking")
+
+    original_config = source_masking.source_feature_masking_config
+    if getattr(original_config, _MASKING_INT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_config)
+    def source_feature_masking_config(
+        *,
+        synthetic_per_class: int | str = 0,
+        mask_fraction: float | str = source_masking.DEFAULT_MASK_FRACTION,
+        mask_mode: str | None = "feature",
+        block_size: Any = None,
+        fill_mode: str | None = "feature_mean",
+        noise_std: float | str = 0.0,
+        preserve_original: bool | int | str = True,
+        random_state: Any = 13,
+    ):
+        return original_config(
+            synthetic_per_class=synthetic_per_class,
+            mask_fraction=mask_fraction,
+            mask_mode=mask_mode,
+            block_size=_positive_optional_integer(block_size, name="block_size"),
+            fill_mode=fill_mode,
+            noise_std=noise_std,
+            preserve_original=preserve_original,
+            random_state=_nonnegative_optional_integer(random_state, name="random_state"),
+        )
+
+    setattr(source_feature_masking_config, _MASKING_INT_PATCH_MARKER, True)
+    source_masking.source_feature_masking_config = source_feature_masking_config
+
+
+def install() -> None:
+    """Install numeric/scalar boolean normalization and source masking config validation."""
+
+    _install_source_jitter_patch()
+    _install_source_masking_patch()
 
 
 __all__ = ["install"]
