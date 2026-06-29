@@ -37,6 +37,12 @@ def test_source_minmax_custom_range() -> None:
     assert np.allclose(result.test_features.ravel(), np.asarray([0.0]))
 
 
+def test_source_minmax_accepts_numpy_vector_range() -> None:
+    reference = fit_source_minmax_reference([[0.0], [2.0]], feature_range=np.asarray([-1.0, 1.0]))
+
+    assert reference.feature_range == (-1.0, 1.0)
+
+
 def test_source_minmax_reference_can_be_reused() -> None:
     reference = fit_source_minmax_reference([[0.0], [4.0]])
     transformed = apply_source_minmax_transform([[2.0]], reference)
@@ -52,6 +58,23 @@ def test_source_minmax_rejects_width_mismatch() -> None:
 def test_source_minmax_rejects_bad_range() -> None:
     with pytest.raises(ValueError, match="feature_range"):
         fit_source_minmax_reference([[0.0], [1.0]], feature_range=(1.0, 0.0))
+
+
+@pytest.mark.parametrize(
+    "feature_range",
+    [
+        False,
+        (False, True),
+        (0.0, True),
+        (0.0,),
+        (0.0, 1.0, 2.0),
+        "01",
+        np.asarray([[0.0], [1.0]]),
+    ],
+)
+def test_source_minmax_rejects_malformed_or_boolean_ranges(feature_range: object) -> None:
+    with pytest.raises(ValueError, match="feature_range"):
+        fit_source_minmax_reference([[0.0], [1.0]], feature_range=feature_range)
 
 
 def test_heldout_labels_are_not_part_of_public_api() -> None:
