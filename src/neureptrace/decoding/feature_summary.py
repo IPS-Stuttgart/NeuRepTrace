@@ -58,9 +58,19 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.ndarra
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
+    message = f"{name} must be a non-negative integer."
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a non-negative integer.")
-    parsed = float(value)
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(message)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 0:
-        raise ValueError(f"{name} must be a non-negative integer.")
+        raise ValueError(message)
     return int(parsed)
