@@ -64,6 +64,18 @@ def test_clip_extremes_rejects_ambiguous_config_values() -> None:
         fit_source_rank_reference([[0.0], [1.0]], clip_extremes=2)
 
 
+def test_epsilon_rejects_array_valued_config_values() -> None:
+    for bad_epsilon in (np.asarray(1e-6), np.asarray([1e-6]), np.asarray([[1e-6]])):
+        with pytest.raises(ValueError, match="epsilon"):
+            fit_source_rank_reference([[0.0], [1.0]], epsilon=bad_epsilon)
+
+
+def test_epsilon_accepts_numpy_numeric_scalar() -> None:
+    reference = fit_source_rank_reference([[0.0], [1.0]], epsilon=np.float64(1e-5))
+
+    assert reference.epsilon == pytest.approx(1e-5)
+
+
 def test_rank_output_aliases_and_validation() -> None:
     assert normalize_rank_output("percentile") == "uniform"
     assert normalize_rank_output("signed") == "centered"
