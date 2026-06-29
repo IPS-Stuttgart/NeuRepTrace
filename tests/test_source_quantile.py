@@ -95,6 +95,35 @@ def test_apply_source_quantile_bins_with_explicit_edges() -> None:
     assert bins.tolist() == [[0, 0], [1, 1], [2, 2]]
 
 
+def test_source_quantile_rank_centered_string_false_is_not_truthy_config() -> None:
+    source = np.asarray([[0.0], [1.0]], dtype=float)
+    test = np.asarray([[-1.0], [2.0]], dtype=float)
+
+    result = source_quantile_rank(source_features=source, test_features=test, centered="false", epsilon=0.01)
+    direct = apply_source_quantile_rank(test, sorted_values=np.sort(source, axis=0), centered="false", epsilon=0.01)
+
+    assert result.metadata["source_quantile_rank_centered"] is False
+    assert np.allclose(result.test_features, np.asarray([[0.01], [0.99]], dtype=np.float32))
+    assert np.allclose(direct, np.asarray([[0.01], [0.99]]))
+
+
+def test_source_quantile_rank_centered_accepts_true_string_config() -> None:
+    source = np.asarray([[0.0], [1.0]], dtype=float)
+    test = np.asarray([[-1.0], [2.0]], dtype=float)
+
+    result = source_quantile_rank(source_features=source, test_features=test, centered="true", epsilon=0.01)
+
+    assert result.metadata["source_quantile_rank_centered"] is True
+    assert np.allclose(result.test_features, np.asarray([[-0.98], [0.98]], dtype=np.float32))
+
+
+def test_source_quantile_rank_rejects_ambiguous_centered_values() -> None:
+    with pytest.raises(ValueError, match="centered"):
+        source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], centered="sometimes")
+    with pytest.raises(ValueError, match="centered"):
+        apply_source_quantile_rank([[0.5]], sorted_values=[[0.0], [1.0]], centered=2)
+
+
 def test_apply_source_quantile_rank_handles_ties() -> None:
     sorted_values = np.asarray([[0.0], [1.0], [1.0], [2.0]], dtype=float)
 
