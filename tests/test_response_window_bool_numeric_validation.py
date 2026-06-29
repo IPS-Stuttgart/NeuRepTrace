@@ -70,5 +70,5 @@ def test_response_window_rejects_boolean_probability_values(tmp_path: Path):
     csv_path = tmp_path / "observations.csv"
     observations.to_csv(csv_path, index=False)
 
-    with pytest.raises(ValueError, match="Probability observations.*booleans"):
+    with pytest.raises(ValueError, match=r"Probability observations.*boolean"):
         run_response_window_ensemble([csv_path], mode="uniform", response_times=(0.088,))
