@@ -45,6 +45,35 @@ def test_compare_prediction_frames_reports_label_mismatches_and_recall_deltas():
     assert np.isclose(class1["delta_candidate_minus_reference"], 0.5)
 
 
+def test_compare_prediction_frames_aligns_recall_classes_after_csv_dtype_roundtrip():
+    reference = pd.DataFrame(
+        {
+            "outer_test_subject": ["s1", "s1"],
+            "trial_index": [0, 1],
+            "true_label": [0, 1],
+            "predicted_label": [0, 1],
+        }
+    )
+    candidate = pd.DataFrame(
+        {
+            "outer_test_subject": ["s1", "s1"],
+            "trial_index": [0, 1],
+            "true_label": ["0", "1"],
+            "predicted_label": ["0", "0"],
+        }
+    )
+
+    _, per_class = compare_prediction_frames(reference, candidate)
+    class_rows = {str(row["true_class"]): row for row in per_class.to_dict("records")}
+
+    assert set(class_rows) == {"0", "1"}
+    assert not per_class[["reference_recall", "candidate_recall"]].isna().any().any()
+    assert np.isclose(class_rows["0"]["reference_recall"], 1.0)
+    assert np.isclose(class_rows["0"]["candidate_recall"], 1.0)
+    assert np.isclose(class_rows["1"]["reference_recall"], 1.0)
+    assert np.isclose(class_rows["1"]["candidate_recall"], 0.0)
+
+
 def test_compare_prediction_frames_does_not_count_unmatched_rows_as_true_label_mismatches():
     reference = pd.DataFrame(
         {

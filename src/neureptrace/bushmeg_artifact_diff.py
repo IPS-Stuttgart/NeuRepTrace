@@ -75,6 +75,37 @@ def _label_columns(frame: pd.DataFrame) -> tuple[str, str]:
     return true_column, pred_column
 
 
+def _class_join_key(value: object) -> str:
+    """Return a dtype-stable key for matching class labels across CSV artifacts."""
+
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and missing:
+        return "<NA>"
+    return str(value)
+
+
+def _with_class_join_key(frame: pd.DataFrame) -> pd.DataFrame:
+    keyed = frame.copy()
+    keyed["__true_class_key"] = keyed["true_class"].map(_class_join_key)
+    return keyed
+
+
+def _merge_recall_frames(reference_recall: pd.DataFrame, candidate_recall: pd.DataFrame, *, group_columns: Sequence[str]) -> pd.DataFrame:
+    reference_recall = _with_class_join_key(reference_recall)
+    candidate_recall = _with_class_join_key(candidate_recall)
+    join_columns = [*group_columns, "__true_class_key"]
+    recall_delta = reference_recall.merge(candidate_recall, on=join_columns, how="outer", suffixes=("_reference", "_candidate"))
+    reference_class = recall_delta.pop("true_class_reference") if "true_class_reference" in recall_delta.columns else pd.Series([pd.NA] * len(recall_delta), index=recall_delta.index)
+    candidate_class = recall_delta.pop("true_class_candidate") if "true_class_candidate" in recall_delta.columns else pd.Series([pd.NA] * len(recall_delta), index=recall_delta.index)
+    recall_delta["true_class"] = reference_class.where(reference_class.notna(), candidate_class)
+    recall_delta = recall_delta.drop(columns=["__true_class_key"])
+    leading_columns = [*group_columns, "true_class"]
+    return recall_delta[[*leading_columns, *[column for column in recall_delta.columns if column not in leading_columns]]]
+
+
 def per_class_recall_frame(predictions: pd.DataFrame, *, group_columns: Sequence[str] = (DEFAULT_GROUP_COLUMN,)) -> pd.DataFrame:
     """Compute per-group/per-class recall from a prediction CSV."""
 
@@ -122,8 +153,7 @@ def compare_prediction_frames(reference: pd.DataFrame, candidate: pd.DataFrame, 
     group_columns = [column for column in group_columns if column in reference.columns and column in candidate.columns]
     ref_recall = per_class_recall_frame(reference, group_columns=group_columns).rename(columns={"recall": "reference_recall", "n_trials": "reference_n_trials", "n_correct": "reference_n_correct"})
     cand_recall = per_class_recall_frame(candidate, group_columns=group_columns).rename(columns={"recall": "candidate_recall", "n_trials": "candidate_n_trials", "n_correct": "candidate_n_correct"})
-    join_columns = [*group_columns, "true_class"]
-    recall_delta = ref_recall.merge(cand_recall, on=join_columns, how="outer")
+    recall_delta = _merge_recall_frames(ref_recall, cand_recall, group_columns=group_columns)
     recall_delta["delta_candidate_minus_reference"] = recall_delta["candidate_recall"] - recall_delta["reference_recall"]
     return pd.DataFrame(diagnostics), recall_delta
 
