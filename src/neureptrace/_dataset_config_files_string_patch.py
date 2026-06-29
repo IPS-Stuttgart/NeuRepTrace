@@ -54,6 +54,7 @@ def _install_optional_section_validation(dataset_config: Any) -> None:
         base_dir: str | Path = ".",
         check_files: bool = False,
     ) -> list[str]:
+        _optional_section(config, "participants", error_type=error_type)
         _optional_section(config, "decoding", error_type=error_type)
         _optional_section(config, "workflow", error_type=error_type)
         return original_validate_dataset_config(config, base_dir=base_dir, check_files=check_files)
