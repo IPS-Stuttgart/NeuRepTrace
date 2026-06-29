@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_temperature import (
     SOURCE_TEMPERATURE_CATEGORY,
+    SourceTemperatureConfig,
     apply_temperature,
     fit_source_temperature_scaling,
     negative_log_likelihood,
@@ -68,6 +69,48 @@ def test_source_temperature_config_parses_grid() -> None:
 
     with pytest.raises(ValueError, match="temperatures"):
         source_temperature_config(temperatures=[])
+
+
+def test_source_temperature_config_accepts_numpy_numeric_scalars() -> None:
+    cfg = source_temperature_config(temperatures=[np.float64(0.5), np.int64(1)], epsilon=np.float64(1e-9))
+
+    assert cfg.temperatures == (0.5, 1.0)
+    assert np.isclose(cfg.epsilon, 1e-9)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: source_temperature_config(temperatures=[True]),
+        lambda: source_temperature_config(temperatures=[np.bool_(True)]),
+        lambda: source_temperature_config(temperatures=[np.asarray([1.0])]),
+        lambda: source_temperature_config(epsilon=True),
+        lambda: source_temperature_config(epsilon=np.asarray([1e-9])),
+        lambda: apply_temperature([[0.5, 0.5]], temperature=True),
+        lambda: apply_temperature([[0.5, 0.5]], temperature=np.asarray([1.0])),
+    ],
+)
+def test_source_temperature_rejects_boolean_and_array_scalar_controls(call) -> None:
+    with pytest.raises(ValueError):
+        call()
+
+
+@pytest.mark.parametrize(
+    "bad_config",
+    [
+        SourceTemperatureConfig(temperatures=(True,)),  # type: ignore[arg-type]
+        SourceTemperatureConfig(temperatures=(np.asarray([1.0]),)),  # type: ignore[arg-type]
+        SourceTemperatureConfig(temperatures=(1.0,), epsilon=np.asarray([1e-9])),  # type: ignore[arg-type]
+    ],
+)
+def test_fit_source_temperature_scaling_revalidates_direct_config_objects(bad_config) -> None:
+    with pytest.raises(ValueError):
+        fit_source_temperature_scaling(
+            source_probabilities=[[0.6, 0.4], [0.4, 0.6]],
+            source_labels=[0, 1],
+            test_probabilities=[[0.5, 0.5]],
+            config=bad_config,
+        )
 
 
 def test_source_temperature_rejects_shape_mismatch() -> None:
