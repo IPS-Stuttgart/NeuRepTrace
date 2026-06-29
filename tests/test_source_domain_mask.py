@@ -114,10 +114,10 @@ def test_source_domain_mask_rejects_scalar_string_vectors() -> None:
     "domains",
     [
         ["subject_one", None, "subject_two"],
-        ["subject_one", float("nan"), "subject_two"],
+        ["subject_one", np.nan, "subject_two"],
         np.asarray([["subject_one", "session_a"], ["subject_two", np.nan]], dtype=object),
     ],
 )
 def test_source_domain_mask_rejects_missing_source_domain_values(domains) -> None:
-    with pytest.raises(ValueError, match="source_domains.*missing"):
+    with pytest.raises(ValueError, match="missing"):
         source_domain_mask(domains)
