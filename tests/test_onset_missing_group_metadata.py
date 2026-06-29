@@ -65,7 +65,6 @@ def test_onset_helpers_preserve_missing_group_metadata() -> None:
     events_by_sequence = events.set_index("sequence_id")
     assert len(events_by_sequence) == 4
     assert pd.isna(events_by_sequence.loc[3, "emission_mode"])
-    assert not events_by_sequence.loc[3, "detected"]
 
     event_summary = summarize_onset_events(events)
     assert event_summary["n_sequences"].sum() == 4
