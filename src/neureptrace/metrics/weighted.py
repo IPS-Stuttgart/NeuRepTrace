@@ -12,6 +12,21 @@ from collections.abc import Iterable
 import numpy as np
 
 
+def _coerce_numeric_scalar(value: object, message: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
 def _weights_contain_boolean(weights: np.ndarray) -> bool:
     if np.issubdtype(weights.dtype, np.bool_):
         return True
@@ -139,26 +154,18 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
 
 
 def _validate_n_bins(n_bins: int) -> int:
-    if isinstance(n_bins, (bool, np.bool_)):
-        raise ValueError("n_bins must be a positive integer")
-    try:
-        numeric = float(n_bins)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("n_bins must be a positive integer") from exc
+    message = "n_bins must be a positive integer"
+    numeric = _coerce_numeric_scalar(n_bins, message)
     if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
-        raise ValueError("n_bins must be a positive integer")
+        raise ValueError(message)
     return int(numeric)
 
 
 def _validate_k(k: int) -> int:
-    if isinstance(k, (bool, np.bool_)):
-        raise ValueError("k must be a positive integer")
-    try:
-        numeric = float(k)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("k must be a positive integer") from exc
+    message = "k must be a positive integer"
+    numeric = _coerce_numeric_scalar(k, message)
     if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
-        raise ValueError("k must be a positive integer")
+        raise ValueError(message)
     return int(numeric)
 
 
@@ -187,9 +194,10 @@ def weighted_negative_log_likelihood(
     """Compute weighted mean categorical negative log-likelihood."""
     probabilities, labels = _validate_probability_inputs(probabilities, labels)
     weights = validate_sample_weight(sample_weight, probabilities.shape[0])
-    eps = float(eps)
+    eps_message = "eps must be finite and in the open interval (0, 1)"
+    eps = _coerce_numeric_scalar(eps, eps_message)
     if not np.isfinite(eps) or eps <= 0.0 or eps >= 1.0:
-        raise ValueError("eps must be finite and in the open interval (0, 1)")
+        raise ValueError(eps_message)
 
     true_probabilities = probabilities[np.arange(labels.shape[0]), labels]
     losses = -np.log(np.clip(true_probabilities, eps, 1.0))
