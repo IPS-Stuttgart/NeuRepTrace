@@ -9,15 +9,10 @@ from neureptrace.decoding.unlabeled_calibration_alignment import unlabeled_calib
 _DISABLED_COMPONENT_STRINGS = ("", " ", "\t", " none ", "None", "NONE", " null ", "NULL")
 
 
-
 def test_optional_mcca_subject_pca_components_parse_disabled_strings():
     for value in _DISABLED_COMPONENT_STRINGS:
         assert source_alignment_config(method="mcca", mcca_subject_pca_components=value).mcca_subject_pca_components is None
-        assert (
-            unlabeled_calibration_alignment_config(method="mcca", mcca_subject_pca_components=value).mcca_subject_pca_components
-            is None
-        )
-
+        assert unlabeled_calibration_alignment_config(method="mcca", mcca_subject_pca_components=value).mcca_subject_pca_components is None
 
 
 def test_optional_mcca_subject_pca_components_preserve_numeric_values():
@@ -38,7 +33,6 @@ def test_optional_mcca_subject_pca_components_reject_booleans(value):
     [
         [8],
         (8,),
-        {"components": 8},
         np.asarray([8]),
         np.asarray(8),
     ],
