@@ -81,6 +81,26 @@ def test_target_count_aliases_and_mode_aliases() -> None:
     assert normalize_balancing_mode("inverse-frequency") == "weights"
 
 
+@pytest.mark.parametrize("value", [None, "", " none ", "NULL", np.asarray("none")])
+def test_random_state_accepts_none_like_config_values(value: object) -> None:
+    cfg = source_class_balancing_config(random_state=value)
+
+    assert cfg.random_state is None
+
+
+@pytest.mark.parametrize("value", [3, "3", np.asarray(3)])
+def test_random_state_accepts_integer_config_values(value: object) -> None:
+    cfg = source_class_balancing_config(random_state=value)
+
+    assert cfg.random_state == 3
+
+
+@pytest.mark.parametrize("value", [True, -1, 0.5, "1.5", [1], {"seed": 1}, np.asarray([1, 2])])
+def test_random_state_rejects_invalid_config_values(value: object) -> None:
+    with pytest.raises(ValueError, match="random_state"):
+        source_class_balancing_config(random_state=value)
+
+
 def test_config_validation() -> None:
     cfg = source_class_balancing_config(mode="over", target_count="max", preserve_order=True)
     assert cfg.mode == "oversample"
