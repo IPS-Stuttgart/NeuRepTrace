@@ -53,11 +53,10 @@ def fit_source_temperature_scaling(
     test = _probability_matrix(test_probabilities, name="test_probabilities", epsilon=cfg.epsilon)
     if source.shape[1] != test.shape[1]:
         raise ValueError(f"source_probabilities and test_probabilities must have the same class width: {source.shape[1]} != {test.shape[1]}.")
-    labels = np.asarray(source_labels, dtype=object).reshape(-1)
-    if labels.shape[0] != source.shape[0]:
-        raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {source.shape[0]}.")
+    labels = _object_vector(source_labels, expected_length=source.shape[0], name="source_labels")
     class_values = _classes(labels, classes, n_classes=source.shape[1])
-    label_index = np.asarray([_class_to_index(class_values)[label] for label in labels.tolist()], dtype=int)
+    class_to_index = _class_to_index(class_values)
+    label_index = np.asarray([class_to_index[_value_key(label)] for label in labels.tolist()], dtype=int)
     losses = {temperature: negative_log_likelihood(apply_temperature(source, temperature=temperature, epsilon=cfg.epsilon), label_index, epsilon=cfg.epsilon) for temperature in cfg.temperatures}
     best_temperature = min(losses, key=lambda value: (losses[value], value))
     scaled = apply_temperature(test, temperature=best_temperature, epsilon=cfg.epsilon)
@@ -120,21 +119,88 @@ def _coerce_config(config: SourceTemperatureConfig | Mapping[str, Any]) -> Sourc
 
 def _classes(labels: np.ndarray, classes: Sequence[Any] | np.ndarray | None, *, n_classes: int) -> np.ndarray:
     if classes is None:
-        values = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+        values = _unique_values(labels)
     else:
-        values = np.asarray(classes, dtype=object).reshape(-1)
+        values = _object_vector(classes, expected_length=n_classes, name="classes")
     if values.shape[0] != n_classes:
         raise ValueError(f"classes must contain one value per probability column: {values.shape[0]} != {n_classes}.")
-    if len(set(values.tolist())) != values.shape[0]:
+    class_keys = [_value_key(value) for value in values.tolist()]
+    if len(set(class_keys)) != values.shape[0]:
         raise ValueError("classes must be unique.")
-    missing = sorted({label for label in labels.tolist() if label not in set(values.tolist())}, key=repr)
+    class_key_set = set(class_keys)
+    missing = sorted({label for label in labels.tolist() if _value_key(label) not in class_key_set}, key=repr)
     if missing:
         raise ValueError(f"source_labels contain labels absent from classes: {missing}.")
     return values
 
 
 def _class_to_index(classes: np.ndarray) -> dict[Any, int]:
-    return {label: index for index, label in enumerate(classes.tolist())}
+    return {_value_key(label): index for index, label in enumerate(classes.tolist())}
+
+
+def _object_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            if array.shape[0] == expected_length:
+                items = array.tolist()
+            elif expected_length == 1:
+                items = [tuple(array.tolist())]
+            else:
+                items = array.tolist()
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if rows.shape[1] == 1:
+                items = rows[:, 0].tolist()
+            else:
+                items = [tuple(row.tolist()) for row in rows]
+    elif isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        try:
+            items = list(values)
+        except TypeError:
+            items = [values]
+        if len(items) != expected_length and expected_length == 1 and isinstance(values, tuple):
+            items = [values]
+    if len(items) != expected_length:
+        raise ValueError(f"{name} must contain one value per expected row/column: {len(items)} != {expected_length}.")
+    vector = np.empty(len(items), dtype=object)
+    for index, item in enumerate(items):
+        vector[index] = item
+    return vector
+
+
+def _unique_values(values: np.ndarray) -> np.ndarray:
+    unique: list[Any] = []
+    seen: set[Any] = set()
+    for value in values.tolist():
+        key = _value_key(value)
+        if key not in seen:
+            seen.add(key)
+            unique.append(value)
+    vector = np.empty(len(unique), dtype=object)
+    for index, value in enumerate(unique):
+        vector[index] = value
+    return vector
+
+
+def _value_key(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        value = value.item()
+    try:
+        hash(value)
+    except TypeError:
+        if isinstance(value, np.ndarray):
+            return tuple(_value_key(item) for item in value.tolist())
+        if isinstance(value, (list, tuple)):
+            return tuple(_value_key(item) for item in value)
+        if isinstance(value, dict):
+            return tuple(sorted((_value_key(key), _value_key(item)) for key, item in value.items()))
+        return repr(value)
+    return value
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
