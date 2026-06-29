@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping, Sequence
 from functools import wraps
 from typing import Any
 
@@ -31,8 +32,18 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise ValueError(f"{name} must be a boolean value.")
 
 
-def _reject_array_scalar(value: Any, *, name: str, expectation: str) -> None:
+def _is_array_like_scalar(value: Any) -> bool:
     if isinstance(value, np.ndarray):
+        return True
+    if isinstance(value, Mapping):
+        return True
+    if isinstance(value, (set, frozenset)):
+        return True
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+
+
+def _reject_array_scalar(value: Any, *, name: str, expectation: str) -> None:
+    if _is_array_like_scalar(value):
         raise ValueError(f"{name} must be {expectation}.")
 
 
@@ -64,8 +75,9 @@ def _install_numeric_array_guards(source_free: Any) -> None:
 
         @wraps(original_bounded_float)
         def _bounded_float_checked(value: Any, name: str, *, lower: float, upper: float, include_upper: bool) -> float:
-            if isinstance(value, np.ndarray):
-                raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')' }.")
+            if _is_array_like_scalar(value):
+                closing = "]" if include_upper else ")"
+                raise ValueError(f"{name} must be finite in [{lower}, {upper}{closing}.")
             return original_bounded_float(value, name, lower=lower, upper=upper, include_upper=include_upper)
 
         setattr(_bounded_float_checked, _BOUNDED_FLOAT_ARRAY_PATCH_MARKER, True)
