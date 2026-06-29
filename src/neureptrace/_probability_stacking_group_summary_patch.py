@@ -1,12 +1,66 @@
-"""Runtime patches for probability-stacking metric summaries."""
+"""Runtime patches for probability-stacking metric summaries and input guards."""
 
 from __future__ import annotations
+
+from functools import wraps
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 _INSTALLED = False
 _ORIGINAL_SUMMARIZE_STACKED_METRICS = None
+_INPUT_GUARD_ATTR = "_neureptrace_probability_stacking_logical_flag_guard"
+
+
+def _object_array(values: Any) -> np.ndarray:
+    if isinstance(values, pd.DataFrame):
+        return values.to_numpy(dtype=object)
+    if isinstance(values, pd.Series):
+        return values.to_numpy(dtype=object)
+    if isinstance(values, np.ndarray):
+        return values.astype(object, copy=False)
+    if isinstance(values, (str, bytes, bytearray)):
+        return np.asarray([values], dtype=object)
+    try:
+        return np.asarray(list(values), dtype=object)
+    except TypeError:
+        return np.asarray([values], dtype=object)
+
+
+def _logical_flag_rows(values: Any) -> list[int]:
+    flat = pd.Series(_object_array(values).reshape(-1))
+    mask = flat.map(lambda value: isinstance(value, (bool, np.bool_))).fillna(False).astype(bool)
+    return [int(index) for index in mask[mask].index.tolist()[:5]]
+
+
+def _reject_logical_flags(values: Any, *, name: str) -> None:
+    rows = _logical_flag_rows(values)
+    if rows:
+        raise ValueError(f"{name} values must not contain logical flags; bad row(s): {rows}.")
+
+
+def _reject_probability_flags(ps, observations: Any, *, name: str) -> None:
+    frame = pd.DataFrame(observations)
+    for column in ps.probability_columns(frame):
+        rows = _logical_flag_rows(frame[column])
+        if rows:
+            raise ValueError(f"{name} probability column {column!r} must not contain logical flags; bad row(s): {rows}.")
+
+
+def _wrap_input_guard(ps, function_name: str, validator) -> None:
+    original = getattr(ps, function_name)
+    if getattr(original, _INPUT_GUARD_ATTR, False):
+        return
+
+    @wraps(original)
+    def guarded(*args, **kwargs):
+        validator(*args, **kwargs)
+        return original(*args, **kwargs)
+
+    setattr(guarded, _INPUT_GUARD_ATTR, True)
+    guarded.__wrapped__ = original
+    setattr(ps, function_name, guarded)
 
 
 def _stable_top_k_positions(probabilities: np.ndarray, *, k: int) -> np.ndarray:
@@ -65,7 +119,7 @@ def _summarize_global_metrics(ps, observations: pd.DataFrame) -> pd.DataFrame:
     label_values = ps._label_values(prob_columns)
     label_value_set = set(label_values)
     probabilities = ps._validate_probability_matrix(
-        observations.loc[:, list(prob_columns)].to_numpy(dtype=float),
+        observations.loc[:, list(prob_columns)].to_numpy(dtype=object),
         context="Probability values for global metric summary",
     )
     true_label_values = ps._integer_label_array(observations["true_label"], name="true_label")
@@ -106,11 +160,27 @@ def install() -> None:
 
     from neureptrace import probability_stacking as ps
 
+    _wrap_input_guard(ps, "_integer_label_array", lambda labels, *args, **kwargs: _reject_logical_flags(labels, name=kwargs.get("name", "labels")))
+    _wrap_input_guard(ps, "_renormalize_probabilities", lambda values, *args, **kwargs: _reject_logical_flags(values, name="Probability"))
+    _wrap_input_guard(ps, "_validate_probability_matrix", lambda values, *args, **kwargs: _reject_logical_flags(values, name=kwargs.get("context", "Probability values")))
+    _wrap_input_guard(ps, "align_probability_cube", lambda observations, *args, **kwargs: _reject_probability_flags(ps, observations, name="Observation table"))
+    _wrap_input_guard(ps, "fit_stacking_weights", lambda probability_cube, *args, **kwargs: _reject_logical_flags(probability_cube, name="probability_cube"))
+    _wrap_input_guard(
+        ps,
+        "combine_probability_cube",
+        lambda probability_cube, weights, *args, **kwargs: (
+            _reject_logical_flags(probability_cube, name="probability_cube"),
+            _reject_logical_flags(weights, name="weights"),
+        ),
+    )
+    _wrap_input_guard(ps, "fit_source_oof_stacking", lambda source_probability_cube, *args, **kwargs: _reject_logical_flags(source_probability_cube, name="source_probability_cube"))
+
     ps._top_k_accuracy = _top_k_accuracy
     ps._top_k_accuracy_from_label_values = _top_k_accuracy_from_label_values
     _ORIGINAL_SUMMARIZE_STACKED_METRICS = ps.summarize_stacked_metrics
 
     def _summarize_stacked_metrics(observations: pd.DataFrame) -> pd.DataFrame:
+        _reject_probability_flags(ps, observations, name="Stacked observations")
         group_columns = [column for column in ps._METRIC_GROUP_COLUMNS if column in observations.columns]
         if group_columns:
             return _ORIGINAL_SUMMARIZE_STACKED_METRICS(observations)
