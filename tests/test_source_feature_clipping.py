@@ -54,6 +54,30 @@ def test_apply_feature_clipping_can_modify_in_place() -> None:
     assert np.allclose(features, np.asarray([[0.0, 6.0], [1.0, 8.0]]))
 
 
+def test_source_feature_clipping_normalizes_copy_booleans() -> None:
+    assert source_feature_clipping_config(copy="false").copy is False
+    assert source_feature_clipping_config(copy=" off ").copy is False
+    assert source_feature_clipping_config(copy="yes").copy is True
+    assert source_feature_clipping_config(copy=1).copy is True
+
+    with pytest.raises(ValueError, match="copy must be a boolean"):
+        source_feature_clipping_config(copy="maybe")
+
+
+def test_apply_feature_clipping_normalizes_copy_strings() -> None:
+    features = np.asarray([[-1.0, 5.0], [2.0, 9.0]], dtype=float)
+
+    clipped = apply_feature_clipping(
+        features,
+        lower_bounds=[0.0, 6.0],
+        upper_bounds=[1.0, 8.0],
+        copy="false",
+    )
+
+    assert clipped is features
+    assert np.allclose(features, np.asarray([[0.0, 6.0], [1.0, 8.0]]))
+
+
 def test_source_feature_clipping_rejects_invalid_quantiles() -> None:
     with pytest.raises(ValueError, match="lower_quantile"):
         source_feature_clipping_config(lower_quantile=0.9, upper_quantile=0.1)
