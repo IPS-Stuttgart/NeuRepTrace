@@ -178,7 +178,7 @@ def source_feature_jitter_config(
         noise_scale=_nonnegative_float(noise_scale, name="noise_scale"),
         scale_mode=normalize_jitter_scale_mode(scale_mode),
         preserve_original=_boolean(preserve_original, name="preserve_original"),
-        random_state=_optional_nonnegative_int(random_state, name="random_state"),
+        random_state=_nonnegative_optional_int(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -327,29 +327,38 @@ def _is_composite_value(value: Any) -> bool:
     return isinstance(value, (tuple, list, dict))
 
 
-def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
-    scalar_value = _scalar_config_value(value, name=name)
-    if _none_like_config_value(scalar_value):
-        return None
-    return _nonnegative_int(scalar_value, name=name)
-
-
-def _none_like_config_value(value: Any) -> bool:
+def _optional_integer(value: Any, *, name: str) -> int | None:
     if value is None:
-        return True
+        return None
     if isinstance(value, str):
-        return value.strip().lower() in _NONE_STRINGS
-    return False
-
-
-def _scalar_config_value(value: Any, *, name: str) -> Any:
-    if isinstance(value, np.ndarray):
+        text = value.strip()
+        if text.lower() in _NONE_STRINGS:
+            return None
+        value = text
+    elif isinstance(value, np.ndarray):
         if value.ndim != 0:
-            raise ValueError(f"{name} must be a non-negative integer.")
-        return value.item()
-    if isinstance(value, (list, tuple, dict, set)):
-        raise ValueError(f"{name} must be a non-negative integer.")
-    return value
+            raise ValueError(f"{name} must be an integer or None.")
+        return _optional_integer(value.item(), name=name)
+    elif isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be an integer or None.")
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer or None.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer or None.") from exc
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer or None.")
+    return int(parsed)
+
+
+def _nonnegative_optional_int(value: Any, *, name: str) -> int | None:
+    parsed = _optional_integer(value, name=name)
+    if parsed is None:
+        return None
+    if parsed < 0:
+        raise ValueError(f"{name} must be a non-negative integer or None.")
+    return parsed
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
@@ -362,7 +371,10 @@ def _nonnegative_int(value: int | str, *, name: str) -> int:
 def _integer(value: int | str, *, name: str) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be an integer.")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
         raise ValueError(f"{name} must be an integer.")
     return int(parsed)
@@ -385,7 +397,10 @@ def _positive_float(value: float | str, *, name: str) -> float:
 def _float_value(value: float | str, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be finite.")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite.") from exc
     if not np.isfinite(parsed):
         raise ValueError(f"{name} must be finite.")
     return parsed
@@ -400,4 +415,17 @@ def _boolean(value: Any, *, name: str) -> bool:
             return True
         if text in _FALSE_STRINGS:
             return False
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        return _boolean(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
     raise ValueError(f"{name} must be a boolean value.")

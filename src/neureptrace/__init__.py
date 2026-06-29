@@ -80,6 +80,7 @@ from . import (  # noqa: E402
     _mne_time_decode_ensemble_param_validation_patch,
     _mne_time_decode_float_sequence_validation_patch,
     _nll_eps_validation_patch,
+    _observation_schema_bool_numeric_patch,
     _observation_schema_label_patch,
     _observation_schema_probability_patch,
     _observation_schema_string_columns_patch,
@@ -205,6 +206,7 @@ _decoding_classifier_param_patch.install()
 _decoding_grouped_cv_patch.install()
 _decoding_option_type_validation_patch.install()
 _decoding_probability_patch.install()
+_observation_schema_bool_numeric_patch.install()
 _observation_schema_probability_patch.install()
 _observation_schema_label_patch.install()
 _observation_schema_string_columns_patch.install()

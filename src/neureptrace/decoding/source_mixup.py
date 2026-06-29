@@ -24,6 +24,9 @@ SOURCE_MIXUP_PROTOCOL = "strict_source_only_mixup_augmentation"
 SOURCE_MIXUP_CATEGORY = "1_strict_source_only"
 HARD_LABEL_POLICIES = ("content", "partner", "dominant")
 DEFAULT_MIXUP_ALPHA = 0.4
+_NONE_RANDOM_STATE_STRINGS = {"", "none", "null"}
+_TRUE_BOOL_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_BOOL_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,22 +235,22 @@ def source_mixup_config(
     *,
     synthetic_per_class: int | str = 0,
     alpha: float | str = DEFAULT_MIXUP_ALPHA,
-    random_state: int | str | None = 13,
-    same_class_partner: bool = True,
-    cross_domain_partner: bool = True,
+    random_state: Any = 13,
+    same_class_partner: Any = True,
+    cross_domain_partner: Any = True,
     hard_label_policy: str = "content",
-    preserve_original: bool = True,
+    preserve_original: Any = True,
 ) -> SourceMixUpConfig:
     """Normalize user-facing source-MixUp options."""
 
-    return SourceMixUpConfig(
-        synthetic_per_class=_normalize_nonnegative_int(synthetic_per_class, name="synthetic_per_class"),
-        alpha=_positive_float(alpha, name="alpha"),
-        random_state=None if random_state in {None, "", "none", "None"} else _normalize_integer(random_state, name="random_state"),
-        same_class_partner=bool(same_class_partner),
-        cross_domain_partner=bool(cross_domain_partner),
-        hard_label_policy=normalize_hard_label_policy(hard_label_policy),
-        preserve_original=bool(preserve_original),
+    return _build_config(
+        synthetic_per_class=synthetic_per_class,
+        alpha=alpha,
+        random_state=random_state,
+        same_class_partner=same_class_partner,
+        cross_domain_partner=cross_domain_partner,
+        hard_label_policy=hard_label_policy,
+        preserve_original=preserve_original,
     )
 
 
@@ -271,8 +274,37 @@ def normalize_hard_label_policy(value: str | None) -> str:
 
 def _coerce_config(config: SourceMixUpConfig | Mapping[str, Any]) -> SourceMixUpConfig:
     if isinstance(config, SourceMixUpConfig):
-        return config
+        return _build_config(
+            synthetic_per_class=config.synthetic_per_class,
+            alpha=config.alpha,
+            random_state=config.random_state,
+            same_class_partner=config.same_class_partner,
+            cross_domain_partner=config.cross_domain_partner,
+            hard_label_policy=config.hard_label_policy,
+            preserve_original=config.preserve_original,
+        )
     return source_mixup_config(**dict(config))
+
+
+def _build_config(
+    *,
+    synthetic_per_class: Any,
+    alpha: Any,
+    random_state: Any,
+    same_class_partner: Any,
+    cross_domain_partner: Any,
+    hard_label_policy: str | None,
+    preserve_original: Any,
+) -> SourceMixUpConfig:
+    return SourceMixUpConfig(
+        synthetic_per_class=_normalize_nonnegative_int(synthetic_per_class, name="synthetic_per_class"),
+        alpha=_positive_float(alpha, name="alpha"),
+        random_state=_normalize_optional_random_state(random_state, name="random_state"),
+        same_class_partner=_bool_value(same_class_partner, name="same_class_partner"),
+        cross_domain_partner=_bool_value(cross_domain_partner, name="cross_domain_partner"),
+        hard_label_policy=normalize_hard_label_policy(hard_label_policy),
+        preserve_original=_bool_value(preserve_original, name="preserve_original"),
+    )
 
 
 def _partner_pool(
@@ -462,6 +494,57 @@ def _normalize_nonnegative_int(value: int | str, *, name: str) -> int:
     if integer < 0:
         raise ValueError(f"{name} must be non-negative.")
     return integer
+
+
+def _normalize_optional_random_state(value: Any, *, name: str) -> int | None:
+    scalar_value = _scalar_config_value(value, name=name, expected="a non-negative integer or None")
+    if _none_like_config_value(scalar_value):
+        return None
+    try:
+        return _normalize_nonnegative_int(scalar_value, name=name)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a non-negative integer or None.") from exc
+
+
+def _none_like_config_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _NONE_RANDOM_STATE_STRINGS
+    return False
+
+
+def _scalar_config_value(value: Any, *, name: str, expected: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be {expected}.")
+        return value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be {expected}.")
+    return value
+
+
+def _bool_value(value: Any, *, name: str) -> bool:
+    scalar_value = _scalar_config_value(value, name=name, expected="a boolean value")
+    if isinstance(scalar_value, (bool, np.bool_)):
+        return bool(scalar_value)
+    if isinstance(scalar_value, str):
+        normalized = scalar_value.strip().lower()
+        if normalized in _TRUE_BOOL_STRINGS:
+            return True
+        if normalized in _FALSE_BOOL_STRINGS:
+            return False
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(scalar_value, (int, np.integer)):
+        if int(scalar_value) in {0, 1}:
+            return bool(scalar_value)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(scalar_value, (float, np.floating)):
+        parsed = float(scalar_value)
+        if np.isfinite(parsed) and parsed in {0.0, 1.0}:
+            return bool(parsed)
+        raise ValueError(f"{name} must be a boolean value.")
+    raise ValueError(f"{name} must be a boolean value.")
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
