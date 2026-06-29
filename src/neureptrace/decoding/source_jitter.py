@@ -361,6 +361,10 @@ def _nonnegative_optional_int(value: Any, *, name: str) -> int | None:
     return parsed
 
 
+def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
+    return _nonnegative_optional_int(value, name=name)
+
+
 def _nonnegative_int(value: int | str, *, name: str) -> int:
     parsed = _integer(value, name=name)
     if parsed < 0:

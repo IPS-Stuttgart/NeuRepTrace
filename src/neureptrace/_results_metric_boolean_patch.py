@@ -85,6 +85,36 @@ def _reject_boolean_table_column(frame: pd.DataFrame, column: str | None) -> Non
         raise ValueError(f"Metric table column '{column}' must not contain booleans; bad row(s): {rows}.")
 
 
+def _group_column_names(group_columns: Sequence[str] | str | None) -> tuple[str, ...]:
+    if group_columns is None:
+        return ()
+    if isinstance(group_columns, str):
+        return (group_columns,)
+    return tuple(group_columns)
+
+
+def _reject_mixed_boolean_optional_column(
+    frame: pd.DataFrame,
+    column: str | None,
+    group_columns: Sequence[str] | str | None,
+) -> None:
+    if column is None or column not in frame.columns:
+        return
+    rows = _boolean_rows(frame[column])
+    if not rows:
+        return
+
+    groups = _group_column_names(group_columns)
+    grouped_frames = [((), frame)] if not groups else frame.groupby(list(groups), dropna=False, sort=False)
+    for _, group in grouped_frames:
+        values = group[column].dropna()
+        if values.empty or not _bool_mask(values).any():
+            continue
+        if (~_bool_mask(values)).any():
+            bad_rows = _boolean_rows(group[column])
+            raise ValueError(f"Metric table column '{column}' must not contain booleans; bad row(s): {bad_rows}.")
+
+
 def install() -> None:
     """Install aggregate result metric guards."""
 
@@ -151,14 +181,10 @@ def install() -> None:
             p_value_thresholds: Sequence[float] = (0.05, 0.01),
             zero_singleton_dispersion: bool = False,
         ) -> pd.DataFrame:
-            guarded_columns = (
-                value_column,
-                chance_column,
-                permutation_p_column,
-                *_normalize_optional_columns(chance_class_columns),
-            )
-            for column in guarded_columns:
+            for column in (value_column, permutation_p_column):
                 _reject_boolean_table_column(frame, column)
+            for column in (chance_column, *_normalize_optional_columns(chance_class_columns)):
+                _reject_mixed_boolean_optional_column(frame, column, group_columns)
             return original_summarize_metric_table(
                 frame,
                 value_column,
