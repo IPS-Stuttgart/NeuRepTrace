@@ -232,7 +232,14 @@ def _matrix(values, *, name: str):
     return matrix
 
 
+def _reject_array_scalar(value: Any, *, name: str) -> None:
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be a scalar value, not an array.")
+
+
 def _bounds(lower, upper) -> tuple[float, float]:
+    _reject_array_scalar(lower, name="lower")
+    _reject_array_scalar(upper, name="upper")
     if isinstance(lower, (bool, np.bool_)) or isinstance(upper, (bool, np.bool_)):
         raise ValueError("lower and upper must be numeric quantiles, not boolean.")
     try:
@@ -272,16 +279,26 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
 
 
 def _epsilon(epsilon) -> float:
-    value = float(epsilon)
+    _reject_array_scalar(epsilon, name="epsilon")
+    if isinstance(epsilon, (bool, np.bool_)):
+        raise ValueError("epsilon must be numeric, not boolean.")
+    try:
+        value = float(epsilon)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("epsilon must be finite and in (0, 0.5).") from exc
     if not np.isfinite(value) or value <= 0.0 or value >= 0.5:
         raise ValueError("epsilon must be finite and in (0, 0.5).")
     return value
 
 
 def _positive_int(value, *, name: str) -> int:
+    _reject_array_scalar(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a positive integer.")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)
