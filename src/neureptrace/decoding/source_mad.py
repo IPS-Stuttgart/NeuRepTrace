@@ -83,8 +83,9 @@ def fit_source_mad_reference(
 
     cfg = source_mad_config() if config is None else _coerce_config(config)
     source = _matrix(source_features, name="source_features")
-    center = np.median(source, axis=0) if cfg.center else np.zeros(source.shape[1], dtype=float)
-    raw_mad = np.median(np.abs(source - center), axis=0)
+    source_median = np.median(source, axis=0)
+    center = source_median if cfg.center else np.zeros(source.shape[1], dtype=float)
+    raw_mad = np.median(np.abs(source - source_median), axis=0)
     scale = raw_mad * (MAD_NORMAL_CONSTANT if cfg.normal_consistency else 1.0) if cfg.scale else np.ones(source.shape[1], dtype=float)
     scale = np.maximum(scale, cfg.epsilon)
     return SourceMADReference(center=center.astype(float, copy=False), scale=scale.astype(float, copy=False), config=cfg, n_fit_rows=int(source.shape[0]))
