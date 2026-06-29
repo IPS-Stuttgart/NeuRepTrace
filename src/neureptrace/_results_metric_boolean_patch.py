@@ -10,6 +10,7 @@ import pandas as pd
 
 _PATCH_ATTR = "_neureptrace_rejects_bool_time_decode_metrics"
 _OBSERVATION_PATCH_ATTR = "_neureptrace_rejects_bool_probability_observations"
+_SUMMARY_PATCH_ATTR = "_neureptrace_rejects_bool_metric_table_inputs"
 _OPTIONAL_PATCH_ATTR = "_neureptrace_results_optional_metric_aggregation"
 _OPTIONAL_METRICS = ("balanced_accuracy", "top2_accuracy", "top3_accuracy")
 
@@ -68,10 +69,27 @@ def _optional_subject_time_metrics(
     return merged.sort_values(subject_time_keys).reset_index(drop=True)
 
 
+def _normalize_optional_columns(columns: Sequence[str] | str | None) -> tuple[str, ...]:
+    if columns is None:
+        return ()
+    if isinstance(columns, str):
+        return (columns,)
+    return tuple(dict.fromkeys(columns))
+
+
+def _reject_boolean_table_column(frame: pd.DataFrame, column: str | None) -> None:
+    if column is None or column not in frame.columns:
+        return
+    rows = _boolean_rows(frame[column])
+    if rows:
+        raise ValueError(f"Metric table column '{column}' must not contain booleans; bad row(s): {rows}.")
+
+
 def install() -> None:
     """Install aggregate result metric guards."""
 
     results = importlib.import_module("neureptrace.results")
+    tables = importlib.import_module("neureptrace.results.tables")
 
     original = results._coerce_finite_metric_columns
     if not getattr(original, _PATCH_ATTR, False):
@@ -113,6 +131,56 @@ def install() -> None:
         setattr(_probability_ece_by_group_checked, _OBSERVATION_PATCH_ATTR, True)
         _probability_ece_by_group_checked.__wrapped__ = original_probability_ece_by_group
         results._probability_ece_by_group = _probability_ece_by_group_checked
+
+    original_summarize_metric_table = tables.summarize_metric_table
+    if not getattr(original_summarize_metric_table, _SUMMARY_PATCH_ATTR, False):
+
+        def summarize_metric_table_checked(
+            frame: pd.DataFrame,
+            value_column: str,
+            group_columns: Sequence[str] | str | None,
+            participant_column: str | None = None,
+            chance_column: str | None = None,
+            scale: float = 1.0,
+            *,
+            percent_scale: float | None = None,
+            percent_prefix: str = "percent",
+            chance_percent_column: str | None = None,
+            chance_class_columns: Sequence[str] | str | None = None,
+            permutation_p_column: str | None = None,
+            p_value_thresholds: Sequence[float] = (0.05, 0.01),
+            zero_singleton_dispersion: bool = False,
+        ) -> pd.DataFrame:
+            guarded_columns = (
+                value_column,
+                chance_column,
+                permutation_p_column,
+                *_normalize_optional_columns(chance_class_columns),
+            )
+            for column in guarded_columns:
+                _reject_boolean_table_column(frame, column)
+            return original_summarize_metric_table(
+                frame,
+                value_column,
+                group_columns,
+                participant_column=participant_column,
+                chance_column=chance_column,
+                scale=scale,
+                percent_scale=percent_scale,
+                percent_prefix=percent_prefix,
+                chance_percent_column=chance_percent_column,
+                chance_class_columns=chance_class_columns,
+                permutation_p_column=permutation_p_column,
+                p_value_thresholds=p_value_thresholds,
+                zero_singleton_dispersion=zero_singleton_dispersion,
+            )
+
+        setattr(summarize_metric_table_checked, _SUMMARY_PATCH_ATTR, True)
+        summarize_metric_table_checked.__wrapped__ = original_summarize_metric_table
+        tables.summarize_metric_table = summarize_metric_table_checked
+        results.summarize_metric_table = summarize_metric_table_checked
+    else:
+        results.summarize_metric_table = original_summarize_metric_table
 
     if getattr(results, _OPTIONAL_PATCH_ATTR, False):
         return
