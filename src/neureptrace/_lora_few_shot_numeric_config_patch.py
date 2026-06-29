@@ -1,10 +1,13 @@
-"""Runtime guardrail for LoRA few-shot float hyperparameter parsing.
+"""Runtime guardrails for LoRA few-shot numeric and probability parsing.
 
 Python/YAML booleans are numeric scalar types, so float validators would otherwise
 coerce values such as ``true``/``false`` to ``1.0``/``0.0``.  That can silently
-turn misspecified LoRA few-shot configs into valid but unintended runs.  This
-patch preserves the existing parser surface while rejecting boolean values before
-numeric coercion.
+turn misspecified LoRA few-shot configs into valid but unintended runs.
+
+The patch also validates LoRA probability matrices before row-wise normalization.
+Without the explicit shape check, a one-dimensional malformed probability vector
+raises a NumPy axis error instead of the public ValueError used by the other
+few-shot probability helpers.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 import importlib.abc
 import importlib.machinery
 import sys
+from functools import wraps
 from types import ModuleType
 from typing import Any
 
@@ -23,6 +27,7 @@ _TARGET_MODULES = (
 )
 _PATCH_MARKER = "_neureptrace_lora_few_shot_numeric_config_patch_installed"
 _FINDER_MARKER = "_neureptrace_lora_few_shot_numeric_config_finder"
+_PROBABILITY_NORMALIZE_MARKER = "_neureptrace_lora_probability_rows_wrapped"
 
 
 def _is_boolean_scalar(value: Any) -> bool:
@@ -55,6 +60,22 @@ def _patch_float_validator(module: ModuleType, validator_name: str) -> None:
     setattr(module, validator_name, _wrapped)
 
 
+def _patch_probability_normalizer(module: ModuleType) -> None:
+    original = getattr(module, "_normalize_probability_rows", None)
+    if original is None or getattr(original, _PROBABILITY_NORMALIZE_MARKER, False):
+        return
+
+    @wraps(original)
+    def _normalize_probability_rows(probabilities: Any):
+        matrix = np.asarray(probabilities, dtype=float)
+        if matrix.ndim != 2:
+            raise ValueError("Predicted probabilities must be finite two-dimensional rows with positive mass.")
+        return original(matrix)
+
+    setattr(_normalize_probability_rows, _PROBABILITY_NORMALIZE_MARKER, True)
+    setattr(module, "_normalize_probability_rows", _normalize_probability_rows)
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
@@ -62,6 +83,7 @@ def _patch_module(module: ModuleType) -> None:
     for validator_name in ("_positive_float", "_nonnegative_float", "_bounded_float"):
         if hasattr(module, validator_name):
             _patch_float_validator(module, validator_name)
+    _patch_probability_normalizer(module)
     setattr(module, _PATCH_MARKER, True)
 
 

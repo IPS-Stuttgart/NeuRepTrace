@@ -30,3 +30,8 @@ def test_lora_float_validators_still_accept_numeric_values():
     assert semi_supervised_lora_few_shot._positive_float("0.5", name="semi_positive") == 0.5
     assert semi_supervised_lora_few_shot._nonnegative_float(0.0, name="semi_nonnegative") == 0.0
     assert semi_supervised_lora_few_shot._bounded_float(1.0, name="semi_bounded", lower=0.0, upper=1.0) == 1.0
+
+
+def test_lora_probability_rows_reject_one_dimensional_input():
+    with pytest.raises(ValueError, match="two-dimensional"):
+        lora_few_shot._normalize_probability_rows(np.array([0.4, 0.6]))
