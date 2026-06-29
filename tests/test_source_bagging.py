@@ -109,6 +109,32 @@ def test_source_bagging_random_state_rejects_non_scalar_values(value: object) ->
         source_bagging_config(random_state=value)
 
 
+def test_source_bagging_epsilon_accepts_scalar_numpy_value() -> None:
+    cfg = source_bagging_config(epsilon=np.asarray(1.0e-6))
+
+    assert cfg.epsilon == pytest.approx(1.0e-6)
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(True), np.asarray(True), np.asarray([1.0e-6]), [1.0e-6], {"eps": 1.0e-6}])
+def test_source_bagging_epsilon_rejects_boolean_and_array_values(value: object) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        source_bagging_config(epsilon=value)
+
+
+def test_source_bagging_rejects_direct_config_invalid_epsilon() -> None:
+    source_features = np.asarray([[-2.0], [-1.0], [1.0], [2.0]], dtype=float)
+    source_labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+    test_features = np.asarray([[-1.8], [1.8]], dtype=float)
+
+    with pytest.raises(ValueError, match="epsilon"):
+        fit_source_bagging_decoder(
+            source_features=source_features,
+            source_labels=source_labels,
+            test_features=test_features,
+            config=SourceBaggingConfig(n_estimators=1, epsilon=np.asarray(True)),
+        )
+
+
 def test_source_bagging_boolean_string_config() -> None:
     cfg = source_bagging_config(bootstrap_rows="false", bootstrap_features="yes", class_balanced="0")
 
