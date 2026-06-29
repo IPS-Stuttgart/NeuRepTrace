@@ -12,6 +12,7 @@ _SAMPLEINFO_ERROR = "sampleinfo must contain finite integer sample bounds."
 _PATCH_MARKER = "_neureptrace_fieldtrip_sampleinfo_validation_patched"
 _IO_BOOL_PATCH_MARKER = "_neureptrace_io_fieldtrip_bool_config_patched"
 _IO_TRIAL_STACK_PATCH_MARKER = "_neureptrace_io_fieldtrip_trial_stack_patched"
+_IO_SHARED_TIME_VECTOR_PATCH_MARKER = "_neureptrace_io_fieldtrip_shared_time_vector_patched"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
@@ -184,6 +185,29 @@ def _normalize_trials_with_axis_hints(
     return io_fieldtrip_mat._normalize_trials(trials)
 
 
+def _install_io_shared_time_vector_patch() -> None:
+    import neureptrace.io.fieldtrip_mat as io_fieldtrip_mat
+
+    if getattr(io_fieldtrip_mat._normalize_times, _IO_SHARED_TIME_VECTOR_PATCH_MARKER, False):
+        return
+
+    original_normalize_times = io_fieldtrip_mat._normalize_times
+
+    def _normalize_times(times: Any, n_trials: int) -> list[np.ndarray]:
+        if isinstance(times, np.ndarray):
+            try:
+                numeric_times = np.asarray(times, dtype=float)
+            except (TypeError, ValueError):
+                numeric_times = None
+            if numeric_times is not None and numeric_times.ndim == 2 and 1 in numeric_times.shape:
+                vector = numeric_times.ravel().astype(float, copy=False)
+                return [vector.copy() for _ in range(n_trials)]
+        return original_normalize_times(times, n_trials)
+
+    setattr(_normalize_times, _IO_SHARED_TIME_VECTOR_PATCH_MARKER, True)
+    io_fieldtrip_mat._normalize_times = _normalize_times
+
+
 def _install_io_trial_stack_patch() -> None:
     import neureptrace.io.fieldtrip_mat as io_fieldtrip_mat
 
@@ -307,6 +331,7 @@ def install() -> None:
     """Install strict FieldTrip validation patches."""
 
     _install_sampleinfo_patch()
+    _install_io_shared_time_vector_patch()
     _install_io_trial_stack_patch()
     _install_io_bool_config_patch()
 
