@@ -14,6 +14,7 @@ _DEFAULT_NAME = "decode_candidate_times"
 _ENSEMBLE_PARSE_PATCH_MARKER = "_neureptrace_ensemble_unique_source_decoder_validation_patch_installed"
 _OBSERVATION_ENSEMBLE_PATCH_MARKER = "_neureptrace_observation_unique_decoder_validation_patch_installed"
 _BOOL_KWARG_PATCH_MARKER = "_neureptrace_mne_time_decode_bool_kwarg_validation_patch_installed"
+_TEMPORAL_TRAIN_WINDOW_PATCH_MARKER = "_neureptrace_temporal_train_window_validation_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
@@ -99,6 +100,25 @@ def _parse_validated_float_sequence(value: Any, default: Sequence[float], *, nam
     return parsed
 
 
+def _normalize_temporal_train_window_value(value: Any) -> tuple[float, float] | None:
+    if value is None:
+        return None
+    values = _coerce_sequence(value, ())
+    if len(values) != 2:
+        raise ValueError("temporal_train_window must contain exactly two finite numeric times: start and stop.")
+    if any(_is_bool_scalar(item) for item in values):
+        raise _validation_error("temporal_train_window")
+    try:
+        start, stop = (float(values[0]), float(values[1]))
+    except (TypeError, ValueError) as exc:
+        raise _validation_error("temporal_train_window") from exc
+    if not np.isfinite(start) or not np.isfinite(stop):
+        raise _validation_error("temporal_train_window")
+    if stop < start:
+        raise ValueError("temporal_train_window stop must be greater than or equal to start.")
+    return start, stop
+
+
 def _duplicate_exact_values(values: Sequence[str]) -> tuple[str, ...]:
     seen: set[str] = set()
     duplicates: list[str] = []
@@ -152,6 +172,20 @@ def _install_time_sequence_validation() -> None:
 
     _parse_float_sequence._neureptrace_mne_time_decode_float_sequence_validation_patch_installed = True  # type: ignore[attr-defined]
     module._parse_float_sequence = _parse_float_sequence
+
+
+def _install_temporal_train_window_validation() -> None:
+    module = importlib.import_module("neureptrace.mne_time_decode")
+    original_normalize_temporal_train_window = module._normalize_temporal_train_window
+    if getattr(original_normalize_temporal_train_window, _TEMPORAL_TRAIN_WINDOW_PATCH_MARKER, False):
+        return
+
+    @wraps(original_normalize_temporal_train_window)
+    def _normalize_temporal_train_window(temporal_train_window):
+        return _normalize_temporal_train_window_value(temporal_train_window)
+
+    setattr(_normalize_temporal_train_window, _TEMPORAL_TRAIN_WINDOW_PATCH_MARKER, True)
+    module._normalize_temporal_train_window = _normalize_temporal_train_window
 
 
 def _wrap_time_decode_boolean_kwargs(module_name: str, parameter_names: Sequence[str]) -> None:
@@ -227,9 +261,10 @@ def _install_observation_ensemble_validation() -> None:
 
 
 def install() -> None:
-    """Patch candidate-time parsing, boolean controls, and duplicate ensemble-source validation."""
+    """Patch candidate-time parsing, temporal train-window parsing, boolean controls, and duplicate ensemble-source validation."""
 
     _install_time_sequence_validation()
+    _install_temporal_train_window_validation()
     _install_time_decode_boolean_validation()
     _install_time_decode_ensemble_validation()
     _install_observation_ensemble_validation()
