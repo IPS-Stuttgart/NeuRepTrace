@@ -38,6 +38,19 @@ def test_source_domain_mask_accepts_scalar_array_seed_values() -> None:
     assert result.metadata["source_domain_mask_random_state"] == 7
 
 
+def test_source_domain_mask_accepts_scalar_array_numeric_config_values() -> None:
+    result = source_domain_mask(
+        ["a", "a", "b", "b", "c", "c"],
+        holdout_fraction=np.asarray("0.5"),
+        min_selected_domains=np.asarray(1),
+        random_state=0,
+    )
+
+    assert result.metadata["source_domain_mask_holdout_fraction"] == 0.5
+    assert result.metadata["source_domain_mask_min_selected_domains"] == 1
+    assert result.metadata["source_domain_mask_n_heldout_domains"] == 1
+
+
 def test_source_domain_mask_core_accepts_scalar_array_seed_values_without_runtime_patch() -> None:
     core_module = _load_core_source_domain_mask_module()
 
@@ -48,10 +61,45 @@ def test_source_domain_mask_core_accepts_scalar_array_seed_values_without_runtim
     assert seeded_result.metadata["source_domain_mask_random_state"] == 7
 
 
+def test_source_domain_mask_core_accepts_scalar_array_numeric_config_values_without_runtime_patch() -> None:
+    core_module = _load_core_source_domain_mask_module()
+
+    result = core_module.source_domain_mask(
+        ["a", "a", "b", "b", "c", "c"],
+        holdout_fraction=np.asarray("0.5"),
+        min_selected_domains=np.asarray(1),
+        random_state=0,
+    )
+
+    assert result.metadata["source_domain_mask_holdout_fraction"] == 0.5
+    assert result.metadata["source_domain_mask_min_selected_domains"] == 1
+    assert result.metadata["source_domain_mask_n_heldout_domains"] == 1
+
+
 def test_source_domain_mask_rejects_invalid_seed_values() -> None:
     for seed in [True, -1, 1.5, [1], np.asarray([1])]:
         with pytest.raises(ValueError, match="random_state"):
             source_domain_mask(["a", "a", "b", "b"], random_state=seed)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"holdout_fraction": [0.5]},
+        {"holdout_fraction": np.asarray([0.5])},
+        {"holdout_fraction": np.asarray([[0.5]])},
+        {"holdout_fraction": np.asarray(True)},
+        {"min_selected_domains": [1]},
+        {"min_selected_domains": np.asarray([1])},
+        {"min_selected_domains": np.asarray([[1]])},
+        {"min_selected_domains": np.asarray(True)},
+    ],
+)
+def test_source_domain_mask_rejects_non_scalar_array_numeric_config_values(kwargs) -> None:
+    name = next(iter(kwargs))
+
+    with pytest.raises(ValueError, match=name):
+        source_domain_mask(["a", "a", "b", "b"], **kwargs)
 
 
 def test_source_domain_mask_core_rejects_non_scalar_array_seeds_without_runtime_patch() -> None:
@@ -60,3 +108,24 @@ def test_source_domain_mask_core_rejects_non_scalar_array_seeds_without_runtime_
     for seed in [[1], np.asarray([1])]:
         with pytest.raises(ValueError, match="random_state"):
             core_module.source_domain_mask(["a", "a", "b", "b"], random_state=seed)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"holdout_fraction": [0.5]},
+        {"holdout_fraction": np.asarray([0.5])},
+        {"holdout_fraction": np.asarray([[0.5]])},
+        {"holdout_fraction": np.asarray(True)},
+        {"min_selected_domains": [1]},
+        {"min_selected_domains": np.asarray([1])},
+        {"min_selected_domains": np.asarray([[1]])},
+        {"min_selected_domains": np.asarray(True)},
+    ],
+)
+def test_source_domain_mask_core_rejects_non_scalar_array_numeric_config_values_without_runtime_patch(kwargs) -> None:
+    core_module = _load_core_source_domain_mask_module()
+    name = next(iter(kwargs))
+
+    with pytest.raises(ValueError, match=name):
+        core_module.source_domain_mask(["a", "a", "b", "b"], **kwargs)
