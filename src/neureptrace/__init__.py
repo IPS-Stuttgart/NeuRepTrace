@@ -66,6 +66,7 @@ from . import (  # noqa: E402
     _lora_few_shot_numeric_config_patch,
     _lora_few_shot_tuple_subject_patch,
     _loso_diagnostics_finite_time_selection_patch,
+    _loso_source_cv_group_support_patch,
     _mcca_component_count_patch,
     _mcca_repetition_count_patch,
     _mcca_subject_pca_components_patch,
@@ -191,6 +192,7 @@ _label_proportion_block_ids_patch.install()
 _label_proportion_tuple_prediction_patch.install()
 _lora_few_shot_tuple_subject_patch.install()
 _loso_diagnostics_finite_time_selection_patch.install()
+_loso_source_cv_group_support_patch.install()
 _decoding_regularization_patch.install()
 _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
