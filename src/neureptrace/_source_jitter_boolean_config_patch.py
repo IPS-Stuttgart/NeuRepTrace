@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_source_jitter_boolean_config_patch_installed"
+_AUGMENT_METADATA_PATCH_MARKER = "_neureptrace_source_jitter_disabled_metadata_patch_installed"
 _MASKING_INT_PATCH_MARKER = "_neureptrace_source_feature_masking_int_config_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
@@ -98,30 +99,53 @@ def _install_source_jitter_patch() -> None:
     source_jitter = importlib.import_module("neureptrace.decoding.source_jitter")
 
     original_config = source_jitter.source_feature_jitter_config
-    if getattr(original_config, _PATCH_MARKER, False):
-        return
+    if not getattr(original_config, _PATCH_MARKER, False):
 
-    @wraps(original_config)
-    def source_feature_jitter_config(
-        *,
-        synthetic_per_class: int | str = 0,
-        noise_scale: float | str = source_jitter.DEFAULT_NOISE_SCALE,
-        scale_mode: str | None = "global",
-        preserve_original: Any = True,
-        random_state: Any = 13,
-        epsilon: float | str = source_jitter.DEFAULT_EPSILON,
-    ):
-        return original_config(
-            synthetic_per_class=synthetic_per_class,
-            noise_scale=noise_scale,
-            scale_mode=scale_mode,
-            preserve_original=_normalize_bool(preserve_original, name="preserve_original"),
-            random_state=_nonnegative_optional_integer(random_state, name="random_state"),
-            epsilon=epsilon,
-        )
+        @wraps(original_config)
+        def source_feature_jitter_config(
+            *,
+            synthetic_per_class: int | str = 0,
+            noise_scale: float | str = source_jitter.DEFAULT_NOISE_SCALE,
+            scale_mode: str | None = "global",
+            preserve_original: Any = True,
+            random_state: Any = 13,
+            epsilon: float | str = source_jitter.DEFAULT_EPSILON,
+        ):
+            return original_config(
+                synthetic_per_class=synthetic_per_class,
+                noise_scale=noise_scale,
+                scale_mode=scale_mode,
+                preserve_original=_normalize_bool(preserve_original, name="preserve_original"),
+                random_state=_nonnegative_optional_integer(random_state, name="random_state"),
+                epsilon=epsilon,
+            )
 
-    setattr(source_feature_jitter_config, _PATCH_MARKER, True)
-    source_jitter.source_feature_jitter_config = source_feature_jitter_config
+        setattr(source_feature_jitter_config, _PATCH_MARKER, True)
+        source_jitter.source_feature_jitter_config = source_feature_jitter_config
+
+    original_augment = source_jitter.augment_source_with_feature_jitter
+    if not getattr(original_augment, _AUGMENT_METADATA_PATCH_MARKER, False):
+
+        @wraps(original_augment)
+        def augment_source_with_feature_jitter(*args: Any, **kwargs: Any):
+            result = original_augment(*args, **kwargs)
+            output_rows = int(result.features.shape[0])
+            metadata = result.metadata
+            if metadata.get("source_feature_jitter_n_output_rows") == output_rows:
+                return result
+            metadata = dict(metadata)
+            metadata["source_feature_jitter_n_output_rows"] = output_rows
+            return source_jitter.SourceFeatureJitterResult(
+                features=result.features,
+                labels=result.labels,
+                synthetic_mask=result.synthetic_mask,
+                content_indices=result.content_indices,
+                noise=result.noise,
+                metadata=metadata,
+            )
+
+        setattr(augment_source_with_feature_jitter, _AUGMENT_METADATA_PATCH_MARKER, True)
+        source_jitter.augment_source_with_feature_jitter = augment_source_with_feature_jitter
 
 
 def _install_source_masking_patch() -> None:

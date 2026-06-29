@@ -15,6 +15,7 @@ _ENSEMBLE_PARSE_PATCH_MARKER = "_neureptrace_ensemble_unique_source_decoder_vali
 _OBSERVATION_ENSEMBLE_PATCH_MARKER = "_neureptrace_observation_unique_decoder_validation_patch_installed"
 _BOOL_KWARG_PATCH_MARKER = "_neureptrace_mne_time_decode_bool_kwarg_validation_patch_installed"
 _TEMPORAL_TRAIN_WINDOW_PATCH_MARKER = "_neureptrace_temporal_train_window_validation_patch_installed"
+_TEMPORAL_TRAIN_WINDOW_KWARG_PATCH_MARKER = "_neureptrace_temporal_train_window_kwarg_validation_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
@@ -63,6 +64,14 @@ def _normalize_boolean_kwargs(kwargs: dict[str, Any], names: Sequence[str]) -> d
     for name in names:
         if name in normalized:
             normalized[name] = _normalize_bool(normalized[name], name=name)
+    return normalized
+
+
+def _normalize_temporal_train_window_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    if "temporal_train_window" not in kwargs:
+        return kwargs
+    normalized = dict(kwargs)
+    normalized["temporal_train_window"] = _normalize_temporal_train_window_value(normalized["temporal_train_window"])
     return normalized
 
 
@@ -196,7 +205,9 @@ def _wrap_time_decode_boolean_kwargs(module_name: str, parameter_names: Sequence
 
     @wraps(original_run_time_resolved_decode)
     def run_time_resolved_decode(*args: Any, **kwargs: Any):
-        return original_run_time_resolved_decode(*args, **_normalize_boolean_kwargs(kwargs, parameter_names))
+        normalized_kwargs = _normalize_boolean_kwargs(kwargs, parameter_names)
+        normalized_kwargs = _normalize_temporal_train_window_kwargs(normalized_kwargs)
+        return original_run_time_resolved_decode(*args, **normalized_kwargs)
 
     setattr(run_time_resolved_decode, _BOOL_KWARG_PATCH_MARKER, True)
     module.run_time_resolved_decode = run_time_resolved_decode
@@ -215,6 +226,20 @@ def _install_time_decode_boolean_validation() -> None:
         "neureptrace.mne_time_decode_ensemble",
         ("label_shuffle_control", "pseudo_label_self_training", "ensemble_source_baseline_debiasing"),
     )
+
+
+def _install_time_transfer_temporal_train_window_validation() -> None:
+    module = importlib.import_module("neureptrace.time_transfer_decode")
+    original_run_time_transfer_decode = module.run_time_transfer_decode
+    if getattr(original_run_time_transfer_decode, _TEMPORAL_TRAIN_WINDOW_KWARG_PATCH_MARKER, False):
+        return
+
+    @wraps(original_run_time_transfer_decode)
+    def run_time_transfer_decode(*args: Any, **kwargs: Any):
+        return original_run_time_transfer_decode(*args, **_normalize_temporal_train_window_kwargs(kwargs))
+
+    setattr(run_time_transfer_decode, _TEMPORAL_TRAIN_WINDOW_KWARG_PATCH_MARKER, True)
+    module.run_time_transfer_decode = run_time_transfer_decode
 
 
 def _install_time_decode_ensemble_validation() -> None:
@@ -266,6 +291,7 @@ def install() -> None:
     _install_time_sequence_validation()
     _install_temporal_train_window_validation()
     _install_time_decode_boolean_validation()
+    _install_time_transfer_temporal_train_window_validation()
     _install_time_decode_ensemble_validation()
     _install_observation_ensemble_validation()
 

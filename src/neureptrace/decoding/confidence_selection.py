@@ -150,6 +150,8 @@ def _metadata(cfg: ConfidenceSelectionConfig, matrix: np.ndarray, selected: np.n
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float) -> np.ndarray:
+    if _contains_boolean_probability_value(values):
+        raise ValueError("probabilities must contain numeric probability values, not boolean flags.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError("probabilities must be a non-empty two-dimensional matrix.")
@@ -160,6 +162,27 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
         raise ValueError("probability rows must have positive total mass.")
     matrix = np.maximum(matrix, float(epsilon))
     return matrix / np.sum(matrix, axis=1, keepdims=True)
+
+
+def _contains_boolean_probability_value(values: Any) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype != object:
+            return False
+        return any(_contains_boolean_probability_value(item) for item in values.ravel())
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, Mapping):
+        iterable = values.values()
+    else:
+        try:
+            iterable = iter(values)
+        except TypeError:
+            return False
+    return any(_contains_boolean_probability_value(item) for item in iterable)
 
 
 def _optional_positive_int(value: int | str | None, *, name: str) -> int | None:

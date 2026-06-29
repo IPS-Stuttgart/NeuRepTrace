@@ -110,6 +110,19 @@ def _as_finite_float(value: Any, *, name: str) -> float:
 def _as_float_pair(value: Any, *, name: str) -> tuple[float, float] | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.startswith("["):
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise DatasetConfigError(f"'{name}' must contain exactly two numeric values.") from exc
+            if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+                raise DatasetConfigError(f"'{name}' must contain exactly two numeric values.")
+        else:
+            value = [part for chunk in text.split(",") for part in chunk.split() if part]
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 2:
         raise DatasetConfigError(f"'{name}' must contain exactly two numeric values.")
     start, stop = (_as_finite_float(item, name=name) for item in value)

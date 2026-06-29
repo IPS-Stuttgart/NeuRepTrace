@@ -20,6 +20,7 @@ SOURCE_BALANCING_PROTOCOL = "strict_source_only_class_balancing"
 SOURCE_BALANCING_CATEGORY = "1_strict_source_only"
 BALANCING_MODES = ("oversample", "undersample", "weights")
 TARGET_COUNT_MODES = ("max", "min", "median", "mean")
+_NONE_RANDOM_STATE_STRINGS = {"", "none", "null"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +166,7 @@ def source_class_balancing_config(
     return SourceClassBalancingConfig(
         mode=normalize_balancing_mode(mode),
         target_count=target_count,
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
+        random_state=_normalize_optional_random_state(random_state, name="random_state"),
         preserve_order=_boolean(preserve_order, name="preserve_order"),
     )
 
@@ -320,6 +321,26 @@ def _hashable_label(value: Any) -> Hashable:
     except TypeError as exc:
         raise ValueError(f"source_labels must contain hashable class labels; got {value!r}.") from exc
     return value
+
+
+def _normalize_optional_random_state(value: Any, *, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a non-negative integer or None.")
+        return _normalize_optional_random_state(value.item(), name=name)
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be a non-negative integer or None.")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.lower() in _NONE_RANDOM_STATE_STRINGS:
+            return None
+        value = text
+    try:
+        return _nonnegative_int(value, name=name)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer or None.") from exc
 
 
 def _positive_int(value: int | str, *, name: str) -> int:

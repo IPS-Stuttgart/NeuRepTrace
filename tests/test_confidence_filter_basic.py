@@ -34,6 +34,32 @@ def test_entropy_normalization_accepts_string_boolean_config() -> None:
     assert result.metadata["confidence_filter_entropy_normalized"] is False
 
 
+@pytest.mark.parametrize("value", [None, "", " none ", "NULL", np.asarray("none")])
+def test_confidence_filter_accepts_none_like_max_entropy(value: object) -> None:
+    rows = np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype=float)
+
+    result = confidence_filter(rows, max_entropy=value)
+
+    assert result.metadata["confidence_filter_max_entropy"] == ""
+
+
+@pytest.mark.parametrize("value", [0.8, "0.8", np.asarray(0.8)])
+def test_confidence_filter_accepts_scalar_max_entropy(value: object) -> None:
+    rows = np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype=float)
+
+    result = confidence_filter(rows, max_entropy=value)
+
+    assert result.metadata["confidence_filter_max_entropy"] == 0.8
+
+
+@pytest.mark.parametrize("value", [-0.1, "bad", [0.5], {"threshold": 0.5}, np.asarray([0.5, 0.6])])
+def test_confidence_filter_rejects_invalid_max_entropy(value: object) -> None:
+    rows = np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="max_entropy"):
+        confidence_filter(rows, max_entropy=value)
+
+
 def test_entropy_normalization_rejects_invalid_boolean_config() -> None:
     rows = np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype=float)
 
