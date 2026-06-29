@@ -1,6 +1,6 @@
 """Reject boolean values in probability-observation numeric fields.
 
-Pandas treats booleans as numeric during ``to_numeric`` coercion.  Without this
+Pandas treats booleans as numeric during ``to_numeric`` coercion. Without this
 check, malformed observation tables can silently turn ``True``/``False`` into
 ``1``/``0`` for time, probability, confidence, and provenance columns.
 """
@@ -50,7 +50,7 @@ def _make_numeric_series_checked(observation_schema):
         values = pd.to_numeric(numeric_source, errors="coerce")
         bad_mask = values.isna() if not allow_nan else values.isna() & raw_values.notna()
         bad_mask = bad_mask & ~boolean_values
-        for row_index, value in raw_values.loc[bad_mask, column].head(20).items() if isinstance(raw_values, pd.DataFrame) else raw_values.loc[bad_mask].head(20).items():
+        for row_index, value in raw_values.loc[bad_mask].head(20).items():
             observation_schema._issue(
                 issues,
                 "error",
