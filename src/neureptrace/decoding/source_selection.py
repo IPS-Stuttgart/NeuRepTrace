@@ -431,18 +431,45 @@ def _normalize_positive_int(value: int | str, *, name: str) -> int:
     return int(numeric)
 
 
+def _scalar_config_value(value: Any, *, name: str, message: str) -> Any:
+    """Return a scalar config value or raise a user-facing ValueError."""
+
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(message)
+    return value
+
+
+def _is_optional_sentinel(value: Any, aliases: set[str]) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in aliases
+    return False
+
+
 def _normalize_optional_positive_int(value: int | str | None, *, name: str) -> int | None:
-    if value in {None, "", "none", "None", "null", "all", "full"}:
+    message = f"{name} must be a positive integer."
+    scalar = _scalar_config_value(value, name=name, message=message)
+    if _is_optional_sentinel(scalar, {"", "none", "null", "all", "full"}):
         return None
-    return _normalize_positive_int(value, name=name)
+    return _normalize_positive_int(scalar, name=name)
 
 
 def _normalize_optional_nonnegative_float(value: float | str | None, *, name: str) -> float | None:
-    if value in {None, "", "none", "None", "null", "off"}:
+    message = f"{name} must be finite and non-negative."
+    scalar = _scalar_config_value(value, name=name, message=message)
+    if _is_optional_sentinel(scalar, {"", "none", "null", "off"}):
         return None
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be finite and non-negative.")
-    parsed = float(value)
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        parsed = float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed < 0.0:
-        raise ValueError(f"{name} must be finite and non-negative.")
+        raise ValueError(message)
     return parsed
