@@ -178,7 +178,7 @@ def _hashable_value(value: Any, *, reject_missing: bool = False) -> Hashable:
 
 
 def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
-    scalar_value = _scalar_config_value(value, name=name)
+    scalar_value = _scalar_config_value(value, name=name, expected="a non-negative integer")
     if _none_like_config_value(scalar_value):
         return None
     return _nonnegative_int(scalar_value, name=name)
@@ -192,20 +192,24 @@ def _none_like_config_value(value: Any) -> bool:
     return False
 
 
-def _scalar_config_value(value: Any, *, name: str) -> Any:
+def _scalar_config_value(value: Any, *, name: str, expected: str) -> Any:
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
-            raise ValueError(f"{name} must be a non-negative integer.")
+            raise ValueError(f"{name} must be {expected}.")
         return value.item()
     if isinstance(value, (list, tuple, dict, set)):
-        raise ValueError(f"{name} must be a non-negative integer.")
+        raise ValueError(f"{name} must be {expected}.")
     return value
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
-    if isinstance(value, (bool, np.bool_)):
+    scalar_value = _scalar_config_value(value, name=name, expected="a positive integer")
+    if isinstance(scalar_value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a positive integer.")
-    parsed = float(value)
+    try:
+        parsed = float(scalar_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)
@@ -214,16 +218,23 @@ def _positive_int(value: int | str, *, name: str) -> int:
 def _nonnegative_int(value: int | str, *, name: str) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a non-negative integer.")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 0:
         raise ValueError(f"{name} must be a non-negative integer.")
     return int(parsed)
 
 
 def _unit_interval(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    scalar_value = _scalar_config_value(value, name=name, expected="in [0, 1]")
+    if isinstance(scalar_value, (bool, np.bool_)):
         raise ValueError(f"{name} must be in [0, 1].")
-    parsed = float(value)
+    try:
+        parsed = float(scalar_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be in [0, 1].") from exc
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
