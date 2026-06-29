@@ -10,6 +10,16 @@ import pandas as pd
 from neureptrace._onset_detection_runs import detection_runs as _enumerate_detection_runs
 from neureptrace._onset_detection_runs import first_detection_run as _select_first_detection_run
 
+_BOOL_NUMERIC_PATCH_MARKER = "_neureptrace_onset_detection_bool_numeric_patch_installed"
+
+
+def _is_boolean_numeric(value: object) -> bool:
+    return isinstance(value, (bool, np.bool_))
+
+
+def _boolean_numeric_mask(values: pd.Series) -> pd.Series:
+    return values.map(_is_boolean_numeric).fillna(False).astype(bool)
+
 
 def _label_values_from_probability_columns(prob_columns: Sequence[str]) -> tuple[int, ...]:
     suffixes = tuple(str(column).removeprefix("prob_class_") for column in prob_columns)
@@ -142,6 +152,49 @@ def _install_probability_suffix_extensions() -> None:
     onset._score_values = _score_values  # noqa: SLF001
     onset._ensure_prediction_columns = _ensure_prediction_columns  # noqa: SLF001
     onset._probability_suffix_compat_patched = True  # noqa: SLF001
+
+
+def _install_bool_numeric_guards() -> None:
+    """Reject booleans before public onset helpers coerce them as 0/1 numerics."""
+    from neureptrace import onset_detection as onset
+
+    if getattr(onset, _BOOL_NUMERIC_PATCH_MARKER, False):
+        return
+
+    def _integer_labels(values: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+        boolean_values = _boolean_numeric_mask(values).to_numpy(dtype=bool)
+        numeric = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+        valid = ~boolean_values & np.isfinite(numeric) & (numeric == np.floor(numeric))
+        labels = np.zeros(len(numeric), dtype=int)
+        labels[valid] = numeric[valid].astype(int)
+        return labels, valid
+
+    def _integer_label(value: object) -> int | None:
+        if _is_boolean_numeric(value):
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            return None
+        return int(numeric)
+
+    def _confidence_values(frame: pd.DataFrame) -> pd.Series:
+        raw_confidence = frame["confidence"]
+        if bool(_boolean_numeric_mask(raw_confidence).any()):
+            raise ValueError("confidence values must be numeric probabilities, not booleans.")
+        confidence = pd.to_numeric(raw_confidence, errors="coerce")
+        if confidence.isna().any() or not np.isfinite(confidence.to_numpy(dtype=float)).all():
+            raise ValueError("confidence values must be finite.")
+        if bool(((confidence < 0.0) | (confidence > 1.0)).any()):
+            raise ValueError("confidence values must lie in [0, 1].")
+        return confidence
+
+    onset._integer_labels = _integer_labels  # noqa: SLF001
+    onset._integer_label = _integer_label  # noqa: SLF001
+    onset._confidence_values = _confidence_values  # noqa: SLF001
+    setattr(onset, _BOOL_NUMERIC_PATCH_MARKER, True)
 
 
 def _metadata_text_matches(observations: pd.DataFrame, column: str, expected: object) -> bool:
@@ -287,4 +340,5 @@ def _install_threshold_annotation_extensions() -> None:
 def install() -> None:
     _install_onset_detection_extensions()
     _install_probability_suffix_extensions()
+    _install_bool_numeric_guards()
     _install_threshold_annotation_extensions()
