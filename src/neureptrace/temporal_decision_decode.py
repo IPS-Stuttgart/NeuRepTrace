@@ -176,6 +176,17 @@ def _components(feature_preprocessor: str, pca_components: Any) -> int | float |
     return normalize_pca_components(pca_components)
 
 
+def _decision_window_time_bounds(times: np.ndarray, decision_windows: Sequence[TimeWindow]) -> tuple[float, float]:
+    """Return the sample-time span covered by selected temporal decision windows."""
+
+    if not decision_windows:
+        raise ValueError("No temporal decision windows are available after filtering.")
+    time_values = np.asarray(times, dtype=float)
+    start = min(float(time_values[max(0, window[0] - 1)]) for window in decision_windows)
+    stop = max(float(time_values[window[1] - 1]) for window in decision_windows)
+    return round(start, 12), round(stop, 12)
+
+
 def _observation_rows(probabilities: np.ndarray, labels: np.ndarray, original_indices: np.ndarray, class_names: np.ndarray, *, fold: int, heldout_group: str, split_id: str, decoder: str, emission_mode: str, preprocessing_hash: str, model_hash: str) -> list[dict[str, Any]]:
     predictions = probabilities.argmax(axis=1)
     rows = []
@@ -238,6 +249,7 @@ def run_temporal_decision_decode_dataset(dataset: EpochDataset, *, label_column:
     min_probability = _normalize_min_probability(min_probability)
     test_window = _pair(test_window, name="test_window")
     decision_windows = _windows(dataset.times, window_ms=window_ms, step_ms=step_ms, tmin=tmin, tmax=tmax, decision_window=test_window)
+    test_window_start, test_window_stop = _decision_window_time_bounds(dataset.times, decision_windows)
     split_id = "leave-one-group-out"
     preprocessing_hash = stable_hash({"dataset": dataset.name, "label_column": label_column, "group_column": group_column, "window_ms": window_ms, "step_ms": step_ms, "test_window": test_window, "feature_preprocessor": feature_preprocessor_name, "pca_components": pca_components_value, "normalization": normalization_name, "baseline_window": baseline_window_value})
 
@@ -264,8 +276,8 @@ def run_temporal_decision_decode_dataset(dataset: EpochDataset, *, label_column:
             "pca_components": "" if pca_components_value is None else pca_components_value, "normalization": normalization_name,
             "baseline_window_start": baseline_window_value[0], "baseline_window_stop": baseline_window_value[1],
             "temporal_mode": "temporal_decision_ensemble", "temporal_aggregation": aggregation,
-            "test_window_start": round(float(min(dataset.times[max(0, window[0] - 1)] for window in decision_windows)), 12),
-            "test_window_stop": round(float(max(dataset.times[window[1] - 1] for window in decision_windows)), 12),
+            "test_window_start": test_window_start,
+            "test_window_stop": test_window_stop,
             "n_test_windows": len(decision_windows), "n_source_decoders": len(decoder_names),
             "accuracy": accuracy_score(labels[test_idx], predictions), "balanced_accuracy": balanced_accuracy_score(labels[test_idx], predictions),
             "top2_accuracy": _top_k_accuracy(probabilities, labels[test_idx], k=2), "top3_accuracy": _top_k_accuracy(probabilities, labels[test_idx], k=3),
