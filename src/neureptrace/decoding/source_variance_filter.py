@@ -41,6 +41,7 @@ class SourceVarianceFilterResult:
 
 # pylint: disable-next=too-many-locals
 
+
 def fit_source_variance_filter(
     *,
     source_features: Sequence[Sequence[float]] | np.ndarray,
@@ -147,21 +148,36 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a non-negative integer.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 0:
         raise ValueError(f"{name} must be a non-negative integer.")
     return int(parsed)
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be non-negative and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be non-negative and finite.") from exc
     if not np.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be non-negative and finite.")
     return parsed
