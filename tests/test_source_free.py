@@ -246,3 +246,28 @@ def test_source_free_string_boolean_is_parsed_for_metadata():
     )
 
     assert result.metadata["source_free_standardize_target"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("confidence_threshold", [0.5]),
+        ("max_iterations", [1]),
+        ("min_class_count", (1,)),
+        ("min_active_classes", {"value": 2}),
+        ("prototype_weight", [0.5]),
+        ("prototype_temperature", (1.0,)),
+        ("balanced_topk_per_class", [1]),
+    ],
+)
+def test_source_free_rejects_array_like_numeric_scalar_controls(field: str, value: object):
+    target_features = np.array([[-1.0, 0.0], [2.0, 0.0]], dtype=float)
+    kwargs = {field: value}
+    if field == "balanced_topk_per_class":
+        kwargs["pseudo_label_selection"] = "balanced_topk"
+
+    with pytest.raises(ValueError, match=field):
+        SourceFreeSubjectAdapter(
+            source_model=_CompositeLabelSourceModel(),
+            **kwargs,
+        ).fit(target_features)
