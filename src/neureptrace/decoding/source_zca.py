@@ -97,7 +97,7 @@ def apply_source_zca_transform(features: Sequence[Sequence[float]] | np.ndarray,
     return transformed.astype(np.float32, copy=False)
 
 
-def source_zca_config(*, regularization: float | str = DEFAULT_REGULARIZATION, center: bool | int | str = True, recolor: bool | int | str = False) -> SourceZCAConfig:
+def source_zca_config(*, regularization: Any = DEFAULT_REGULARIZATION, center: Any = True, recolor: Any = False) -> SourceZCAConfig:
     """Normalize source-ZCA options."""
 
     return SourceZCAConfig(regularization=_positive_float(regularization, name="regularization"), center=_bool_value(center, name="center"), recolor=_bool_value(recolor, name="recolor"))
@@ -105,7 +105,11 @@ def source_zca_config(*, regularization: float | str = DEFAULT_REGULARIZATION, c
 
 def _coerce_config(config: SourceZCAConfig | Mapping[str, Any]) -> SourceZCAConfig:
     if isinstance(config, SourceZCAConfig):
-        return config
+        return source_zca_config(
+            regularization=config.regularization,
+            center=config.center,
+            recolor=config.recolor,
+        )
     return source_zca_config(**dict(config))
 
 
@@ -144,22 +148,41 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+def _positive_float(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be positive and finite.") from None
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
 
 
-def _bool_value(value: bool | int | str, *, name: str) -> bool:
+def _bool_value(value: Any, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
-    if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
-        return bool(value)
+    if isinstance(value, (int, np.integer)):
+        parsed = int(value)
+        if parsed in {0, 1}:
+            return bool(parsed)
+    if isinstance(value, (float, np.floating)):
+        parsed_float = float(value)
+        if np.isfinite(parsed_float) and parsed_float in {0.0, 1.0}:
+            return bool(parsed_float)
     if isinstance(value, str):
         text = value.strip().lower()
-        if text in {"1", "true", "yes", "on"}:
+        if text in {"1", "true", "t", "yes", "y", "on"}:
             return True
-        if text in {"0", "false", "no", "off"}:
+        if text in {"0", "false", "f", "no", "n", "off"}:
             return False
     raise ValueError(f"{name} must be a boolean value.")
