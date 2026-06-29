@@ -89,7 +89,7 @@ def source_feature_clipping_config(
     *,
     lower_quantile: float | str = DEFAULT_LOWER_QUANTILE,
     upper_quantile: float | str = DEFAULT_UPPER_QUANTILE,
-    copy: bool = True,
+    copy: bool | int | str = True,
 ) -> SourceFeatureClippingConfig:
     """Normalize public clipping options."""
 
@@ -97,7 +97,7 @@ def source_feature_clipping_config(
     upper = _quantile(upper_quantile, name="upper_quantile")
     if lower >= upper:
         raise ValueError("lower_quantile must be smaller than upper_quantile.")
-    return SourceFeatureClippingConfig(lower_quantile=lower, upper_quantile=upper, copy=bool(copy))
+    return SourceFeatureClippingConfig(lower_quantile=lower, upper_quantile=upper, copy=_bool_value(copy, name="copy"))
 
 
 def source_feature_clipping_bounds(
@@ -123,7 +123,7 @@ def apply_feature_clipping(
     *,
     lower_bounds: Sequence[float] | np.ndarray,
     upper_bounds: Sequence[float] | np.ndarray,
-    copy: bool = True,
+    copy: bool | int | str = True,
 ) -> np.ndarray:
     """Apply precomputed clipping bounds to feature rows."""
 
@@ -134,7 +134,7 @@ def apply_feature_clipping(
         raise ValueError("lower_bounds and upper_bounds must match the feature width.")
     if np.any(lower > upper):
         raise ValueError("lower_bounds cannot exceed upper_bounds.")
-    target = matrix.copy() if copy else matrix
+    target = matrix.copy() if _bool_value(copy, name="copy") else matrix
     return np.clip(target, lower, upper, out=target)
 
 
@@ -158,3 +158,18 @@ def _quantile(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
+
+
+def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean.")
