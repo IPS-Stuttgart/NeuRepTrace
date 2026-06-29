@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_zca import (
     SOURCE_ZCA_CATEGORY,
+    SourceZCAConfig,
     apply_source_zca_transform,
     fit_source_zca_reference,
     fit_source_zca_transform,
@@ -55,6 +56,35 @@ def test_source_zca_config_validation() -> None:
 
     with pytest.raises(ValueError, match="regularization"):
         source_zca_config(regularization=0.0)
+
+
+def test_source_zca_revalidates_direct_config_objects() -> None:
+    source = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float)
+    result = fit_source_zca_transform(
+        source_features=source,
+        test_features=source,
+        config=SourceZCAConfig(regularization="1e-4", center="false", recolor="1"),  # type: ignore[arg-type]
+    )
+
+    assert np.isclose(result.reference.config.regularization, 1e-4)
+    assert result.reference.config.center is False
+    assert result.reference.config.recolor is True
+    assert np.allclose(result.reference.mean, np.zeros(source.shape[1]))
+    assert result.metadata["source_zca_center"] is False
+    assert result.metadata["source_zca_recolor"] is True
+
+
+def test_source_zca_rejects_invalid_direct_config_objects() -> None:
+    source = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="regularization"):
+        fit_source_zca_reference(source, config=SourceZCAConfig(regularization=0.0))
+
+    with pytest.raises(ValueError, match="center"):
+        fit_source_zca_reference(source, config=SourceZCAConfig(center="maybe"))  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="recolor"):
+        fit_source_zca_reference(source, config=SourceZCAConfig(recolor=np.asarray([True])))  # type: ignore[arg-type]
 
 
 def test_source_zca_rejects_width_mismatch() -> None:
