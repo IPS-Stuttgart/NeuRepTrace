@@ -120,3 +120,20 @@ def test_smote_reproducible_with_fixed_seed() -> None:
 def test_invalid_interpolation_weight_is_rejected() -> None:
     with pytest.raises(ValueError, match="lam"):
         interpolate_rows([0.0], [1.0], 1.5)
+
+
+def test_interpolation_weight_rejects_boolean_scalar_array() -> None:
+    with pytest.raises(ValueError, match="lam"):
+        interpolate_rows([0.0], [1.0], np.asarray(True))
+
+
+def test_source_smote_numeric_options_reject_boolean_scalar_arrays() -> None:
+    invalid_options = [
+        ({"synthetic_per_class": np.asarray(True)}, "synthetic_per_class"),
+        ({"jitter_std": np.asarray(True)}, "jitter_std"),
+        ({"random_state": np.asarray(True)}, "random_state"),
+    ]
+
+    for kwargs, option_name in invalid_options:
+        with pytest.raises(ValueError, match=option_name):
+            source_smote_config(**kwargs)

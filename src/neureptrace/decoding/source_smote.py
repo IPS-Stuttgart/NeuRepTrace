@@ -320,6 +320,18 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_l
     return vector
 
 
+def _numeric_scalar_input(value: Any, *, message: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(message)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    return value
+
+
 def _nonnegative_int(value: int | str, *, name: str) -> int:
     integer = _integer(value, name=name)
     if integer < 0:
@@ -328,11 +340,14 @@ def _nonnegative_int(value: int | str, *, name: str) -> int:
 
 
 def _integer(value: int | str, *, name: str) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be an integer.")
-    parsed = float(value)
+    message = f"{name} must be an integer."
+    value = _numeric_scalar_input(value, message=message)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
-        raise ValueError(f"{name} must be an integer.")
+        raise ValueError(message)
     return int(parsed)
 
 
@@ -351,11 +366,14 @@ def _nonnegative_float(value: float | str, *, name: str) -> float:
 
 
 def _float_value(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be finite.")
-    parsed = float(value)
+    message = f"{name} must be finite."
+    value = _numeric_scalar_input(value, message=message)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed):
-        raise ValueError(f"{name} must be finite.")
+        raise ValueError(message)
     return parsed
 
 
