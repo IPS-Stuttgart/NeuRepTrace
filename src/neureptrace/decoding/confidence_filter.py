@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 CONFIDENCE_FILTER_PROTOCOL = "posthoc_probability_confidence_filter"
+_NONE_STRINGS = {"", "none", "null"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +43,7 @@ def confidence_filter(
     matrix = _probability_matrix(probabilities)
     confidence_threshold = _unit_interval(min_confidence, name="min_confidence")
     margin_threshold = _unit_interval(min_margin, name="min_margin")
-    entropy_threshold = None if max_entropy in {None, "", "none", "None"} else _nonnegative_float(max_entropy, name="max_entropy")
+    entropy_threshold = _optional_nonnegative_float(max_entropy, name="max_entropy")
     normalize = _boolean(normalize_entropy, name="normalize_entropy")
     order = np.argsort(matrix, axis=1)
     top = order[:, -1]
@@ -105,6 +106,26 @@ def _unit_interval(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
+
+
+def _optional_nonnegative_float(value: float | str | None, *, name: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be non-negative and finite or None.")
+        return _optional_nonnegative_float(value.item(), name=name)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.lower() in _NONE_STRINGS:
+            return None
+        value = text
+    elif isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be non-negative and finite or None.")
+    try:
+        return _nonnegative_float(value, name=name)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be non-negative and finite or None.") from exc
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
