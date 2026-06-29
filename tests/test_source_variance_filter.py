@@ -57,6 +57,22 @@ def test_source_variance_filter_config_validation() -> None:
         source_variance_filter_config(top_k=0)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"variance_threshold": True},
+        {"variance_threshold": np.bool_(False)},
+        {"top_k": True},
+        {"top_k": np.bool_(True)},
+        {"ddof": False},
+        {"ddof": np.bool_(False)},
+    ],
+)
+def test_source_variance_filter_config_rejects_boolean_numeric_values(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        source_variance_filter_config(**kwargs)
+
+
 def test_source_variance_filter_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_variance_filter(source_features=[[0.0, 1.0]], test_features=[[0.0]])
