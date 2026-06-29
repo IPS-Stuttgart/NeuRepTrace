@@ -70,6 +70,25 @@ def test_source_bagging_config_validation() -> None:
         source_bagging_config(n_estimators=0)
 
 
+@pytest.mark.parametrize("value", [None, "", " none ", "NULL"])
+def test_source_bagging_random_state_accepts_none_like_values(value: object) -> None:
+    cfg = source_bagging_config(random_state=value)
+
+    assert cfg.random_state is None
+
+
+def test_source_bagging_random_state_accepts_scalar_numpy_seed() -> None:
+    cfg = source_bagging_config(random_state=np.asarray(7))
+
+    assert cfg.random_state == 7
+
+
+@pytest.mark.parametrize("value", [[7], {"seed": 7}, {7}, np.asarray([7])])
+def test_source_bagging_random_state_rejects_non_scalar_values(value: object) -> None:
+    with pytest.raises(ValueError, match="random_state"):
+        source_bagging_config(random_state=value)
+
+
 def test_source_bagging_boolean_string_config() -> None:
     cfg = source_bagging_config(bootstrap_rows="false", bootstrap_features="yes", class_balanced="0")
 

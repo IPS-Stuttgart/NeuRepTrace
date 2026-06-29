@@ -60,7 +60,6 @@ class SourceBaggingResult:
 
 
 # pylint: disable-next=too-many-arguments,too-many-locals
-
 def fit_source_bagging_decoder(
     *,
     source_features: Sequence[Sequence[float]] | np.ndarray,
@@ -148,7 +147,7 @@ def source_bagging_config(
         bootstrap_rows=_boolean(bootstrap_rows, name="bootstrap_rows"),
         bootstrap_features=_boolean(bootstrap_features, name="bootstrap_features"),
         class_balanced=_boolean(class_balanced, name="class_balanced"),
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
+        random_state=_optional_nonnegative_int(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -157,6 +156,30 @@ def _coerce_config(config: SourceBaggingConfig | Mapping[str, Any]) -> SourceBag
     if isinstance(config, SourceBaggingConfig):
         return config
     return source_bagging_config(**dict(config))
+
+
+def _is_none_like_random_state(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"", "none", "null"}
+    return False
+
+
+def _scalar_random_state_value(value: Any, *, name: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        return value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be a non-negative integer.")
+    return value
+
+
+def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
+    if _is_none_like_random_state(value):
+        return None
+    return _nonnegative_int(_scalar_random_state_value(value, name=name), name=name)
 
 
 def _default_estimator(cfg: SourceBaggingConfig) -> BaseEstimator:
