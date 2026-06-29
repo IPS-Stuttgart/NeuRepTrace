@@ -1,9 +1,8 @@
-"""Normalize MixStyle boolean config values from CLI/YAML-style inputs."""
+"""Normalize MixStyle scalar and boolean config values from CLI/YAML-style inputs."""
 
 from __future__ import annotations
 
 import importlib
-from dataclasses import replace
 from functools import wraps
 from typing import Any
 
@@ -16,6 +15,18 @@ _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 def _bool_error(name: str) -> ValueError:
     return ValueError(f"{name} must be a boolean value.")
+
+
+def _scalar_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be a scalar configuration value.")
+
+
+def _reject_array_valued(value: Any, *, name: str) -> Any:
+    """Reject NumPy arrays before scalar validators can coerce them."""
+
+    if isinstance(value, np.ndarray):
+        raise _scalar_error(name)
+    return value
 
 
 def _normalize_bool(value: Any, *, name: str) -> bool:
@@ -63,9 +74,9 @@ def _patch_feature_mixstyle() -> None:
             include_original: Any = True,
         ):
             return original_config(
-                augmentations_per_row=augmentations_per_row,
-                alpha=alpha,
-                random_state=random_state,
+                augmentations_per_row=_reject_array_valued(augmentations_per_row, name="augmentations_per_row"),
+                alpha=_reject_array_valued(alpha, name="alpha"),
+                random_state=_reject_array_valued(random_state, name="random_state"),
                 domain_pairing=domain_pairing,
                 preserve_domain_mean=_normalize_bool(preserve_domain_mean, name="preserve_domain_mean"),
                 class_conditional=_normalize_bool(class_conditional, name="class_conditional"),
@@ -96,9 +107,9 @@ def _patch_feature_mixstyle() -> None:
                 source_features,
                 source_labels,
                 source_domains,
-                augmentations_per_row=augmentations_per_row,
-                alpha=alpha,
-                random_state=random_state,
+                augmentations_per_row=_reject_array_valued(augmentations_per_row, name="augmentations_per_row"),
+                alpha=_reject_array_valued(alpha, name="alpha"),
+                random_state=_reject_array_valued(random_state, name="random_state"),
                 domain_pairing=domain_pairing,
                 preserve_domain_mean=_normalize_bool(preserve_domain_mean, name="preserve_domain_mean"),
                 class_conditional=_normalize_bool(class_conditional, name="class_conditional"),
@@ -126,12 +137,12 @@ def _patch_domain_mixstyle() -> None:
             random_state: int | str | None = 13,
         ):
             return original_config(
-                mixes_per_row=mixes_per_row,
-                alpha=alpha,
-                style_strength=style_strength,
-                synthetic_weight=synthetic_weight,
+                mixes_per_row=_reject_array_valued(mixes_per_row, name="mixes_per_row"),
+                alpha=_reject_array_valued(alpha, name="alpha"),
+                style_strength=_reject_array_valued(style_strength, name="style_strength"),
+                synthetic_weight=_reject_array_valued(synthetic_weight, name="synthetic_weight"),
                 include_original=_normalize_bool(include_original, name="include_original"),
-                random_state=random_state,
+                random_state=_reject_array_valued(random_state, name="random_state"),
             )
 
         setattr(source_mixstyle_config, _PATCH_MARKER, True)
@@ -144,7 +155,14 @@ def _patch_domain_mixstyle() -> None:
             if config is None:
                 return None
             cfg = source_mixstyle._coerce_config(config)
-            return replace(cfg, include_original=_normalize_bool(cfg.include_original, name="include_original"))
+            return source_mixstyle.source_mixstyle_config(
+                mixes_per_row=cfg.mixes_per_row,
+                alpha=cfg.alpha,
+                style_strength=cfg.style_strength,
+                synthetic_weight=cfg.synthetic_weight,
+                include_original=_normalize_bool(cfg.include_original, name="include_original"),
+                random_state=cfg.random_state,
+            )
 
         @wraps(original_augment)
         def augment_source_domains_mixstyle(
@@ -166,7 +184,7 @@ def _patch_domain_mixstyle() -> None:
 
 
 def install() -> None:
-    """Install strict MixStyle boolean option normalization."""
+    """Install strict MixStyle scalar and boolean option normalization."""
 
     _patch_feature_mixstyle()
     _patch_domain_mixstyle()
