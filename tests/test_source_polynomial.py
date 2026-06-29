@@ -68,6 +68,18 @@ def test_polynomial_config_validation() -> None:
         fit_source_polynomial_reference(3, config={"max_interactions": -1})
 
 
+@pytest.mark.parametrize("n_features", [True, np.bool_(True)])
+def test_polynomial_rejects_boolean_feature_width(n_features) -> None:
+    with pytest.raises(ValueError, match="n_features must be a positive integer"):
+        fit_source_polynomial_reference(n_features)
+
+
+@pytest.mark.parametrize("max_interactions", [True, False, np.bool_(True), np.bool_(False)])
+def test_polynomial_rejects_boolean_max_interactions(max_interactions) -> None:
+    with pytest.raises(ValueError, match="max_interactions must be a non-negative integer"):
+        fit_source_polynomial_reference(3, config={"max_interactions": max_interactions})
+
+
 def test_polynomial_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_polynomial_transform(source_features=[[0.0, 1.0]], test_features=[[0.0]])
