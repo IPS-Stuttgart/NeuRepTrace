@@ -95,7 +95,23 @@ def test_fit_window_model_accepts_fractional_pca_variance_ratio():
     assert model_bundle.explained_variance_percent >= 90.0
 
 
-@pytest.mark.parametrize("components_pca", [0, 0.0, 1.5, -1, np.nan, True, False, np.bool_(True), np.bool_(False), "not-a-pca-value"])
+@pytest.mark.parametrize(
+    "components_pca",
+    [
+        0,
+        0.0,
+        1.5,
+        -1,
+        np.nan,
+        True,
+        False,
+        np.bool_(True),
+        np.bool_(False),
+        np.asarray(True),
+        np.array([1]),
+        "not-a-pca-value",
+    ],
+)
 def test_fit_window_model_rejects_invalid_pca_components(components_pca):
     with pytest.raises(ValueError, match="components_pca must be"):
         fit_window_model(
@@ -191,6 +207,20 @@ def test_permutation_score_curves_rejects_fractional_permutation_counts():
 
     with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
         permutation_score_curves(**kwargs, n_permutations=True)
+
+
+@pytest.mark.parametrize("n_permutations", [np.asarray(True), np.array([2])])
+def test_permutation_score_curves_rejects_array_permutation_counts(n_permutations):
+    kwargs = {
+        "train_features": np.array([[-2.0], [-1.0], [1.0], [2.0]]),
+        "train_labels": np.array([0, 0, 1, 1]),
+        "validation_features": np.array([[-2.0], [2.0]]),
+        "validation_labels": np.array([0, 1]),
+        "fit_model": _fit_sign_classifier,
+    }
+
+    with pytest.raises(ValueError, match="n_permutations must be a non-negative integer"):
+        permutation_score_curves(**kwargs, n_permutations=n_permutations)
 
 
 def test_score_windowed_decoding_rejects_mismatched_validation_labels():

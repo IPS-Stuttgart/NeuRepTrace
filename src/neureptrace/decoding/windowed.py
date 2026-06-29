@@ -319,6 +319,8 @@ def _normalize_pca_components(components_pca: int | float | str | None, features
 
 
 def _coerce_numeric_scalar(value: object, *, message: str) -> float:
+    if isinstance(value, np.ndarray):
+        raise ValueError(message)
     array = np.asarray(value)
     if array.ndim > 0 or np.issubdtype(array.dtype, np.bool_):
         raise ValueError(message)
