@@ -12,6 +12,8 @@ _PATCH_ATTR = "_neureptrace_rejects_bool_time_decode_metrics"
 _OBSERVATION_PATCH_ATTR = "_neureptrace_rejects_bool_probability_observations"
 _SUMMARY_PATCH_ATTR = "_neureptrace_rejects_bool_metric_table_inputs"
 _OPTIONAL_PATCH_ATTR = "_neureptrace_results_optional_metric_aggregation"
+_POSITIVE_INTEGER_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_positive_integer_controls"
+_FINITE_SCALAR_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_finite_numeric_scalars"
 _OPTIONAL_METRICS = ("balanced_accuracy", "top2_accuracy", "top3_accuracy")
 
 
@@ -21,6 +23,15 @@ def _bool_mask(values: pd.Series) -> pd.Series:
 
 def _boolean_rows(values: pd.Series) -> list[object]:
     mask = _bool_mask(values)
+    return mask[mask].index.tolist()[:5]
+
+
+def _array_mask(values: pd.Series) -> pd.Series:
+    return values.map(lambda value: isinstance(value, np.ndarray)).fillna(False).astype(bool)
+
+
+def _array_rows(values: pd.Series) -> list[object]:
+    mask = _array_mask(values)
     return mask[mask].index.tolist()[:5]
 
 
@@ -85,6 +96,14 @@ def _reject_boolean_table_column(frame: pd.DataFrame, column: str | None) -> Non
         raise ValueError(f"Metric table column '{column}' must not contain booleans; bad row(s): {rows}.")
 
 
+def _reject_array_table_column(frame: pd.DataFrame, column: str | None) -> None:
+    if column is None or column not in frame.columns:
+        return
+    rows = _array_rows(frame[column])
+    if rows:
+        raise ValueError(f"Metric table column '{column}' must not contain arrays; bad row(s): {rows}.")
+
+
 def _group_column_names(group_columns: Sequence[str] | str | None) -> tuple[str, ...]:
     if group_columns is None:
         return ()
@@ -120,6 +139,30 @@ def install() -> None:
 
     results = importlib.import_module("neureptrace.results")
     tables = importlib.import_module("neureptrace.results.tables")
+
+    original_validate_positive_integer = results._validate_positive_integer
+    if not getattr(original_validate_positive_integer, _POSITIVE_INTEGER_ARRAY_PATCH_ATTR, False):
+
+        def _validate_positive_integer_checked(value: object, *, name: str) -> int:
+            if isinstance(value, np.ndarray):
+                raise ValueError(f"{name} must be a positive integer.")
+            return original_validate_positive_integer(value, name=name)
+
+        setattr(_validate_positive_integer_checked, _POSITIVE_INTEGER_ARRAY_PATCH_ATTR, True)
+        _validate_positive_integer_checked.__wrapped__ = original_validate_positive_integer
+        results._validate_positive_integer = _validate_positive_integer_checked
+
+    original_finite_numeric_scalar = tables._finite_numeric_scalar
+    if not getattr(original_finite_numeric_scalar, _FINITE_SCALAR_ARRAY_PATCH_ATTR, False):
+
+        def _finite_numeric_scalar_checked(value: object, *, name: str) -> float:
+            if isinstance(value, np.ndarray):
+                raise ValueError(f"{name} must be a finite numeric value.")
+            return original_finite_numeric_scalar(value, name=name)
+
+        setattr(_finite_numeric_scalar_checked, _FINITE_SCALAR_ARRAY_PATCH_ATTR, True)
+        _finite_numeric_scalar_checked.__wrapped__ = original_finite_numeric_scalar
+        tables._finite_numeric_scalar = _finite_numeric_scalar_checked
 
     original = results._coerce_finite_metric_columns
     if not getattr(original, _PATCH_ATTR, False):
@@ -181,6 +224,8 @@ def install() -> None:
             p_value_thresholds: Sequence[float] = (0.05, 0.01),
             zero_singleton_dispersion: bool = False,
         ) -> pd.DataFrame:
+            for column in (value_column, chance_column, permutation_p_column, *_normalize_optional_columns(chance_class_columns)):
+                _reject_array_table_column(frame, column)
             for column in (value_column, permutation_p_column):
                 _reject_boolean_table_column(frame, column)
             for column in (chance_column, *_normalize_optional_columns(chance_class_columns)):
