@@ -87,6 +87,18 @@ def test_rank_output_aliases_and_validation() -> None:
         fit_source_rank_reference([[0.0], [1.0]], epsilon=0.8)
 
 
+@pytest.mark.parametrize("epsilon", [np.asarray(1e-6), np.array([1e-6]), np.asarray(True), np.array([True])])
+def test_rank_epsilon_rejects_array_valued_scalars(epsilon: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="epsilon must be a finite numeric scalar"):
+        fit_source_rank_reference([[0.0], [1.0]], epsilon=epsilon)  # type: ignore[arg-type]
+
+
+def test_rank_epsilon_accepts_numpy_numeric_scalar() -> None:
+    reference = fit_source_rank_reference([[0.0], [1.0]], epsilon=np.float64(1e-4))
+
+    assert reference.epsilon == pytest.approx(1e-4)
+
+
 def test_rank_transform_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_rank_transform(source_features=[[0.0, 1.0]], eval_features=[[0.0]])

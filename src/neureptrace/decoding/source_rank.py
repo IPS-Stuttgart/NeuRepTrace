@@ -158,7 +158,11 @@ def _numeric_scalar(value: Any, *, name: str) -> float:
 
 
 def _epsilon(value: float | str) -> float:
-    parsed = _numeric_scalar(value, name="epsilon")
+    message = "epsilon must be a finite numeric scalar in (0, 0.5)."
+    try:
+        parsed = _numeric_scalar(value, name="epsilon")
+    except ValueError as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0 or parsed >= 0.5:
-        raise ValueError("epsilon must be finite and in (0, 0.5).")
+        raise ValueError(message)
     return parsed
