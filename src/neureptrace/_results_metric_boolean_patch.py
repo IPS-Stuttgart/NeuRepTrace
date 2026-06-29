@@ -9,12 +9,18 @@ import numpy as np
 import pandas as pd
 
 _PATCH_ATTR = "_neureptrace_rejects_bool_time_decode_metrics"
+_OBSERVATION_PATCH_ATTR = "_neureptrace_rejects_bool_probability_observations"
 _OPTIONAL_PATCH_ATTR = "_neureptrace_results_optional_metric_aggregation"
 _OPTIONAL_METRICS = ("balanced_accuracy", "top2_accuracy", "top3_accuracy")
 
 
 def _bool_mask(values: pd.Series) -> pd.Series:
     return values.map(lambda value: isinstance(value, (bool, np.bool_))).fillna(False).astype(bool)
+
+
+def _boolean_rows(values: pd.Series) -> list[object]:
+    mask = _bool_mask(values)
+    return mask[mask].index.tolist()[:5]
 
 
 def _optional_metric_columns(frame: pd.DataFrame) -> list[str]:
@@ -77,15 +83,36 @@ def install() -> None:
             for metric in metric_columns:
                 if metric not in frame.columns:
                     continue
-                bad_values = _bool_mask(frame[metric])
-                if bad_values.any():
-                    rows = bad_values[bad_values].index.tolist()[:5]
+                rows = _boolean_rows(frame[metric])
+                if rows:
                     raise ValueError(f"Metric column '{metric}' must not contain booleans; bad row(s): {rows}.")
             return original(frame, metric_columns)
 
         setattr(_coerce_finite_metric_columns_checked, _PATCH_ATTR, True)
         _coerce_finite_metric_columns_checked.__wrapped__ = original
         results._coerce_finite_metric_columns = _coerce_finite_metric_columns_checked
+
+    original_probability_ece_by_group = results._probability_ece_by_group
+    if not getattr(original_probability_ece_by_group, _OBSERVATION_PATCH_ATTR, False):
+
+        def _probability_ece_by_group_checked(
+            observations: pd.DataFrame,
+            group_columns: list[str],
+            *,
+            n_bins: int,
+        ) -> pd.DataFrame:
+            probability_columns = tuple(results.probability_columns(observations))
+            for column in ("time", "true_label", *probability_columns):
+                if column not in observations.columns:
+                    continue
+                rows = _boolean_rows(observations[column])
+                if rows:
+                    raise ValueError(f"Probability-observation column '{column}' must not contain booleans; bad row(s): {rows}.")
+            return original_probability_ece_by_group(observations, group_columns, n_bins=n_bins)
+
+        setattr(_probability_ece_by_group_checked, _OBSERVATION_PATCH_ATTR, True)
+        _probability_ece_by_group_checked.__wrapped__ = original_probability_ece_by_group
+        results._probability_ece_by_group = _probability_ece_by_group_checked
 
     if getattr(results, _OPTIONAL_PATCH_ATTR, False):
         return
