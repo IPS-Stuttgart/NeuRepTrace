@@ -33,6 +33,19 @@ class SourceRobustScalerConfig:
     upper_quantile: float = DEFAULT_UPPER_QUANTILE
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Validate direct dataclass construction as strictly as the public helper."""
+
+        lower = _unit_interval_float(self.lower_quantile, name="lower_quantile")
+        upper = _unit_interval_float(self.upper_quantile, name="upper_quantile")
+        if lower >= upper:
+            raise ValueError("lower_quantile must be smaller than upper_quantile.")
+        object.__setattr__(self, "center", normalize_center_mode(self.center))
+        object.__setattr__(self, "scale", normalize_scale_mode(self.scale))
+        object.__setattr__(self, "lower_quantile", lower)
+        object.__setattr__(self, "upper_quantile", upper)
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceRobustScalerStats:
@@ -198,15 +211,27 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _scalar_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be a scalar finite number.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a scalar finite number.") from exc
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be a scalar finite number.")
+    return parsed
+
+
 def _unit_interval_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
-    if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
+    parsed = _scalar_float(value, name=name)
+    if parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
-    if not np.isfinite(parsed) or parsed <= 0.0:
+    parsed = _scalar_float(value, name=name)
+    if parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
