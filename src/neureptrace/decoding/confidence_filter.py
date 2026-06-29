@@ -92,6 +92,8 @@ def probability_entropy(probabilities: Sequence[Sequence[float]] | np.ndarray, *
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+    if _contains_boolean_value(values):
+        raise ValueError("probabilities must contain numeric probability values, not booleans.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a two-dimensional matrix with at least two columns.")
@@ -103,8 +105,31 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.nd
     return matrix / row_sums
 
 
+def _contains_boolean_value(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if value.dtype.kind == "b":
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean_value(item) for item in value.ravel())
+        return False
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
+
+
 def _unit_interval(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be in [0, 1].")
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be in [0, 1].")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be in [0, 1].") from exc
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
@@ -131,6 +156,8 @@ def _optional_nonnegative_float(value: float | str | None, *, name: str) -> floa
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be non-negative and finite.")
     parsed = float(value)
     if not np.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be non-negative and finite.")
