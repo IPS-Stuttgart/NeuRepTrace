@@ -34,6 +34,19 @@ def _install_call_targets(tree: ast.Module) -> set[str]:
     return targets
 
 
+def _install_call_order(tree: ast.Module) -> dict[str, int]:
+    order: dict[str, int] = {}
+    for position, node in enumerate(tree.body):
+        if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+            continue
+        call = node.value.func
+        if not isinstance(call, ast.Attribute) or call.attr != "install":
+            continue
+        if isinstance(call.value, ast.Name):
+            order.setdefault(call.value.id, position)
+    return order
+
+
 def test_imported_runtime_patch_modules_are_installed() -> None:
     tree = _package_init_tree()
 
@@ -42,3 +55,17 @@ def test_imported_runtime_patch_modules_are_installed() -> None:
     missing = sorted(set(imported) - installed)
 
     assert missing == [], "Runtime patches imported by neureptrace.__init__ must also be installed. Missing: " + ", ".join(missing)
+
+
+def test_final_source_alignment_hook_precedes_eager_source_alignment_importers() -> None:
+    tree = _package_init_tree()
+    order = _install_call_order(tree)
+
+    finalizer = order["_source_alignment_target_calibration_offsets_patch"]
+    eager_source_alignment_importers = (
+        "_source_alignment_times_validation_patch",
+        "_source_alignment_target_seed_patch",
+    )
+    misplaced = [name for name in eager_source_alignment_importers if order[name] < finalizer]
+
+    assert misplaced == [], "The final source-alignment composition hook must be installed before eager importers: " + ", ".join(misplaced)
