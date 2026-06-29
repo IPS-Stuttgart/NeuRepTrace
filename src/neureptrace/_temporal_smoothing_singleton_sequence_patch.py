@@ -1,4 +1,4 @@
-"""Preserve singleton sequences during temporal posterior smoothing."""
+"""Preserve singleton sequences and reject boolean temporal observations."""
 
 from __future__ import annotations
 
@@ -12,13 +12,88 @@ import pandas as pd
 _PATCH_MARKER = "_neureptrace_temporal_smoothing_singleton_sequence_patch_installed"
 
 
+def _contains_boolean_values(values: object) -> bool:
+    """Return whether an array-like object contains Python/NumPy booleans."""
+
+    array = np.asarray(values, dtype=object)
+    if array.size == 0:
+        return False
+    return any(isinstance(value, (bool, np.bool_)) for value in array.ravel())
+
+
+def _reject_boolean_values(values: object, message: str) -> None:
+    if _contains_boolean_values(values):
+        raise ValueError(message)
+
+
 def install() -> None:
     """Patch temporal smoothing so valid one-row sequences are retained."""
 
+    temporal_model = importlib.import_module("neureptrace.temporal_model")
     temporal_smoothing = importlib.import_module("neureptrace.temporal_smoothing")
     original_smooth = temporal_smoothing.smooth_probability_observations
     if getattr(original_smooth, _PATCH_MARKER, False):
         return
+
+    original_validate_probability_matrix = temporal_model._validate_probability_matrix
+
+    @wraps(original_validate_probability_matrix)
+    def _validate_probability_matrix(probabilities: np.ndarray) -> np.ndarray:
+        _reject_boolean_values(
+            probabilities,
+            "Probability observations must be numeric probabilities, not boolean values.",
+        )
+        return original_validate_probability_matrix(probabilities)
+
+    temporal_model._validate_probability_matrix = _validate_probability_matrix
+
+    original_read_probability_observations = temporal_model.read_probability_observations
+
+    @wraps(original_read_probability_observations)
+    def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
+        paths = [path if isinstance(path, Path) else Path(path) for path in csv_paths]
+        for csv_path in paths:
+            frame = pd.read_csv(csv_path)
+            if "time" in frame.columns:
+                _reject_boolean_values(
+                    frame["time"].to_numpy(dtype=object),
+                    f"{csv_path} time values must be numeric, not boolean.",
+                )
+        return original_read_probability_observations(paths)
+
+    temporal_model.read_probability_observations = read_probability_observations
+    temporal_smoothing.read_probability_observations = read_probability_observations
+
+    original_numeric_label_values = temporal_smoothing._numeric_label_values
+
+    @wraps(original_numeric_label_values)
+    def _numeric_label_values(frame: pd.DataFrame, label_values: tuple[int, ...]) -> np.ndarray:
+        if "true_label" in frame.columns:
+            _reject_boolean_values(
+                frame["true_label"].to_numpy(dtype=object),
+                "true_label values must be numeric integer labels, not boolean values.",
+            )
+        return original_numeric_label_values(frame, label_values)
+
+    temporal_smoothing._numeric_label_values = _numeric_label_values
+
+    original_metrics_from_probability_observations = temporal_smoothing.metrics_from_probability_observations
+
+    @wraps(original_metrics_from_probability_observations)
+    def metrics_from_probability_observations(observations: pd.DataFrame, *, ece_bins: int = 10) -> pd.DataFrame:
+        if "true_label" in observations.columns:
+            _reject_boolean_values(
+                observations["true_label"].to_numpy(dtype=object),
+                "true_label values must be numeric integer labels, not boolean values.",
+            )
+        for column in temporal_smoothing.probability_columns(observations):
+            _reject_boolean_values(
+                observations[column].to_numpy(dtype=object),
+                f"{column} values must be numeric probabilities, not boolean values.",
+            )
+        return original_metrics_from_probability_observations(observations, ece_bins=ece_bins)
+
+    temporal_smoothing.metrics_from_probability_observations = metrics_from_probability_observations
 
     @wraps(original_smooth)
     def smooth_probability_observations(
