@@ -40,6 +40,7 @@ def test_summarize_calibration_metrics_orders_by_effect_ece():
         "0.1,0.2",
         (False, 0.2),
         (0.1, np.bool_(True)),
+        (0.1, np.asarray(True)),
         (0.1, np.inf),
         (0.2, 0.1),
         (0.1,),

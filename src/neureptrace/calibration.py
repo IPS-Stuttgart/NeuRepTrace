@@ -47,6 +47,18 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
     return paths
 
 
+def _is_boolean_like_numeric(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        try:
+            scalar = value.item()
+        except ValueError:
+            return False
+        return isinstance(scalar, (bool, np.bool_))
+    return False
+
+
 def _validate_time_window(window: Sequence[object], *, name: str) -> tuple[float, float]:
     if isinstance(window, (str, bytes)):
         raise ValueError(f"{name} must contain exactly two finite numeric endpoints.")
@@ -59,7 +71,7 @@ def _validate_time_window(window: Sequence[object], *, name: str) -> tuple[float
 
     endpoints: list[float] = []
     for value in values:
-        if isinstance(value, (bool, np.bool_)):
+        if _is_boolean_like_numeric(value):
             raise ValueError(f"{name} endpoints must be finite numeric values, not booleans.")
         try:
             endpoint = float(value)
@@ -87,7 +99,7 @@ def _format_float(value: float, digits: int = 3) -> str:
 
 
 def _reject_boolean_numeric_values(values: pd.Series, column: str, *, source: str) -> None:
-    boolean_values = values.map(lambda value: isinstance(value, (bool, np.bool_))).fillna(False).astype(bool)
+    boolean_values = values.map(_is_boolean_like_numeric).fillna(False).astype(bool)
     if boolean_values.any():
         bad_rows = boolean_values[boolean_values].index.tolist()[:5]
         raise ValueError(f"{source} contains boolean values in numeric column '{column}' at row(s) {bad_rows}.")
