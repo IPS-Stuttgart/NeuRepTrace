@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.results import aggregate_time_decode_csvs, aggregate_time_decode_results
 
@@ -97,6 +98,36 @@ def test_aggregate_time_decode_results_rejects_fractional_observation_labels():
         assert "true_label values must be integer-valued" in str(exc)
     else:
         raise AssertionError("Expected fractional observation labels to fail")
+
+
+@pytest.mark.parametrize("column", ["time", "true_label", "prob_class_0"])
+def test_aggregate_time_decode_results_rejects_boolean_observation_values(column):
+    results = pd.DataFrame(
+        {
+            "subject": ["s1", "s1"],
+            "fold": [0, 1],
+            "time": [0.1, 0.1],
+            "accuracy": [1.0, 0.0],
+            "log_loss": [0.4, 0.7],
+            "brier": [0.3, 0.6],
+            "ece": [0.39, 0.69],
+            "n_test": [1, 1],
+        }
+    )
+    observations = pd.DataFrame(
+        {
+            "subject": ["s1", "s1"],
+            "fold": [0, 1],
+            "time": [0.1, 0.1],
+            "true_label": [0, 0],
+            "prob_class_0": [0.61, 0.31],
+            "prob_class_1": [0.39, 0.69],
+        }
+    )
+    observations[column] = True
+
+    with pytest.raises(ValueError, match=f"Probability-observation column '{column}' must not contain booleans"):
+        aggregate_time_decode_results(results, observations=observations)
 
 
 def test_aggregate_time_decode_results_requires_observations_to_match_result_groups():
