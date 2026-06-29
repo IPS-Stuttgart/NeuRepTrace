@@ -117,3 +117,9 @@ def test_numeric_enabled_aliases_toggle_source_reliability_mode():
     assert source_group_weighting_config({"enabled": "1"}).mode == "source_reliability"
     assert source_group_weighting_config({"enabled": 0}).mode == "none"
     assert source_group_weighting_config({"enabled": "0"}).mode == "none"
+
+
+@pytest.mark.parametrize("score", [True, np.bool_(True), np.asarray(True)])
+def test_source_group_weighting_rejects_boolean_scores(score):
+    with pytest.raises(ValueError, match="source-group scores"):
+        weights_from_scores({"s1": score, "s2": 0.50})
