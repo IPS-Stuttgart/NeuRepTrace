@@ -128,7 +128,12 @@ def _classes(labels: np.ndarray, classes: Sequence[Any] | np.ndarray | None, *, 
     if len(set(class_keys)) != values.shape[0]:
         raise ValueError("classes must be unique.")
     class_key_set = set(class_keys)
-    missing = sorted({label for label in labels.tolist() if _value_key(label) not in class_key_set}, key=repr)
+    missing_by_key: dict[Any, Any] = {}
+    for label in labels.tolist():
+        key = _value_key(label)
+        if key not in class_key_set:
+            missing_by_key.setdefault(key, label)
+    missing = sorted(missing_by_key.values(), key=repr)
     if missing:
         raise ValueError(f"source_labels contain labels absent from classes: {missing}.")
     return values
