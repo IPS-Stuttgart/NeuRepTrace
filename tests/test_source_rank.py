@@ -48,6 +48,22 @@ def test_transform_source_rank_features_handles_ties_by_midrank() -> None:
     assert np.allclose(transformed, np.asarray([[0.5]], dtype=np.float32))
 
 
+def test_clip_extremes_string_false_keeps_unclipped_rank_extremes() -> None:
+    result = fit_source_rank_transform(source_features=[[0.0], [1.0]], eval_features=[[-1.0], [2.0]], clip_extremes="false")
+
+    assert result.reference.clip_extremes is False
+    assert result.metadata["source_rank_clip_extremes"] is False
+    assert np.allclose(result.eval_features, np.asarray([[0.0], [1.0]], dtype=np.float32))
+
+
+def test_clip_extremes_rejects_ambiguous_config_values() -> None:
+    with pytest.raises(ValueError, match="clip_extremes"):
+        fit_source_rank_reference([[0.0], [1.0]], clip_extremes="disabled")
+
+    with pytest.raises(ValueError, match="clip_extremes"):
+        fit_source_rank_reference([[0.0], [1.0]], clip_extremes=2)
+
+
 def test_rank_output_aliases_and_validation() -> None:
     assert normalize_rank_output("percentile") == "uniform"
     assert normalize_rank_output("signed") == "centered"
