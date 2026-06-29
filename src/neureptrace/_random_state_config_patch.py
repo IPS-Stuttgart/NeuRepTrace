@@ -184,14 +184,40 @@ def _patch_domain_mixstyle() -> None:
         source_mixstyle.augment_source_domains_mixstyle = augment_source_domains_mixstyle
 
 
+def _patch_source_domain_mask() -> None:
+    source_domain_mask_module = importlib.import_module("neureptrace.decoding.source_domain_mask")
+
+    original_mask = source_domain_mask_module.source_domain_mask
+    if getattr(original_mask, _PATCH_MARKER, False):
+        return
+
+    @wraps(original_mask)
+    def source_domain_mask(
+        source_domains,
+        *,
+        random_state: int | str | None = 13,
+        **kwargs,
+    ):
+        seed = _normalize_optional_nonnegative_int(
+            random_state,
+            normalizer=source_domain_mask_module._nonnegative_int,
+            name="random_state",
+        )
+        return original_mask(source_domains, random_state=seed, **kwargs)
+
+    setattr(source_domain_mask, _PATCH_MARKER, True)
+    source_domain_mask_module.source_domain_mask = source_domain_mask
+
+
 def install() -> None:
-    """Install random-state validation patches for MixStyle helpers."""
+    """Install random-state validation patches for config helpers."""
 
     global _INSTALLED
     if _INSTALLED:
         return
     _patch_feature_mixstyle()
     _patch_domain_mixstyle()
+    _patch_source_domain_mask()
     _INSTALLED = True
 
 
