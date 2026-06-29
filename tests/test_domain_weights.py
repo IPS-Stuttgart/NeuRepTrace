@@ -101,6 +101,16 @@ def test_domain_importance_config_parses_boolean_strings() -> None:
     assert cfg.account_for_sample_priors is False
 
 
+def test_domain_importance_config_preserves_short_boolean_aliases() -> None:
+    disabled = domain_importance_config(normalize="f", account_for_sample_priors="n")
+    enabled = domain_importance_config(normalize="t", account_for_sample_priors="y")
+
+    assert disabled.normalize is False
+    assert disabled.account_for_sample_priors is False
+    assert enabled.normalize is True
+    assert enabled.account_for_sample_priors is True
+
+
 def test_domain_importance_config_rejects_ambiguous_boolean_strings() -> None:
     with pytest.raises(ValueError, match="normalize"):
         domain_importance_config(normalize="sometimes")
