@@ -1,4 +1,4 @@
-"""Preserve composite row ids in precomputed foundation-feature tables."""
+"""Patch precomputed foundation-feature table edge cases."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def _requested_row_ids(values: Any, index: dict[Any, int]) -> tuple[Any, ...]:
 
 
 def install() -> None:
-    """Patch precomputed foundation-feature row-id normalization."""
+    """Patch precomputed foundation-feature row-id and probability normalization."""
 
     module = importlib.import_module("neureptrace.decoding.precomputed_foundation")
     if getattr(module, _PATCH_MARKER, False):
@@ -155,6 +155,23 @@ def install() -> None:
             raise KeyError(f"Precomputed feature table is missing {len(missing)} requested row id(s): {preview}.")
         return table.features[[index[row_id] for row_id in requested]].astype(np.float32, copy=False)
 
+    def _predict_probabilities_or_none(model, features):
+        if hasattr(model, "predict_proba"):
+            probabilities = np.asarray(model.predict_proba(features), dtype=float)
+            return module._normalize_probability_rows(probabilities)
+        if hasattr(model, "decision_function"):
+            scores = np.asarray(model.decision_function(features), dtype=float)
+            if scores.ndim == 1 or (scores.ndim == 2 and scores.shape[1] == 1):
+                margins = np.clip(scores.reshape(-1), -50.0, 50.0)
+                positive = 1.0 / (1.0 + np.exp(-margins))
+                return module._normalize_probability_rows(np.column_stack([1.0 - positive, positive]))
+            if scores.ndim != 2:
+                raise ValueError("Decision-function scores must be one- or two-dimensional.")
+            shifted = scores - np.max(scores, axis=1, keepdims=True)
+            exp_scores = np.exp(np.clip(shifted, -50.0, 50.0))
+            return module._normalize_probability_rows(exp_scores)
+        return None
+
     def fit_precomputed_foundation_probe(
         *,
         feature_table,
@@ -210,6 +227,7 @@ def install() -> None:
     module._load_npz_features = _load_npz_features
     module.make_precomputed_foundation_feature_table = make_precomputed_foundation_feature_table
     module.align_precomputed_foundation_features = align_precomputed_foundation_features
+    module._predict_probabilities_or_none = _predict_probabilities_or_none
     module.fit_precomputed_foundation_probe = fit_precomputed_foundation_probe
     setattr(module, _PATCH_MARKER, True)
 
