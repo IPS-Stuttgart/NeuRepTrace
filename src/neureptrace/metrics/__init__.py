@@ -38,37 +38,38 @@ __all__ = [
 ]
 
 
-def _validate_non_negative_finite_float(value: object, name: str) -> float:
+def _coerce_numeric_scalar(value: object, name: str, expectation: str) -> float:
+    message = f"{name} must be {expectation}"
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a non-negative finite value")
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
     try:
-        numeric = float(value)
+        return float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a non-negative finite value") from exc
+        raise ValueError(message) from exc
+
+
+def _validate_non_negative_finite_float(value: object, name: str) -> float:
+    numeric = _coerce_numeric_scalar(value, name, "a non-negative finite value")
     if not np.isfinite(numeric) or numeric < 0.0:
         raise ValueError(f"{name} must be a non-negative finite value")
     return numeric
 
 
 def _validate_positive_finite_float(value: object, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a positive finite value")
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive finite value") from exc
+    numeric = _coerce_numeric_scalar(value, name, "a positive finite value")
     if not np.isfinite(numeric) or numeric <= 0.0:
         raise ValueError(f"{name} must be a positive finite value")
     return numeric
 
 
 def _validate_positive_integer(value: object, name: str) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a positive integer")
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive integer") from exc
+    numeric = _coerce_numeric_scalar(value, name, "a positive integer")
     if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
         raise ValueError(f"{name} must be a positive integer")
     return int(numeric)
