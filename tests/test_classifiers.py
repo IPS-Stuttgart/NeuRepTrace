@@ -80,6 +80,16 @@ def test_registry_trains_fast_sklearn_classifiers(multiclass_data):
             assert len(model.predict(features)) == len(labels)
 
 
+def test_knn_caps_neighbors_to_training_row_count():
+    features = np.array([[-1.0, 0.0], [0.0, 0.0], [1.0, 0.0]])
+    labels = np.array([0, 0, 1])
+
+    model = train_classifier(features, labels, "knn", 5)
+
+    assert model.n_neighbors == features.shape[0]
+    assert model.predict(features).shape == labels.shape
+
+
 def test_train_multiclass_classifier_encodes_nonzero_labels_and_decodes_outputs():
     class EncodedBinaryModel:
         def predict(self, features):
