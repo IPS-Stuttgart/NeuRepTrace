@@ -14,6 +14,12 @@ def test_column_stats_computes_column_summaries():
     assert result.metadata == {"array_stats_rows": 2, "array_stats_columns": 2}
 
 
+def test_column_stats_accepts_scalar_array_scale_floor():
+    result = column_stats([[1.0], [1.0]], scale_floor=np.asarray(0.25))
+
+    np.testing.assert_allclose(result.scale, np.array([0.25], dtype=np.float32))
+
+
 @pytest.mark.parametrize("scale_floor", [True, np.bool_(True)])
 def test_column_stats_rejects_boolean_scale_floor(scale_floor):
     with pytest.raises(ValueError, match="scale_floor"):
@@ -22,5 +28,11 @@ def test_column_stats_rejects_boolean_scale_floor(scale_floor):
 
 @pytest.mark.parametrize("scale_floor", [0.0, -1.0, np.inf, np.nan])
 def test_column_stats_rejects_non_positive_or_non_finite_scale_floor(scale_floor):
+    with pytest.raises(ValueError, match="scale_floor"):
+        column_stats([[1.0]], scale_floor=scale_floor)
+
+
+@pytest.mark.parametrize("scale_floor", [[0.1], (0.1,), {"value": 0.1}, np.asarray([0.1])])
+def test_column_stats_rejects_container_scale_floor(scale_floor):
     with pytest.raises(ValueError, match="scale_floor"):
         column_stats([[1.0]], scale_floor=scale_floor)
