@@ -117,6 +117,8 @@ def _validate_window(window: Window) -> Window:
 def _validate_window_endpoint(value: object, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"window {name} must be a finite numeric value")
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"window {name} must be a finite numeric scalar")
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:
