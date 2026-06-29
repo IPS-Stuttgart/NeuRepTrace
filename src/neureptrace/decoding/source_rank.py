@@ -10,6 +10,8 @@ import numpy as np
 SOURCE_RANK_PROTOCOL = "strict_source_only_empirical_rank_transform"
 SOURCE_RANK_CATEGORY = "1_strict_source_only"
 RANK_OUTPUTS = ("uniform", "centered")
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,14 +34,14 @@ class SourceRankTransformResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def fit_source_rank_reference(source_features, *, output: str = "uniform", clip_extremes: bool = True, epsilon: float = 1e-6) -> SourceRankReference:
+def fit_source_rank_reference(source_features, *, output: str = "uniform", clip_extremes: bool | str = True, epsilon: float = 1e-6) -> SourceRankReference:
     """Fit an empirical rank reference from source rows only."""
 
     source = _matrix(source_features, name="source_features")
     return SourceRankReference(
         sorted_values=np.sort(source, axis=0).astype(float, copy=False),
         output=normalize_rank_output(output),
-        clip_extremes=bool(clip_extremes),
+        clip_extremes=_normalize_bool(clip_extremes, name="clip_extremes"),
         epsilon=_epsilon(epsilon),
     )
 
@@ -66,7 +68,7 @@ def transform_source_rank_features(features, reference: SourceRankReference) -> 
     return (2.0 * ranks - 1.0).astype(np.float32, copy=False)
 
 
-def fit_source_rank_transform(*, source_features, eval_features, output: str = "uniform", clip_extremes: bool = True, epsilon: float = 1e-6) -> SourceRankTransformResult:
+def fit_source_rank_transform(*, source_features, eval_features, output: str = "uniform", clip_extremes: bool | str = True, epsilon: float = 1e-6) -> SourceRankTransformResult:
     """Fit source ranks and transform source/evaluation rows."""
 
     source = _matrix(source_features, name="source_features")
@@ -93,8 +95,8 @@ def fit_source_rank_transform(*, source_features, eval_features, output: str = "
             "source_rank_n_eval_rows": int(eval_matrix.shape[0]),
             "source_rank_feature_dim": int(source.shape[1]),
             "source_rank_output": normalize_rank_output(output),
-            "source_rank_clip_extremes": bool(clip_extremes),
-            "source_rank_epsilon": float(_epsilon(epsilon)),
+            "source_rank_clip_extremes": bool(reference.clip_extremes),
+            "source_rank_epsilon": float(reference.epsilon),
         },
     )
 
@@ -118,7 +120,35 @@ def _matrix(values, *, name: str) -> np.ndarray:
     return matrix
 
 
+def _normalize_bool(value: Any, *, name: str) -> bool:
+    message = f"{name} must be a boolean value."
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return _normalize_bool(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise ValueError(message)
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise ValueError(message)
+    raise ValueError(message)
+
+
 def _epsilon(value: float | str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("epsilon must be finite and in (0, 0.5).")
     parsed = float(value)
     if not np.isfinite(parsed) or parsed <= 0.0 or parsed >= 0.5:
         raise ValueError("epsilon must be finite and in (0, 0.5).")
