@@ -1,4 +1,4 @@
-"""Runtime patch for per-time calibration sample-weight fractions."""
+"""Runtime patches for calibration validation and sample-weight fractions."""
 
 from __future__ import annotations
 
@@ -32,8 +32,11 @@ def _per_group_weight_fractions(frame, weight_column: str, group_columns: list[s
 
 
 def install() -> None:
-    """Patch calibration aggregation to normalize weight fractions per time point."""
+    """Patch calibration validation and weight-fraction aggregation."""
+    from . import _calibration_bool_numeric_patch
     import neureptrace.calibration as calibration
+
+    _calibration_bool_numeric_patch.install()
 
     if getattr(calibration.aggregate_reliability_bins, _PATCH_ATTR, False):
         return
