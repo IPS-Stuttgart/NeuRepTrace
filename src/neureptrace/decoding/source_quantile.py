@@ -9,6 +9,7 @@ import numpy as np
 SOURCE_QUANTILE_CATEGORY = "1_strict_source_only"
 SOURCE_QUANTILE_CLIP_PROTOCOL = "strict_source_only_quantile_clip"
 SOURCE_QUANTILE_RANK_PROTOCOL = "strict_source_only_quantile_rank"
+SOURCE_QUANTILE_BIN_PROTOCOL = "strict_source_only_quantile_bins"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +32,16 @@ class SourceQuantileRankResult:
     train_features: np.ndarray
     test_features: np.ndarray
     sorted_source_values: np.ndarray
+    metadata: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class SourceQuantileBinResult:
+    """Feature matrices transformed to source-fitted quantile bin indices."""
+
+    train_features: np.ndarray
+    test_features: np.ndarray
+    bin_edges: np.ndarray
     metadata: dict[str, object]
 
 
@@ -115,6 +126,43 @@ def source_quantile_rank(*, source_features, test_features, centered: bool = Fal
     )
 
 
+def source_quantile_bins(*, source_features, test_features, n_bins=4) -> SourceQuantileBinResult:
+    """Transform rows to source-fitted quantile bin indices.
+
+    The bin edges are fitted from source rows only.  Returned values are integer
+    bin indices in ``[0, n_bins - 1]`` for each feature column.
+    """
+
+    source = _matrix(source_features, name="source_features")
+    test = _matrix(test_features, name="test_features")
+    if source.shape[1] != test.shape[1]:
+        raise ValueError("source_features and test_features must have the same feature width.")
+    bins = _positive_int(n_bins, name="n_bins")
+    levels = np.linspace(0.0, 1.0, bins + 1, dtype=float)[1:-1]
+    edges = np.quantile(source, levels, axis=0) if levels.size else np.empty((0, source.shape[1]), dtype=float)
+    train = apply_source_quantile_bins(source, bin_edges=edges)
+    test_out = apply_source_quantile_bins(test, bin_edges=edges)
+    metadata = {
+        "source_quantile_bins": True,
+        "source_quantile_bins_protocol": SOURCE_QUANTILE_BIN_PROTOCOL,
+        "source_quantile_bins_protocol_category": SOURCE_QUANTILE_CATEGORY,
+        "source_quantile_bins_uses_source_features": True,
+        "source_quantile_bins_uses_test_features_for_fitting": False,
+        "source_quantile_bins_uses_test_labels": False,
+        "source_quantile_bins_valid_for_strict_source_only": True,
+        "source_quantile_bins_n_source_rows": int(source.shape[0]),
+        "source_quantile_bins_n_test_rows": int(test.shape[0]),
+        "source_quantile_bins_feature_dim": int(source.shape[1]),
+        "source_quantile_bins_n_bins": int(bins),
+    }
+    return SourceQuantileBinResult(
+        train_features=train,
+        test_features=test_out,
+        bin_edges=edges.astype(float, copy=False),
+        metadata=metadata,
+    )
+
+
 def apply_source_quantile_rank(features, *, sorted_values, centered: bool = False, epsilon=1e-6):
     matrix = _matrix(features, name="features")
     reference = _matrix(sorted_values, name="sorted_values")
@@ -132,6 +180,19 @@ def apply_source_quantile_rank(features, *, sorted_values, centered: bool = Fals
     if centered:
         return 2.0 * ranks - 1.0
     return ranks
+
+
+def apply_source_quantile_bins(features, *, bin_edges):
+    matrix = _matrix(features, name="features")
+    edges = np.asarray(bin_edges, dtype=float)
+    if edges.ndim != 2:
+        raise ValueError("bin_edges must be a two-dimensional matrix.")
+    if matrix.shape[1] != edges.shape[1]:
+        raise ValueError("features width must match source quantile bin edges.")
+    output = np.zeros(matrix.shape, dtype=np.int16)
+    for column in range(matrix.shape[1]):
+        output[:, column] = np.searchsorted(edges[:, column], matrix[:, column], side="right").astype(np.int16, copy=False)
+    return output
 
 
 def apply_source_quantile_clip(features, lower, upper):
@@ -171,3 +232,12 @@ def _epsilon(epsilon) -> float:
     if not np.isfinite(value) or value <= 0.0 or value >= 0.5:
         raise ValueError("epsilon must be finite and in (0, 0.5).")
     return value
+
+
+def _positive_int(value, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    parsed = float(value)
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(parsed)
