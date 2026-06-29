@@ -151,6 +151,7 @@ from . import (  # noqa: E402
     _transfer_array_label_null_patch,
     _transfer_component_analysis_validation_patch,
     _transfer_components_validation_patch,
+    _transfer_config_class_count_patch,
     _transfer_cross_validation_label_patch,
     _transfer_null_fallback_patch,
     _transfer_null_label_conflict_patch,
@@ -302,6 +303,7 @@ _torch_weight_validation_patch.install()
 _transfer_array_label_null_patch.install()
 _transfer_component_analysis_validation_patch.install()
 _transfer_components_validation_patch.install()
+_transfer_config_class_count_patch.install()
 _transfer_cross_validation_label_patch.install()
 _transfer_null_fallback_patch.install()
 _transfer_null_label_conflict_patch.install()
