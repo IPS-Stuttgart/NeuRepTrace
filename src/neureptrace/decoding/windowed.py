@@ -244,8 +244,14 @@ def permutation_p_from_accuracy(accuracy: float, permutation_accuracy: Sequence[
     return float((np.sum(permutation_accuracy >= accuracy) + 1.0) / (permutation_accuracy.size + 1.0))
 
 
+def _is_array_scalar_control(value: object) -> bool:
+    """Return whether a scalar control was supplied as a NumPy array."""
+
+    return isinstance(value, np.ndarray)
+
+
 def _validate_permutation_count(n_permutations: int) -> int:
-    if isinstance(n_permutations, (bool, np.bool_)):
+    if isinstance(n_permutations, (bool, np.bool_)) or _is_array_scalar_control(n_permutations):
         raise ValueError("n_permutations must be a non-negative integer.")
     try:
         numeric = float(n_permutations)
@@ -295,7 +301,7 @@ def _normalize_pca_components(components_pca: int | float | str | None, features
 
     if components_pca is None:
         return None
-    if isinstance(components_pca, (bool, np.bool_)):
+    if isinstance(components_pca, (bool, np.bool_)) or _is_array_scalar_control(components_pca):
         raise ValueError(_pca_components_error_message())
     if isinstance(components_pca, str):
         normalized = components_pca.strip().lower()
