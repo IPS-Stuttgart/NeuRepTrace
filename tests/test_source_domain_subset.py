@@ -49,6 +49,35 @@ def test_source_domain_subset_preserves_matrix_composite_domains() -> None:
     assert int(np.sum(result.selected_mask)) == 2
 
 
+def test_source_domain_subset_random_state_accepts_scalar_config_values() -> None:
+    domains = ["a", "a", "b", "b", "c", "c"]
+
+    reference = source_domain_subset_mask(domains, omit_fraction=0.5, min_domains=2, random_state=7)
+    from_string = source_domain_subset_mask(domains, omit_fraction="0.5", min_domains="2", random_state="7")
+    from_scalar_array = source_domain_subset_mask(domains, omit_fraction=0.5, min_domains=2, random_state=np.asarray(7))
+
+    assert from_string.selected_mask.tolist() == reference.selected_mask.tolist()
+    assert from_string.selected_domains == reference.selected_domains
+    assert from_string.omitted_domains == reference.omitted_domains
+    assert from_scalar_array.selected_mask.tolist() == reference.selected_mask.tolist()
+    assert from_scalar_array.selected_domains == reference.selected_domains
+    assert from_scalar_array.omitted_domains == reference.omitted_domains
+
+
+@pytest.mark.parametrize("seed", [None, "", "none", "null"])
+def test_source_domain_subset_random_state_accepts_none_like_values(seed: object) -> None:
+    result = source_domain_subset_mask(["a", "b"], omit_fraction=0.0, random_state=seed)
+
+    assert result.selected_mask.tolist() == [True, True]
+    assert result.omitted_domains == ()
+
+
+@pytest.mark.parametrize("seed", [True, np.bool_(False), -1, 1.5, [7], (7,), np.asarray([7])])
+def test_source_domain_subset_random_state_rejects_invalid_values(seed: object) -> None:
+    with pytest.raises(ValueError, match="random_state"):
+        source_domain_subset_mask(["a", "b"], random_state=seed)
+
+
 def test_apply_source_domain_subset_filters_features_and_labels() -> None:
     features = np.asarray([[0.0], [1.0], [2.0], [3.0], [4.0], [5.0]])
     labels = [("x", 1), ("x", 1), ("y", 2), ("y", 2), ("z", 3), ("z", 3)]
