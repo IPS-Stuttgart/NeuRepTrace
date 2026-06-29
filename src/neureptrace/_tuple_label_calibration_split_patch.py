@@ -97,6 +97,23 @@ def _normalize_manual_split_indices(values: Sequence[int] | np.ndarray, *, name:
     return indices
 
 
+def _is_boolean_scalar(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray) and value.shape == () and np.issubdtype(value.dtype, np.bool_):
+        return True
+    return False
+
+
+def _coerce_integer_option(value: Any, *, name: str, default: int) -> int:
+    if _is_boolean_scalar(value):
+        raise ValueError(f"{name} must be an integer value, not a boolean value.")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _patch_all_protocols() -> None:
     all_protocols = importlib.import_module("neureptrace.bushmeg_all_protocols")
     if getattr(all_protocols, _ALL_PROTOCOLS_PATCH_MARKER, False):
@@ -115,18 +132,9 @@ def _patch_all_protocols() -> None:
         context: Sequence[Any] = (),
     ):
         context_tuple = tuple(str(item) for item in context)
-        try:
-            per_class_count = int(per_class)
-        except (TypeError, ValueError):
-            per_class_count = 0
-        try:
-            seed_value = int(seed)
-        except (TypeError, ValueError):
-            seed_value = 0
-        try:
-            min_eval_count = int(min_evaluation_per_class)
-        except (TypeError, ValueError):
-            min_eval_count = 0
+        per_class_count = _coerce_integer_option(per_class, name="per_class", default=0)
+        seed_value = _coerce_integer_option(seed, name="seed", default=0)
+        min_eval_count = _coerce_integer_option(min_evaluation_per_class, name="min_evaluation_per_class", default=0)
 
         if per_class_count < 1:
             return all_protocols._empty_bushmeg_target_calibration_split(
@@ -241,6 +249,10 @@ def _patch_all_protocols() -> None:
         calibration_per_class: int = 1,
         seed: int = 13,
     ) -> tuple[np.ndarray, np.ndarray]:
+        if _is_boolean_scalar(calibration_per_class):
+            raise ValueError("calibration_per_class must be an integer value, not a boolean value.")
+        if _is_boolean_scalar(seed):
+            raise ValueError("seed must be an integer value, not a boolean value.")
         split = select_bushmeg_target_calibration_split(
             labels,
             per_class=calibration_per_class,
