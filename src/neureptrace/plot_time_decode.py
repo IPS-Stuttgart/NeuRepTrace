@@ -41,13 +41,14 @@ def _summary_from_csv(results_csv: Path) -> pd.DataFrame:
         raise ValueError(f"Results CSV is missing required metric columns: {missing}")
 
     group_columns = _group_columns(results)
-    grouped = results.groupby([*group_columns, "time"], as_index=False)
+    group_keys = [*group_columns, "time"]
+    grouped = results.groupby(group_keys, as_index=False, dropna=False)
     summary = grouped[list(METRIC_COLUMNS)].mean()
     for metric in METRIC_COLUMNS:
         sem = grouped[metric].sem().rename(columns={metric: f"{metric}_sem"})
-        summary = summary.merge(sem, on="time")
+        summary = summary.merge(sem, on=group_keys, how="left", validate="one_to_one")
         summary = summary.rename(columns={metric: f"{metric}_mean"})
-    return summary.sort_values([*group_columns, "time"] or ["time"])
+    return summary.sort_values(group_keys)
 
 
 def plot_time_decode_results(
@@ -65,7 +66,7 @@ def plot_time_decode_results(
 
     summary = _summary_from_csv(results_csv)
     group_columns = _group_columns(summary)
-    plot_groups = list(summary.groupby(group_columns, sort=True)) if group_columns else [(None, summary)]
+    plot_groups = list(summary.groupby(group_columns, sort=True, dropna=False)) if group_columns else [(None, summary)]
     n_metrics = len(metrics)
     n_cols = 2 if n_metrics > 1 else 1
     n_rows = (n_metrics + n_cols - 1) // n_cols
