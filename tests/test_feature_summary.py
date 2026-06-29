@@ -31,3 +31,14 @@ def test_summarize_features_rejects_bad_input() -> None:
         summarize_features([[1.0, np.nan]])
     with pytest.raises(ValueError):
         summarize_features([[1.0]], ddof=-1)
+
+
+def test_summarize_features_rejects_non_scalar_ddof() -> None:
+    for bad in ([1], (1,), {"value": 1}, {1}, np.asarray([1]), np.asarray([[1]])):
+        with pytest.raises(ValueError):
+            summarize_features([[1.0], [2.0]], ddof=bad)  # type: ignore[arg-type]
+
+
+def test_summarize_features_accepts_numpy_scalar_ddof() -> None:
+    result = summarize_features([[1.0], [2.0]], ddof=np.asarray(0))
+    assert result.metadata["feature_summary_ddof"] == 0
