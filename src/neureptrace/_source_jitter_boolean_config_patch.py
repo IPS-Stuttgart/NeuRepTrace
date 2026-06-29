@@ -52,6 +52,74 @@ def _integer_error(name: str) -> ValueError:
     return ValueError(f"{name} must be an integer or None.")
 
 
+def _required_integer_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be an integer.")
+
+
+def _float_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be finite.")
+
+
+def _normalize_integer(value: Any, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise _required_integer_error(name)
+    if isinstance(value, np.ndarray):
+        raise _required_integer_error(name)
+    if isinstance(value, (list, tuple, dict, set)):
+        raise _required_integer_error(name)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise _required_integer_error(name) from exc
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
+        raise _required_integer_error(name)
+    return int(parsed)
+
+
+def _nonnegative_integer(value: Any, *, name: str) -> int:
+    parsed = _normalize_integer(value, name=name)
+    if parsed < 0:
+        raise ValueError(f"{name} must be non-negative.")
+    return parsed
+
+
+def _normalize_float(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise _float_error(name)
+    if isinstance(value, np.ndarray):
+        raise _float_error(name)
+    if isinstance(value, (list, tuple, dict, set)):
+        raise _float_error(name)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise _float_error(name) from exc
+    if not np.isfinite(parsed):
+        raise _float_error(name)
+    return parsed
+
+
+def _nonnegative_float(value: Any, *, name: str) -> float:
+    parsed = _normalize_float(value, name=name)
+    if parsed < 0.0:
+        raise ValueError(f"{name} must be non-negative and finite.")
+    return parsed
+
+
+def _positive_float(value: Any, *, name: str) -> float:
+    parsed = _normalize_float(value, name=name)
+    if parsed <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return parsed
+
+
+def _unit_interval_float(value: Any, *, name: str) -> float:
+    parsed = _normalize_float(value, name=name)
+    if parsed < 0.0 or parsed > 1.0:
+        raise ValueError(f"{name} must be in [0, 1].")
+    return parsed
+
+
 def _normalize_optional_integer(value: Any, *, name: str) -> int | None:
     if value is None:
         return None
@@ -104,20 +172,20 @@ def _install_source_jitter_patch() -> None:
         @wraps(original_config)
         def source_feature_jitter_config(
             *,
-            synthetic_per_class: int | str = 0,
-            noise_scale: float | str = source_jitter.DEFAULT_NOISE_SCALE,
+            synthetic_per_class: Any = 0,
+            noise_scale: Any = source_jitter.DEFAULT_NOISE_SCALE,
             scale_mode: str | None = "global",
             preserve_original: Any = True,
             random_state: Any = 13,
-            epsilon: float | str = source_jitter.DEFAULT_EPSILON,
+            epsilon: Any = source_jitter.DEFAULT_EPSILON,
         ):
             return original_config(
-                synthetic_per_class=synthetic_per_class,
-                noise_scale=noise_scale,
+                synthetic_per_class=_nonnegative_integer(synthetic_per_class, name="synthetic_per_class"),
+                noise_scale=_nonnegative_float(noise_scale, name="noise_scale"),
                 scale_mode=scale_mode,
                 preserve_original=_normalize_bool(preserve_original, name="preserve_original"),
                 random_state=_nonnegative_optional_integer(random_state, name="random_state"),
-                epsilon=epsilon,
+                epsilon=_positive_float(epsilon, name="epsilon"),
             )
 
         setattr(source_feature_jitter_config, _PATCH_MARKER, True)
@@ -158,22 +226,22 @@ def _install_source_masking_patch() -> None:
     @wraps(original_config)
     def source_feature_masking_config(
         *,
-        synthetic_per_class: int | str = 0,
-        mask_fraction: float | str = source_masking.DEFAULT_MASK_FRACTION,
+        synthetic_per_class: Any = 0,
+        mask_fraction: Any = source_masking.DEFAULT_MASK_FRACTION,
         mask_mode: str | None = "feature",
         block_size: Any = None,
         fill_mode: str | None = "feature_mean",
-        noise_std: float | str = 0.0,
+        noise_std: Any = 0.0,
         preserve_original: bool | int | str = True,
         random_state: Any = 13,
     ):
         return original_config(
-            synthetic_per_class=synthetic_per_class,
-            mask_fraction=mask_fraction,
+            synthetic_per_class=_nonnegative_integer(synthetic_per_class, name="synthetic_per_class"),
+            mask_fraction=_unit_interval_float(mask_fraction, name="mask_fraction"),
             mask_mode=mask_mode,
             block_size=_positive_optional_integer(block_size, name="block_size"),
             fill_mode=fill_mode,
-            noise_std=noise_std,
+            noise_std=_nonnegative_float(noise_std, name="noise_std"),
             preserve_original=preserve_original,
             random_state=_nonnegative_optional_integer(random_state, name="random_state"),
         )
