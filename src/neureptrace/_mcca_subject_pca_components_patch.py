@@ -141,7 +141,7 @@ def _patch_unlabeled_calibration_config() -> None:
         method: str = "hyperalignment",
         anchor_mode: str = "stimulus_id_mean",
         repetition_cap: int | str | None = None,
-        repetition_selection: str = "first",
+        repetition_selection: str = "random",
         repetition_seed: int | str | None = 0,
         components: int | float | str | None = 64,
         hyperalignment_iterations: int | str = 10,
