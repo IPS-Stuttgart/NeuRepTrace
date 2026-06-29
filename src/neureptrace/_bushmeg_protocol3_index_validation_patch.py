@@ -1,11 +1,16 @@
 """Runtime guardrails for Protocol 3 calibration/evaluation index vectors.
 
-Protocol 3 uses disjoint same-subject calibration and evaluation rows.  The
+Protocol 3 uses disjoint same-subject calibration and evaluation rows. The
 core validator historically delegated to ``np.asarray(..., dtype=int)`` and
-``np.intersect1d``.  That silently flattened malformed matrix-shaped split
-indices and coerced booleans or fractional values into row numbers.  This patch
+``np.intersect1d``. That silently flattened malformed matrix-shaped split
+indices and coerced booleans or fractional values into row numbers. This patch
 normalizes only genuine one-dimensional integer index vectors before the
 disjointness check runs.
+
+The same bool-is-int pitfall also applies to the Protocol 3 split-size options:
+``per_class=True`` silently meant one calibration row per class. For YAML-backed
+experimental configs that should be rejected explicitly rather than interpreted
+as a numeric count or seed.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from __future__ import annotations
 import importlib.abc
 import importlib.machinery
 import sys
+from functools import wraps
 from types import ModuleType
 from typing import Any
 
@@ -54,9 +60,25 @@ def _as_index_vector(values: Any, *, name: str) -> np.ndarray:
     return numeric.astype(int, copy=False)
 
 
+def _is_boolean_scalar(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray) and value.shape == () and np.issubdtype(value.dtype, np.bool_):
+        return True
+    return False
+
+
+def _reject_boolean_integer_option(value: Any, *, name: str) -> None:
+    if _is_boolean_scalar(value):
+        raise ValueError(f"{name} must be an integer value, not a boolean value.")
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
+
+    original_select_split = module.select_bushmeg_target_calibration_split
+    original_category3_split = module.category3_calibration_evaluation_split
 
     def validate_disjoint_calibration_evaluation(calibration_indices: Any, evaluation_indices: Any) -> None:
         calibration = _as_index_vector(calibration_indices, name="calibration_indices")
@@ -66,7 +88,35 @@ def _patch_module(module: ModuleType) -> None:
             preview = ",".join(map(str, overlap[:10]))
             raise ValueError(f"Protocol 3 calibration/evaluation rows must be disjoint; overlapping row(s): {preview}.")
 
+    @wraps(original_select_split)
+    def select_bushmeg_target_calibration_split(
+        target_labels: Any,
+        *,
+        per_class: Any,
+        seed: Any,
+        min_evaluation_per_class: Any = 1,
+        context: Any = (),
+    ) -> Any:
+        _reject_boolean_integer_option(per_class, name="per_class")
+        _reject_boolean_integer_option(seed, name="seed")
+        _reject_boolean_integer_option(min_evaluation_per_class, name="min_evaluation_per_class")
+        return original_select_split(
+            target_labels,
+            per_class=per_class,
+            seed=seed,
+            min_evaluation_per_class=min_evaluation_per_class,
+            context=context,
+        )
+
+    @wraps(original_category3_split)
+    def category3_calibration_evaluation_split(labels: Any, *, calibration_per_class: Any = 1, seed: Any = 13) -> Any:
+        _reject_boolean_integer_option(calibration_per_class, name="calibration_per_class")
+        _reject_boolean_integer_option(seed, name="seed")
+        return original_category3_split(labels, calibration_per_class=calibration_per_class, seed=seed)
+
     module.validate_disjoint_calibration_evaluation = validate_disjoint_calibration_evaluation
+    module.select_bushmeg_target_calibration_split = select_bushmeg_target_calibration_split
+    module.category3_calibration_evaluation_split = category3_calibration_evaluation_split
     setattr(module, _PATCH_MARKER, True)
 
 
@@ -104,7 +154,7 @@ class _Protocol3IndexValidationFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Install Protocol 3 split-index validation."""
+    """Install Protocol 3 split-index and split-count validation."""
 
     loaded = sys.modules.get(_TARGET_MODULE)
     if loaded is not None:
