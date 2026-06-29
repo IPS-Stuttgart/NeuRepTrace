@@ -17,20 +17,25 @@ def _random_state_error() -> ValueError:
     return ValueError("random_state must be a non-negative integer or none.")
 
 
+def _is_none_like_random_state(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _NONE_STRINGS
+    return False
+
+
 def _normalize_optional_random_state(value: Any, *, normalizer: Any) -> int | None:
     """Normalize optional random-state values accepted by NumPy SeedSequence."""
 
-    if value is None:
+    if _is_none_like_random_state(value):
         return None
-    if isinstance(value, str):
-        text = value.strip().lower()
-        if text in _NONE_STRINGS:
-            return None
-        value = text
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
             raise _random_state_error()
         value = value.item()
+        if _is_none_like_random_state(value):
+            return None
     if isinstance(value, (list, tuple, dict, set)):
         raise _random_state_error()
     try:
