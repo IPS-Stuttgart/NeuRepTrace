@@ -1,7 +1,8 @@
-"""Normalize subspace-adaptation boolean config values from CLI/YAML-style inputs."""
+"""Normalize subspace and random-subspace config values from CLI/YAML inputs."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from functools import wraps
 from typing import Any
 
@@ -9,8 +10,10 @@ import numpy as np
 
 _PATCH_MARKER = "_neureptrace_subspace_bool_config_patch_installed"
 _RANDOM_SUBSPACE_PATCH_MARKER = "_neureptrace_random_subspace_bool_config_patch_installed"
+_RANDOM_SUBSPACE_RANDOM_STATE_PATCH_MARKER = "_neureptrace_random_subspace_random_state_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
+_NONE_STRINGS = {"", "none", "null"}
 
 
 def _bool_error(name: str) -> ValueError:
@@ -44,8 +47,47 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise _bool_error(name)
 
 
+def _random_state_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be a non-negative integer or None.")
+
+
+def _normalize_optional_random_state(value: Any, *, name: str) -> int | None:
+    """Normalize optional integer seeds without leaking raw set/NumPy errors."""
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.lower() in _NONE_STRINGS:
+            return None
+        value = stripped
+    elif isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise _random_state_error(name)
+        return _normalize_optional_random_state(value.item(), name=name)
+    elif isinstance(value, (Mapping, Sequence)) and not isinstance(value, (str, bytes, bytearray)):
+        raise _random_state_error(name)
+    if isinstance(value, (bool, np.bool_)):
+        raise _random_state_error(name)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise _random_state_error(name) from exc
+    if not np.isfinite(parsed) or parsed < 0.0 or parsed % 1.0 != 0.0:
+        raise _random_state_error(name)
+    return int(parsed)
+
+
+def _normalize_random_subspace_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    if "random_state" not in kwargs:
+        return kwargs
+    normalized = dict(kwargs)
+    normalized["random_state"] = _normalize_optional_random_state(normalized["random_state"], name="random_state")
+    return normalized
+
+
 def install() -> None:
-    """Install strict boolean normalization for subspace-adaptation config."""
+    """Install strict normalization for subspace and random-subspace config."""
 
     from neureptrace.decoding import subspace_adaptation as subspace
 
@@ -80,18 +122,26 @@ def install() -> None:
     from neureptrace.decoding import random_subspace
 
     original_random_subspace_config = random_subspace.random_subspace_ensemble_config
-    if getattr(original_random_subspace_config, _RANDOM_SUBSPACE_PATCH_MARKER, False):
-        return
+    if not getattr(original_random_subspace_config, _RANDOM_SUBSPACE_PATCH_MARKER, False):
+        @wraps(original_random_subspace_config)
+        def random_subspace_ensemble_config(**kwargs):
+            kwargs = _normalize_random_subspace_kwargs(dict(kwargs))
+            if "bootstrap_rows" in kwargs:
+                kwargs["bootstrap_rows"] = _normalize_bool(kwargs["bootstrap_rows"], name="bootstrap_rows")
+            return original_random_subspace_config(**kwargs)
 
-    @wraps(original_random_subspace_config)
-    def random_subspace_ensemble_config(**kwargs):
-        if "bootstrap_rows" in kwargs:
-            kwargs = dict(kwargs)
-            kwargs["bootstrap_rows"] = _normalize_bool(kwargs["bootstrap_rows"], name="bootstrap_rows")
-        return original_random_subspace_config(**kwargs)
+        setattr(random_subspace_ensemble_config, _RANDOM_SUBSPACE_PATCH_MARKER, True)
+        random_subspace.random_subspace_ensemble_config = random_subspace_ensemble_config
 
-    setattr(random_subspace_ensemble_config, _RANDOM_SUBSPACE_PATCH_MARKER, True)
-    random_subspace.random_subspace_ensemble_config = random_subspace_ensemble_config
+    original_sample_feature_subspaces = random_subspace.sample_feature_subspaces
+    if not getattr(original_sample_feature_subspaces, _RANDOM_SUBSPACE_RANDOM_STATE_PATCH_MARKER, False):
+        @wraps(original_sample_feature_subspaces)
+        def sample_feature_subspaces(**kwargs):
+            kwargs = _normalize_random_subspace_kwargs(dict(kwargs))
+            return original_sample_feature_subspaces(**kwargs)
+
+        setattr(sample_feature_subspaces, _RANDOM_SUBSPACE_RANDOM_STATE_PATCH_MARKER, True)
+        random_subspace.sample_feature_subspaces = sample_feature_subspaces
 
 
 __all__ = ["install"]
