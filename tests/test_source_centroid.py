@@ -56,6 +56,22 @@ def test_source_centroid_config_validation() -> None:
         source_centroid_config(shrinkage=1.5)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "field"),
+    [
+        ({"temperature": True}, "temperature"),
+        ({"temperature": np.bool_(True)}, "temperature"),
+        ({"shrinkage": False}, "shrinkage"),
+        ({"shrinkage": np.bool_(True)}, "shrinkage"),
+        ({"epsilon": True}, "epsilon"),
+        ({"epsilon": np.asarray(True)}, "epsilon"),
+    ],
+)
+def test_source_centroid_config_rejects_boolean_numeric_values(kwargs, field) -> None:
+    with pytest.raises(ValueError, match=field):
+        source_centroid_config(**kwargs)
+
+
 def test_source_centroid_string_false_disables_diagonal_scale() -> None:
     source_features = np.asarray([[0.0, 10.0], [1.0, 12.0], [5.0, 20.0], [6.0, 22.0]], dtype=float)
     source_labels = np.asarray(["a", "a", "b", "b"], dtype=object)
