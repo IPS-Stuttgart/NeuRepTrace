@@ -517,3 +517,60 @@ def test_probability_stacking_cli_writes_observations_and_metrics(tmp_path: Path
     assert not metrics.empty
     assert "source_oof_weights" in metrics.columns
     assert {"top2_accuracy", "top3_accuracy", "brier", "ece"}.issubset(metrics.columns)
+
+
+def test_fit_source_oof_stacking_rejects_boolean_source_labels() -> None:
+    cube = np.array(
+        [
+            [[0.9, 0.1], [0.1, 0.9]],
+            [[0.6, 0.4], [0.4, 0.6]],
+        ]
+    )
+
+    with pytest.raises(ValueError, match="source_labels values must be numeric, not boolean"):
+        fit_source_oof_stacking(cube, [False, True], candidates=("strong", "weak"))
+
+
+def test_fit_stacking_weights_rejects_boolean_probability_cube() -> None:
+    cube = np.array(
+        [
+            [[True, False], [0.1, 0.9]],
+            [[0.6, 0.4], [0.4, 0.6]],
+        ],
+        dtype=object,
+    )
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="Probability values must be numeric, not boolean"):
+        fit_stacking_weights(cube, labels)
+
+
+def test_stack_probability_observations_rejects_boolean_probability_values() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    source[["prob_class_0", "prob_class_1"]] = source[["prob_class_0", "prob_class_1"]].astype(object)
+    source.loc[0, ["prob_class_0", "prob_class_1"]] = [True, False]
+
+    with pytest.raises(ValueError, match="Probability values must be numeric, not boolean"):
+        stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+
+def test_stack_probability_observations_rejects_boolean_target_labels() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    target["true_label"] = target["true_label"].astype(object)
+    target.loc[target["sample_index"] == 1, "true_label"] = True
+
+    with pytest.raises(ValueError, match="target true_label values must be numeric, not boolean"):
+        stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+
+
+def test_summarize_stacked_metrics_rejects_boolean_probability_values() -> None:
+    source = _observation_rows(subject="source", labels=[0, 1, 0, 1, 0, 1])
+    target = _observation_rows(subject="target", labels=[0, 1, 0])
+    stacked = stack_probability_observations(source, target, weighting="stacked", max_iter=120)
+    stacked[["prob_class_0", "prob_class_1"]] = stacked[["prob_class_0", "prob_class_1"]].astype(object)
+    stacked.loc[0, ["prob_class_0", "prob_class_1"]] = [True, False]
+
+    with pytest.raises(ValueError, match="Probability values must be numeric, not boolean"):
+        summarize_stacked_metrics(stacked)
