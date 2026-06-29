@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+
 import numpy as np
 import pandas as pd
 
@@ -65,7 +67,7 @@ def _summarize_global_metrics(ps, observations: pd.DataFrame) -> pd.DataFrame:
     label_values = ps._label_values(prob_columns)
     label_value_set = set(label_values)
     probabilities = ps._validate_probability_matrix(
-        observations.loc[:, list(prob_columns)].to_numpy(dtype=float),
+        observations.loc[:, list(prob_columns)].to_numpy(),
         context="Probability values for global metric summary",
     )
     true_label_values = ps._integer_label_array(observations["true_label"], name="true_label")
@@ -97,11 +99,18 @@ def _summarize_global_metrics(ps, observations: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame([row])
 
 
+def _install_bool_validation_patch() -> None:
+    """Install boolean validators after the final metric-summary wrapper."""
+
+    importlib.import_module("neureptrace._probability_stacking_bool_validation_patch").install()
+
+
 def install() -> None:
     """Install probability-stacking metric wrappers once."""
 
     global _INSTALLED, _ORIGINAL_SUMMARIZE_STACKED_METRICS
     if _INSTALLED:
+        _install_bool_validation_patch()
         return
 
     from neureptrace import probability_stacking as ps
@@ -120,3 +129,4 @@ def install() -> None:
     _summarize_stacked_metrics.__doc__ = _ORIGINAL_SUMMARIZE_STACKED_METRICS.__doc__
     ps.summarize_stacked_metrics = _summarize_stacked_metrics
     _INSTALLED = True
+    _install_bool_validation_patch()
