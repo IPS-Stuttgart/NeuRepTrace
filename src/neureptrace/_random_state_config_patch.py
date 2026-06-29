@@ -43,7 +43,10 @@ def _normalize_optional_nonnegative_int(
 ) -> int | None:
     if _is_none_random_state(value):
         return None
-    return normalizer(_scalar_random_state_value(value, name=name), name=name)
+    scalar_value = _scalar_random_state_value(value, name=name)
+    if _is_none_random_state(scalar_value):
+        return None
+    return normalizer(scalar_value, name=name)
 
 
 def _patch_feature_mixstyle() -> None:

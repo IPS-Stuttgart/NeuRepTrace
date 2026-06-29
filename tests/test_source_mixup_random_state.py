@@ -13,8 +13,12 @@ def test_source_mixup_config_rejects_negative_random_state() -> None:
 
 
 def test_source_mixup_config_accepts_none_random_state_strings() -> None:
-    assert source_mixup.source_mixup_config(random_state="none").random_state is None
-    assert source_mixup.source_mixup_config(random_state="null").random_state is None
+    for value in ["none", "null", np.asarray("none")]:
+        assert source_mixup.source_mixup_config(random_state=value).random_state is None
+
+
+def test_source_mixup_config_accepts_scalar_array_random_state() -> None:
+    assert source_mixup.source_mixup_config(random_state=np.asarray(7)).random_state == 7
 
 
 def test_source_mixup_dataclass_config_rejects_negative_random_state_before_rng() -> None:
