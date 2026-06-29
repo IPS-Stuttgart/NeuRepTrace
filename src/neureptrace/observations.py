@@ -69,6 +69,37 @@ def _value_at(values: Sequence[object] | np.ndarray | pd.Series | None, index: i
     return value
 
 
+def _validate_class_indices(values: np.ndarray, *, n_classes: int, name: str) -> None:
+    if values.size == 0:
+        return
+    valid = (values >= 0) & (values < n_classes)
+    if not bool(np.all(valid)):
+        raise ValueError(f"{name} must contain class indices in [0, {n_classes - 1}].")
+
+
+def _validate_nonnegative_indices(values: np.ndarray, *, name: str) -> None:
+    if not bool(np.all(values >= 0)):
+        raise ValueError(f"{name} must contain non-negative row indices.")
+
+
+def _validate_lookup_bounds(indices: np.ndarray, *, lookup_length: int, index_name: str, lookup_name: str) -> None:
+    if indices.size == 0:
+        return
+    max_index = int(indices.max(initial=-1))
+    if max_index >= int(lookup_length):
+        raise ValueError(f"{index_name} contains an index outside {lookup_name}: max {max_index} >= length {lookup_length}.")
+
+
+def _validate_optional_lookup_bounds(indices: np.ndarray, values: Sequence[object] | np.ndarray | pd.Series | None, *, lookup_name: str) -> None:
+    if values is None:
+        return
+    try:
+        lookup_length = len(values)
+    except TypeError as exc:
+        raise ValueError(f"{lookup_name} must be an indexable sequence.") from exc
+    _validate_lookup_bounds(indices, lookup_length=lookup_length, index_name="test_indices", lookup_name=lookup_name)
+
+
 def _empty_or_missing(series: pd.Series) -> pd.Series:
     missing = series.isna()
     missing |= series.astype(object).astype(str).eq("")
@@ -141,9 +172,18 @@ class ProbabilityObservationTable:
             raise ValueError("probabilities, labels, predictions, and test_indices must contain the same number of samples.")
         if probabilities.shape[1] != len(class_names):
             raise ValueError("class_names must match the number of probability columns.")
+        n_classes = probabilities.shape[1]
+        _validate_class_indices(test_labels, n_classes=n_classes, name="test_labels")
+        _validate_class_indices(predictions, n_classes=n_classes, name="predictions")
+        _validate_nonnegative_indices(test_indices, name="test_indices")
         if original_indices is None:
             original_indices = np.arange(int(test_indices.max(initial=-1)) + 1)
         original_indices = np.asarray(original_indices)
+        if original_indices.ndim == 0:
+            raise ValueError("original_indices must be an indexable sequence.")
+        _validate_lookup_bounds(test_indices, lookup_length=len(original_indices), index_name="test_indices", lookup_name="original_indices")
+        _validate_optional_lookup_bounds(test_indices, session_values, lookup_name="session_values")
+        _validate_optional_lookup_bounds(test_indices, group_values, lookup_name="group_values")
 
         rows: list[dict[str, object]] = []
         for local_position, filtered_index in enumerate(test_indices):
