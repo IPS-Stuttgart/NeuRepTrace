@@ -139,6 +139,7 @@ from . import (  # noqa: E402
     _source_mixup_random_state_patch,
     _source_mixstyle_tuple_labels_patch,
     _source_mixstyle_tuple_vectors_patch,
+    _source_quantile_bin_dtype_patch,
     _source_selection_class_balance_patch,
     _source_selection_composite_ids_patch,
     _source_selection_optional_bounds_patch,
@@ -294,6 +295,7 @@ _source_mixup_boolean_config_patch.install()
 _source_mixup_random_state_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
 _source_mixstyle_tuple_vectors_patch.install()
+_source_quantile_bin_dtype_patch.install()
 _random_state_config_patch.install()
 _reaction_time_trial_index_base_patch.install()
 _reaction_time_trial_value_type_patch.install()
