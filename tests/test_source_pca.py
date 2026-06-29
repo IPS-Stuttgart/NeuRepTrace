@@ -97,6 +97,31 @@ def test_source_pca_config_parses_string_booleans() -> None:
         source_pca_config(center="maybe")
 
 
+def test_source_pca_boolean_config_parses_cli_style_values() -> None:
+    cfg = source_pca_config(center="false", scale="TRUE", whiten="0")
+
+    assert cfg.center is False
+    assert cfg.scale is True
+    assert cfg.whiten is False
+
+    result = fit_source_pca_transform(
+        source_features=[[0.0], [1.0], [2.0]],
+        test_features=[[0.5]],
+        config={"n_components": 1, "center": "false", "scale": 0, "whiten": 1},
+    )
+
+    assert result.metadata["source_pca_center"] is False
+    assert result.metadata["source_pca_scale"] is False
+    assert result.metadata["source_pca_whiten"] is True
+
+
+@pytest.mark.parametrize("field", ["center", "scale", "whiten"])
+@pytest.mark.parametrize("bad_value", ["maybe", 2, 0.5, np.asarray([True, False])])
+def test_source_pca_rejects_ambiguous_boolean_config(field: str, bad_value: object) -> None:
+    with pytest.raises(ValueError, match=field):
+        source_pca_config(**{field: bad_value})
+
+
 def test_source_pca_revalidates_direct_config_instances() -> None:
     with pytest.raises(ValueError, match="epsilon"):
         fit_source_pca_transform(source_features=[[0.0], [1.0]], test_features=[[0.5]], config=SourcePCAConfig(epsilon=0.0))
