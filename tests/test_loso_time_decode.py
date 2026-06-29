@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from neureptrace.loso_time_decode import run_loso_time_decode
+from neureptrace.loso_time_decode import _feasible_source_cv_splits, run_loso_time_decode
 
 
 @dataclass
@@ -110,6 +110,26 @@ def test_loso_time_decode_selects_source_validated_train_window(tmp_path: Path, 
     assert source_scores.exists()
     assert set(scores["outer_group"]) == {"s1", "s2", "s3", "s4"}
     assert scores.loc[scores.groupby("outer_group")["source_select_score"].idxmax(), "train_time"].round(6).tolist() == [0.005] * 4
+
+
+def test_loso_source_cv_rejects_class_isolated_source_groups() -> None:
+    labels = np.array([0, 0, 0, 1, 1, 1])
+    groups = np.array(["only_a", "only_a", "only_a", "b", "c", "c"])
+
+    with pytest.raises(ValueError, match="at least two source groups"):
+        list(_feasible_source_cv_splits(labels, groups, 2))
+
+
+def test_loso_source_cv_grouped_splits_keep_all_classes_in_training_folds() -> None:
+    labels = np.array([0, 1, 0, 1, 0, 1, 0, 1])
+    groups = np.array(["s1", "s1", "s2", "s2", "s3", "s3", "s4", "s4"])
+
+    splits = list(_feasible_source_cv_splits(labels, groups, 4))
+
+    assert len(splits) == 4
+    for train_indices, val_indices in splits:
+        assert set(labels[train_indices].tolist()) == {0, 1}
+        assert set(labels[val_indices].tolist()) == {0, 1}
 
 
 def test_loso_time_decode_can_restrict_heldout_groups(tmp_path: Path, monkeypatch):
