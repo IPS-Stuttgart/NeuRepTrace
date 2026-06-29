@@ -97,22 +97,24 @@ def selective_predict(
     coverage_requested = None if target_coverage is None else _open_unit_interval_float(target_coverage, name="target_coverage", include_one=True)
     if coverage_requested is not None:
         threshold = confidence_threshold_for_coverage(confidence, target_coverage=coverage_requested)
+    max_entropy_threshold = None if max_entropy is None else _nonnegative_float(max_entropy, name="max_entropy")
+    min_margin_threshold = None if min_margin is None else _unit_interval_float(min_margin, name="min_margin")
 
     selected = np.ones(probs.shape[0], dtype=bool)
     if threshold is not None:
         selected &= confidence >= threshold
-    if max_entropy is not None:
-        selected &= entropy <= _nonnegative_float(max_entropy, name="max_entropy")
-    if min_margin is not None:
-        selected &= margin >= _unit_interval_float(min_margin, name="min_margin")
+    if max_entropy_threshold is not None:
+        selected &= entropy <= max_entropy_threshold
+    if min_margin_threshold is not None:
+        selected &= margin >= min_margin_threshold
 
     metadata = _metadata(
         n_rows=probs.shape[0],
         n_classes=probs.shape[1],
         selected_count=int(np.count_nonzero(selected)),
         confidence_threshold=threshold,
-        max_entropy=max_entropy,
-        min_margin=min_margin,
+        max_entropy=max_entropy_threshold,
+        min_margin=min_margin_threshold,
         target_coverage=coverage_requested,
     )
     return SelectivePredictionResult(
@@ -148,8 +150,9 @@ def normalize_probability_rows(probabilities: Sequence[Sequence[float]] | np.nda
 def probability_entropy(probabilities: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float = DEFAULT_EPSILON) -> np.ndarray:
     """Return row-wise Shannon entropy."""
 
-    probs = normalize_probability_rows(probabilities, epsilon=epsilon)
-    return -np.sum(probs * np.log(np.maximum(probs, float(epsilon))), axis=1)
+    eps = _positive_float(epsilon, name="epsilon")
+    probs = normalize_probability_rows(probabilities, epsilon=eps)
+    return -np.sum(probs * np.log(np.maximum(probs, eps)), axis=1)
 
 
 def probability_margin(probabilities: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
@@ -189,8 +192,8 @@ def _metadata(
     n_classes: int,
     selected_count: int,
     confidence_threshold: float | None,
-    max_entropy: float | str | None,
-    min_margin: float | str | None,
+    max_entropy: float | None,
+    min_margin: float | None,
     target_coverage: float | None,
 ) -> dict[str, Any]:
     adaptive = target_coverage is not None
@@ -245,7 +248,7 @@ def _open_unit_interval_float(value: float | str, *, name: str, include_one: boo
 
 
 def _float_value(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
         raise ValueError(f"{name} must be finite.")
     try:
         parsed = float(value)
