@@ -10,6 +10,30 @@ from typing import Any
 
 from neureptrace.datasets.spec import DatasetFile
 
+_TRUE_BOOL_TOKENS = {"1", "true", "yes", "on"}
+_FALSE_BOOL_TOKENS = {"", "0", "false", "no", "off", "none", "null"}
+
+
+def _normalize_bool(raw_value: Any, *, name: str) -> bool:
+    """Normalize dataset-spec booleans without treating non-empty strings as true."""
+
+    if isinstance(raw_value, bool):
+        return raw_value
+    if raw_value is None:
+        return False
+    if isinstance(raw_value, Integral):
+        if int(raw_value) in {0, 1}:
+            return bool(raw_value)
+        raise ValueError(f"{name} must be a boolean value, not {raw_value!r}.")
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in _TRUE_BOOL_TOKENS:
+            return True
+        if normalized in _FALSE_BOOL_TOKENS:
+            return False
+        raise ValueError(f"{name} must be a boolean value, not {raw_value!r}.")
+    raise ValueError(f"{name} must be a boolean value, not {type(raw_value).__name__}.")
+
 
 def _normalize_index_path(raw_index_path: Any) -> tuple[int, ...]:
     """Normalize ``matlab.index_path`` without lossy truthiness or string iteration."""
@@ -70,13 +94,13 @@ def load_matlab_struct_recording(dataset_file: DatasetFile, spec: Mapping[str, A
 
     variable = str(matlab.get("variable", "data"))
     raw_index_path = matlab.get("index_path")
-    if raw_index_path is None and bool(matlab.get("squeeze_first_element", False)):
+    if raw_index_path is None and _normalize_bool(matlab.get("squeeze_first_element", False), name="matlab.squeeze_first_element"):
         raw_index_path = [0]
     index_path = _normalize_index_path(raw_index_path)
     return load_matlab_struct(
         dataset_file.path,
         variable=variable,
         index_path=index_path,
-        squeeze_me=bool(matlab.get("squeeze_me", False)),
-        struct_as_record=bool(matlab.get("struct_as_record", False)),
+        squeeze_me=_normalize_bool(matlab.get("squeeze_me", False), name="matlab.squeeze_me"),
+        struct_as_record=_normalize_bool(matlab.get("struct_as_record", False), name="matlab.struct_as_record"),
     )
