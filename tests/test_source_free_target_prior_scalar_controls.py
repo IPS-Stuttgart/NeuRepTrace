@@ -28,8 +28,8 @@ def test_target_prior_scalar_controls_accept_numpy_numeric_scalars():
     corrected, prior = apply_target_prior_correction(
         _PROBABILITIES,
         strength=np.float64(0.5),
-        smoothing=np.array(0.25),
-        floor=np.array(0.01),
+        smoothing=np.float64(0.25),
+        floor=np.float64(0.01),
     )
 
     assert corrected.shape == _PROBABILITIES.shape
