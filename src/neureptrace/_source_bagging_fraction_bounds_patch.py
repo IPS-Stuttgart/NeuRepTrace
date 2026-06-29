@@ -117,4 +117,6 @@ def install() -> None:
         source_bagging._coerce_config = _coerce_config
 
 
+install()
+
 __all__ = ["install"]
