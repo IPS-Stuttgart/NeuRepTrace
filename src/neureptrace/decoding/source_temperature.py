@@ -1,0 +1,174 @@
+"""Strict source-only probability temperature scaling.
+
+This module fits a single scalar temperature from source validation probability
+rows and source labels, then applies the fixed temperature to held-out probability
+rows.  It is a Protocol-1 calibration helper: held-out probabilities are
+transformed but never used to fit the temperature.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+
+SOURCE_TEMPERATURE_PROTOCOL = "strict_source_only_probability_temperature"
+SOURCE_TEMPERATURE_CATEGORY = "1_strict_source_only"
+DEFAULT_TEMPERATURE_GRID = (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0)
+DEFAULT_EPSILON = 1e-12
+
+
+@dataclass(frozen=True, slots=True)
+class SourceTemperatureConfig:
+    """Configuration for source-only temperature selection."""
+
+    temperatures: tuple[float, ...] = DEFAULT_TEMPERATURE_GRID
+    epsilon: float = DEFAULT_EPSILON
+
+
+@dataclass(frozen=True, slots=True)
+class SourceTemperatureResult:
+    """Temperature-scaled probabilities and provenance metadata."""
+
+    probabilities: np.ndarray
+    temperature: float
+    source_losses: Mapping[float, float]
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def fit_source_temperature_scaling(
+    *,
+    source_probabilities: Sequence[Sequence[float]] | np.ndarray,
+    source_labels: Sequence[Any] | np.ndarray,
+    test_probabilities: Sequence[Sequence[float]] | np.ndarray,
+    classes: Sequence[Any] | np.ndarray | None = None,
+    config: SourceTemperatureConfig | Mapping[str, Any] | None = None,
+) -> SourceTemperatureResult:
+    """Fit temperature on source rows and apply it to held-out probabilities."""
+
+    cfg = source_temperature_config() if config is None else _coerce_config(config)
+    source = _probability_matrix(source_probabilities, name="source_probabilities", epsilon=cfg.epsilon)
+    test = _probability_matrix(test_probabilities, name="test_probabilities", epsilon=cfg.epsilon)
+    if source.shape[1] != test.shape[1]:
+        raise ValueError(f"source_probabilities and test_probabilities must have the same class width: {source.shape[1]} != {test.shape[1]}.")
+    labels = np.asarray(source_labels, dtype=object).reshape(-1)
+    if labels.shape[0] != source.shape[0]:
+        raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {source.shape[0]}.")
+    class_values = _classes(labels, classes, n_classes=source.shape[1])
+    label_index = np.asarray([_class_to_index(class_values)[label] for label in labels.tolist()], dtype=int)
+    losses = {temperature: negative_log_likelihood(apply_temperature(source, temperature=temperature, epsilon=cfg.epsilon), label_index, epsilon=cfg.epsilon) for temperature in cfg.temperatures}
+    best_temperature = min(losses, key=lambda value: (losses[value], value))
+    scaled = apply_temperature(test, temperature=best_temperature, epsilon=cfg.epsilon)
+    return SourceTemperatureResult(
+        probabilities=scaled.astype(np.float32, copy=False),
+        temperature=float(best_temperature),
+        source_losses={float(key): float(value) for key, value in losses.items()},
+        metadata=_metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], n_classes=source.shape[1], temperature=best_temperature),
+    )
+
+
+def apply_temperature(probabilities: Sequence[Sequence[float]] | np.ndarray, *, temperature: float | str, epsilon: float = DEFAULT_EPSILON) -> np.ndarray:
+    """Apply scalar temperature to probability rows."""
+
+    matrix = _probability_matrix(probabilities, name="probabilities", epsilon=epsilon)
+    temp = _positive_float(temperature, name="temperature")
+    logits = np.log(np.maximum(matrix, float(epsilon))) / temp
+    logits = logits - np.max(logits, axis=1, keepdims=True)
+    exp_logits = np.exp(np.clip(logits, -80.0, 80.0))
+    return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+
+
+def negative_log_likelihood(probabilities: Sequence[Sequence[float]] | np.ndarray, labels: Sequence[int] | np.ndarray, *, epsilon: float = DEFAULT_EPSILON) -> float:
+    """Return mean negative log likelihood for integer label indices."""
+
+    matrix = _probability_matrix(probabilities, name="probabilities", epsilon=epsilon)
+    indices = np.asarray(labels, dtype=int).reshape(-1)
+    if indices.shape[0] != matrix.shape[0]:
+        raise ValueError("labels must contain one value per probability row.")
+    if np.any(indices < 0) or np.any(indices >= matrix.shape[1]):
+        raise ValueError("labels contain class indices outside the probability width.")
+    return float(-np.mean(np.log(np.maximum(matrix[np.arange(matrix.shape[0]), indices], float(epsilon)))))
+
+
+def source_temperature_config(
+    *,
+    temperatures: Sequence[float] | str = DEFAULT_TEMPERATURE_GRID,
+    epsilon: float | str = DEFAULT_EPSILON,
+) -> SourceTemperatureConfig:
+    """Normalize source-temperature options."""
+
+    if isinstance(temperatures, str):
+        values = tuple(float(part.strip()) for part in temperatures.replace(";", ",").split(",") if part.strip())
+    else:
+        values = tuple(float(value) for value in temperatures)
+    if not values:
+        raise ValueError("temperatures must contain at least one value.")
+    if not all(np.isfinite(value) and value > 0.0 for value in values):
+        raise ValueError("temperatures must contain positive finite values.")
+    return SourceTemperatureConfig(temperatures=values, epsilon=_positive_float(epsilon, name="epsilon"))
+
+
+def _coerce_config(config: SourceTemperatureConfig | Mapping[str, Any]) -> SourceTemperatureConfig:
+    if isinstance(config, SourceTemperatureConfig):
+        return config
+    return source_temperature_config(**dict(config))
+
+
+def _classes(labels: np.ndarray, classes: Sequence[Any] | np.ndarray | None, *, n_classes: int) -> np.ndarray:
+    if classes is None:
+        values = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+    else:
+        values = np.asarray(classes, dtype=object).reshape(-1)
+    if values.shape[0] != n_classes:
+        raise ValueError(f"classes must contain one value per probability column: {values.shape[0]} != {n_classes}.")
+    if len(set(values.tolist())) != values.shape[0]:
+        raise ValueError("classes must be unique.")
+    missing = sorted({label for label in labels.tolist() if label not in set(values.tolist())}, key=repr)
+    if missing:
+        raise ValueError(f"source_labels contain labels absent from classes: {missing}.")
+    return values
+
+
+def _class_to_index(classes: np.ndarray) -> dict[Any, int]:
+    return {label: index for index, label in enumerate(classes.tolist())}
+
+
+def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
+    matrix = np.asarray(values, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
+        raise ValueError(f"{name} must be a non-empty two-dimensional matrix with at least two columns.")
+    if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
+        raise ValueError(f"{name} must contain finite non-negative values.")
+    row_sums = np.sum(matrix, axis=1, keepdims=True)
+    if np.any(row_sums <= float(epsilon)):
+        raise ValueError(f"{name} rows must have positive probability mass.")
+    return matrix / row_sums
+
+
+def _metadata(cfg: SourceTemperatureConfig, *, n_source_rows: int, n_test_rows: int, n_classes: int, temperature: float) -> dict[str, Any]:
+    return {
+        "source_temperature_scaling": True,
+        "source_temperature_protocol": SOURCE_TEMPERATURE_PROTOCOL,
+        "source_temperature_protocol_category": SOURCE_TEMPERATURE_CATEGORY,
+        "source_temperature_uses_source_probabilities": True,
+        "source_temperature_uses_source_labels": True,
+        "source_temperature_uses_test_probabilities_for_fitting": False,
+        "source_temperature_uses_test_labels": False,
+        "source_temperature_valid_for_strict_source_only": True,
+        "source_temperature_valid_for_benchmark": True,
+        "source_temperature_n_source_rows": int(n_source_rows),
+        "source_temperature_n_test_rows": int(n_test_rows),
+        "source_temperature_n_classes": int(n_classes),
+        "source_temperature_selected": float(temperature),
+        "source_temperature_grid": "|".join(f"{value:.12g}" for value in cfg.temperatures),
+        "source_temperature_epsilon": float(cfg.epsilon),
+    }
+
+
+def _positive_float(value: float | str, *, name: str) -> float:
+    parsed = float(value)
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return parsed
