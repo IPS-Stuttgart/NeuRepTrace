@@ -101,6 +101,35 @@ def test_compare_prediction_frames_does_not_count_unmatched_rows_as_true_label_m
     assert diagnostic_values["true_label_mismatch_rows"] == 0
 
 
+def test_compare_prediction_frames_disambiguates_repeated_trials_by_fold():
+    reference = pd.DataFrame(
+        {
+            "outer_test_subject": ["s1", "s1"],
+            "trial_index": [0, 0],
+            "fold_index": [1, 2],
+            "true_label": [0, 1],
+            "predicted_label": [0, 1],
+        }
+    )
+    candidate = pd.DataFrame(
+        {
+            "outer_test_subject": ["s1", "s1"],
+            "trial_index": [0, 0],
+            "fold_index": [1, 2],
+            "true_label": [0, 1],
+            "predicted_label": [0, 1],
+        }
+    )
+
+    diagnostics, _ = compare_prediction_frames(reference, candidate)
+    diagnostic_values = dict(zip(diagnostics["diagnostic"], diagnostics["value"], strict=True))
+
+    assert diagnostic_values["matched_prediction_rows"] == 2
+    assert diagnostic_values["reference_only_rows"] == 0
+    assert diagnostic_values["candidate_only_rows"] == 0
+    assert diagnostic_values["true_label_mismatch_rows"] == 0
+
+
 def test_compare_prediction_frames_uses_only_common_recall_group_columns():
     reference = pd.DataFrame(
         {
