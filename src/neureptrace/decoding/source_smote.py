@@ -19,6 +19,7 @@ from neureptrace._object_label_utils import label_counts, label_equal_mask
 SOURCE_SMOTE_AUGMENTATION = "source_smote"
 SOURCE_SMOTE_PROTOCOL = "strict_source_only_smote_interpolation"
 SOURCE_SMOTE_CATEGORY = "1_strict_source_only"
+_NONE_RANDOM_STATE_TOKENS = {"", "none", "null"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,7 +185,7 @@ def source_smote_config(
     synthetic_per_class: int | str = 0,
     cross_domain_partner: bool | int | str = True,
     preserve_original: bool | int | str = True,
-    random_state: int | str | None = 13,
+    random_state: Any = 13,
     jitter_std: float | str = 0.0,
 ) -> SourceSmoteConfig:
     """Normalize public source-SMOTE options."""
@@ -193,9 +194,38 @@ def source_smote_config(
         synthetic_per_class=_nonnegative_int(synthetic_per_class, name="synthetic_per_class"),
         cross_domain_partner=_bool_value(cross_domain_partner, name="cross_domain_partner"),
         preserve_original=_bool_value(preserve_original, name="preserve_original"),
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
+        random_state=_normalize_optional_random_state(random_state, name="random_state"),
         jitter_std=_nonnegative_float(jitter_std, name="jitter_std"),
     )
+
+
+def _random_state_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be a non-negative integer or none.")
+
+
+def _is_none_like_random_state(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _NONE_RANDOM_STATE_TOKENS
+    return False
+
+
+def _normalize_optional_random_state(value: Any, *, name: str) -> int | None:
+    if _is_none_like_random_state(value):
+        return None
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise _random_state_error(name)
+        value = value.item()
+        if _is_none_like_random_state(value):
+            return None
+    if isinstance(value, (list, tuple, dict, set)):
+        raise _random_state_error(name)
+    try:
+        return _nonnegative_int(value, name=name)
+    except ValueError as exc:
+        raise _random_state_error(name) from exc
 
 
 def _coerce_config(config: SourceSmoteConfig | Mapping[str, Any]) -> SourceSmoteConfig:
