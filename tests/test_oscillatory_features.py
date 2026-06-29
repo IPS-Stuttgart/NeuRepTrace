@@ -63,6 +63,23 @@ def test_compute_band_features_rejects_boolean_window_endpoints(window) -> None:
         compute_band_features(data, time, windows=[window])
 
 
+@pytest.mark.parametrize(
+    "window",
+    [
+        (np.asarray(-0.25), 0.25),
+        (-0.25, np.asarray([0.25])),
+        ("named", np.asarray([-0.25]), 0.25),
+        {"name": "mapped", "start": -0.25, "stop": np.asarray([[0.25]])},
+        BandFeatureWindow("dataclass", np.asarray(-0.25), 0.25),
+    ],
+)
+def test_compute_band_features_rejects_array_window_endpoints(window) -> None:
+    data, time = _fixture()
+
+    with pytest.raises(ValueError, match="window .* must be"):
+        compute_band_features(data, time, windows=[window])
+
+
 def test_compute_band_analytic_window_accepts_matlab_row_time_axis() -> None:
     data, time = _fixture()
 
