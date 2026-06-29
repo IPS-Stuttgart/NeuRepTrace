@@ -133,3 +133,9 @@ def install() -> None:
     finder = _LoRAFewShotNumericConfigPatchFinder()
     setattr(finder, _FINDER_MARKER, True)
     sys.meta_path.insert(0, finder)
+
+
+__all__ = ["install"]
+
+# Imported by neureptrace.__init__ for runtime guardrail registration.
+install()
