@@ -124,6 +124,7 @@ def install() -> None:
     @wraps(original_fit_stacking_weights)
     def fit_stacking_weights(probability_cube: Any, labels: Any, *args: Any, **kwargs: Any):
         _reject_boolean_probabilities(probability_cube)
+        _reject_boolean_label_values(labels, name="labels")
         return original_fit_stacking_weights(probability_cube, labels, *args, **kwargs)
 
     original_fit_source_oof_stacking = ps.fit_source_oof_stacking
