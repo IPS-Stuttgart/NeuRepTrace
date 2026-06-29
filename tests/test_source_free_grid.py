@@ -54,7 +54,11 @@ def test_source_free_grid_can_rank_balanced_topk_variants():
     assert result.metadata["source_free_uses_target_labels"] is False
 
 
-def test_source_free_grid_rejects_boolean_prior_strength():
+@pytest.mark.parametrize(
+    "prior_strength",
+    [True, np.bool_(True), np.asarray(True), np.array([False]), np.array([0.5])],
+)
+def test_source_free_grid_rejects_invalid_prior_strength_scalars(prior_strength):
     target_features = np.vstack([np.full((2, 2), -1.0), np.full((2, 2), 1.0)])
 
     with pytest.raises(ValueError, match="prior_strength"):
@@ -64,7 +68,7 @@ def test_source_free_grid_rejects_boolean_prior_strength():
             max_iterations=0,
             prototype_weights=(0.0,),
             confidence_thresholds=(0.75,),
-            prior_strengths=(True,),
+            prior_strengths=(prior_strength,),
             pseudo_label_selections=("confidence",),
         )
 
