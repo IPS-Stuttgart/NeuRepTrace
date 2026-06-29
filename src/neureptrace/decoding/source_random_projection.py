@@ -119,16 +119,18 @@ def source_random_projection_config(
     """Normalize source-random-projection options."""
 
     return SourceRandomProjectionConfig(
-        n_components=n_components,
+        n_components=_normalize_components_option(n_components),
         distribution=normalize_projection_distribution(distribution),
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
-        density=density if isinstance(density, str) and density.strip().lower() == "auto" else _unit_interval_open_float(density, name="density"),
+        random_state=_optional_random_state(random_state),
+        density=_normalize_density_option(density),
     )
 
 
 def normalize_projection_distribution(value: str | None) -> str:
     """Normalize projection distribution aliases."""
 
+    if isinstance(value, np.ndarray):
+        raise ValueError("distribution must be a string, not a NumPy array.")
     normalized = "gaussian" if value is None else str(value).strip().lower().replace("-", "_")
     normalized = {"normal": "gaussian", "dense": "gaussian", "achlioptas": "sparse"}.get(normalized, normalized)
     if normalized not in PROJECTION_DISTRIBUTIONS:
@@ -138,7 +140,12 @@ def normalize_projection_distribution(value: str | None) -> str:
 
 def _coerce_config(config: SourceRandomProjectionConfig | Mapping[str, Any]) -> SourceRandomProjectionConfig:
     if isinstance(config, SourceRandomProjectionConfig):
-        return config
+        return source_random_projection_config(
+            n_components=config.n_components,
+            distribution=config.distribution,
+            random_state=config.random_state,
+            density=config.density,
+        )
     return source_random_projection_config(**dict(config))
 
 
@@ -164,17 +171,39 @@ def _metadata(cfg: SourceRandomProjectionConfig, *, n_source_rows: int, n_test_r
     }
 
 
+def _normalize_components_option(value: int | str) -> int | str:
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"all", "full"}:
+            return text
+        return _positive_int(text, name="n_components")
+    return _positive_int(value, name="n_components")
+
+
+def _optional_random_state(value: int | str | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"", "none"}:
+        return None
+    return _nonnegative_int(value, name="random_state")
+
+
+def _normalize_density_option(value: float | str) -> float | str:
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text == "auto":
+            return "auto"
+        value = text
+    return _unit_interval_open_float(value, name="density")
+
+
 def _resolve_components(value: int | str, *, n_features: int) -> int:
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"all", "full"}:
             return int(n_features)
-        requested = float(text)
-    else:
-        requested = float(value)
-    if not np.isfinite(requested) or requested % 1.0 != 0.0 or requested < 1:
-        raise ValueError("n_components must be a positive integer, 'all', or 'full'.")
-    return int(requested)
+        return _positive_int(text, name="n_components")
+    return _positive_int(value, name="n_components")
 
 
 def _resolve_density(value: float | str, *, n_features: int) -> float:
@@ -195,22 +224,33 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _numeric_scalar(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a numeric scalar, not a boolean.")
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be a numeric scalar, not a NumPy array.")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a numeric scalar.") from exc
+
+
 def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    parsed = _numeric_scalar(value, name=name)
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    parsed = _numeric_scalar(value, name=name)
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 0:
         raise ValueError(f"{name} must be a non-negative integer.")
     return int(parsed)
 
 
 def _unit_interval_open_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    parsed = _numeric_scalar(value, name=name)
     if not np.isfinite(parsed) or parsed <= 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in (0, 1].")
     return parsed
