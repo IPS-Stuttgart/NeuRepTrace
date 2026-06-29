@@ -130,3 +130,29 @@ def test_heldout_labels_are_not_part_of_public_api() -> None:
             test_probabilities=[[0.5, 0.5]],
             heldout_labels=[0],  # type: ignore[call-arg]
         )
+
+
+def test_fit_source_temperature_scaling_preserves_tuple_labels_and_classes() -> None:
+    source_probabilities = np.asarray(
+        [
+            [0.90, 0.10],
+            [0.80, 0.20],
+            [0.20, 0.80],
+            [0.10, 0.90],
+        ],
+        dtype=float,
+    )
+    source_labels = [("face", 1), ("face", 1), ("scene", 2), ("scene", 2)]
+    test_probabilities = np.asarray([[0.65, 0.35], [0.25, 0.75]], dtype=float)
+
+    result = fit_source_temperature_scaling(
+        source_probabilities=source_probabilities,
+        source_labels=source_labels,
+        test_probabilities=test_probabilities,
+        classes=[("face", 1), ("scene", 2)],
+        config={"temperatures": [0.5, 1.0, 2.0]},
+    )
+
+    assert result.probabilities.shape == (2, 2)
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+    assert set(result.source_losses) == {0.5, 1.0, 2.0}
