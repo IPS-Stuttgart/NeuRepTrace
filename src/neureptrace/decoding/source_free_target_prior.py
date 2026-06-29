@@ -251,11 +251,7 @@ def _coerce_scalar_float(value: Any, message: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(message)
     if isinstance(value, np.ndarray):
-        if value.ndim != 0:
-            raise ValueError(message)
-        value = value.item()
-        if isinstance(value, (bool, np.bool_)):
-            raise ValueError(message)
+        raise ValueError(message)
     elif isinstance(value, np.generic):
         value = value.item()
         if isinstance(value, (bool, np.bool_)):
