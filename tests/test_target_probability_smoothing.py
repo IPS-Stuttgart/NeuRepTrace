@@ -77,6 +77,44 @@ def test_config_aliases_and_validation() -> None:
         smooth_target_probabilities([[0.0], [1.0]], [[0.5, 0.5]])
 
 
+def test_config_accepts_numpy_numeric_scalars() -> None:
+    cfg = target_probability_smoothing_config(
+        alpha=np.float64(0.25),
+        gamma=np.float32(1.5),
+        n_neighbors=np.int64(2),
+        max_iter=np.int32(3),
+        tol=np.float64(1e-4),
+        epsilon=np.float32(1e-6),
+        standardize=np.bool_(False),
+    )
+
+    assert cfg.alpha == 0.25
+    assert cfg.gamma == pytest.approx(1.5)
+    assert cfg.n_neighbors == 2
+    assert cfg.max_iter == 3
+    assert cfg.tol == pytest.approx(1e-4)
+    assert cfg.epsilon == pytest.approx(1e-6)
+    assert cfg.standardize is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("alpha", True),
+        ("alpha", [0.5]),
+        ("gamma", np.asarray([1.0])),
+        ("n_neighbors", True),
+        ("n_neighbors", [1]),
+        ("max_iter", {"value": 2}),
+        ("tol", (1e-3,)),
+        ("epsilon", np.asarray(1e-12)),
+    ],
+)
+def test_config_rejects_bool_and_array_like_numeric_controls(field: str, value: object) -> None:
+    with pytest.raises(ValueError, match=field):
+        target_probability_smoothing_config(**{field: value})
+
+
 def test_target_labels_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
         smooth_target_probabilities(
