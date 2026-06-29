@@ -76,7 +76,8 @@ def _install_numeric_array_guards(source_free: Any) -> None:
         @wraps(original_bounded_float)
         def _bounded_float_checked(value: Any, name: str, *, lower: float, upper: float, include_upper: bool) -> float:
             if _is_array_like_scalar(value):
-                raise ValueError(f"{name} must be finite in [{lower}, {upper}{']' if include_upper else ')' }.")
+                closing = "]" if include_upper else ")"
+                raise ValueError(f"{name} must be finite in [{lower}, {upper}{closing}.")
             return original_bounded_float(value, name, lower=lower, upper=upper, include_upper=include_upper)
 
         setattr(_bounded_float_checked, _BOUNDED_FLOAT_ARRAY_PATCH_MARKER, True)
