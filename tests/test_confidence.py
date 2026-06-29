@@ -66,6 +66,24 @@ def test_confidence_guardrails() -> None:
         select_confident_rows([[0.5, 0.5]], min_confidence=1.5)
 
 
+def test_confidence_rejects_boolean_probability_inputs() -> None:
+    with pytest.raises(ValueError, match="booleans"):
+        confidence_scores(np.asarray([[True, False], [False, True]], dtype=bool))
+    with pytest.raises(ValueError, match="booleans"):
+        confidence_scores([[1.0, False]])
+
+
+def test_confidence_thresholds_must_be_numeric_scalars() -> None:
+    with pytest.raises(ValueError, match="min_confidence"):
+        select_confident_rows([[0.8, 0.2]], min_confidence=np.asarray(True))
+    with pytest.raises(ValueError, match="scalar"):
+        select_confident_rows([[0.8, 0.2]], min_margin=np.asarray([0.2, 0.3]))
+
+    result = select_confident_rows([[0.8, 0.2]], min_confidence=np.asarray(0.5))
+
+    assert result.accepted_mask.tolist() == [True]
+
+
 def test_selection_mask_must_match_rows() -> None:
     selection = select_confident_rows([[0.9, 0.1], [0.1, 0.9]])
     bad_selection = type(selection)(

@@ -92,7 +92,14 @@ def accepted_probability_rows(probabilities: Sequence[Sequence[float]] | np.ndar
     return matrix[mask].astype(np.float32, copy=False)
 
 
+def _contains_boolean_value(values: Any) -> bool:
+    array = np.asarray(values, dtype=object)
+    return any(isinstance(value, (bool, np.bool_)) for value in array.reshape(-1))
+
+
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+    if _contains_boolean_value(values):
+        raise ValueError("probabilities must contain numeric scores, not booleans.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a two-dimensional matrix with at least two columns.")
@@ -104,10 +111,24 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.nd
     return matrix / row_sums
 
 
-def _unit_interval(value: float | str, *, name: str) -> float:
+def _scalar_value(value: Any, *, name: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.shape == ():
+            return value.item()
+        if value.size == 1:
+            return value.reshape(-1)[0].item()
+        raise ValueError(f"{name} must be a scalar in [0, 1].")
+    return value
+
+
+def _unit_interval(value: float | str | np.ndarray, *, name: str) -> float:
+    value = _scalar_value(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be in [0, 1].")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be in [0, 1].") from exc
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
