@@ -68,6 +68,12 @@ def test_aliases_and_validation() -> None:
         source_feature_scale_config(epsilon=0.0)
 
 
+@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"epsilon": 1}])
+def test_source_scale_rejects_non_numeric_epsilon_values(value: object) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        source_feature_scale_config(epsilon=value)  # type: ignore[arg-type]
+
+
 def test_source_scale_rejects_width_mismatch_and_extra_labels() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_feature_scale(source_features=[[0.0, 1.0]], test_features=[[0.0]])
