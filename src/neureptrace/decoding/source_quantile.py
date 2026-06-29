@@ -15,6 +15,16 @@ _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
+def _bin_index_dtype(max_index: int) -> np.dtype:
+    """Return the narrowest signed integer dtype that can store ``max_index``."""
+
+    if max_index <= np.iinfo(np.int16).max:
+        return np.dtype(np.int16)
+    if max_index <= np.iinfo(np.int32).max:
+        return np.dtype(np.int32)
+    return np.dtype(np.int64)
+
+
 @dataclass(frozen=True, slots=True)
 class SourceQuantileClipResult:
     """Feature matrices clipped with source-fitted quantiles."""
@@ -196,9 +206,10 @@ def apply_source_quantile_bins(features, *, bin_edges):
         raise ValueError("bin_edges must be a two-dimensional matrix.")
     if matrix.shape[1] != edges.shape[1]:
         raise ValueError("features width must match source quantile bin edges.")
-    output = np.zeros(matrix.shape, dtype=np.int16)
+    dtype = _bin_index_dtype(edges.shape[0])
+    output = np.zeros(matrix.shape, dtype=dtype)
     for column in range(matrix.shape[1]):
-        output[:, column] = np.searchsorted(edges[:, column], matrix[:, column], side="right").astype(np.int16, copy=False)
+        output[:, column] = np.searchsorted(edges[:, column], matrix[:, column], side="right").astype(dtype, copy=False)
     return output
 
 
