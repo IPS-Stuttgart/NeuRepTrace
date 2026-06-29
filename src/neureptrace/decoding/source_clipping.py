@@ -154,7 +154,12 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _quantile(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a numeric quantile, not boolean.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be in [0, 1].") from exc
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed

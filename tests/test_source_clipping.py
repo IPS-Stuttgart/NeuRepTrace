@@ -67,6 +67,14 @@ def test_source_feature_clipping_config_aliases_and_validation() -> None:
         source_feature_clipping_config(copy="maybe")
 
 
+def test_source_feature_clipping_rejects_bool_quantiles() -> None:
+    with pytest.raises(ValueError, match="lower_quantile"):
+        source_feature_clipping_config(lower_quantile=False, upper_quantile=0.9)
+
+    with pytest.raises(ValueError, match="upper_quantile"):
+        source_feature_clipping_config(lower_quantile=0.1, upper_quantile=True)
+
+
 def test_source_feature_clipping_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_feature_clipping(
