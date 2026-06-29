@@ -215,15 +215,28 @@ def _boolean(value: Any, *, name: str) -> bool:
     raise ValueError(f"{name} must be a boolean value.")
 
 
+def _reject_boolean_numeric(value: Any, *, name: str, message: str) -> None:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray) and value.ndim == 0 and isinstance(value.item(), (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray) and value.ndim > 0 and np.issubdtype(value.dtype, np.bool_):
+        raise ValueError(message)
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
+    message = f"{name} must be positive and finite."
+    _reject_boolean_numeric(value, name=name, message=message)
     parsed = float(value)
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
 def _unit_interval_float(value: float | str, *, name: str) -> float:
+    message = f"{name} must be in [0, 1]."
+    _reject_boolean_numeric(value, name=name, message=message)
     parsed = float(value)
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
-        raise ValueError(f"{name} must be in [0, 1].")
+        raise ValueError(message)
     return parsed
