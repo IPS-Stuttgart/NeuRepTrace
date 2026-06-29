@@ -65,6 +65,18 @@ def test_fit_stacking_weights_rejects_boolean_probability_cube() -> None:
         fit_stacking_weights(cube, [0, 1])
 
 
+def test_fit_stacking_weights_rejects_boolean_labels() -> None:
+    cube = np.array(
+        [
+            [[0.9, 0.1], [0.1, 0.9]],
+            [[0.6, 0.4], [0.4, 0.6]],
+        ]
+    )
+
+    with pytest.raises(ValueError, match="labels values must be numeric, not boolean"):
+        fit_stacking_weights(cube, [False, True])
+
+
 def test_stack_probability_observations_rejects_boolean_probability_columns() -> None:
     source = _observation_rows(subject="source", labels=[0, 1, 0, 1])
     target = _observation_rows(subject="target", labels=[0, 1])
