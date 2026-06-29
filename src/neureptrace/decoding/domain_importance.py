@@ -243,6 +243,15 @@ def _metadata(
     }
 
 
+def _clip_bound_to_float(value: object) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("clip bounds must be numeric values, not booleans.")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("clip bounds must be finite numeric values.") from exc
+
+
 def _normalize_clip(value: Sequence[float] | str | bool | None) -> tuple[float, float] | None:
     if value is None:
         return None
@@ -257,12 +266,15 @@ def _normalize_clip(value: Sequence[float] | str | bool | None) -> tuple[float, 
         parts = [part.strip() for chunk in text.replace(";", ",").split(",") for part in chunk.split() if part.strip()]
         if len(parts) != 2:
             raise ValueError("clip must contain exactly two values, e.g. '0.05,20'.")
-        lower, upper = (float(parts[0]), float(parts[1]))
+        lower, upper = (_clip_bound_to_float(parts[0]), _clip_bound_to_float(parts[1]))
     else:
-        values = list(value)
+        try:
+            values = list(value)
+        except TypeError as exc:
+            raise ValueError("clip must be disabled with false/off/none or contain exactly two numeric bounds.") from exc
         if len(values) != 2:
             raise ValueError("clip must contain exactly two values.")
-        lower, upper = (float(values[0]), float(values[1]))
+        lower, upper = (_clip_bound_to_float(values[0]), _clip_bound_to_float(values[1]))
     if not np.isfinite(lower) or not np.isfinite(upper) or lower < 0.0 or upper <= 0.0 or lower > upper:
         raise ValueError("clip bounds must be finite non-negative values with lower <= upper and upper > 0.")
     return lower, upper
