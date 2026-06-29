@@ -157,14 +157,17 @@ def balance_source_classes(
 def source_class_balancing_config(
     *,
     mode: str | None = "oversample",
-    target_count: int | str = "max",
+    target_count: int | str | None = None,
     random_state: int | str | None = 13,
     preserve_order: bool | str = False,
 ) -> SourceClassBalancingConfig:
     """Normalize public class-balancing options."""
 
+    normalized_mode = normalize_balancing_mode(mode)
+    if target_count is None:
+        target_count = "min" if normalized_mode == "undersample" else "max"
     return SourceClassBalancingConfig(
-        mode=normalize_balancing_mode(mode),
+        mode=normalized_mode,
         target_count=target_count,
         random_state=_normalize_optional_random_state(random_state, name="random_state"),
         preserve_order=_boolean(preserve_order, name="preserve_order"),
