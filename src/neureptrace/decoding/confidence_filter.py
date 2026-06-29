@@ -44,9 +44,11 @@ def confidence_filter(
     margin_threshold = _unit_interval(min_margin, name="min_margin")
     entropy_threshold = None if max_entropy in {None, "", "none", "None"} else _nonnegative_float(max_entropy, name="max_entropy")
     normalize = _boolean(normalize_entropy, name="normalize_entropy")
-    order = np.argsort(matrix, axis=1)
-    top = order[:, -1]
-    second = order[:, -2]
+    # Match numpy.argmax/confidence_scores semantics for exact ties: choose the
+    # lowest class index, not the last sorted tied index.
+    order = np.argsort(-matrix, axis=1, kind="mergesort")
+    top = order[:, 0]
+    second = order[:, 1]
     row_index = np.arange(matrix.shape[0])
     confidence = matrix[row_index, top]
     margin = confidence - matrix[row_index, second]

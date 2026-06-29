@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from neureptrace._onset_utils import validate_detection_options
 from neureptrace.onset_detection import DEFAULT_DETECTION_WINDOW, DEFAULT_THRESHOLD_QUANTILE, DEFAULT_THRESHOLD_WINDOW, THRESHOLD_METHODS
 from neureptrace.onset_workflow import DEFAULT_OBSERVATIONS_GLOB, _expand_task_dirs, run_onset_workflow
 
@@ -68,14 +69,13 @@ def build_sensitivity_settings(
         min_duration_values,
         stable_prediction_values,
     ):
-        if threshold_method not in THRESHOLD_METHODS:
-            raise ValueError(f"threshold methods must be one of {THRESHOLD_METHODS}.")
-        if not 0.0 <= threshold_quantile <= 1.0:
-            raise ValueError("threshold quantiles must be between 0 and 1.")
-        if min_consecutive < 1:
-            raise ValueError("min_consecutive values must be at least 1.")
-        if min_duration is not None and min_duration < 0:
-            raise ValueError("min_duration values must be non-negative.")
+        validate_detection_options(
+            threshold_quantile=threshold_quantile,
+            threshold_method=threshold_method,
+            threshold_methods=THRESHOLD_METHODS,
+            min_consecutive=min_consecutive,
+            min_duration=min_duration,
+        )
         settings.append(
             OnsetSensitivitySetting(
                 threshold_method=threshold_method,
