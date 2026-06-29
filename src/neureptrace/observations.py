@@ -52,9 +52,35 @@ def _probability_sort_key(column: str) -> tuple[int, str]:
     return (int(suffix), suffix) if suffix.isdigit() else (10_000, suffix)
 
 
+def _numeric_probability_labels(columns: Sequence[str]) -> tuple[int, ...] | None:
+    suffixes = tuple(column.removeprefix("prob_class_") for column in columns)
+    if not all(suffix.isdigit() for suffix in suffixes):
+        return None
+    return tuple(int(suffix) for suffix in suffixes)
+
+
+def _duplicate_probability_labels(labels: Sequence[int]) -> list[int]:
+    seen: set[int] = set()
+    duplicates: list[int] = []
+    for label in labels:
+        if label in seen and label not in duplicates:
+            duplicates.append(label)
+        seen.add(label)
+    return duplicates
+
+
 def probability_columns(frame: pd.DataFrame) -> tuple[str, ...]:
     """Return ``prob_class_*`` columns in class-index order."""
-    return tuple(sorted((column for column in frame.columns if column.startswith("prob_class_")), key=_probability_sort_key))
+    columns = tuple(sorted((column for column in frame.columns if column.startswith("prob_class_")), key=_probability_sort_key))
+    labels = _numeric_probability_labels(columns)
+    if labels is not None:
+        duplicates = _duplicate_probability_labels(labels)
+        if duplicates:
+            raise ValueError(
+                "prob_class_* columns must map to unique class labels; "
+                f"duplicate label(s): {duplicates}."
+            )
+    return columns
 
 
 def _value_at(values: Sequence[object] | np.ndarray | pd.Series | None, index: int, default: object = "") -> object:
