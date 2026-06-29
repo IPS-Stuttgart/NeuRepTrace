@@ -52,8 +52,8 @@ def test_top_k_metrics_reject_boolean_array_k(k: object) -> None:
         weighted_top_k_accuracy(PROBABILITIES, LABELS, SAMPLE_WEIGHT, k=k)
 
 
-@pytest.mark.parametrize("eps", [np.asarray(True), np.array([True])])
-def test_nll_metrics_reject_boolean_array_eps(eps: object) -> None:
+@pytest.mark.parametrize("eps", [np.asarray(True), np.array([True]), np.asarray(1e-6), np.array([1e-6])])
+def test_nll_metrics_reject_array_eps(eps: object) -> None:
     with pytest.raises(ValueError, match="eps"):
         negative_log_likelihood(PROBABILITIES, LABELS, eps=eps)
 
