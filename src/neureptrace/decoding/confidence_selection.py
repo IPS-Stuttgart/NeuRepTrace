@@ -91,7 +91,7 @@ def confidence_selection_config(
         top_k=_optional_positive_int(top_k, name="top_k"),
         per_class_top_k=_optional_positive_int(per_class_top_k, name="per_class_top_k"),
         min_margin=_unit_interval_float(min_margin, name="min_margin"),
-        epsilon=_positive_float(epsilon, name="epsilon"),
+        epsilon=_open_unit_interval_float(epsilon, name="epsilon"),
     )
 
 
@@ -190,6 +190,13 @@ def _unit_interval_float(value: float | str, *, name: str) -> float:
     numeric = _float_value(value, name=name)
     if numeric < 0.0 or numeric > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
+    return numeric
+
+
+def _open_unit_interval_float(value: float | str, *, name: str) -> float:
+    numeric = _float_value(value, name=name)
+    if numeric <= 0.0 or numeric >= 1.0:
+        raise ValueError(f"{name} must be in (0, 1).")
     return numeric
 
 

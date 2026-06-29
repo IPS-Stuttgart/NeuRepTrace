@@ -110,6 +110,23 @@ def test_optional_count_sentinels_are_normalized() -> None:
     assert confidence_selection_config(mode="per_class_top_k", per_class_top_k=" full ").per_class_top_k is None
 
 
+@pytest.mark.parametrize("epsilon", [0.0, "0", 1.0, "1", 2.0, "2"])
+def test_epsilon_must_be_in_open_unit_interval(epsilon: float | str) -> None:
+    with pytest.raises(ValueError, match=r"epsilon must be in \(0, 1\)"):
+        confidence_selection_config(epsilon=epsilon)
+
+
+def test_small_positive_epsilon_is_accepted() -> None:
+    cfg = confidence_selection_config(epsilon="1e-6")
+
+    assert cfg.epsilon == 1e-6
+
+
+def test_large_epsilon_is_rejected_before_probability_clipping() -> None:
+    with pytest.raises(ValueError, match=r"epsilon must be in \(0, 1\)"):
+        select_confident_probability_rows([[0.99, 0.01]], config={"epsilon": 1.0})
+
+
 def test_bad_probability_rows_are_rejected() -> None:
     with pytest.raises(ValueError, match="finite non-negative"):
         select_confident_probability_rows([[0.5, -0.5]])
