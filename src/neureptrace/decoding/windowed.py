@@ -244,19 +244,11 @@ def permutation_p_from_accuracy(accuracy: float, permutation_accuracy: Sequence[
     return float((np.sum(permutation_accuracy >= accuracy) + 1.0) / (permutation_accuracy.size + 1.0))
 
 
-def _is_array_scalar_control(value: object) -> bool:
-    """Return whether a scalar control was supplied as a NumPy array."""
-
-    return isinstance(value, np.ndarray)
-
-
 def _validate_permutation_count(n_permutations: int) -> int:
-    if isinstance(n_permutations, (bool, np.bool_)) or _is_array_scalar_control(n_permutations):
-        raise ValueError("n_permutations must be a non-negative integer.")
-    try:
-        numeric = float(n_permutations)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("n_permutations must be a non-negative integer.") from exc
+    numeric = _coerce_numeric_scalar(
+        n_permutations,
+        message="n_permutations must be a non-negative integer.",
+    )
     if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 0.0:
         raise ValueError("n_permutations must be a non-negative integer.")
     return int(numeric)
@@ -301,8 +293,6 @@ def _normalize_pca_components(components_pca: int | float | str | None, features
 
     if components_pca is None:
         return None
-    if isinstance(components_pca, (bool, np.bool_)) or _is_array_scalar_control(components_pca):
-        raise ValueError(_pca_components_error_message())
     if isinstance(components_pca, str):
         normalized = components_pca.strip().lower()
         if normalized in {"", "all", "inf", "infinity", "none"}:
@@ -312,10 +302,10 @@ def _normalize_pca_components(components_pca: int | float | str | None, features
         except ValueError as exc:
             raise ValueError(_pca_components_error_message()) from exc
     else:
-        try:
-            value = float(components_pca)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(_pca_components_error_message()) from exc
+        value = _coerce_numeric_scalar(
+            components_pca,
+            message=_pca_components_error_message(),
+        )
 
     if np.isposinf(value):
         return None
@@ -326,6 +316,18 @@ def _normalize_pca_components(components_pca: int | float | str | None, features
     if value.is_integer() and value >= 1.0:
         return min(int(value), _max_pca_components(features))
     raise ValueError(_pca_components_error_message())
+
+
+def _coerce_numeric_scalar(value: object, *, message: str) -> float:
+    if isinstance(value, np.ndarray):
+        raise ValueError(message)
+    array = np.asarray(value)
+    if array.ndim > 0 or np.issubdtype(array.dtype, np.bool_):
+        raise ValueError(message)
+    try:
+        return float(array)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
 
 
 def _max_pca_components(features: np.ndarray) -> int:
