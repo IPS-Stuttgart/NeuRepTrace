@@ -17,6 +17,8 @@ SOURCE_PCA_PROTOCOL = "strict_source_only_pca_projection"
 SOURCE_PCA_CATEGORY = "1_strict_source_only"
 DEFAULT_COMPONENTS = 64
 DEFAULT_EPSILON = 1e-12
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +159,38 @@ def _coerce_config(config: SourcePCAConfig | Mapping[str, Any]) -> SourcePCAConf
             epsilon=config.epsilon,
         )
     return source_pca_config(**dict(config))
+
+
+def _bool_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be a boolean value.")
+
+
+def _normalize_bool(value: Any, *, name: str) -> bool:
+    """Return a real bool while rejecting ambiguous truthy/falsy objects."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise _bool_error(name)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise _bool_error(name)
+        return _normalize_bool(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise _bool_error(name)
+    if isinstance(value, (float, np.floating)):
+        parsed = float(value)
+        if np.isfinite(parsed) and parsed in {0.0, 1.0}:
+            return bool(parsed)
+        raise _bool_error(name)
+    raise _bool_error(name)
 
 
 def _resolve_components(value: int | str, *, n_rows: int, n_features: int, center: bool) -> int:
