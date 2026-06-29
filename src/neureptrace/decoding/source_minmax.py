@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
 SOURCE_MINMAX_PROTOCOL = "strict_source_only_minmax_scaling"
 SOURCE_MINMAX_CATEGORY = "1_strict_source_only"
+_RANGE_ERROR = "feature_range must contain exactly two finite numeric non-boolean values with low < high."
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,9 +80,34 @@ def _matrix(values, *, name: str) -> np.ndarray:
 
 
 def _range(values) -> tuple[float, float]:
-    low, high = values
-    low = float(low)
-    high = float(high)
-    if not np.isfinite(low) or not np.isfinite(high) or low >= high:
-        raise ValueError("feature_range must contain finite values with low < high.")
+    if isinstance(values, (str, bytes)):
+        raise ValueError(_RANGE_ERROR)
+    try:
+        items = list(values)
+    except TypeError as exc:
+        raise ValueError(_RANGE_ERROR) from exc
+    if len(items) != 2:
+        raise ValueError(_RANGE_ERROR)
+    low = _range_endpoint(items[0])
+    high = _range_endpoint(items[1])
+    if low >= high:
+        raise ValueError(_RANGE_ERROR)
     return low, high
+
+
+def _range_endpoint(value: Any) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(_RANGE_ERROR)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(_RANGE_ERROR)
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(_RANGE_ERROR)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_RANGE_ERROR) from exc
+    if not np.isfinite(parsed):
+        raise ValueError(_RANGE_ERROR)
+    return parsed
