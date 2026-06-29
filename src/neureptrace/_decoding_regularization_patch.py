@@ -50,6 +50,13 @@ def _install_decoding_option_type_validation() -> None:
     patch.install()
 
 
+def _install_decoder_random_state_propagation() -> None:
+    """Install decoder-factory random-state propagation after factory wrapping."""
+
+    patch = importlib.import_module("neureptrace._decoder_random_state_patch")
+    patch.install()
+
+
 def install() -> None:
     """Install corrected sparse/elastic-net logistic decoder builders."""
 
@@ -58,6 +65,7 @@ def install() -> None:
     _install_decoding_option_type_validation()
 
     if getattr(decoding, _PATCH_MARKER, False):
+        _install_decoder_random_state_propagation()
         return
 
     original_make_decoder = decoding.make_decoder
@@ -212,3 +220,4 @@ def install() -> None:
     decoding.make_decoder = make_decoder
     decoding.make_tuned_decoder = make_tuned_decoder
     setattr(decoding, _PATCH_MARKER, True)
+    _install_decoder_random_state_propagation()
