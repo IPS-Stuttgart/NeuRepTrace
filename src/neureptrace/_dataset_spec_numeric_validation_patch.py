@@ -1,11 +1,12 @@
-"""Runtime validation patch for dataset-spec numeric fields.
+"""Runtime validation patch for dataset-spec numeric and subject fields.
 
 YAML and JSON dataset specs often decode configuration values as plain Python
 scalars.  Since booleans are integer-like in Python, direct ``int(...)`` or
 ``float(...)`` coercion can silently turn malformed numeric fields such as
-``index_base: true`` into valid-looking numbers.  Keep the public parser strict
-by rejecting booleans, non-integral integers, and non-finite floats at the
-specification boundary.
+``index_base: true`` into valid-looking numbers.  Likewise, subject lists can
+silently turn ``true``/``false`` into literal ``"True"``/``"False"`` subject
+identifiers.  Keep the public parser strict by rejecting booleans,
+non-integral integers, and non-finite floats at the specification boundary.
 """
 
 from __future__ import annotations
@@ -20,6 +21,19 @@ _PATCH_MARKER = "_neureptrace_dataset_spec_numeric_validation_patch_installed"
 
 def _is_boolean(value: Any) -> bool:
     return isinstance(value, (bool, np.bool_))
+
+
+def _reject_boolean_subject_identifier(value: Any) -> None:
+    if _is_boolean(value):
+        raise ValueError("subjects must not contain boolean identifiers.")
+    if isinstance(value, Mapping):
+        for key in ("include", "exclude"):
+            if key in value:
+                _reject_boolean_subject_identifier(value[key])
+        return
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for item in value:
+            _reject_boolean_subject_identifier(item)
 
 
 def _finite_float(value: Any, *, name: str) -> float:
@@ -78,7 +92,7 @@ def _two_float_tuple(value: Any, name: str) -> tuple[float, float]:
 
 
 def install() -> None:
-    """Install strict numeric validation for dataset-spec and calibration scalar fields."""
+    """Install strict numeric and subject validation for dataset specs."""
 
     from neureptrace import _calibration_bool_numeric_patch, dataset_spec
 
@@ -86,6 +100,14 @@ def install() -> None:
 
     if getattr(dataset_spec, _PATCH_MARKER, False):
         return
+
+    original_parse_subjects = dataset_spec.parse_subjects
+
+    def parse_subjects(value: Any) -> tuple[str, ...]:
+        _reject_boolean_subject_identifier(value)
+        return original_parse_subjects(value)
+
+    parse_subjects.__doc__ = original_parse_subjects.__doc__
 
     def _parse_labels(mapping: Mapping[str, Any]) -> Any:
         chance_classes = None
@@ -101,6 +123,7 @@ def install() -> None:
             subtract_one_when_no_null_class=bool(mapping.get("subtract_one_when_no_null_class", False)),
         )
 
+    dataset_spec.parse_subjects = parse_subjects
     dataset_spec._optional_int = _optional_int
     dataset_spec._optional_float = _optional_float
     dataset_spec._two_float_tuple = _two_float_tuple
