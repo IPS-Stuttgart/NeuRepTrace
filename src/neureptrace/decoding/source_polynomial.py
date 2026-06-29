@@ -199,18 +199,29 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
-    if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
-        raise ValueError(f"{name} must be a positive integer.")
+def _integer_value(value: int | str, *, name: str, minimum: int, description: str) -> int:
+    message = f"{name} must be a {description} integer."
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return _integer_value(value.item(), name=name, minimum=minimum, description=description)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < minimum:
+        raise ValueError(message)
     return int(parsed)
+
+
+def _positive_int(value: int | str, *, name: str) -> int:
+    return _integer_value(value, name=name, minimum=1, description="positive")
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
-    if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 0:
-        raise ValueError(f"{name} must be a non-negative integer.")
-    return int(parsed)
+    return _integer_value(value, name=name, minimum=0, description="non-negative")
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
