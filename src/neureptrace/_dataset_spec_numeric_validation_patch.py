@@ -49,6 +49,24 @@ def _integer(value: Any, *, name: str, minimum: int | None = None) -> int:
     return integer
 
 
+def _boolean(value: Any, *, name: str, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if _is_boolean(value):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        number = float(value)
+        if np.isfinite(number) and number in {0.0, 1.0}:
+            return bool(number)
+    raise ValueError(f"{name} must be a boolean value.")
+
+
 def _optional_int(mapping: Mapping[str, Any], key: str) -> int | None:
     value = mapping.get(key)
     if value is None:
@@ -98,7 +116,10 @@ def install() -> None:
             column=dataset_spec._optional_str(mapping, "column"),
             chance_classes=chance_classes,
             index_base=index_base,
-            subtract_one_when_no_null_class=bool(mapping.get("subtract_one_when_no_null_class", False)),
+            subtract_one_when_no_null_class=_boolean(
+                mapping.get("subtract_one_when_no_null_class"),
+                name="labels.subtract_one_when_no_null_class",
+            ),
         )
 
     dataset_spec._optional_int = _optional_int

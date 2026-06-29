@@ -48,6 +48,37 @@ def test_dataset_spec_accepts_integral_label_numeric_strings() -> None:
     assert spec.labels.chance_classes == 8
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("false", False),
+        ("0", False),
+        ("no", False),
+        (0, False),
+        ("true", True),
+        ("1", True),
+        ("yes", True),
+        (1, True),
+    ],
+)
+def test_dataset_spec_parses_label_boolean_flag_without_truthy_string_bug(value: object, expected: bool) -> None:
+    payload = _minimal_spec()
+    payload["labels"] = {"subtract_one_when_no_null_class": value}
+
+    spec = dataset_spec_from_mapping(payload)
+
+    assert spec.labels.subtract_one_when_no_null_class is expected
+
+
+@pytest.mark.parametrize("value", ["maybe", 2, -1, float("nan")])
+def test_dataset_spec_rejects_invalid_label_boolean_flag(value: object) -> None:
+    payload = _minimal_spec()
+    payload["labels"] = {"subtract_one_when_no_null_class": value}
+
+    with pytest.raises(ValueError, match=r"labels\.subtract_one_when_no_null_class must be a boolean"):
+        dataset_spec_from_mapping(payload)
+
+
 def test_dataset_spec_rejects_boolean_split_label_index_base() -> None:
     payload = _minimal_spec()
     splits = payload["splits"]
