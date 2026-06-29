@@ -150,9 +150,9 @@ def source_rff_config(
     """Normalize source-RFF options."""
 
     return SourceRFFConfig(
-        n_components=n_components,
+        n_components=_positive_int(n_components, name="n_components"),
         gamma=normalize_gamma(gamma),
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
+        random_state=_optional_random_state(random_state),
         standardize=_bool_value(standardize, name="standardize"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
@@ -171,7 +171,13 @@ def normalize_gamma(value: float | str) -> float | str:
 
 def _coerce_config(config: SourceRFFConfig | Mapping[str, Any]) -> SourceRFFConfig:
     if isinstance(config, SourceRFFConfig):
-        return config
+        return source_rff_config(
+            n_components=config.n_components,
+            gamma=config.gamma,
+            random_state=config.random_state,
+            standardize=config.standardize,
+            epsilon=config.epsilon,
+        )
     return source_rff_config(**dict(config))
 
 
@@ -218,22 +224,41 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _optional_random_state(value: int | str | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"", "none"}:
+        return None
+    return _nonnegative_int(value, name="random_state")
+
+
+def _numeric_scalar(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a numeric scalar, not a boolean.")
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be a numeric scalar, not a NumPy array.")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a numeric scalar.") from exc
+
+
 def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    parsed = _numeric_scalar(value, name=name)
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    parsed = _numeric_scalar(value, name=name)
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 0:
         raise ValueError(f"{name} must be a non-negative integer.")
     return int(parsed)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    parsed = _numeric_scalar(value, name=name)
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
