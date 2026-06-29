@@ -124,6 +124,16 @@ def test_source_quantile_rank_rejects_ambiguous_centered_values() -> None:
         apply_source_quantile_rank([[0.5]], sorted_values=[[0.0], [1.0]], centered=2)
 
 
+def test_apply_source_quantile_bins_preserves_large_bin_indices() -> None:
+    n_edges = np.iinfo(np.int16).max + 1
+    edges = np.arange(n_edges, dtype=float).reshape(-1, 1)
+
+    bins = apply_source_quantile_bins([[float(n_edges)]], bin_edges=edges)
+
+    assert bins.dtype == np.int32
+    assert bins.tolist() == [[n_edges]]
+
+
 def test_apply_source_quantile_rank_handles_ties() -> None:
     sorted_values = np.asarray([[0.0], [1.0], [1.0], [2.0]], dtype=float)
 
