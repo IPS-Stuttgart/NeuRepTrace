@@ -15,6 +15,15 @@ def test_encode_transfer_labels_rejects_test_only_classes() -> None:
         _encode_transfer_labels(raw_labels, train_mask, test_mask)
 
 
+def test_encode_transfer_labels_rejects_single_class_transfer_task() -> None:
+    raw_labels = np.asarray(["face", "face", "face"], dtype=object)
+    train_mask = np.asarray([True, True, False])
+    test_mask = np.asarray([False, False, True])
+
+    with pytest.raises(ValueError, match="at least two labeled classes"):
+        _encode_transfer_labels(raw_labels, train_mask, test_mask)
+
+
 def test_encode_transfer_labels_allows_auxiliary_unlabeled_rows_outside_split() -> None:
     raw_labels = np.asarray(["face", "tool", None, "face"], dtype=object)
     train_mask = np.asarray([True, True, False, False])
