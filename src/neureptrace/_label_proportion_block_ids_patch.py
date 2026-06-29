@@ -11,6 +11,8 @@ import neureptrace.decoding.label_proportions as _label_proportions
 
 _BLOCK_ID_PATCH_MARKER = "_neureptrace_label_proportion_block_ids_patch_installed"
 _ZERO_SUPPORT_PATCH_MARKER = "_neureptrace_label_proportion_zero_support_patch_installed"
+_POSITIVE_FLOAT_PATCH_MARKER = "_neureptrace_label_proportion_positive_float_validation_patch_installed"
+_NONNEGATIVE_FLOAT_PATCH_MARKER = "_neureptrace_label_proportion_nonnegative_float_validation_patch_installed"
 
 
 def _object_block_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int | None = None) -> np.ndarray:
@@ -86,6 +88,30 @@ def _apply_class_bias(probabilities: np.ndarray, class_bias: np.ndarray, *, epsi
     if np.any(row_sums <= 0.0):
         raise ValueError("Label-proportion calibration produced a zero-probability row; check proportions and input probabilities.")
     return weighted / row_sums
+
+
+def _normalize_positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return parsed
+
+
+def _normalize_nonnegative_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be non-negative and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be non-negative and finite.") from exc
+    if not np.isfinite(parsed) or parsed < 0.0:
+        raise ValueError(f"{name} must be non-negative and finite.")
+    return parsed
 
 
 def _adjust_probability_blocks_to_label_proportions(
@@ -192,6 +218,16 @@ def install() -> None:
     if not getattr(current_bias, _ZERO_SUPPORT_PATCH_MARKER, False):
         setattr(_apply_class_bias, _ZERO_SUPPORT_PATCH_MARKER, True)
         _label_proportions._apply_class_bias = _apply_class_bias
+
+    current_positive_float = _label_proportions._normalize_positive_float
+    if not getattr(current_positive_float, _POSITIVE_FLOAT_PATCH_MARKER, False):
+        setattr(_normalize_positive_float, _POSITIVE_FLOAT_PATCH_MARKER, True)
+        _label_proportions._normalize_positive_float = _normalize_positive_float
+
+    current_nonnegative_float = _label_proportions._normalize_nonnegative_float
+    if not getattr(current_nonnegative_float, _NONNEGATIVE_FLOAT_PATCH_MARKER, False):
+        setattr(_normalize_nonnegative_float, _NONNEGATIVE_FLOAT_PATCH_MARKER, True)
+        _label_proportions._normalize_nonnegative_float = _normalize_nonnegative_float
 
 
 __all__ = ["install"]
