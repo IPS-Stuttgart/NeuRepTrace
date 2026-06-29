@@ -16,16 +16,23 @@ class SourceDomainSubsetResult:
     omitted_domains: tuple[Hashable, ...]
 
 
-def source_domain_subset_mask(source_domains: Sequence[Hashable] | np.ndarray, *, omit_fraction: float = 0.25, min_domains: int = 1, random_state: int | None = 13) -> SourceDomainSubsetResult:
+def source_domain_subset_mask(
+    source_domains: Sequence[Hashable] | np.ndarray,
+    *,
+    omit_fraction: float | str = 0.25,
+    min_domains: int | str = 1,
+    random_state: int | str | None = 13,
+) -> SourceDomainSubsetResult:
     domains = _object_vector(source_domains, name="source_domains")
     unique_domains = tuple(dict.fromkeys(domains.tolist()))
     if not unique_domains:
         raise ValueError("At least one source domain is required.")
     min_domains = _validate_positive_int(min_domains, name="min_domains")
     omit_fraction = _validate_unit_interval(omit_fraction, name="omit_fraction")
+    seed = _validate_optional_nonnegative_int(random_state, name="random_state")
     if min_domains > len(unique_domains):
         raise ValueError("min_domains is outside the valid range.")
-    rng = np.random.default_rng(random_state)
+    rng = np.random.default_rng(seed)
     n_omit = min(int(np.floor(omit_fraction * len(unique_domains))), len(unique_domains) - min_domains)
     shuffled_indices = np.arange(len(unique_domains), dtype=int)
     rng.shuffle(shuffled_indices)
@@ -36,7 +43,12 @@ def source_domain_subset_mask(source_domains: Sequence[Hashable] | np.ndarray, *
     return SourceDomainSubsetResult(selected_mask=mask, selected_domains=selected, omitted_domains=omitted)
 
 
-def apply_source_domain_subset(features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence[Any] | np.ndarray, source_domains: Sequence[Hashable] | np.ndarray, **kwargs: Any) -> tuple[np.ndarray, np.ndarray, SourceDomainSubsetResult]:
+def apply_source_domain_subset(
+    features: Sequence[Sequence[float]] | np.ndarray,
+    labels: Sequence[Any] | np.ndarray,
+    source_domains: Sequence[Hashable] | np.ndarray,
+    **kwargs: Any,
+) -> tuple[np.ndarray, np.ndarray, SourceDomainSubsetResult]:
     matrix = np.asarray(features, dtype=float)
     if matrix.ndim != 2:
         raise ValueError("features must be a two-dimensional matrix.")
@@ -116,3 +128,40 @@ def _validate_unit_interval(value: object, *, name: str) -> float:
     if not np.isfinite(numeric) or not 0.0 <= numeric <= 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return numeric
+
+
+def _validate_optional_nonnegative_int(value: object, *, name: str) -> int | None:
+    scalar_value = _scalar_config_value(value, name=name)
+    if _none_like_config_value(scalar_value):
+        return None
+    return _validate_nonnegative_int(scalar_value, name=name)
+
+
+def _none_like_config_value(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"", "none", "null"}
+    return False
+
+
+def _scalar_config_value(value: object, *, name: str) -> object:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        return value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be a non-negative integer.")
+    return value
+
+
+def _validate_nonnegative_int(value: object, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a non-negative integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 0:
+        raise ValueError(f"{name} must be a non-negative integer.")
+    return int(numeric)
