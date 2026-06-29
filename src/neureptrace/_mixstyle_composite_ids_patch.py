@@ -135,32 +135,37 @@ def install() -> None:
         class_conditional: bool = False,
         include_original: bool = True,
     ):
+        cfg = mixstyle.source_mixstyle_config(
+            augmentations_per_row=augmentations_per_row,
+            alpha=alpha,
+            random_state=random_state,
+            domain_pairing=domain_pairing,
+            preserve_domain_mean=preserve_domain_mean,
+            class_conditional=class_conditional,
+            include_original=include_original,
+        )
         features = mixstyle._feature_matrix(source_features, name='source_features')
         labels = _label_vector(source_labels, expected_length=features.shape[0])
         domains = _domain_vector(source_domains, expected_length=features.shape[0])
-        n_aug = mixstyle._normalize_nonnegative_int(augmentations_per_row, name='augmentations_per_row')
-        beta_alpha = mixstyle._positive_float(alpha, name='alpha')
-        pairing = mixstyle.normalize_mixstyle_domain_pairing(domain_pairing)
-        seed = None if random_state in {None, '', 'none', 'None'} else mixstyle._normalize_nonnegative_int(random_state, name='random_state')
-        rng = np.random.default_rng(seed)
+        rng = np.random.default_rng(cfg.random_state)
 
         domain_stats = _domain_statistics(features, domains)
         domain_names = tuple(domain_stats)
-        if len(domain_names) < 2 and n_aug > 0:
+        if len(domain_names) < 2 and cfg.augmentations_per_row > 0:
             raise ValueError('Source MixStyle requires at least two source domains when augmentations_per_row > 0.')
-        label_domain_stats = _label_domain_statistics(features, labels, domains) if class_conditional else {}
+        label_domain_stats = _label_domain_statistics(features, labels, domains) if cfg.class_conditional else {}
         deterministic_partner_order = mixstyle._deterministic_partner_order(domain_stats)
 
         synthetic_features: list[np.ndarray] = []
         synthetic_labels: list[Any] = []
         synthetic_domains: list[str] = []
         for row, label, domain in zip(features, labels, domains, strict=True):
-            for _ in range(n_aug):
+            for _ in range(cfg.augmentations_per_row):
                 partner = mixstyle._choose_partner_domain(
                     domain,
                     domain_names=domain_names,
                     deterministic_partner_order=deterministic_partner_order,
-                    pairing=pairing,
+                    pairing=cfg.domain_pairing,
                     rng=rng,
                 )
                 source_stats = _stats_for_row(label_domain_stats, domain_stats, label, domain)
@@ -169,8 +174,8 @@ def install() -> None:
                     row,
                     source_stats=source_stats,
                     partner_stats=partner_stats,
-                    mix=float(rng.beta(beta_alpha, beta_alpha)),
-                    preserve_domain_mean=bool(preserve_domain_mean),
+                    mix=float(rng.beta(cfg.alpha, cfg.alpha)),
+                    preserve_domain_mean=cfg.preserve_domain_mean,
                 )
                 synthetic_features.append(synthetic)
                 synthetic_labels.append(label)
@@ -180,7 +185,7 @@ def install() -> None:
         label_blocks = []
         domain_blocks = []
         mask_blocks = []
-        if include_original:
+        if cfg.include_original:
             feature_blocks.append(features)
             label_blocks.append(labels)
             domain_blocks.append(domains)
@@ -204,13 +209,13 @@ def install() -> None:
             n_domains=len(domain_names),
             n_classes=len(_unique_values(labels)),
             feature_dim=features.shape[1],
-            augmentations_per_row=n_aug,
-            alpha=beta_alpha,
-            random_state=seed,
-            domain_pairing=pairing,
-            preserve_domain_mean=bool(preserve_domain_mean),
-            class_conditional=bool(class_conditional),
-            include_original=bool(include_original),
+            augmentations_per_row=cfg.augmentations_per_row,
+            alpha=cfg.alpha,
+            random_state=cfg.random_state,
+            domain_pairing=cfg.domain_pairing,
+            preserve_domain_mean=cfg.preserve_domain_mean,
+            class_conditional=cfg.class_conditional,
+            include_original=cfg.include_original,
         )
         return mixstyle.SourceMixStyleResult(
             features=output_features,
