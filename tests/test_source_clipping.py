@@ -75,6 +75,18 @@ def test_source_feature_clipping_rejects_bool_quantiles() -> None:
         source_feature_clipping_config(lower_quantile=0.1, upper_quantile=True)
 
 
+def test_source_feature_clipping_rejects_array_quantiles() -> None:
+    source = np.asarray([[0.0], [1.0]], dtype=float)
+    bad_quantiles = [np.asarray([0.1]), np.asarray(0.1)]
+
+    for bad_quantile in bad_quantiles:
+        with pytest.raises(ValueError, match="lower_quantile.*scalar"):
+            source_feature_clipping_config(lower_quantile=bad_quantile, upper_quantile=0.9)
+
+        with pytest.raises(ValueError, match="upper_quantile.*scalar"):
+            source_feature_clipping_bounds(source, lower_quantile=0.1, upper_quantile=bad_quantile)
+
+
 def test_source_feature_clipping_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_feature_clipping(
