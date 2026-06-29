@@ -34,3 +34,14 @@ def test_atomic_domain_vector_keeps_column_vectors_as_scalar_domains() -> None:
 
     assert vector.tolist() == ["sub-01", "sub-02", "sub-01"]
     assert ordered_unique(domains) == ("sub-01", "sub-02")
+
+
+def test_atomic_domain_vector_preserves_single_row_composite_matrix() -> None:
+    domains = np.asarray([["sub-01", "run-01"]], dtype=object)
+
+    vector = atomic_domain_vector(domains)
+
+    assert vector.dtype == object
+    assert vector.tolist() == [("sub-01", "run-01")]
+    assert ordered_unique(domains) == (("sub-01", "run-01"),)
+    assert domain_mask(domains, [("sub-01", "run-01")]).tolist() == [True]
