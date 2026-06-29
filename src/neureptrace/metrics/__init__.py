@@ -82,6 +82,24 @@ def _labels_contain_boolean(labels: np.ndarray) -> bool:
     return False
 
 
+def _probabilities_contain_boolean(probabilities: object) -> bool:
+    if isinstance(probabilities, (bool, np.bool_)):
+        return True
+    if isinstance(probabilities, np.ndarray):
+        if np.issubdtype(probabilities.dtype, np.bool_):
+            return True
+        if probabilities.dtype != object:
+            return False
+        return any(_probabilities_contain_boolean(value) for value in probabilities.ravel())
+    if isinstance(probabilities, (str, bytes)):
+        return False
+    try:
+        iterator = iter(probabilities)
+    except TypeError:
+        return False
+    return any(_probabilities_contain_boolean(value) for value in iterator)
+
+
 def _coerce_label_indices(labels: np.ndarray) -> np.ndarray:
     if _labels_contain_boolean(labels):
         raise ValueError("labels must contain integer class indices")
@@ -108,6 +126,8 @@ def validate_probability_inputs(
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """Validate and coerce probability-matrix inputs used by scoring metrics."""
     normalization_atol = _validate_non_negative_finite_float(normalization_atol, "normalization_atol")
+    if _probabilities_contain_boolean(probabilities):
+        raise ValueError("probabilities must contain numeric probability values, not boolean flags")
     probabilities = np.asarray(probabilities, dtype=float)
     if probabilities.ndim != 2:
         raise ValueError("probabilities must have shape (n_samples, n_classes)")
