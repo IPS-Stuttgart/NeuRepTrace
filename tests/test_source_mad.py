@@ -53,6 +53,15 @@ def test_source_mad_can_disable_center_or_scale() -> None:
     assert np.allclose(no_scale.reference.scale, np.asarray([1.0]))
 
 
+def test_source_mad_scale_stays_centered_when_output_centering_is_disabled() -> None:
+    source = np.asarray([[101.0], [103.0], [105.0]], dtype=float)
+
+    reference = fit_source_mad_reference(source, config={"center": False, "normal_consistency": False})
+
+    assert np.allclose(reference.center, np.asarray([0.0]))
+    assert np.allclose(reference.scale, np.asarray([2.0]))
+
+
 def test_source_mad_config_validation() -> None:
     cfg = source_mad_config(center="true", scale="false", epsilon="1e-5")
     assert cfg.center is True
