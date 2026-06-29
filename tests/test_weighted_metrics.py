@@ -159,6 +159,23 @@ def test_weighted_probability_metrics_reject_invalid_label_indices(bad_labels: n
         weighted_brier_score_multiclass(probabilities, bad_labels, sample_weight)
 
 
+def test_weighted_probability_metrics_reject_boolean_probability_values() -> None:
+    labels = np.array([0, 1])
+    sample_weight = np.array([1.0, 1.0])
+    bad_probabilities = np.array([[True, False], [False, True]])
+    metric_calls = (
+        weighted_brier_score_multiclass,
+        weighted_negative_log_likelihood,
+        weighted_top_k_accuracy,
+        weighted_expected_calibration_error,
+        weighted_reliability_bins,
+    )
+
+    for metric in metric_calls:
+        with pytest.raises(ValueError, match="probabilities.*boolean"):
+            metric(bad_probabilities, labels, sample_weight)
+
+
 def test_weighted_probability_metrics_validate_inputs() -> None:
     probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
     labels = np.array([0, 1])
