@@ -24,6 +24,7 @@ DEFAULT_NOISE_SCALE = 0.05
 DEFAULT_EPSILON = 1e-8
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
+_NONE_STRINGS = {"", "none", "null"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +178,7 @@ def source_feature_jitter_config(
         noise_scale=_nonnegative_float(noise_scale, name="noise_scale"),
         scale_mode=normalize_jitter_scale_mode(scale_mode),
         preserve_original=_boolean(preserve_original, name="preserve_original"),
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
+        random_state=_optional_nonnegative_int(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -324,6 +325,31 @@ def _is_composite_value(value: Any) -> bool:
     if isinstance(value, np.ndarray):
         return value.ndim != 0
     return isinstance(value, (tuple, list, dict))
+
+
+def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
+    scalar_value = _scalar_config_value(value, name=name)
+    if _none_like_config_value(scalar_value):
+        return None
+    return _nonnegative_int(scalar_value, name=name)
+
+
+def _none_like_config_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _NONE_STRINGS
+    return False
+
+
+def _scalar_config_value(value: Any, *, name: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        return value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be a non-negative integer.")
+    return value
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
