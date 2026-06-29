@@ -29,3 +29,19 @@ def test_source_feature_masking_parses_quoted_false_preserve_original() -> None:
 def test_source_feature_masking_rejects_ambiguous_preserve_original(value: object) -> None:
     with pytest.raises(ValueError, match="preserve_original"):
         source_feature_masking_config(preserve_original=value)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"synthetic_per_class": np.asarray(1)}, "synthetic_per_class"),
+        ({"synthetic_per_class": np.array([1])}, "synthetic_per_class"),
+        ({"mask_fraction": np.asarray(0.25)}, "mask_fraction"),
+        ({"mask_fraction": np.array([0.25])}, "mask_fraction"),
+        ({"noise_std": np.asarray(0.01)}, "noise_std"),
+        ({"noise_std": np.array([0.01])}, "noise_std"),
+    ],
+)
+def test_source_feature_masking_rejects_array_valued_numeric_config(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        source_feature_masking_config(**kwargs)

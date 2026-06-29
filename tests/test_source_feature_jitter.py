@@ -178,3 +178,19 @@ def test_scale_mode_aliases_and_invalid_values() -> None:
 
     with pytest.raises(ValueError, match="preserve_original"):
         source_feature_jitter_config(preserve_original="maybe")
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"synthetic_per_class": np.asarray(1)}, "synthetic_per_class"),
+        ({"synthetic_per_class": np.array([1])}, "synthetic_per_class"),
+        ({"noise_scale": np.asarray(0.05)}, "noise_scale"),
+        ({"noise_scale": np.array([0.05])}, "noise_scale"),
+        ({"epsilon": np.asarray(1e-8)}, "epsilon"),
+        ({"epsilon": np.array([1e-8])}, "epsilon"),
+    ],
+)
+def test_source_feature_jitter_rejects_array_valued_numeric_config(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        source_feature_jitter_config(**kwargs)
