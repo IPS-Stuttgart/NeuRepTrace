@@ -8,6 +8,7 @@ import numpy as np
 from neureptrace.decoding.source_free import PseudoLabelSelection, SourceFreeAdaptationResult, fit_source_free_predict_proba
 
 _EPS = 1e-12
+_NEGATIVE_TOLERANCE = 1e-10
 TargetPriorCorrection = Literal["none", "balanced"]
 TargetPriorEstimator = Literal["mean", "confidence_weighted", "entropy_weighted"]
 
@@ -277,12 +278,23 @@ def _validate_prior(prior: np.ndarray, *, n_classes: int) -> np.ndarray:
 
 
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
-    array = np.asarray(probabilities, dtype=float)
+    raw = np.asarray(probabilities)
+    if np.issubdtype(raw.dtype, np.bool_) or (
+        raw.dtype == object and any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
+    ):
+        raise ValueError("probabilities must be numeric probability values, not boolean indicators.")
+    try:
+        array = raw.astype(float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("probabilities must be numeric.") from exc
     if array.ndim != 2 or array.shape[0] < 1 or array.shape[1] < 2:
         raise ValueError("probabilities must be a two-dimensional matrix with at least two classes.")
     if not np.all(np.isfinite(array)):
         raise ValueError("probabilities must be finite.")
-    array = np.clip(array, 0.0, None)
+    if np.any(array < -_NEGATIVE_TOLERANCE):
+        raise ValueError("probabilities must be non-negative.")
+    if np.any(array < 0.0):
+        array = np.where(array < 0.0, 0.0, array)
     row_sums = array.sum(axis=1, keepdims=True)
     if np.any(row_sums <= 0.0):
         raise ValueError("probability rows must have positive mass.")
