@@ -23,6 +23,7 @@ SCALING_MODES = ("row", "feature")
 SCALING_DISTRIBUTIONS = ("lognormal", "uniform", "normal")
 DEFAULT_SCALE_STD = 0.1
 DEFAULT_EPSILON = 1e-8
+_NONE_STRINGS = {"", "none", "null"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,7 +199,7 @@ def source_feature_scaling_config(
         scaling_mode=normalize_scaling_mode(scaling_mode),
         distribution=normalize_scaling_distribution(distribution),
         preserve_original=_bool_value(preserve_original, name="preserve_original"),
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
+        random_state=_optional_nonnegative_int(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -339,6 +340,24 @@ def _is_composite_value(value: Any) -> bool:
 # jscpd:ignore-end
 
 
+def _optional_int_none(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _NONE_STRINGS
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            return False
+        return _optional_int_none(value.item())
+    return False
+
+
+def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
+    if _optional_int_none(value):
+        return None
+    return _nonnegative_int(value, name=name)
+
+
 def _positive_int(value: int | str, *, name: str) -> int:
     integer = _integer(value, name=name)
     if integer < 1:
@@ -356,7 +375,14 @@ def _nonnegative_int(value: int | str, *, name: str) -> int:
 def _integer(value: int | str, *, name: str) -> int:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be an integer.")
-    parsed = float(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be an integer.")
+        value = value.item()
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
         raise ValueError(f"{name} must be an integer.")
     return int(parsed)
