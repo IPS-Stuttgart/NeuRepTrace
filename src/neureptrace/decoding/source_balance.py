@@ -59,7 +59,7 @@ def source_balance_config(
         strategy=normalize_balance_strategy(strategy),
         target=normalize_balance_target(target),
         normalize_weights=_bool_config(normalize_weights, name="normalize_weights"),
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
+        random_state=_optional_nonnegative_int(random_state, name="random_state"),
     )
 
 
@@ -163,6 +163,26 @@ def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
         if np.isfinite(parsed_float) and parsed_float in {0.0, 1.0}:
             return bool(parsed_float)
     raise ValueError(f"{name} must be a boolean value.")
+
+
+def _is_none_random_state(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"", "none", "null"}
+    return False
+
+
+def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
+    if _is_none_random_state(value):
+        return None
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        value = value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be a non-negative integer.")
+    return _nonnegative_int(value, name=name)
 
 
 def _coerce_config(config: SourceBalanceConfig | Mapping[str, Any]) -> SourceBalanceConfig:
@@ -293,7 +313,12 @@ def _hashable_value(value: Any) -> Hashable:
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a non-negative integer.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 0:
         raise ValueError(f"{name} must be a non-negative integer.")
     return int(parsed)
