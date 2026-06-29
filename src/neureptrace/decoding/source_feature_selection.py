@@ -87,6 +87,7 @@ def source_feature_scores(
     resolved = normalize_score_method(method)
     if resolved == "variance":
         return np.var(source, axis=0, ddof=1 if source.shape[0] > 1 else 0)
+    epsilon_value = _positive_float(epsilon, name="epsilon")
     classes = tuple(dict.fromkeys(labels.tolist()))
     if len(classes) < 2:
         raise ValueError("ANOVA feature scoring requires at least two classes.")
@@ -103,7 +104,7 @@ def source_feature_scores(
         within += np.sum((rows - mean) ** 2, axis=0)
     df_between = max(len(classes) - 1, 1)
     df_within = max(source.shape[0] - len(classes), 1)
-    return (between / df_between) / np.maximum(within / df_within, float(epsilon))
+    return (between / df_between) / np.maximum(within / df_within, epsilon_value)
 
 
 def select_top_source_features(scores: Sequence[float] | np.ndarray, *, k: int | str = DEFAULT_K, min_score: float | str | None = None) -> np.ndarray:
@@ -114,8 +115,8 @@ def select_top_source_features(scores: Sequence[float] | np.ndarray, *, k: int |
         raise ValueError("scores must be a non-empty finite vector.")
     limit = _resolve_k(k, n_features=vector.shape[0])
     order = np.argsort(-vector, kind="mergesort")[:limit]
-    if min_score is not None and min_score not in {"", "none", "None"}:
-        threshold = float(min_score)
+    if not _is_missing_min_score(min_score):
+        threshold = _finite_float(min_score, name="min_score")
         order = order[vector[order] >= threshold]
     if order.size == 0:
         raise ValueError("No features selected; relax k or min_score.")
@@ -133,8 +134,8 @@ def source_feature_selection_config(
 
     return SourceFeatureSelectionConfig(
         method=normalize_score_method(method),
-        k=k,
-        min_score=None if min_score in {None, "", "none", "None"} else float(min_score),
+        k=_validate_k_option(k),
+        min_score=None if _is_missing_min_score(min_score) else _finite_float(min_score, name="min_score"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -151,7 +152,7 @@ def normalize_score_method(value: str | None) -> str:
 
 def _coerce_config(config: SourceFeatureSelectionConfig | Mapping[str, Any]) -> SourceFeatureSelectionConfig:
     if isinstance(config, SourceFeatureSelectionConfig):
-        return config
+        return source_feature_selection_config(method=config.method, k=config.k, min_score=config.min_score, epsilon=config.epsilon)
     return source_feature_selection_config(**dict(config))
 
 
@@ -177,16 +178,24 @@ def _metadata(cfg: SourceFeatureSelectionConfig, *, n_source_rows: int, n_test_r
 
 
 def _resolve_k(value: int | str, *, n_features: int) -> int:
+    normalized = _validate_k_option(value)
+    if isinstance(normalized, str):
+        return int(n_features)
+    return min(int(normalized), int(n_features))
+
+
+def _validate_k_option(value: int | str) -> int | str:
+    message = "k must be a positive integer, 'all', or 'full'."
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"all", "full"}:
-            return int(n_features)
-        numeric = float(text)
+            return text
+        numeric = _numeric_scalar(text, message=message)
     else:
-        numeric = float(value)
-    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1:
-        raise ValueError("k must be a positive integer, 'all', or 'full'.")
-    return min(int(numeric), int(n_features))
+        numeric = _numeric_scalar(value, message=message)
+    if numeric % 1.0 != 0.0 or numeric < 1:
+        raise ValueError(message)
+    return int(numeric)
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
@@ -198,8 +207,32 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _is_missing_min_score(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"", "none"}
+    return False
+
+
+def _finite_float(value: float | str, *, name: str) -> float:
+    return _numeric_scalar(value, message=f"{name} must be a finite numeric scalar.")
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
-    if not np.isfinite(parsed) or parsed <= 0.0:
+    parsed = _numeric_scalar(value, message=f"{name} must be positive and finite.")
+    if parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
+    return parsed
+
+
+def _numeric_scalar(value: Any, *, message: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+        raise ValueError(message)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(message) from None
+    if not np.isfinite(parsed):
+        raise ValueError(message)
     return parsed
