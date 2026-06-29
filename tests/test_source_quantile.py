@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neureptrace.decoding.source_quantile import SOURCE_QUANTILE_CATEGORY, source_feature_quantiles
+from neureptrace.decoding.source_quantile import (
+    SOURCE_QUANTILE_CATEGORY,
+    apply_source_quantile_clip,
+    source_feature_quantiles,
+    source_quantile_clip,
+)
 
 
 def test_source_feature_quantiles_are_source_only() -> None:
@@ -14,6 +19,35 @@ def test_source_feature_quantiles_are_source_only() -> None:
     assert SOURCE_QUANTILE_CATEGORY == "1_strict_source_only"
     assert np.allclose(lower, np.quantile(features, 0.25, axis=0))
     assert np.allclose(upper, np.quantile(features, 0.75, axis=0))
+
+
+def test_source_quantile_clip_uses_source_bounds_for_test_rows() -> None:
+    source = np.asarray([[0.0, 10.0], [1.0, 11.0], [2.0, 12.0], [3.0, 13.0]], dtype=float)
+    test = np.asarray([[-5.0, 10.5], [10.0, 20.0]], dtype=float)
+
+    result = source_quantile_clip(source_features=source, test_features=test, lower=0.25, upper=0.75)
+
+    assert result.train_features.shape == source.shape
+    assert result.test_features.shape == test.shape
+    assert np.all(result.test_features >= result.lower)
+    assert np.all(result.test_features <= result.upper)
+    assert result.metadata["source_quantile_clip_protocol_category"] == SOURCE_QUANTILE_CATEGORY
+    assert result.metadata["source_quantile_clip_uses_source_features"] is True
+    assert result.metadata["source_quantile_clip_uses_test_features_for_fitting"] is False
+    assert result.metadata["source_quantile_clip_uses_test_labels"] is False
+    assert result.metadata["source_quantile_clip_test_values_clipped"] == int(np.count_nonzero(result.test_clipped_mask))
+
+
+def test_apply_source_quantile_clip_returns_mask() -> None:
+    clipped, mask = apply_source_quantile_clip([[0.0, 5.0], [10.0, -5.0]], lower=[1.0, 0.0], upper=[9.0, 4.0])
+
+    assert np.allclose(clipped, np.asarray([[1.0, 4.0], [9.0, 0.0]]))
+    assert mask.tolist() == [[True, True], [True, True]]
+
+
+def test_source_quantile_clip_rejects_width_mismatch() -> None:
+    with pytest.raises(ValueError, match="same feature width"):
+        source_quantile_clip(source_features=[[0.0, 1.0]], test_features=[[0.0]])
 
 
 def test_source_feature_quantiles_validate_bounds() -> None:
@@ -29,3 +63,5 @@ def test_source_feature_quantiles_reject_nonfinite_values() -> None:
 def test_heldout_arguments_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
         source_feature_quantiles([[0.0], [1.0]], heldout_features=[[0.5]])  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], heldout_labels=[0])  # type: ignore[call-arg]
