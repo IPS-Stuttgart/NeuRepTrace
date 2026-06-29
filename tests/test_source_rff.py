@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_rff import (
     SOURCE_RFF_CATEGORY,
+    SourceRFFConfig,
     apply_source_rff,
     fit_source_rff_reference,
     fit_source_rff_transform,
@@ -67,7 +68,7 @@ def test_gamma_aliases_and_config_validation() -> None:
     assert normalize_gamma("scale") == "scale"
     assert normalize_gamma("0.25") == 0.25
     cfg = source_rff_config(n_components="8", standardize="true", epsilon="1e-6")
-    assert cfg.n_components == "8"
+    assert cfg.n_components == 8
     assert cfg.standardize is True
     assert np.isclose(cfg.epsilon, 1e-6)
 
@@ -76,6 +77,44 @@ def test_gamma_aliases_and_config_validation() -> None:
 
     with pytest.raises(ValueError, match="n_components"):
         fit_source_rff_reference([[0.0], [1.0]], config={"n_components": 0})
+
+
+def test_source_rff_revalidates_direct_config_instances() -> None:
+    source = np.asarray([[0.0, 2.0], [2.0, 4.0], [4.0, 6.0]], dtype=float)
+    cfg = SourceRFFConfig(
+        n_components="4",
+        gamma="0.5",  # type: ignore[arg-type]
+        random_state="3",  # type: ignore[arg-type]
+        standardize="false",  # type: ignore[arg-type]
+        epsilon="1e-6",  # type: ignore[arg-type]
+    )
+
+    reference = fit_source_rff_reference(source, config=cfg)
+
+    assert reference.config.n_components == 4
+    assert reference.config.gamma == 0.5
+    assert reference.config.random_state == 3
+    assert reference.config.standardize is False
+    assert np.isclose(reference.config.epsilon, 1e-6)
+    assert np.allclose(reference.mean, np.zeros(source.shape[1]))
+    assert np.allclose(reference.scale, np.ones(source.shape[1]))
+
+
+def test_source_rff_rejects_bool_and_array_numeric_controls() -> None:
+    invalid_configs = [
+        {"n_components": True},
+        {"n_components": np.asarray([4])},
+        {"gamma": True},
+        {"gamma": np.asarray([0.5])},
+        {"random_state": True},
+        {"random_state": np.asarray([7])},
+        {"epsilon": True},
+        {"epsilon": np.asarray([1e-6])},
+    ]
+
+    for config in invalid_configs:
+        with pytest.raises(ValueError):
+            source_rff_config(**config)  # type: ignore[arg-type]
 
 
 def test_source_rff_rejects_width_mismatch() -> None:
