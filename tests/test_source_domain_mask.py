@@ -108,3 +108,16 @@ def test_source_domain_mask_rejects_scalar_string_vectors() -> None:
         apply_source_domain_mask([[0.0]], "label", ["subject_one"])
     with pytest.raises(ValueError, match="source_domains"):
         apply_source_domain_mask([[0.0]], ["label"], "subject_one")
+
+
+@pytest.mark.parametrize(
+    "domains",
+    [
+        ["subject_one", None, "subject_two"],
+        ["subject_one", float("nan"), "subject_two"],
+        np.asarray([["subject_one", "session_a"], ["subject_two", np.nan]], dtype=object),
+    ],
+)
+def test_source_domain_mask_rejects_missing_source_domain_values(domains) -> None:
+    with pytest.raises(ValueError, match="source_domains.*missing"):
+        source_domain_mask(domains)
