@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from neureptrace.decoding.source_weighting import (
+    combine_source_reliability_and_similarity,
     dynamic_source_group_weights,
     normalize_source_group_weighting_mode,
     sample_weights_from_group_weights,
@@ -117,3 +118,55 @@ def test_numeric_enabled_aliases_toggle_source_reliability_mode():
     assert source_group_weighting_config({"enabled": "1"}).mode == "source_reliability"
     assert source_group_weighting_config({"enabled": 0}).mode == "none"
     assert source_group_weighting_config({"enabled": "0"}).mode == "none"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("temperature", np.asarray(True)),
+        ("temperature", np.asarray([0.25])),
+        ("top_k", np.asarray(True)),
+        ("top_k", np.asarray([2])),
+        ("blend", np.asarray(False)),
+        ("blend", np.asarray([0.5])),
+        ("hybrid_target_similarity_weight", np.asarray(True)),
+        ("hybrid_target_similarity_weight", np.asarray([0.5])),
+    ],
+)
+def test_source_group_weighting_config_rejects_array_like_numeric_scalars(field, value):
+    with pytest.raises(ValueError, match="source_group_weighting"):
+        source_group_weighting_config({"mode": "hybrid", field: value})
+
+
+def test_source_group_weighting_config_accepts_zero_dimensional_numeric_arrays():
+    cfg = source_group_weighting_config(
+        {
+            "mode": "source_reliability",
+            "temperature": np.asarray(0.25),
+            "top_k": np.asarray(1),
+            "blend": np.asarray(0.5),
+        }
+    )
+
+    assert cfg.temperature == pytest.approx(0.25)
+    assert cfg.top_k == 1
+    assert cfg.blend == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("bad_score", [True, np.bool_(True), np.asarray(True), np.asarray([0.80])])
+def test_weights_from_scores_rejects_malformed_score_scalars(bad_score):
+    with pytest.raises(ValueError, match="source-group scores"):
+        weights_from_scores({"s1": bad_score, "s2": 0.50})
+
+
+def test_combine_source_reliability_rejects_array_target_similarity_scores():
+    with pytest.raises(ValueError, match="target-similarity scores"):
+        combine_source_reliability_and_similarity({"s1": 0.80, "s2": 0.70}, {"s1": np.asarray([0.20]), "s2": 0.10})
+
+
+def test_sample_weight_helpers_reject_array_like_weights():
+    with pytest.raises(ValueError, match="source_group_weight"):
+        sample_weights_from_group_weights(np.asarray(["s1"]), {"s1": np.asarray([1.0])})
+
+    with pytest.raises(ValueError, match="source_group_weight"):
+        selected_source_groups({"s1": np.asarray([1.0])})
