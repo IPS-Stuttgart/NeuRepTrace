@@ -133,11 +133,12 @@ def _fit(self, target_features: np.ndarray, *, source_model: Any | None = None, 
                 min_class_count=min_class_count,
             )
             prototype_rows = np.ones_like(selected, dtype=bool) if prototype_estimator == "soft_all" else selected
-            signature = _sf._pseudo_label_signature(prototype_rows, pseudo_labels)
-            if signature in seen_signatures:
-                stop_reason = "selection_repeated"
-                break
-            seen_signatures.add(signature)
+            if prototype_estimator == "hard":
+                signature = _sf._pseudo_label_signature(prototype_rows, pseudo_labels)
+                if signature in seen_signatures:
+                    stop_reason = "selection_repeated"
+                    break
+                seen_signatures.add(signature)
             prototypes, active_classes, class_counts = _fit_target_prototypes(
                 embedding,
                 probabilities,
@@ -156,9 +157,14 @@ def _fit(self, target_features: np.ndarray, *, source_model: Any | None = None, 
             prototype_probabilities = _sf._prototype_probabilities(embedding, prototypes, active_classes, temperature=prototype_temperature)
             next_probabilities = _sf._blend_probabilities(source_probabilities, prototype_probabilities, prototype_weight=prototype_weight)
             iterations = iteration
-            if np.array_equal(next_probabilities.argmax(axis=1), pseudo_labels):
+            if prototype_estimator == "hard":
+                if np.array_equal(next_probabilities.argmax(axis=1), pseudo_labels):
+                    probabilities = next_probabilities
+                    stop_reason = "selection_unchanged"
+                    break
+            elif np.allclose(next_probabilities, probabilities, rtol=1.0e-9, atol=1.0e-12):
                 probabilities = next_probabilities
-                stop_reason = "selection_unchanged"
+                stop_reason = "probabilities_converged"
                 break
             probabilities = next_probabilities
     final_pseudo_labels = probabilities.argmax(axis=1).astype(int)
