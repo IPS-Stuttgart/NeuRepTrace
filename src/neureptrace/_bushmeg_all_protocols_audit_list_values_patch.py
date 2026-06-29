@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -172,6 +173,19 @@ def _parse_index_set(value: Any) -> set[int]:
     return indices
 
 
+def _integer_index_or_none(value: Any) -> int | None:
+    value = _coerce_repeated_scalar(value)
+    if _is_missing_scalar(value) or isinstance(value, Mapping) or _is_nonstring_iterable(value):
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(numeric) or numeric % 1.0 != 0.0:
+        return None
+    return int(numeric)
+
+
 def _protocol3_prediction_overlap_failures(summary: pd.DataFrame, predictions: pd.DataFrame) -> list[str]:
     audit = importlib.import_module("neureptrace.bushmeg_all_protocols_audit")
     p3_summary = audit._protocol_rows(summary, 3)
@@ -202,7 +216,13 @@ def _protocol3_prediction_overlap_failures(summary: pd.DataFrame, predictions: p
         prediction_value = _coerce_repeated_scalar(row.get(prediction_index_column))
         if not calibration_indices or _is_missing_scalar(prediction_value):
             continue
-        row_index = int(float(prediction_value))
+        row_index = _integer_index_or_none(prediction_value)
+        if row_index is None:
+            failures.append(
+                f"Protocol 3 prediction has non-integer `{prediction_index_column}`={_format_label_value(prediction_value)!r} "
+                f"for {audit._row_label(row)}."
+            )
+            continue
         if row_index in calibration_indices:
             failures.append(f"Protocol 3 prediction uses calibration row {row_index} for {audit._row_label(row)}.")
     return failures[:10]

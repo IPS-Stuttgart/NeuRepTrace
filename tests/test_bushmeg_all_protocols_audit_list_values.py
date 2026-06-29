@@ -33,7 +33,7 @@ def _summary_with_list_values() -> pd.DataFrame:
     )
 
 
-def _predictions_with_list_values(*, target_row_index: list[int]) -> pd.DataFrame:
+def _predictions_with_list_values(*, target_row_index: list[int | str]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
@@ -70,3 +70,12 @@ def test_protocol3_audit_detects_list_valued_calibration_overlap() -> None:
     failures = audit._protocol3_prediction_failures(summary, predictions)
 
     assert any("Protocol 3 prediction uses calibration row 2" in failure for failure in failures)
+
+
+def test_protocol3_audit_reports_invalid_prediction_index_instead_of_crashing() -> None:
+    summary = _summary_with_list_values()
+    predictions = _predictions_with_list_values(target_row_index=["not-an-index", "not-an-index"])
+
+    failures = audit._protocol3_prediction_failures(summary, predictions)
+
+    assert any("non-integer `target_row_index`='not-an-index'" in failure for failure in failures)
