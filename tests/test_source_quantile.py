@@ -5,9 +5,11 @@ import pytest
 
 from neureptrace.decoding.source_quantile import (
     SOURCE_QUANTILE_CATEGORY,
+    apply_source_quantile_bins,
     apply_source_quantile_clip,
     apply_source_quantile_rank,
     source_feature_quantiles,
+    source_quantile_bins,
     source_quantile_clip,
     source_quantile_rank,
 )
@@ -68,6 +70,31 @@ def test_source_quantile_rank_centered_output_is_bounded() -> None:
     assert result.metadata["source_quantile_rank_centered"] is True
 
 
+def test_source_quantile_bins_use_source_edges_for_test_rows() -> None:
+    source = np.asarray([[0.0], [1.0], [2.0], [3.0]], dtype=float)
+    test = np.asarray([[-1.0], [0.5], [1.5], [4.0]], dtype=float)
+
+    result = source_quantile_bins(source_features=source, test_features=test, n_bins=4)
+
+    assert result.train_features.shape == source.shape
+    assert result.test_features.shape == test.shape
+    assert result.bin_edges.shape == (3, 1)
+    assert result.train_features.dtype == np.int16
+    assert result.test_features.tolist() == [[0], [0], [2], [3]]
+    assert result.metadata["source_quantile_bins_protocol_category"] == SOURCE_QUANTILE_CATEGORY
+    assert result.metadata["source_quantile_bins_uses_source_features"] is True
+    assert result.metadata["source_quantile_bins_uses_test_features_for_fitting"] is False
+    assert result.metadata["source_quantile_bins_uses_test_labels"] is False
+
+
+def test_apply_source_quantile_bins_with_explicit_edges() -> None:
+    edges = np.asarray([[1.0, 10.0], [2.0, 20.0]], dtype=float)
+
+    bins = apply_source_quantile_bins([[0.0, 9.0], [1.0, 10.0], [3.0, 30.0]], bin_edges=edges)
+
+    assert bins.tolist() == [[0, 0], [1, 1], [2, 2]]
+
+
 def test_apply_source_quantile_rank_handles_ties() -> None:
     sorted_values = np.asarray([[0.0], [1.0], [1.0], [2.0]], dtype=float)
 
@@ -88,6 +115,8 @@ def test_source_quantile_helpers_reject_width_mismatch() -> None:
         source_quantile_clip(source_features=[[0.0, 1.0]], test_features=[[0.0]])
     with pytest.raises(ValueError, match="same feature width"):
         source_quantile_rank(source_features=[[0.0, 1.0]], test_features=[[0.0]])
+    with pytest.raises(ValueError, match="same feature width"):
+        source_quantile_bins(source_features=[[0.0, 1.0]], test_features=[[0.0]])
 
 
 def test_source_feature_quantiles_validate_bounds() -> None:
@@ -98,6 +127,13 @@ def test_source_feature_quantiles_validate_bounds() -> None:
 def test_source_quantile_rank_validates_epsilon() -> None:
     with pytest.raises(ValueError, match="epsilon"):
         source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=0.5)
+
+
+def test_source_quantile_bins_validate_n_bins() -> None:
+    with pytest.raises(ValueError, match="n_bins"):
+        source_quantile_bins(source_features=[[0.0], [1.0]], test_features=[[0.5]], n_bins=0)
+    with pytest.raises(ValueError, match="bin_edges"):
+        apply_source_quantile_bins([[0.5]], bin_edges=[0.0, 1.0])
 
 
 def test_source_feature_quantiles_reject_boolean_bounds() -> None:
@@ -119,3 +155,5 @@ def test_heldout_arguments_are_not_part_of_public_api() -> None:
         source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], heldout_labels=[0])  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], heldout_labels=[0])  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        source_quantile_bins(source_features=[[0.0], [1.0]], test_features=[[0.5]], heldout_labels=[0])  # type: ignore[call-arg]
