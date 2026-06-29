@@ -124,6 +124,9 @@ def test_fit_precomputed_foundation_probe_supports_decision_function_classifier(
     assert result.probabilities is not None
     assert result.probabilities.shape == (2, 2)
     assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+    margins = np.asarray(result.classifier.decision_function(result.test_features), dtype=float)
+    expected_positive = 1.0 / (1.0 + np.exp(-margins))
+    np.testing.assert_allclose(result.probabilities[:, 1], expected_positive)
 
 
 def test_fit_precomputed_foundation_probe_rejects_target_labels_argument() -> None:

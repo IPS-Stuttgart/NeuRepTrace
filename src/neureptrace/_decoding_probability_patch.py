@@ -291,6 +291,7 @@ def _patch_binary_decision_probability_fallbacks() -> None:
     _patch_decision_probability_helper("neureptrace.decoding.subspace_alignment", "_probabilities_or_none")
     _patch_decision_probability_helper("neureptrace.decoding.transfer_components", "_predict_probabilities_or_none")
     _patch_decision_probability_helper("neureptrace.decoding.transfer_component_analysis", "_predict_probabilities_or_none")
+    _patch_decision_probability_helper("neureptrace.decoding.precomputed_foundation", "_predict_probabilities_or_none")
     _patch_class_score_matrix()
     _patch_decoded_label_classifier()
     _patch_ensemble_aligned_probability_helpers()
