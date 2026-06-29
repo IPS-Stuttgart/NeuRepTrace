@@ -60,6 +60,39 @@ def test_confidence_filter_rejects_invalid_max_entropy(value: object) -> None:
         confidence_filter(rows, max_entropy=value)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"min_confidence": True},
+        {"min_confidence": np.bool_(False)},
+        {"min_margin": True},
+        {"min_margin": np.asarray(False)},
+        {"max_entropy": True},
+        {"max_entropy": np.asarray(False)},
+    ],
+)
+def test_confidence_filter_rejects_boolean_numeric_thresholds(kwargs: dict[str, object]) -> None:
+    rows = np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype=float)
+
+    with pytest.raises(ValueError):
+        confidence_filter(rows, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [[True, False], [False, True]],
+        np.asarray([[True, False], [False, True]]),
+        np.asarray([[True, 0.0], [0.25, 0.75]], dtype=object),
+    ],
+)
+def test_confidence_filter_rejects_boolean_probability_values(rows: object) -> None:
+    with pytest.raises(ValueError, match="probabilities"):
+        confidence_filter(rows)
+    with pytest.raises(ValueError, match="probabilities"):
+        probability_entropy(rows)
+
+
 def test_entropy_normalization_rejects_invalid_boolean_config() -> None:
     rows = np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype=float)
 
