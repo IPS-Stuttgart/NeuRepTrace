@@ -71,6 +71,7 @@ def test_source_pca_whitening_changes_scale() -> None:
     whitened = fit_source_pca_transform(source_features=source, test_features=test, config={"n_components": 1, "whiten": True})
 
     assert not np.allclose(unwhitened.train_features, whitened.train_features)
+    assert np.isclose(np.var(whitened.train_features[:, 0], ddof=1), 1.0)
     assert whitened.metadata["source_pca_whiten"] is True
 
 
