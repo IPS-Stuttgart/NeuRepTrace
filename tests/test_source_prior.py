@@ -65,6 +65,18 @@ def test_source_prior_smoothing_and_aliases() -> None:
     assert np.allclose(prior, np.asarray([0.6, 0.4]))
 
 
+@pytest.mark.parametrize("smoothing", [True, False, np.bool_(True), np.bool_(False), np.asarray(True), np.asarray(False)])
+def test_source_prior_rejects_boolean_smoothing(smoothing) -> None:
+    with pytest.raises(ValueError, match="smoothing must be non-negative and finite"):
+        source_prior_config(smoothing=smoothing)
+
+
+@pytest.mark.parametrize("epsilon", [True, False, np.bool_(True), np.bool_(False), np.asarray(True), np.asarray(False)])
+def test_source_prior_rejects_boolean_epsilon(epsilon) -> None:
+    with pytest.raises(ValueError, match="epsilon must be positive and finite"):
+        source_prior_config(epsilon=epsilon)
+
+
 def test_source_prior_rejects_bad_inputs() -> None:
     with pytest.raises(ValueError, match="target_prior"):
         normalize_target_prior("bad")

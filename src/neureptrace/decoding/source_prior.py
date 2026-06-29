@@ -184,14 +184,34 @@ def _metadata(cfg: SourcePriorConfig, *, n_rows: int, n_classes: int) -> dict[st
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be positive and finite."
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return _positive_float(value.item(), name=name)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be non-negative and finite."
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return _nonnegative_float(value.item(), name=name)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed < 0.0:
-        raise ValueError(f"{name} must be non-negative and finite.")
+        raise ValueError(message)
     return parsed
