@@ -64,13 +64,16 @@ def apply_source_domain_subset(
 def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str = "values") -> np.ndarray:
     if isinstance(values, (str, bytes)):
         raise ValueError(f"{name} must be a one-dimensional sequence of hashable values, not a scalar string.")
+    reject_missing = name == "source_domains"
     items = _row_items(values, name=name)
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
         try:
-            vector[index] = _hashable_value(value)
+            vector[index] = _hashable_value(value, reject_missing=reject_missing)
         except TypeError as exc:
             raise ValueError(f"{name} values must be hashable; got {value!r}.") from exc
+        except ValueError as exc:
+            raise ValueError(f"{name} values must not be missing; got {value!r}.") from exc
     return vector
 
 
@@ -91,17 +94,40 @@ def _row_items(values: Sequence[Any] | np.ndarray, *, name: str) -> list[Any]:
         raise ValueError(f"{name} must be a one-dimensional sequence of hashable values.") from exc
 
 
-def _hashable_value(value: Any) -> Hashable:
+def _missing_value(value: Any) -> bool:
     if isinstance(value, np.generic):
-        return value.item()
+        value = value.item()
+    if value is None:
+        return True
+    try:
+        return bool(np.isnan(value))
+    except (TypeError, ValueError):
+        pass
+    try:
+        equal_to_self = value == value
+    except (TypeError, ValueError):
+        return False
+    if isinstance(equal_to_self, np.ndarray):
+        return False
+    try:
+        return not bool(equal_to_self)
+    except (TypeError, ValueError):
+        return True
+
+
+def _hashable_value(value: Any, *, reject_missing: bool = False) -> Hashable:
+    if isinstance(value, np.generic):
+        return _hashable_value(value.item(), reject_missing=reject_missing)
     if isinstance(value, np.ndarray):
         if value.ndim == 0:
-            return _hashable_value(value.item())
-        return tuple(_hashable_value(item) for item in value.tolist())
+            return _hashable_value(value.item(), reject_missing=reject_missing)
+        return tuple(_hashable_value(item, reject_missing=reject_missing) for item in value.tolist())
     if isinstance(value, list):
-        return tuple(_hashable_value(item) for item in value)
+        return tuple(_hashable_value(item, reject_missing=reject_missing) for item in value)
     if isinstance(value, tuple):
-        return tuple(_hashable_value(item) for item in value)
+        return tuple(_hashable_value(item, reject_missing=reject_missing) for item in value)
+    if reject_missing and _missing_value(value):
+        raise ValueError("missing")
     hash(value)
     return value
 
