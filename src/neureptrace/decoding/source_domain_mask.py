@@ -44,7 +44,7 @@ def source_domain_mask(
     if min_keep > len(unique_domains):
         raise ValueError("min_selected_domains cannot exceed the number of source domains.")
     fraction = _unit_interval(holdout_fraction, name="holdout_fraction")
-    seed = None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state")
+    seed = _optional_nonnegative_int(random_state, name="random_state")
     n_holdout = min(int(np.floor(fraction * len(unique_domains))), len(unique_domains) - min_keep)
     rng = np.random.default_rng(seed)
     shuffled_indices = np.arange(len(unique_domains), dtype=int)
@@ -174,6 +174,31 @@ def _hashable_value(value: Any, *, reject_missing: bool = False) -> Hashable:
         hash(value)
     except TypeError:
         raise
+    return value
+
+
+def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
+    scalar_value = _scalar_config_value(value, name=name)
+    if _none_like_config_value(scalar_value):
+        return None
+    return _nonnegative_int(scalar_value, name=name)
+
+
+def _none_like_config_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"", "none", "null"}
+    return False
+
+
+def _scalar_config_value(value: Any, *, name: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        return value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be a non-negative integer.")
     return value
 
 
