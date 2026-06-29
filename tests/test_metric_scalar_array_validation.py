@@ -22,14 +22,14 @@ LABELS = np.array([0, 1])
 SAMPLE_WEIGHT = np.array([1.0, 1.0])
 
 
-@pytest.mark.parametrize("normalization_atol", [np.asarray(False), np.array([False])])
-def test_probability_input_validation_rejects_boolean_array_tolerance(normalization_atol: object) -> None:
+@pytest.mark.parametrize("normalization_atol", [np.asarray(0.0), np.array([0.0]), np.asarray(False), np.array([False])])
+def test_probability_input_validation_rejects_array_tolerance(normalization_atol: object) -> None:
     with pytest.raises(ValueError, match="normalization_atol must be a non-negative finite value"):
         validate_probability_inputs(PROBABILITIES, normalization_atol=normalization_atol)
 
 
-@pytest.mark.parametrize("n_bins", [np.asarray(True), np.array([True])])
-def test_calibration_metrics_reject_boolean_array_bin_counts(n_bins: object) -> None:
+@pytest.mark.parametrize("n_bins", [np.asarray(2), np.array([2]), np.asarray(True), np.array([True])])
+def test_calibration_metrics_reject_array_bin_counts(n_bins: object) -> None:
     with pytest.raises(ValueError, match="n_bins must be a positive integer"):
         expected_calibration_error(PROBABILITIES, LABELS, n_bins=n_bins)
 
@@ -43,8 +43,8 @@ def test_calibration_metrics_reject_boolean_array_bin_counts(n_bins: object) -> 
         weighted_reliability_bins(PROBABILITIES, LABELS, SAMPLE_WEIGHT, n_bins=n_bins)
 
 
-@pytest.mark.parametrize("k", [np.asarray(True), np.array([True])])
-def test_top_k_metrics_reject_boolean_array_k(k: object) -> None:
+@pytest.mark.parametrize("k", [np.asarray(1), np.array([1]), np.asarray(True), np.array([True])])
+def test_top_k_metrics_reject_array_k(k: object) -> None:
     with pytest.raises(ValueError, match="k must be a positive integer"):
         top_k_accuracy(PROBABILITIES, LABELS, k=k)
 
