@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 import scipy.io as sio
 
+import neureptrace.fieldtrip_mat as fieldtrip_mat
 from neureptrace.fieldtrip_mat import _sampleinfo_array, load_fieldtrip_raw_mat_epochs, write_fieldtrip_raw_mat_epochs
 
 
@@ -114,6 +115,69 @@ def test_write_fieldtrip_mat_refuses_existing_metadata_without_overwrite(tmp_pat
 
     assert epochs.saved_paths == []
     assert metadata_out.read_text(encoding="utf-8") == "old\n"
+
+
+def test_fieldtrip_cli_forwards_custom_path_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    seen: dict[str, object] = {}
+
+    def fake_writer(mat_path: Path | str, **kwargs):
+        seen["mat_path"] = Path(mat_path)
+        seen.update(kwargs)
+        return kwargs["epochs_out"], kwargs["metadata_out"]
+
+    monkeypatch.setattr(fieldtrip_mat, "write_fieldtrip_raw_mat_epochs", fake_writer)
+
+    exit_code = fieldtrip_mat.main(
+        [
+            str(tmp_path / "custom.mat"),
+            "--epochs-out",
+            str(tmp_path / "custom-epo.fif"),
+            "--metadata-out",
+            str(tmp_path / "custom-metadata.csv"),
+            "--root-path",
+            "outer,0,fieldtrip",
+            "--trial-path",
+            "epochs,trials",
+            "--time-path",
+            "epochs,times",
+            "--label-path",
+            "channels,names",
+            "--trialinfo-path",
+            "metadata,trial_info",
+            "--sampleinfo-path",
+            "none",
+            "--label-column",
+            "stimulus",
+            "--label-base",
+            "none",
+            "--trialinfo-column",
+            "2",
+            "--ch-type",
+            "mag",
+            "--trial-axis-order",
+            "time_channel",
+            "--no-trim-overlong-labels",
+            "--overwrite",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen["mat_path"] == tmp_path / "custom.mat"
+    assert seen["epochs_out"] == tmp_path / "custom-epo.fif"
+    assert seen["metadata_out"] == tmp_path / "custom-metadata.csv"
+    assert seen["root_path"] == ("outer", 0, "fieldtrip")
+    assert seen["trial_path"] == ("epochs", "trials")
+    assert seen["time_path"] == ("epochs", "times")
+    assert seen["label_path"] == ("channels", "names")
+    assert seen["trialinfo_path"] == ("metadata", "trial_info")
+    assert seen["sampleinfo_path"] is None
+    assert seen["label_column"] == "stimulus"
+    assert seen["label_base"] is None
+    assert seen["trialinfo_column"] == 2
+    assert seen["ch_type"] == "mag"
+    assert seen["trial_axis_order"] == "time_channel"
+    assert seen["trim_overlong_labels"] is False
+    assert seen["overwrite"] is True
 
 
 def test_fieldtrip_sampleinfo_accepts_integral_float_bounds():
