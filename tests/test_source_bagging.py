@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neureptrace.decoding.source_bagging import SOURCE_BAGGING_CATEGORY, fit_source_bagging_decoder, source_bagging_config
+from neureptrace.decoding.source_bagging import SOURCE_BAGGING_CATEGORY, SourceBaggingConfig, fit_source_bagging_decoder, source_bagging_config
 
 
 def test_source_bagging_predicts_separated_classes() -> None:
@@ -68,6 +68,26 @@ def test_source_bagging_config_validation() -> None:
 
     with pytest.raises(ValueError, match="n_estimators"):
         source_bagging_config(n_estimators=0)
+
+
+@pytest.mark.parametrize("option_name", ["sample_fraction", "feature_fraction"])
+def test_source_bagging_rejects_fraction_above_one(option_name: str) -> None:
+    with pytest.raises(ValueError, match=option_name):
+        source_bagging_config(**{option_name: 1.01})
+
+
+def test_source_bagging_rejects_direct_config_fraction_above_one() -> None:
+    source_features = np.asarray([[-2.0], [-1.0], [1.0], [2.0]], dtype=float)
+    source_labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+    test_features = np.asarray([[-1.8], [1.8]], dtype=float)
+
+    with pytest.raises(ValueError, match="feature_fraction"):
+        fit_source_bagging_decoder(
+            source_features=source_features,
+            source_labels=source_labels,
+            test_features=test_features,
+            config=SourceBaggingConfig(n_estimators=1, feature_fraction=1.5),
+        )
 
 
 @pytest.mark.parametrize("value", [None, "", " none ", "NULL"])
