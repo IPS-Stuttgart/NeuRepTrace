@@ -121,3 +121,19 @@ def test_source_domain_mask_rejects_scalar_string_vectors() -> None:
 def test_source_domain_mask_rejects_missing_source_domain_values(domains) -> None:
     with pytest.raises(ValueError, match="missing"):
         source_domain_mask(domains)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"holdout_fraction": True}, "holdout_fraction"),
+        ({"holdout_fraction": np.asarray(True)}, "holdout_fraction"),
+        ({"holdout_fraction": np.asarray([0.25])}, "holdout_fraction"),
+        ({"min_selected_domains": True}, "min_selected_domains"),
+        ({"min_selected_domains": np.asarray(True)}, "min_selected_domains"),
+        ({"min_selected_domains": np.asarray([1])}, "min_selected_domains"),
+    ],
+)
+def test_source_domain_mask_rejects_boolean_and_vector_config_values(kwargs, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        source_domain_mask(["subject_one", "subject_two"], **kwargs)
