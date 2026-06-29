@@ -108,7 +108,7 @@ def _install_source_jitter_patch() -> None:
         noise_scale: float | str = source_jitter.DEFAULT_NOISE_SCALE,
         scale_mode: str | None = "global",
         preserve_original: Any = True,
-        random_state: int | str | None = 13,
+        random_state: Any = 13,
         epsilon: float | str = source_jitter.DEFAULT_EPSILON,
     ):
         return original_config(
@@ -116,7 +116,7 @@ def _install_source_jitter_patch() -> None:
             noise_scale=noise_scale,
             scale_mode=scale_mode,
             preserve_original=_normalize_bool(preserve_original, name="preserve_original"),
-            random_state=random_state,
+            random_state=_nonnegative_optional_integer(random_state, name="random_state"),
             epsilon=epsilon,
         )
 
