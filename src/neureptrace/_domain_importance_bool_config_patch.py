@@ -12,9 +12,9 @@ def _bool_config(value: Any, *, name: str) -> bool:
         return bool(value)
     if isinstance(value, str):
         text = value.strip().lower()
-        if text in {"1", "true", "yes", "on"}:
+        if text in {"1", "true", "t", "yes", "y", "on"}:
             return True
-        if text in {"0", "false", "no", "off"}:
+        if text in {"0", "false", "f", "no", "n", "off"}:
             return False
     raise ValueError(f"{name} must be a boolean value.")
 
