@@ -48,14 +48,33 @@ def _parse_label_base(value: str | int | float | None) -> float | None:
 
 
 def _build_parser(fieldtrip_mat: Any, prog: str | None = None) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog, description="Convert FieldTrip-like MATLAB raw/trial data to MNE Epochs FIF plus metadata CSV.")
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="Convert FieldTrip-like MATLAB raw/trial data to MNE Epochs FIF plus metadata CSV.",
+    )
     parser.add_argument("mat", type=Path)
     parser.add_argument("--epochs-out", type=Path, required=True)
     parser.add_argument("--metadata-out", type=Path)
-    parser.add_argument("--root-path", default=_format_path_default(fieldtrip_mat.DEFAULT_ROOT_PATH), help="Comma-separated field/index path to the FieldTrip root struct.")
-    parser.add_argument("--trial-path", default=_format_path_default(fieldtrip_mat.DEFAULT_TRIAL_PATH), help="Comma-separated field/index path from root to the trial cell array.")
-    parser.add_argument("--time-path", default=_format_path_default(fieldtrip_mat.DEFAULT_TIME_PATH), help="Comma-separated field/index path from root to the time cell array.")
-    parser.add_argument("--label-path", default=_format_path_default(fieldtrip_mat.DEFAULT_LABEL_PATH), help="Comma-separated field/index path from root to channel labels.")
+    parser.add_argument(
+        "--root-path",
+        default=_format_path_default(fieldtrip_mat.DEFAULT_ROOT_PATH),
+        help="Comma-separated field/index path to the FieldTrip root struct.",
+    )
+    parser.add_argument(
+        "--trial-path",
+        default=_format_path_default(fieldtrip_mat.DEFAULT_TRIAL_PATH),
+        help="Comma-separated field/index path from root to the trial cell array.",
+    )
+    parser.add_argument(
+        "--time-path",
+        default=_format_path_default(fieldtrip_mat.DEFAULT_TIME_PATH),
+        help="Comma-separated field/index path from root to the time cell array.",
+    )
+    parser.add_argument(
+        "--label-path",
+        default=_format_path_default(fieldtrip_mat.DEFAULT_LABEL_PATH),
+        help="Comma-separated field/index path from root to channel labels.",
+    )
     parser.add_argument(
         "--trialinfo-path",
         default=_format_path_default(fieldtrip_mat.DEFAULT_TRIALINFO_PATH),
@@ -67,10 +86,19 @@ def _build_parser(fieldtrip_mat: Any, prog: str | None = None) -> argparse.Argum
         help="Comma-separated field/index path from root to sampleinfo; use 'none' to disable sampleinfo metadata.",
     )
     parser.add_argument("--label-column", default="condition")
-    parser.add_argument("--label-base", type=_parse_label_base, default=1.0, help="Numeric offset subtracted from trialinfo labels; use 'none' for string/already-normalized labels.")
+    parser.add_argument(
+        "--label-base",
+        type=_parse_label_base,
+        default=1.0,
+        help="Numeric offset subtracted from trialinfo labels; use 'none' for string/already-normalized labels.",
+    )
     parser.add_argument("--trialinfo-column", type=int, default=0)
     parser.add_argument("--ch-type", default="grad")
-    parser.add_argument("--trial-axis-order", choices=("channel_time", "time_channel"), default="channel_time")
+    parser.add_argument(
+        "--trial-axis-order",
+        choices=("channel_time", "time_channel"),
+        default="channel_time",
+    )
     parser.add_argument("--no-trim-overlong-labels", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     return parser
@@ -94,12 +122,32 @@ def install() -> None:
             args.mat,
             epochs_out=args.epochs_out,
             metadata_out=args.metadata_out,
-            root_path=fieldtrip_mat.parse_path_tokens(args.root_path, fieldtrip_mat.DEFAULT_ROOT_PATH),
-            trial_path=fieldtrip_mat.parse_path_tokens(args.trial_path, fieldtrip_mat.DEFAULT_TRIAL_PATH),
-            time_path=fieldtrip_mat.parse_path_tokens(args.time_path, fieldtrip_mat.DEFAULT_TIME_PATH),
-            label_path=fieldtrip_mat.parse_path_tokens(args.label_path, fieldtrip_mat.DEFAULT_LABEL_PATH),
-            trialinfo_path=_parse_optional_path_tokens(fieldtrip_mat, args.trialinfo_path, fieldtrip_mat.DEFAULT_TRIALINFO_PATH),
-            sampleinfo_path=_parse_optional_path_tokens(fieldtrip_mat, args.sampleinfo_path, fieldtrip_mat.DEFAULT_SAMPLEINFO_PATH),
+            root_path=fieldtrip_mat.parse_path_tokens(
+                args.root_path,
+                fieldtrip_mat.DEFAULT_ROOT_PATH,
+            ),
+            trial_path=fieldtrip_mat.parse_path_tokens(
+                args.trial_path,
+                fieldtrip_mat.DEFAULT_TRIAL_PATH,
+            ),
+            time_path=fieldtrip_mat.parse_path_tokens(
+                args.time_path,
+                fieldtrip_mat.DEFAULT_TIME_PATH,
+            ),
+            label_path=fieldtrip_mat.parse_path_tokens(
+                args.label_path,
+                fieldtrip_mat.DEFAULT_LABEL_PATH,
+            ),
+            trialinfo_path=_parse_optional_path_tokens(
+                fieldtrip_mat,
+                args.trialinfo_path,
+                fieldtrip_mat.DEFAULT_TRIALINFO_PATH,
+            ),
+            sampleinfo_path=_parse_optional_path_tokens(
+                fieldtrip_mat,
+                args.sampleinfo_path,
+                fieldtrip_mat.DEFAULT_SAMPLEINFO_PATH,
+            ),
             label_column=args.label_column,
             label_base=args.label_base,
             trialinfo_column=args.trialinfo_column,
