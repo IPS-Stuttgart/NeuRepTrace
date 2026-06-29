@@ -1,16 +1,23 @@
-"""Robust boolean parsing for onset summary tables.
+"""Robust boolean parsing and missing-group preservation for onset tables.
 
 Onset events and thresholded observations are commonly written to CSV before
-being summarized again.  Pandas may preserve boolean-looking columns as strings
+being summarized again. Pandas may preserve boolean-looking columns as strings
 in user code, and ``Series.astype(bool)`` treats every non-empty string,
-including ``"False"``, as true.  This patch keeps CSV round-trips from inflating
+including ``"False"``, as true. This patch keeps CSV round-trips from inflating
 onset, false-alarm, and threshold-crossing counts.
+
+The onset helpers also group by optional metadata columns such as ``subject``,
+``decoder``, and ``emission_mode``. Pandas ``groupby`` drops ``NaN`` keys by
+default, which can silently remove whole sequences whose metadata is missing.
+This patch maps missing group keys to a private sentinel while the original
+helper runs, then restores missing values in the returned table.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -19,6 +26,8 @@ _TRUE_BOOL_TEXT = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_TEXT = {"0", "false", "f", "no", "n", "off", ""}
 _PATCH_MARKER = "_neureptrace_onset_boolean_summary_patch_installed"
 _PARSED_ABOVE_THRESHOLD_COLUMN = "_neureptrace_parsed_above_threshold"
+_MISSING_GROUP_SENTINEL = object()
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 def _is_missing(value: object) -> bool:
@@ -56,6 +65,54 @@ def _bool_series(values: Any, *, name: str) -> pd.Series:
     series = pd.Series(values, copy=False)
     parsed_values = [_parse_bool(value, name=name) for value in series.to_numpy(dtype=object)]
     return pd.Series(parsed_values, index=series.index, dtype=bool)
+
+
+def _sentinelize_missing_group_values(
+    frame: pd.DataFrame,
+    group_columns: list[str],
+) -> tuple[pd.DataFrame, list[str]]:
+    """Replace missing onset group keys with a private sentinel."""
+
+    missing_columns = [column for column in group_columns if column in frame.columns and bool(frame[column].isna().any())]
+    if not missing_columns:
+        return frame, []
+
+    patched = frame.copy()
+    for column in missing_columns:
+        missing = patched[column].isna()
+        patched[column] = patched[column].astype(object)
+        patched.loc[missing, column] = _MISSING_GROUP_SENTINEL
+    return patched, missing_columns
+
+
+def _restore_missing_group_values(
+    frame: pd.DataFrame,
+    missing_columns: list[str],
+) -> pd.DataFrame:
+    """Restore private sentinel group keys to ``np.nan`` in output tables."""
+
+    if not missing_columns:
+        return frame
+
+    restored = frame.copy()
+    for column in missing_columns:
+        if column not in restored.columns:
+            continue
+        restored[column] = restored[column].map(lambda value: np.nan if value is _MISSING_GROUP_SENTINEL else value)
+    return restored
+
+
+def _wrap_grouped_dataframe_helper(onset_module: Any, function: _F) -> _F:
+    """Run an onset helper without letting pandas drop missing group keys."""
+
+    @wraps(function)
+    def wrapper(frame: pd.DataFrame, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        group_columns = onset_module._group_columns(frame)
+        patched_frame, missing_columns = _sentinelize_missing_group_values(frame, group_columns)
+        result = function(patched_frame, *args, **kwargs)
+        return _restore_missing_group_values(result, missing_columns)
+
+    return wrapper  # type: ignore[return-value]
 
 
 def _sequence_crossing_rate(
@@ -110,7 +167,7 @@ def _window_threshold_stats(
 
 
 def install() -> None:
-    """Install robust boolean parsing for onset summary helpers."""
+    """Install robust boolean parsing and missing-group preservation for onset helpers."""
 
     import neureptrace.onset_detection as onset_detection
 
@@ -123,7 +180,7 @@ def install() -> None:
     def summarize_onset_events(events: pd.DataFrame) -> pd.DataFrame:
         group_columns = onset_detection._group_columns(events)
         rows = []
-        grouped = events.groupby(group_columns, sort=True) if group_columns else [((), events)]
+        grouped = events.groupby(group_columns, sort=True, dropna=False) if group_columns else [((), events)]
         for keys, group_frame in grouped:
             key_values = keys if isinstance(keys, tuple) else (keys,)
             group_values = dict(zip(group_columns, key_values, strict=True))
@@ -176,8 +233,23 @@ def install() -> None:
     ) -> dict[str, float | int]:
         return _window_threshold_stats(onset_detection, frame, window, sequence_columns)
 
-    onset_detection.summarize_onset_events = summarize_onset_events
     onset_detection._window_threshold_stats = patched_window_threshold_stats
+    onset_detection.annotate_threshold_crossings = _wrap_grouped_dataframe_helper(
+        onset_detection,
+        onset_detection.annotate_threshold_crossings,
+    )
+    onset_detection.detect_onsets = _wrap_grouped_dataframe_helper(
+        onset_detection,
+        onset_detection.detect_onsets,
+    )
+    onset_detection.summarize_onset_events = _wrap_grouped_dataframe_helper(
+        onset_detection,
+        summarize_onset_events,
+    )
+    onset_detection.summarize_threshold_crossings = _wrap_grouped_dataframe_helper(
+        onset_detection,
+        onset_detection.summarize_threshold_crossings,
+    )
     setattr(onset_detection, _PATCH_MARKER, True)
 
 
