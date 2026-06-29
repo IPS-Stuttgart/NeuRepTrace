@@ -146,6 +146,8 @@ def _object_vector(items: Sequence[object]) -> np.ndarray:
 
 
 def _validate_integer(value: object, *, name: str, minimum: int) -> int:
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"{name} values must be integers.")
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} values must be integers.")
     try:
