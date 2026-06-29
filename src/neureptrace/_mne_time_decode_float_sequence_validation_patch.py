@@ -1,4 +1,4 @@
-"""Validate MNE time-decode floating-point time sequences and boolean controls."""
+"""Validate MNE time-decode scalar controls, floating-point sequences, and boolean controls."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ _OBSERVATION_ENSEMBLE_PATCH_MARKER = "_neureptrace_observation_unique_decoder_va
 _BOOL_KWARG_PATCH_MARKER = "_neureptrace_mne_time_decode_bool_kwarg_validation_patch_installed"
 _TEMPORAL_TRAIN_WINDOW_PATCH_MARKER = "_neureptrace_temporal_train_window_validation_patch_installed"
 _TEMPORAL_TRAIN_WINDOW_KWARG_PATCH_MARKER = "_neureptrace_temporal_train_window_kwarg_validation_patch_installed"
+_SCALAR_ARRAY_PATCH_MARKER = "_neureptrace_mne_time_decode_scalar_array_validation_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
@@ -77,6 +78,27 @@ def _normalize_temporal_train_window_kwargs(kwargs: dict[str, Any]) -> dict[str,
 
 def _validation_error(name: str) -> ValueError:
     return ValueError(f"{name} must contain finite numeric time values, not booleans or NaN/inf.")
+
+
+def _integer_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be an integer.")
+
+
+def _positive_float_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be positive and finite.")
+
+
+def _nonnegative_float_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be non-negative and finite.")
+
+
+def _unit_interval_error(name: str, *, include_one: bool = False) -> ValueError:
+    bracket = "[0, 1]" if include_one else "[0, 1)"
+    return ValueError(f"{name} must be finite in {bracket}.")
+
+
+def _pseudo_label_threshold_error() -> ValueError:
+    return ValueError("pseudo_label_confidence_threshold must be between 0 and 1.")
 
 
 def _coerce_sequence(value: Any, default: Sequence[float]) -> list[Any]:
@@ -197,6 +219,63 @@ def _install_temporal_train_window_validation() -> None:
     module._normalize_temporal_train_window = _normalize_temporal_train_window
 
 
+def _install_scalar_array_validation() -> None:
+    module = importlib.import_module("neureptrace.mne_time_decode")
+    original_normalize_integer = module._normalize_integer
+    if getattr(original_normalize_integer, _SCALAR_ARRAY_PATCH_MARKER, False):
+        return
+
+    original_normalize_positive_int = module._normalize_positive_int
+    original_normalize_positive_float = module._normalize_positive_float
+    original_normalize_nonnegative_float = module._normalize_nonnegative_float
+    original_normalize_unit_interval_float = module._normalize_unit_interval_float
+    original_normalize_pseudo_label_confidence_threshold = module._normalize_pseudo_label_confidence_threshold
+
+    @wraps(original_normalize_integer)
+    def _normalize_integer(value, *, name, minimum=None):
+        if isinstance(value, np.ndarray):
+            raise _integer_error(name)
+        return original_normalize_integer(value, name=name, minimum=minimum)
+
+    @wraps(original_normalize_positive_int)
+    def _normalize_positive_int(value, *, name):
+        if isinstance(value, np.ndarray):
+            raise _integer_error(name)
+        return original_normalize_positive_int(value, name=name)
+
+    @wraps(original_normalize_positive_float)
+    def _normalize_positive_float(value, *, name):
+        if isinstance(value, np.ndarray):
+            raise _positive_float_error(name)
+        return original_normalize_positive_float(value, name=name)
+
+    @wraps(original_normalize_nonnegative_float)
+    def _normalize_nonnegative_float(value, *, name):
+        if isinstance(value, np.ndarray):
+            raise _nonnegative_float_error(name)
+        return original_normalize_nonnegative_float(value, name=name)
+
+    @wraps(original_normalize_unit_interval_float)
+    def _normalize_unit_interval_float(value, *, name, include_one=False):
+        if isinstance(value, np.ndarray):
+            raise _unit_interval_error(name, include_one=include_one)
+        return original_normalize_unit_interval_float(value, name=name, include_one=include_one)
+
+    @wraps(original_normalize_pseudo_label_confidence_threshold)
+    def _normalize_pseudo_label_confidence_threshold(value):
+        if isinstance(value, np.ndarray):
+            raise _pseudo_label_threshold_error()
+        return original_normalize_pseudo_label_confidence_threshold(value)
+
+    setattr(_normalize_integer, _SCALAR_ARRAY_PATCH_MARKER, True)
+    module._normalize_integer = _normalize_integer
+    module._normalize_positive_int = _normalize_positive_int
+    module._normalize_positive_float = _normalize_positive_float
+    module._normalize_nonnegative_float = _normalize_nonnegative_float
+    module._normalize_unit_interval_float = _normalize_unit_interval_float
+    module._normalize_pseudo_label_confidence_threshold = _normalize_pseudo_label_confidence_threshold
+
+
 def _wrap_time_decode_boolean_kwargs(module_name: str, parameter_names: Sequence[str]) -> None:
     module = importlib.import_module(module_name)
     original_run_time_resolved_decode = module.run_time_resolved_decode
@@ -286,10 +365,11 @@ def _install_observation_ensemble_validation() -> None:
 
 
 def install() -> None:
-    """Patch candidate-time parsing, temporal train-window parsing, boolean controls, and duplicate ensemble-source validation."""
+    """Patch time decoding sequence, scalar, boolean, temporal-window, and ensemble validations."""
 
     _install_time_sequence_validation()
     _install_temporal_train_window_validation()
+    _install_scalar_array_validation()
     _install_time_decode_boolean_validation()
     _install_time_transfer_temporal_train_window_validation()
     _install_time_decode_ensemble_validation()
