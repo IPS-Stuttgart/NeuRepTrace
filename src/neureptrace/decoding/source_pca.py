@@ -124,7 +124,7 @@ def apply_source_pca_transform(features: Sequence[Sequence[float]] | np.ndarray,
     projected = ((matrix - reference.mean) / reference.scale) @ reference.components.T
     if reference.config.whiten:
         denom = np.maximum(reference.singular_values, reference.config.epsilon)
-        projected = projected / denom
+        projected = projected * _whitening_scale(reference) / denom
     return projected.astype(np.float32, copy=False)
 
 
@@ -165,6 +165,12 @@ def _resolve_components(value: int | str, *, n_rows: int, n_features: int, cente
     if isinstance(requested, str):
         return int(maximum)
     return min(int(requested), int(maximum))
+
+
+def _whitening_scale(reference: SourcePCAReference) -> float:
+    n_fit_rows = max(1, int(reference.n_fit_rows))
+    variance_dof = n_fit_rows - 1 if reference.config.center and n_fit_rows > 1 else n_fit_rows
+    return float(np.sqrt(float(max(1, variance_dof))))
 
 
 def _component_request(value: Any) -> int | str:
