@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_pca import (
     SOURCE_PCA_CATEGORY,
+    SourcePCAConfig,
     apply_source_pca_transform,
     fit_source_pca_reference,
     fit_source_pca_transform,
@@ -84,6 +85,33 @@ def test_source_pca_config_validation() -> None:
         fit_source_pca_transform(source_features=[[0.0], [1.0]], test_features=[[0.5]], config={"n_components": 0})
 
 
+def test_source_pca_config_parses_string_booleans() -> None:
+    cfg = source_pca_config(center="false", scale="yes", whiten="off")
+
+    assert cfg.center is False
+    assert cfg.scale is True
+    assert cfg.whiten is False
+
+    with pytest.raises(ValueError, match="center"):
+        source_pca_config(center="maybe")
+
+
+def test_source_pca_revalidates_direct_config_instances() -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        fit_source_pca_transform(source_features=[[0.0], [1.0]], test_features=[[0.5]], config=SourcePCAConfig(epsilon=0.0))
+
+
+def test_source_pca_direct_config_uses_boolean_normalizer() -> None:
+    result = fit_source_pca_transform(
+        source_features=[[1.0], [2.0]],
+        test_features=[[3.0]],
+        config=SourcePCAConfig(n_components=1, center="false"),
+    )
+
+    assert np.allclose(result.reference.mean, [0.0])
+    assert result.metadata["source_pca_center"] is False
+
+
 def test_source_pca_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_pca_transform(source_features=[[0.0, 1.0]], test_features=[[0.0]])
@@ -94,5 +122,5 @@ def test_heldout_labels_are_not_part_of_public_api() -> None:
         fit_source_pca_transform(
             source_features=[[0.0], [1.0]],
             test_features=[[0.5]],
-            heldout_labels=[0],  # type: ignore[call-arg]
+            heldout_labels=[0],
         )
