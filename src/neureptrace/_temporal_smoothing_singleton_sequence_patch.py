@@ -1,4 +1,4 @@
-"""Preserve singleton sequences and reject boolean temporal observations."""
+"""Preserve singleton sequences and reject malformed temporal inputs."""
 
 from __future__ import annotations
 
@@ -26,6 +26,22 @@ def _reject_boolean_values(values: object, message: str) -> None:
         raise ValueError(message)
 
 
+def _temporal_config_scalar(value: object, message: str) -> object:
+    """Return a scalar config value while rejecting boolean and array-valued inputs."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
+    elif isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(message)
+    return value
+
+
 def install() -> None:
     """Patch temporal smoothing so valid one-row sequences are retained."""
 
@@ -34,6 +50,28 @@ def install() -> None:
     original_smooth = temporal_smoothing.smooth_probability_observations
     if getattr(original_smooth, _PATCH_MARKER, False):
         return
+
+    original_validate_integer = temporal_model._validate_integer
+
+    @wraps(original_validate_integer)
+    def _validate_integer(value: object, *, name: str, minimum: int | None = None) -> int:
+        value = _temporal_config_scalar(value, f"{name} must be an integer.")
+        return original_validate_integer(value, name=name, minimum=minimum)
+
+    temporal_model._validate_integer = _validate_integer
+
+    original_validate_finite_float = temporal_model._validate_finite_float
+
+    @wraps(original_validate_finite_float)
+    def _validate_finite_float(value: object, *, name: str) -> float:
+        message = f"{name} must be finite."
+        value = _temporal_config_scalar(value, message)
+        try:
+            return original_validate_finite_float(value, name=name)
+        except TypeError as exc:
+            raise ValueError(message) from exc
+
+    temporal_model._validate_finite_float = _validate_finite_float
 
     original_validate_probability_matrix = temporal_model._validate_probability_matrix
 
