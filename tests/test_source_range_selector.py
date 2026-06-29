@@ -27,6 +27,12 @@ def test_source_range_selector_top_k_and_fallback() -> None:
     assert select_source_range_features([0.0, 0.0, 2.0], min_range=10.0).tolist() == [2]
 
 
+def test_source_range_selector_accepts_string_scalar_controls() -> None:
+    selected = select_source_range_features([0.0, 2.0, 4.0], min_range="1", top_k="2")
+
+    assert selected.tolist() == [1, 2]
+
+
 def test_source_range_selector_validation() -> None:
     with pytest.raises(ValueError):
         select_source_range_features([1.0], min_range=-0.1)
@@ -36,3 +42,14 @@ def test_source_range_selector_validation() -> None:
 
     with pytest.raises(ValueError, match="feature widths"):
         fit_source_range_selector(source_features=[[0.0, 1.0]], test_features=[[0.0]])
+
+
+def test_source_range_selector_rejects_ambiguous_scalar_controls() -> None:
+    with pytest.raises(ValueError, match="top_k"):
+        select_source_range_features([1.0, 2.0], top_k=1.5)
+
+    with pytest.raises(ValueError, match="top_k"):
+        select_source_range_features([1.0, 2.0], top_k=True)
+
+    with pytest.raises(ValueError, match="min_range"):
+        select_source_range_features([1.0, 2.0], min_range=[0.0, 1.0])
