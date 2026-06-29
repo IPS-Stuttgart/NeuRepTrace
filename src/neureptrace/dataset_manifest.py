@@ -43,7 +43,7 @@ def write_manifest_from_dataset_config(
     config_path: Path | str,
     out_path: Path | str,
     *,
-    run_names: Sequence[str] | None = None,
+    run_names: Sequence[str] | str | None = None,
     absolute_paths: bool = False,
 ) -> pd.DataFrame:
     """Write a CSV benchmark manifest from a dataset config and return it as a frame."""
@@ -65,7 +65,7 @@ def manifest_from_dataset_config(
     config: Mapping[str, Any],
     *,
     config_dir: Path | None = None,
-    run_names: Sequence[str] | None = None,
+    run_names: Sequence[str] | str | None = None,
     absolute_paths: bool = False,
 ) -> pd.DataFrame:
     """Expand a compact dataset config into a NeuRepTrace benchmark manifest."""
@@ -182,7 +182,7 @@ def _is_boolean_like(value: Any) -> bool:
     return isinstance(value, bool) or type(value).__name__ == "bool_"
 
 
-def _runs(config: Mapping[str, Any], *, files: Mapping[str, Any], run_names: Sequence[str] | None) -> list[dict[str, Any]]:
+def _runs(config: Mapping[str, Any], *, files: Mapping[str, Any], run_names: Sequence[str] | str | None) -> list[dict[str, Any]]:
     raw_runs = config.get("runs")
     if raw_runs is None:
         first_key = next(iter(files))
@@ -200,7 +200,9 @@ def _runs(config: Mapping[str, Any], *, files: Mapping[str, Any], run_names: Seq
             runs.append(run)
     if run_names is None:
         return runs
-    requested = set(run_names)
+    if isinstance(run_names, bytes):
+        raise ValueError("run_names must be a run-name string or a sequence of run-name strings, not bytes.")
+    requested = {run_names} if isinstance(run_names, str) else {str(run_name) for run_name in run_names}
     selected = [run for run in runs if str(run["name"]) in requested]
     missing = requested.difference(str(run["name"]) for run in selected)
     if missing:
