@@ -133,6 +133,34 @@ def test_masking_is_reproducible_with_fixed_seed() -> None:
     assert [mask.tolist() for mask in first.masked_feature_indices] == [mask.tolist() for mask in second.masked_feature_indices]
 
 
+@pytest.mark.parametrize("value", [None, "", " none ", "NULL", np.asarray("none")])
+def test_optional_integer_config_accepts_none_like_values(value: object) -> None:
+    config = source_feature_masking_config(block_size=value, random_state=value)
+
+    assert config.block_size is None
+    assert config.random_state is None
+
+
+@pytest.mark.parametrize("value", [3, "3", np.asarray(3)])
+def test_optional_integer_config_accepts_integer_values(value: object) -> None:
+    config = source_feature_masking_config(block_size=value, random_state=value)
+
+    assert config.block_size == 3
+    assert config.random_state == 3
+
+
+@pytest.mark.parametrize("value", [True, -1, 0.5, "1.5", [1], {"seed": 1}, np.asarray([1, 2])])
+def test_source_feature_masking_rejects_invalid_random_state(value: object) -> None:
+    with pytest.raises(ValueError, match="random_state"):
+        source_feature_masking_config(random_state=value)
+
+
+@pytest.mark.parametrize("value", [True, 0, -1, 0.5, "1.5", [1], {"size": 1}, np.asarray([1, 2])])
+def test_source_feature_masking_rejects_invalid_block_size(value: object) -> None:
+    with pytest.raises(ValueError, match="block_size"):
+        source_feature_masking_config(block_size=value)
+
+
 def test_aliases_and_invalid_options() -> None:
     assert normalize_mask_mode("contiguous") == "block"
     assert normalize_fill_mode("column-mean") == "feature_mean"
