@@ -29,6 +29,10 @@ def apply_source_range_clip(features, lower, upper):
     hi = np.asarray(upper, dtype=float).reshape(-1)
     if matrix.shape[1] != lo.shape[0] or matrix.shape[1] != hi.shape[0]:
         raise ValueError("features width must match lower and upper bounds.")
+    if not np.all(np.isfinite(lo)) or not np.all(np.isfinite(hi)):
+        raise ValueError("lower and upper bounds must contain finite values.")
+    if np.any(lo > hi):
+        raise ValueError("lower bounds must not exceed upper bounds.")
     clipped = np.minimum(np.maximum(matrix, lo), hi)
     return clipped.astype(np.float32, copy=False), clipped != matrix
 
