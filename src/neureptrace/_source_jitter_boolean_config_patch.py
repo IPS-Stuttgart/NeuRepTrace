@@ -11,6 +11,7 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_source_jitter_boolean_config_patch_installed"
 _AUGMENT_METADATA_PATCH_MARKER = "_neureptrace_source_jitter_disabled_metadata_patch_installed"
 _MASKING_INT_PATCH_MARKER = "_neureptrace_source_feature_masking_int_config_patch_installed"
+_MASKING_AUGMENT_CONFIG_PATCH_MARKER = "_neureptrace_source_feature_masking_dataclass_config_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 _NONE_STRINGS = {"", "none", "null"}
@@ -163,6 +164,34 @@ def _nonnegative_optional_integer(value: Any, *, name: str) -> int | None:
     return parsed
 
 
+def _normalize_jitter_dataclass_config(source_jitter: Any, config: Any) -> Any:
+    if not isinstance(config, source_jitter.SourceFeatureJitterConfig):
+        return config
+    return source_jitter.source_feature_jitter_config(
+        synthetic_per_class=config.synthetic_per_class,
+        noise_scale=config.noise_scale,
+        scale_mode=config.scale_mode,
+        preserve_original=config.preserve_original,
+        random_state=config.random_state,
+        epsilon=config.epsilon,
+    )
+
+
+def _normalize_masking_dataclass_config(source_masking: Any, config: Any) -> Any:
+    if not isinstance(config, source_masking.SourceFeatureMaskingConfig):
+        return config
+    return source_masking.source_feature_masking_config(
+        synthetic_per_class=config.synthetic_per_class,
+        mask_fraction=config.mask_fraction,
+        mask_mode=config.mask_mode,
+        block_size=config.block_size,
+        fill_mode=config.fill_mode,
+        noise_std=config.noise_std,
+        preserve_original=config.preserve_original,
+        random_state=config.random_state,
+    )
+
+
 def _install_source_jitter_patch() -> None:
     source_jitter = importlib.import_module("neureptrace.decoding.source_jitter")
 
@@ -196,6 +225,9 @@ def _install_source_jitter_patch() -> None:
 
         @wraps(original_augment)
         def augment_source_with_feature_jitter(*args: Any, **kwargs: Any):
+            if "config" in kwargs:
+                kwargs = dict(kwargs)
+                kwargs["config"] = _normalize_jitter_dataclass_config(source_jitter, kwargs["config"])
             result = original_augment(*args, **kwargs)
             output_rows = int(result.features.shape[0])
             metadata = result.metadata
@@ -220,34 +252,46 @@ def _install_source_masking_patch() -> None:
     source_masking = importlib.import_module("neureptrace.decoding.source_masking")
 
     original_config = source_masking.source_feature_masking_config
-    if getattr(original_config, _MASKING_INT_PATCH_MARKER, False):
-        return
+    if not getattr(original_config, _MASKING_INT_PATCH_MARKER, False):
 
-    @wraps(original_config)
-    def source_feature_masking_config(
-        *,
-        synthetic_per_class: Any = 0,
-        mask_fraction: Any = source_masking.DEFAULT_MASK_FRACTION,
-        mask_mode: str | None = "feature",
-        block_size: Any = None,
-        fill_mode: str | None = "feature_mean",
-        noise_std: Any = 0.0,
-        preserve_original: bool | int | str = True,
-        random_state: Any = 13,
-    ):
-        return original_config(
-            synthetic_per_class=_nonnegative_integer(synthetic_per_class, name="synthetic_per_class"),
-            mask_fraction=_unit_interval_float(mask_fraction, name="mask_fraction"),
-            mask_mode=mask_mode,
-            block_size=_positive_optional_integer(block_size, name="block_size"),
-            fill_mode=fill_mode,
-            noise_std=_nonnegative_float(noise_std, name="noise_std"),
-            preserve_original=preserve_original,
-            random_state=_nonnegative_optional_integer(random_state, name="random_state"),
-        )
+        @wraps(original_config)
+        def source_feature_masking_config(
+            *,
+            synthetic_per_class: Any = 0,
+            mask_fraction: Any = source_masking.DEFAULT_MASK_FRACTION,
+            mask_mode: str | None = "feature",
+            block_size: Any = None,
+            fill_mode: str | None = "feature_mean",
+            noise_std: Any = 0.0,
+            preserve_original: bool | int | str = True,
+            random_state: Any = 13,
+        ):
+            return original_config(
+                synthetic_per_class=_nonnegative_integer(synthetic_per_class, name="synthetic_per_class"),
+                mask_fraction=_unit_interval_float(mask_fraction, name="mask_fraction"),
+                mask_mode=mask_mode,
+                block_size=_positive_optional_integer(block_size, name="block_size"),
+                fill_mode=fill_mode,
+                noise_std=_nonnegative_float(noise_std, name="noise_std"),
+                preserve_original=preserve_original,
+                random_state=_nonnegative_optional_integer(random_state, name="random_state"),
+            )
 
-    setattr(source_feature_masking_config, _MASKING_INT_PATCH_MARKER, True)
-    source_masking.source_feature_masking_config = source_feature_masking_config
+        setattr(source_feature_masking_config, _MASKING_INT_PATCH_MARKER, True)
+        source_masking.source_feature_masking_config = source_feature_masking_config
+
+    original_augment = source_masking.augment_source_with_feature_masking
+    if not getattr(original_augment, _MASKING_AUGMENT_CONFIG_PATCH_MARKER, False):
+
+        @wraps(original_augment)
+        def augment_source_with_feature_masking(*args: Any, **kwargs: Any):
+            if "config" in kwargs:
+                kwargs = dict(kwargs)
+                kwargs["config"] = _normalize_masking_dataclass_config(source_masking, kwargs["config"])
+            return original_augment(*args, **kwargs)
+
+        setattr(augment_source_with_feature_masking, _MASKING_AUGMENT_CONFIG_PATCH_MARKER, True)
+        source_masking.augment_source_with_feature_masking = augment_source_with_feature_masking
 
 
 def install() -> None:
