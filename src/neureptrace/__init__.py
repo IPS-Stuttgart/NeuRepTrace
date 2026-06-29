@@ -116,6 +116,7 @@ from . import (  # noqa: E402
     _sample_weight_validation_patch,
     _sampling_composite_label_array_patch,
     _semi_supervised_lora_tuple_labels_patch,
+    _sign_flip_scalar_controls_patch,
     _source_alignment_anchor_patch,
     _source_alignment_cli_choices_patch,
     _source_alignment_contrastive_patch,
@@ -269,6 +270,7 @@ _results_observation_condition_patch.install()
 _response_window_bool_numeric_patch.install()
 _response_window_time_validation_patch.install()
 _paired_stats_tie_patch.install()
+_sign_flip_scalar_controls_patch.install()
 _riemannian_vector_validation_patch.install()
 _source_alignment_anchor_patch.install()
 _source_alignment_pseudo_calibration_patch.install()
