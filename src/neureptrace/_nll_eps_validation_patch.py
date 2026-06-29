@@ -11,6 +11,8 @@ _EPS_ERROR = "eps must be a positive finite value"
 
 
 def _validate_eps(eps: object) -> float:
+    if isinstance(eps, np.ndarray):
+        raise ValueError(_EPS_ERROR)
     if isinstance(eps, (bool, np.bool_)):
         raise ValueError(_EPS_ERROR)
     try:
