@@ -108,7 +108,14 @@ def install() -> None:
         return original_gradient_boosting(features, labels, classifier_param, random_state)
 
     def build_knn(features, labels, classifier_param, random_state):
-        classifier_param = _strict_positive_int_classifier_param(classifier_param, name="knn classifier_param")
+        requested_neighbors = _strict_positive_int_classifier_param(classifier_param, name="knn classifier_param")
+        features_array = np.asarray(features)
+        if features_array.ndim != 2:
+            raise ValueError("knn classifier features must be a two-dimensional matrix.")
+        n_training_rows = int(features_array.shape[0])
+        if n_training_rows < 1:
+            raise ValueError("knn classifier requires at least one training sample.")
+        classifier_param = min(requested_neighbors, n_training_rows)
         return original_knn(features, labels, classifier_param, random_state)
 
     def build_random_forest(features, labels, classifier_param, random_state):
