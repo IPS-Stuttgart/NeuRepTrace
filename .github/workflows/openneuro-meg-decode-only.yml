@@ -141,7 +141,7 @@ jobs:
 
             - name: Restore OpenNeuro staged-epoch cache on GitHub-hosted runners
               if: runner.environment == 'github-hosted'
-              uses: actions/cache@v5
+              uses: actions/cache@v6
               with:
                   path: ~/.cache/datasets/openneuro
                   key: openneuro-meg-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-v2

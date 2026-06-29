@@ -236,7 +236,7 @@ jobs:
 
             - name: Cache OpenNeuro raw files on GitHub-hosted runners
               if: runner.environment == 'github-hosted'
-              uses: actions/cache@v5
+              uses: actions/cache@v6
               with:
                   path: ~/.cache/datasets/openneuro/${{ inputs.dataset }}
                   key: openneuro-meg-raw-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-v2
@@ -246,7 +246,7 @@ jobs:
 
             - name: Cache staged OpenNeuro epochs on GitHub-hosted runners
               if: runner.environment == 'github-hosted'
-              uses: actions/cache@v5
+              uses: actions/cache@v6
               with:
                   path: ~/.cache/datasets/openneuro/staged-epochs/${{ inputs.dataset }}
                   key: openneuro-meg-staged-${{ runner.os }}-${{ inputs.dataset }}-${{ inputs.mode }}-${{ hashFiles('.cache-key-material/openneuro-inputs.txt') }}-v2
