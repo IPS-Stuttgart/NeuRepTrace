@@ -1,4 +1,4 @@
-"""Validate Source MixUp random-state values before RNG construction."""
+"""Validate Source MixUp/SMOTE random-state values before RNG construction."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def _normalize_optional_random_state(value: Any, *, normalizer: Any) -> int | No
 
 
 def install() -> None:
-    """Install early Source MixUp random-state validation."""
+    """Install early Source MixUp/SMOTE random-state validation."""
 
     source_mixup = importlib.import_module("neureptrace.decoding.source_mixup")
 
@@ -105,6 +105,66 @@ def install() -> None:
 
         setattr(augment_source_with_mixup, _PATCH_MARKER, True)
         source_mixup.augment_source_with_mixup = augment_source_with_mixup
+
+    source_smote = importlib.import_module("neureptrace.decoding.source_smote")
+
+    original_smote_config = source_smote.source_smote_config
+    if not getattr(original_smote_config, _PATCH_MARKER, False):
+
+        @wraps(original_smote_config)
+        def source_smote_config(
+            *,
+            synthetic_per_class: int | str = 0,
+            cross_domain_partner: bool | int | str = True,
+            preserve_original: bool | int | str = True,
+            random_state: int | str | None = 13,
+            jitter_std: float | str = 0.0,
+        ):
+            seed = _normalize_optional_random_state(
+                random_state,
+                normalizer=source_smote._nonnegative_int,
+            )
+            return original_smote_config(
+                synthetic_per_class=synthetic_per_class,
+                cross_domain_partner=cross_domain_partner,
+                preserve_original=preserve_original,
+                random_state=seed,
+                jitter_std=jitter_std,
+            )
+
+        setattr(source_smote_config, _PATCH_MARKER, True)
+        source_smote.source_smote_config = source_smote_config
+
+    original_smote_augment = source_smote.augment_source_with_smote
+    if not getattr(original_smote_augment, _PATCH_MARKER, False):
+
+        def _coerce_smote_config_with_seed(config: Any):
+            if config is None:
+                return None
+            cfg = source_smote._coerce_config(config)
+            seed = _normalize_optional_random_state(
+                cfg.random_state,
+                normalizer=source_smote._nonnegative_int,
+            )
+            return replace(cfg, random_state=seed)
+
+        @wraps(original_smote_augment)
+        def augment_source_with_smote(
+            source_features,
+            source_labels,
+            *,
+            source_domains=None,
+            config: Any = None,
+        ):
+            return original_smote_augment(
+                source_features,
+                source_labels,
+                source_domains=source_domains,
+                config=_coerce_smote_config_with_seed(config),
+            )
+
+        setattr(augment_source_with_smote, _PATCH_MARKER, True)
+        source_smote.augment_source_with_smote = augment_source_with_smote
 
 
 __all__ = ["install"]
