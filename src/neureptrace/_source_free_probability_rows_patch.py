@@ -37,6 +37,7 @@ def install() -> None:
     original_predict_source_probabilities = source_free._predict_source_probabilities
     if getattr(original_predict_source_probabilities, _FUNC_MARKER, False):
         setattr(source_free, _PATCH_MARKER, True)
+        importlib.import_module("neureptrace._source_quantile_bin_dtype_patch").install()
         return
 
     @wraps(original_predict_source_probabilities)
@@ -50,6 +51,7 @@ def install() -> None:
     setattr(_predict_source_probabilities, _FUNC_MARKER, True)
     source_free._predict_source_probabilities = _predict_source_probabilities
     setattr(source_free, _PATCH_MARKER, True)
+    importlib.import_module("neureptrace._source_quantile_bin_dtype_patch").install()
 
 
 __all__ = ["install"]
