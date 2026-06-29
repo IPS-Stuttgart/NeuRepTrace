@@ -10,7 +10,7 @@ from neureptrace._source_free_standardize_target_patch import _normalize_bool, _
 
 def _prototype_estimator_mode(value: Any) -> str:
     text = str(value).strip().lower().replace("-", "_")
-    if text in {"hard", "selected_hard", "pseudo_label", "pseudo_labels"}:
+    if text in {"", "hard", "selected_hard", "argmax", "pseudo_label", "pseudo_labels"}:
         return "hard"
     if text in {"soft_selected", "selected_soft", "posterior_selected"}:
         return "soft_selected"

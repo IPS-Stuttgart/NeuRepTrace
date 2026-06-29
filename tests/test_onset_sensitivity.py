@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.onset_sensitivity import (
     build_sensitivity_settings,
@@ -20,6 +21,25 @@ def test_build_sensitivity_settings_crosses_parameters():
     assert len(settings) == 8
     assert settings[0].setting_id == "point_q0900_c01_dnone_anypred"
     assert settings[-1].setting_id == "point_q0950_c02_dnone_stable"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"threshold_quantiles": (True,)}, "threshold_quantile must be a real-valued number"),
+        ({"min_consecutive_values": (True,)}, "min_consecutive must be a real-valued number"),
+        ({"min_duration_values": (False,)}, "min_duration must be a real-valued number"),
+    ],
+)
+def test_build_sensitivity_settings_rejects_boolean_numeric_grid_values(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        build_sensitivity_settings(**kwargs)
+
+
+def test_build_sensitivity_settings_keeps_boolean_stable_prediction_grid():
+    settings = build_sensitivity_settings(stable_prediction_values=(False, True))
+
+    assert [setting.require_stable_prediction for setting in settings] == [False, True]
 
 
 def test_build_sensitivity_settings_can_compare_threshold_methods():

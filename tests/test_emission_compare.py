@@ -79,18 +79,21 @@ def test_compare_emission_modes_rejects_malformed_structure(mutate, message: str
     ("column", "value", "message"),
     [
         ("persistence_gain_per_observation", "high", "persistence_gain_per_observation values must be numeric"),
+        ("persistence_gain_per_observation", True, "persistence_gain_per_observation values must be numeric"),
         ("persistence_gain_per_observation", np.inf, "persistence_gain_per_observation values must be finite"),
         ("empirical_p_value", "small", "empirical_p_value values must be numeric"),
+        ("empirical_p_value", np.bool_(True), "empirical_p_value values must be numeric"),
         ("empirical_p_value", np.nan, "empirical_p_value values must be finite"),
         ("empirical_p_value", 1.2, "empirical_p_value values must be between 0 and 1"),
         ("best_stay_probability", "sticky", "best_stay_probability values must be numeric"),
+        ("best_stay_probability", False, "best_stay_probability values must be numeric"),
         ("best_stay_probability", np.inf, "best_stay_probability values must be finite"),
         ("best_stay_probability", -0.1, "best_stay_probability values must be between 0 and 1"),
     ],
 )
 def test_compare_emission_modes_rejects_malformed_numeric_values(column: str, value, message: str):
     summary = _temporal_summary()
-    if isinstance(value, str):
+    if isinstance(value, (str, bool, np.bool_)):
         summary[column] = summary[column].astype(object)
     row = summary.index[summary["condition"] == "shuffled_time"][0] if column == "empirical_p_value" else 0
     summary.loc[row, column] = value
