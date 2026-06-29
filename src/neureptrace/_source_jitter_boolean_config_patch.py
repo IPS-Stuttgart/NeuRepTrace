@@ -12,6 +12,7 @@ _PATCH_MARKER = "_neureptrace_source_jitter_boolean_config_patch_installed"
 _AUGMENT_METADATA_PATCH_MARKER = "_neureptrace_source_jitter_disabled_metadata_patch_installed"
 _MASKING_INT_PATCH_MARKER = "_neureptrace_source_feature_masking_int_config_patch_installed"
 _MASKING_AUGMENT_CONFIG_PATCH_MARKER = "_neureptrace_source_feature_masking_dataclass_config_patch_installed"
+_MASKING_HELPER_PATCH_MARKER = "_neureptrace_source_feature_masking_helper_scalar_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 _NONE_STRINGS = {"", "none", "null"}
@@ -81,6 +82,13 @@ def _nonnegative_integer(value: Any, *, name: str) -> int:
     parsed = _normalize_integer(value, name=name)
     if parsed < 0:
         raise ValueError(f"{name} must be non-negative.")
+    return parsed
+
+
+def _positive_integer(value: Any, *, name: str) -> int:
+    parsed = _normalize_integer(value, name=name)
+    if parsed < 1:
+        raise ValueError(f"{name} must be a positive integer.")
     return parsed
 
 
@@ -250,6 +258,22 @@ def _install_source_jitter_patch() -> None:
 
 def _install_source_masking_patch() -> None:
     source_masking = importlib.import_module("neureptrace.decoding.source_masking")
+
+    if not getattr(source_masking, _MASKING_HELPER_PATCH_MARKER, False):
+
+        def _positive_int(value: Any, *, name: str) -> int:
+            return _positive_integer(value, name=name)
+
+        def _nonnegative_int(value: Any, *, name: str) -> int:
+            return _nonnegative_integer(value, name=name)
+
+        def _float_value(value: Any, *, name: str) -> float:
+            return _normalize_float(value, name=name)
+
+        source_masking._positive_int = _positive_int
+        source_masking._nonnegative_int = _nonnegative_int
+        source_masking._float_value = _float_value
+        setattr(source_masking, _MASKING_HELPER_PATCH_MARKER, True)
 
     original_config = source_masking.source_feature_masking_config
     if not getattr(original_config, _MASKING_INT_PATCH_MARKER, False):
