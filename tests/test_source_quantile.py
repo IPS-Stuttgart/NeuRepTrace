@@ -100,6 +100,13 @@ def test_source_quantile_rank_validates_epsilon() -> None:
         source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=0.5)
 
 
+def test_source_feature_quantiles_reject_boolean_bounds() -> None:
+    with pytest.raises(ValueError, match="not boolean"):
+        source_feature_quantiles([[0.0], [1.0]], lower=False, upper=True)
+    with pytest.raises(ValueError, match="not boolean"):
+        source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], lower=0.0, upper=np.bool_(True))
+
+
 def test_source_feature_quantiles_reject_nonfinite_values() -> None:
     with pytest.raises(ValueError, match="finite"):
         source_feature_quantiles([[0.0], [float("nan")]])

@@ -154,8 +154,13 @@ def _matrix(values, *, name: str):
 
 
 def _bounds(lower, upper) -> tuple[float, float]:
-    lo = float(lower)
-    hi = float(upper)
+    if isinstance(lower, (bool, np.bool_)) or isinstance(upper, (bool, np.bool_)):
+        raise ValueError("lower and upper must be numeric quantiles, not boolean.")
+    try:
+        lo = float(lower)
+        hi = float(upper)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("lower and upper must satisfy 0 <= lower <= upper <= 1.") from exc
     if not 0.0 <= lo <= hi <= 1.0:
         raise ValueError("lower and upper must satisfy 0 <= lower <= upper <= 1.")
     return lo, hi
