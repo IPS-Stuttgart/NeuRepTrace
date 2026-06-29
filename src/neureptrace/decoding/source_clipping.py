@@ -156,6 +156,8 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 def _quantile(value: float | str, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a numeric quantile, not boolean.")
+    if _array_like_scalar_control(value):
+        raise ValueError(f"{name} must be a scalar quantile, not an array-like value.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
@@ -163,6 +165,14 @@ def _quantile(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
+
+
+def _array_like_scalar_control(value: Any) -> bool:
+    if isinstance(value, np.ndarray):
+        return True
+    if isinstance(value, (str, bytes)):
+        return False
+    return hasattr(value, "shape") and hasattr(value, "dtype") and not np.isscalar(value)
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
