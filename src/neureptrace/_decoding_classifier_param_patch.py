@@ -10,6 +10,28 @@ _INTEGER_PATCH_MARKER = "_neureptrace_classifier_integer_params_patch_installed"
 _NONNEGATIVE_FLOAT_PARAM_NAMES = {"TorchMLP weight_decay"}
 
 
+def _scalar_classifier_param(
+    classifier_param: Any,
+    *,
+    name: str,
+    scalar_kind: str,
+    boolean_message: str,
+) -> Any:
+    """Return a scalar classifier parameter without ndarray/boolean coercion."""
+
+    if isinstance(classifier_param, (bool, np.bool_)):
+        raise ValueError(boolean_message)
+    if isinstance(classifier_param, np.ndarray):
+        if np.issubdtype(classifier_param.dtype, np.bool_):
+            raise ValueError(boolean_message)
+        if classifier_param.ndim != 0:
+            raise ValueError(f"{name} must be a scalar {scalar_kind} value.")
+        classifier_param = classifier_param.item()
+        if isinstance(classifier_param, (bool, np.bool_)):
+            raise ValueError(boolean_message)
+    return classifier_param
+
+
 def _strict_positive_float_classifier_param(
     classifier_param: Any,
     *,
@@ -27,8 +49,12 @@ def _strict_positive_float_classifier_param(
     if classifier_param is None:
         value = float(default)
     else:
-        if isinstance(classifier_param, (bool, np.bool_)):
-            raise ValueError(f"{name} must be numeric, not boolean.")
+        classifier_param = _scalar_classifier_param(
+            classifier_param,
+            name=name,
+            scalar_kind="numeric",
+            boolean_message=f"{name} must be numeric, not boolean.",
+        )
         try:
             value = float(classifier_param)
         except (TypeError, ValueError) as exc:
@@ -44,8 +70,12 @@ def _strict_positive_float_classifier_param(
 
 
 def _strict_positive_int_classifier_param(classifier_param: Any, *, name: str) -> int:
-    if isinstance(classifier_param, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a positive integer, not boolean.")
+    classifier_param = _scalar_classifier_param(
+        classifier_param,
+        name=name,
+        scalar_kind="positive integer",
+        boolean_message=f"{name} must be a positive integer, not boolean.",
+    )
     try:
         value = float(classifier_param)
     except (TypeError, ValueError) as exc:
@@ -86,8 +116,12 @@ def install() -> None:
         return original_random_forest(features, labels, classifier_param, random_state)
 
     def normalize_shrinkage(classifier_param):
-        if isinstance(classifier_param, (bool, np.bool_)):
-            raise ValueError("shrinkage-lda classifier_param must be numeric, not boolean.")
+        classifier_param = _scalar_classifier_param(
+            classifier_param,
+            name="shrinkage-lda classifier_param",
+            scalar_kind="numeric",
+            boolean_message="shrinkage-lda classifier_param must be numeric, not boolean.",
+        )
         return original_shrinkage(classifier_param)
 
     def build_xgboost(features, labels, classifier_param, random_state):

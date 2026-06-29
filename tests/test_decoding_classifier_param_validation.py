@@ -18,7 +18,7 @@ from neureptrace.decoding import make_decoder
         "torch_mlp",
     ],
 )
-@pytest.mark.parametrize("classifier_param", [True, False, np.bool_(True), np.bool_(False)])
+@pytest.mark.parametrize("classifier_param", [True, False, np.bool_(True), np.bool_(False), np.asarray(True), np.array([True])])
 def test_make_decoder_rejects_boolean_classifier_params(decoder, classifier_param):
     with pytest.raises(ValueError, match="numeric, not boolean"):
         make_decoder(decoder, classifier_param=classifier_param)
