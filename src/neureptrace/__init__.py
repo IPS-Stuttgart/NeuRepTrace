@@ -50,6 +50,7 @@ from . import (  # noqa: E402
     _decoding_option_type_validation_patch,
     _decoding_probability_patch,
     _decoding_regularization_patch,
+    _decoder_random_state_patch,
     _domain_importance_epsilon_patch,
     _event_detection_extensions,
     _fieldtrip_cli_path_patch,
@@ -204,6 +205,7 @@ _lora_few_shot_numeric_config_patch.install()
 _loso_diagnostics_finite_time_selection_patch.install()
 _loso_source_cv_group_support_patch.install()
 _decoding_regularization_patch.install()
+_decoder_random_state_patch.install()
 _decoding_adaptive_calibration.install()
 _decoding_c_grid_patch.install()
 _decoding_classifier_param_patch.install()
