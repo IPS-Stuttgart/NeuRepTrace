@@ -117,7 +117,7 @@ def target_probability_smoothing_config(
     return TargetProbabilitySmoothingConfig(
         alpha=_closed_unit_float(alpha, name="alpha"),
         gamma=_normalize_gamma(gamma),
-        n_neighbors=None if n_neighbors in {None, "", "none", "None"} else _positive_int(n_neighbors, name="n_neighbors"),
+        n_neighbors=None if _is_optional_none_token(n_neighbors) else _positive_int(n_neighbors, name="n_neighbors"),
         max_iter=_positive_int(max_iter, name="max_iter"),
         tol=_positive_float(tol, name="tol"),
         standardize=_bool_value(standardize, name="standardize"),
@@ -226,21 +226,33 @@ def _normalize_gamma(value: float | str) -> float | str:
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    _reject_non_scalar_numeric(value, name=name, expectation="a positive integer")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    _reject_non_scalar_numeric(value, name=name, expectation="positive and finite")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
 
 
 def _closed_unit_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    _reject_non_scalar_numeric(value, name=name, expectation="in [0, 1]")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be in [0, 1].") from exc
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
@@ -258,3 +270,24 @@ def _bool_value(value: bool | int | str, *, name: str) -> bool:
         if text in {"0", "false", "no", "off"}:
             return False
     raise ValueError(f"{name} must be a boolean value.")
+
+
+def _is_optional_none_token(value: Any) -> bool:
+    if value is None:
+        return True
+    return isinstance(value, str) and value.strip().lower() in {"", "none", "null"}
+
+
+def _is_array_like_control(value: Any) -> bool:
+    if isinstance(value, np.ndarray):
+        return True
+    if isinstance(value, Mapping):
+        return True
+    if isinstance(value, (set, frozenset)):
+        return True
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+
+
+def _reject_non_scalar_numeric(value: Any, *, name: str, expectation: str) -> None:
+    if isinstance(value, (bool, np.bool_)) or _is_array_like_control(value):
+        raise ValueError(f"{name} must be {expectation}.")
