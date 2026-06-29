@@ -131,40 +131,89 @@ def apply_source_pca_transform(features: Sequence[Sequence[float]] | np.ndarray,
 def source_pca_config(
     *,
     n_components: int | str = DEFAULT_COMPONENTS,
-    center: bool = True,
-    scale: bool = False,
-    whiten: bool = False,
+    center: bool | str | int | float = True,
+    scale: bool | str | int | float = False,
+    whiten: bool | str | int | float = False,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> SourcePCAConfig:
     """Normalize public source-PCA options."""
 
     return SourcePCAConfig(
-        n_components=n_components,
-        center=bool(center),
-        scale=bool(scale),
-        whiten=bool(whiten),
+        n_components=_component_request(n_components),
+        center=_bool_config(center, name="center"),
+        scale=_bool_config(scale, name="scale"),
+        whiten=_bool_config(whiten, name="whiten"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
 
 def _coerce_config(config: SourcePCAConfig | Mapping[str, Any]) -> SourcePCAConfig:
     if isinstance(config, SourcePCAConfig):
-        return config
+        return source_pca_config(
+            n_components=config.n_components,
+            center=config.center,
+            scale=config.scale,
+            whiten=config.whiten,
+            epsilon=config.epsilon,
+        )
     return source_pca_config(**dict(config))
 
 
 def _resolve_components(value: int | str, *, n_rows: int, n_features: int, center: bool) -> int:
     maximum = min(n_features, max(1, n_rows - 1 if center and n_rows > 1 else n_rows))
+    requested = _component_request(value)
+    if isinstance(requested, str):
+        return int(maximum)
+    return min(int(requested), int(maximum))
+
+
+def _component_request(value: Any) -> int | str:
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"all", "full"}:
-            return int(maximum)
-        requested = float(text)
-    else:
-        requested = float(value)
-    if not np.isfinite(requested) or requested % 1.0 != 0.0 or requested < 1:
+            return text
+        return _positive_integer(text, name="n_components")
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError("n_components must be a positive integer, 'all', or 'full'.")
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
         raise ValueError("n_components must be a positive integer, 'all', or 'full'.")
-    return min(int(requested), int(maximum))
+    return _positive_integer(value, name="n_components")
+
+
+def _positive_integer(value: Any, *, name: str) -> int:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a positive integer, 'all', or 'full'.") from None
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
+        raise ValueError(f"{name} must be a positive integer, 'all', or 'full'.")
+    return int(parsed)
+
+
+def _bool_config(value: Any, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    if isinstance(value, (int, np.integer)):
+        parsed = int(value)
+        if parsed in {0, 1}:
+            return bool(parsed)
+    if isinstance(value, (float, np.floating)):
+        parsed_float = float(value)
+        if np.isfinite(parsed_float) and parsed_float in {0.0, 1.0}:
+            return bool(parsed_float)
+    raise ValueError(f"{name} must be a boolean value.")
 
 
 def _canonicalize_component_signs(components: np.ndarray) -> np.ndarray:
@@ -207,8 +256,17 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+def _positive_float(value: Any, *, name: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be positive and finite.") from None
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
