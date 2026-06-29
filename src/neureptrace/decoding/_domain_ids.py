@@ -61,24 +61,22 @@ def domain_mask(values: Sequence[Any] | np.ndarray, selected: Sequence[object]) 
     return np.asarray([any(values_equal(value, item) for item in selected) for value in vector], dtype=bool)
 
 
-def _domain_identifier(value: object) -> object:
-    """Return a dictionary-safe representation for domain summaries."""
+def hashable_domain_id(value: object) -> object:
+    """Return a dictionary-safe representation for domain-risk summaries."""
 
     if isinstance(value, np.ndarray):
         value = value.tolist()
     if isinstance(value, list):
-        return tuple(_domain_identifier(item) for item in value)
+        return tuple(hashable_domain_id(item) for item in value)
     if isinstance(value, tuple):
-        return tuple(_domain_identifier(item) for item in value)
+        return tuple(hashable_domain_id(item) for item in value)
     return value
 
-
-globals()["ha" + "sh" + "able_domain_id"] = _domain_identifier
 
 __all__ = [
     "atomic_domain_vector",
     "domain_mask",
-    "ha" + "sh" + "able_domain_id",
+    "hashable_domain_id",
     "ordered_unique",
     "values_equal",
 ]
