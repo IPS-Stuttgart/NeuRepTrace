@@ -55,6 +55,7 @@ from . import (  # noqa: E402
     _event_detection_extensions,
     _fieldtrip_cli_path_patch,
     _fieldtrip_sampleinfo_validation_patch,
+    _few_shot_array_integer_patch,
     _few_shot_split_validation_patch,
     _few_shot_target_index_patch,
     _few_shot_tuple_labels_patch,
@@ -190,6 +191,7 @@ _onset_boolean_summary_patch.install()
 _stimulus_detection_boolean_summary_patch.install()
 _fieldtrip_sampleinfo_validation_patch.install()
 _fieldtrip_cli_path_patch.install()
+_few_shot_array_integer_patch.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _few_shot_target_index_patch.install()
