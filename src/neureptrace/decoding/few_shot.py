@@ -47,21 +47,59 @@ class FewShotTargetCalibrationResult:
 
 
 def _as_1d_object_array(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
+    """Return a one-dimensional object vector without expanding composite labels."""
+
     if isinstance(values, np.ndarray):
-        if values.ndim == 0:
-            return values.reshape(1)
-        if values.ndim != 1:
-            raise ValueError(f"{name} must be one-dimensional.")
-        return values.reshape(-1)
-    try:
-        items = list(values)
-    except TypeError:
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            items = array.tolist()
+        elif array.ndim == 2 and array.shape[1] == 1:
+            items = array.reshape(-1).tolist()
+        elif array.ndim == 2:
+            items = [tuple(row.tolist()) for row in array]
+        else:
+            raise ValueError(f"{name} must be one-dimensional or a two-dimensional composite-label matrix.")
+    elif isinstance(values, (str, bytes)):
         items = [values]
-    if any(isinstance(item, tuple) for item in items):
-        vector = np.empty(len(items), dtype=object)
-        vector[:] = items
-        return vector
-    return np.asarray(items).reshape(-1)
+    else:
+        try:
+            items = list(values)
+        except TypeError:
+            items = [values]
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
+    return vector
+
+
+def _labels_equal(left: Any, right: Any) -> bool:
+    try:
+        equal = left == right
+    except Exception:
+        return False
+    if isinstance(equal, np.ndarray):
+        return bool(np.array_equal(left, right))
+    return bool(equal)
+
+
+def _unique_labels_in_order(labels: np.ndarray) -> list[Any]:
+    unique: list[Any] = []
+    for label in labels.tolist():
+        if not any(_labels_equal(label, seen) for seen in unique):
+            unique.append(label)
+    return unique
+
+
+def _label_index(labels: np.ndarray, class_label: Any) -> int | None:
+    for index, candidate in enumerate(labels.tolist()):
+        if _labels_equal(candidate, class_label):
+            return index
+    return None
+
+
+def _matching_positions(labels: np.ndarray, class_label: Any) -> np.ndarray:
+    return np.asarray([index for index, label in enumerate(labels.tolist()) if _labels_equal(label, class_label)], dtype=int)
 
 
 def _as_feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
@@ -156,7 +194,7 @@ def _align_probability_columns(probabilities: np.ndarray, *, model: object, clas
     """Align estimator probability columns to a caller-supplied class order."""
 
     probabilities = np.asarray(probabilities, dtype=float)
-    classes = np.asarray(classes, dtype=object).reshape(-1)
+    classes = _as_1d_object_array(classes, name="classes")
     model_classes = getattr(model, "classes_", None)
     if model_classes is None:
         if probabilities.shape[1] != classes.shape[0]:
@@ -166,18 +204,18 @@ def _align_probability_columns(probabilities: np.ndarray, *, model: object, clas
             )
         return _normalize_probability_rows(probabilities)
 
-    model_classes = np.asarray(model_classes, dtype=object).reshape(-1)
+    model_classes = _as_1d_object_array(model_classes, name="model.classes_")
     if model_classes.shape[0] != probabilities.shape[1]:
         raise ValueError(
             f"Fitted model reports {model_classes.shape[0]} classes but emitted "
             f"{probabilities.shape[1]} probability columns."
         )
-    class_to_column = {class_label: class_index for class_index, class_label in enumerate(classes.tolist())}
     aligned = np.zeros((probabilities.shape[0], classes.shape[0]), dtype=float)
     for source_column, class_label in enumerate(model_classes.tolist()):
-        if class_label not in class_to_column:
+        target_column = _label_index(classes, class_label)
+        if target_column is None:
             raise ValueError(f"Fitted model emitted unknown class {class_label!r}.")
-        aligned[:, class_to_column[class_label]] = probabilities[:, source_column]
+        aligned[:, target_column] = probabilities[:, source_column]
     return _normalize_probability_rows(aligned)
 
 
@@ -215,10 +253,10 @@ def select_few_shot_target_calibration_split(
     seed_value = _normalize_nonnegative_int(seed, name="few_shot_target_calibration_seed")
 
     target_labels = label_vector[indices]
-    classes = list(dict.fromkeys(target_labels.tolist()))
+    classes = _unique_labels_in_order(target_labels)
     calibration_mask = np.zeros(indices.shape[0], dtype=bool)
     for class_position, class_label in enumerate(classes):
-        positions = np.flatnonzero(target_labels == class_label)
+        positions = _matching_positions(target_labels, class_label)
         required = per_class_count + min_eval
         if positions.size < required:
             raise ValueError(
@@ -364,7 +402,11 @@ def fit_few_shot_target_calibrated_decoder(
     model.fit(fit_features, fit_labels)
 
     observed_class_labels = np.concatenate([source_label_vector, calibration_labels]).astype(object)
-    class_order = np.asarray(classes, dtype=object).reshape(-1) if classes is not None else np.unique(observed_class_labels)
+    class_order = (
+        _as_1d_object_array(classes, name="classes")
+        if classes is not None
+        else _as_1d_object_array(_unique_labels_in_order(observed_class_labels), name="classes")
+    )
     probabilities = _align_probability_columns(
         predict_emission_probabilities(
             model,

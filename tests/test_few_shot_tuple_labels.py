@@ -20,20 +20,31 @@ class ReversedTupleDecoder:
         return probabilities
 
 
+def _label_tuple(labels, index):
+    value = labels[index]
+    if isinstance(value, np.ndarray):
+        return tuple(value.tolist())
+    return value
+
+
 def test_select_few_shot_target_calibration_split_handles_tuple_labels():
-    labels = [
-        ("face", "early"),
-        ("face", "early"),
-        ("face", "early"),
-        ("house", "late"),
-        ("house", "late"),
-        ("house", "late"),
-    ]
+    labels = np.asarray(
+        [
+            ("face", "early"),
+            ("face", "early"),
+            ("face", "early"),
+            ("house", "late"),
+            ("house", "late"),
+            ("house", "late"),
+        ],
+        dtype=object,
+    )
+    assert labels.ndim == 2
 
     split = select_few_shot_target_calibration_split(labels, per_class=1, seed=11)
 
-    calibration_labels = [labels[index] for index in split.calibration_indices.tolist()]
-    evaluation_labels = [labels[index] for index in split.evaluation_indices.tolist()]
+    calibration_labels = [_label_tuple(labels, index) for index in split.calibration_indices.tolist()]
+    evaluation_labels = [_label_tuple(labels, index) for index in split.evaluation_indices.tolist()]
     assert calibration_labels.count(("face", "early")) == 1
     assert calibration_labels.count(("house", "late")) == 1
     assert evaluation_labels.count(("face", "early")) == 2
@@ -42,9 +53,12 @@ def test_select_few_shot_target_calibration_split_handles_tuple_labels():
 
 def test_fit_few_shot_target_calibrated_decoder_aligns_tuple_label_columns(monkeypatch):
     source_features = np.array([[0.0], [1.0]])
-    source_labels = [("face", "early"), ("house", "late")]
+    source_labels = np.asarray([("face", "early"), ("house", "late")], dtype=object)
     target_features = np.array([[0.0], [0.1], [1.0], [0.9]])
-    target_labels = [("face", "early"), ("face", "early"), ("house", "late"), ("house", "late")]
+    target_labels = np.asarray(
+        [("face", "early"), ("face", "early"), ("house", "late"), ("house", "late")],
+        dtype=object,
+    )
     split = FewShotTargetCalibrationSplit(
         calibration_indices=np.array([0, 2]),
         evaluation_indices=np.array([1, 3]),
@@ -56,7 +70,33 @@ def test_fit_few_shot_target_calibrated_decoder_aligns_tuple_label_columns(monke
         source_labels=source_labels,
         target_features=target_features,
         target_labels=target_labels,
-        classes=[("face", "early"), ("house", "late")],
+        classes=np.asarray([("face", "early"), ("house", "late")], dtype=object),
+        split=split,
+        emission_mode="uncalibrated",
+    )
+
+    np.testing.assert_allclose(result.probabilities, np.array([[0.3, 0.7], [0.3, 0.7]]))
+
+
+def test_fit_few_shot_target_calibrated_decoder_infers_tuple_class_order(monkeypatch):
+    source_features = np.array([[0.0], [1.0]])
+    source_labels = np.asarray([("face", "early"), ("house", "late")], dtype=object)
+    target_features = np.array([[0.0], [0.1], [1.0], [0.9]])
+    target_labels = np.asarray(
+        [("face", "early"), ("face", "early"), ("house", "late"), ("house", "late")],
+        dtype=object,
+    )
+    split = FewShotTargetCalibrationSplit(
+        calibration_indices=np.array([0, 2]),
+        evaluation_indices=np.array([1, 3]),
+    )
+    monkeypatch.setattr("neureptrace.decoding.few_shot.make_decoder", lambda *args, **kwargs: ReversedTupleDecoder())
+
+    result = fit_few_shot_target_calibrated_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        target_features=target_features,
+        target_labels=target_labels,
         split=split,
         emission_mode="uncalibrated",
     )
