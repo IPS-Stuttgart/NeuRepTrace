@@ -271,3 +271,16 @@ def test_source_free_rejects_array_like_numeric_scalar_controls(field: str, valu
             source_model=_CompositeLabelSourceModel(),
             **kwargs,
         ).fit(target_features)
+
+
+def test_legacy_singular_soft_prototype_patch_does_not_shadow_current_runtime():
+    import neureptrace._source_free_soft_prototype_patch as legacy_patch
+    import neureptrace.decoding.source_free as source_free
+
+    before_fit = source_free.SourceFreeSubjectAdapter.fit
+    before_predict_proba = source_free.fit_source_free_predict_proba
+
+    legacy_patch.install()
+
+    assert source_free.SourceFreeSubjectAdapter.fit is before_fit
+    assert source_free.fit_source_free_predict_proba is before_predict_proba
