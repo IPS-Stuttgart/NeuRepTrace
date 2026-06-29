@@ -100,19 +100,21 @@ def source_temperature_config(
     """Normalize source-temperature options."""
 
     if isinstance(temperatures, str):
-        values = tuple(float(part.strip()) for part in temperatures.replace(";", ",").split(",") if part.strip())
+        raw_values = tuple(part.strip() for part in temperatures.replace(";", ",").split(",") if part.strip())
     else:
-        values = tuple(float(value) for value in temperatures)
+        try:
+            raw_values = tuple(temperatures)
+        except TypeError as exc:
+            raise ValueError("temperatures must contain positive finite values.") from exc
+    values = tuple(_positive_float(value, name="temperatures") for value in raw_values)
     if not values:
         raise ValueError("temperatures must contain at least one value.")
-    if not all(np.isfinite(value) and value > 0.0 for value in values):
-        raise ValueError("temperatures must contain positive finite values.")
     return SourceTemperatureConfig(temperatures=values, epsilon=_positive_float(epsilon, name="epsilon"))
 
 
 def _coerce_config(config: SourceTemperatureConfig | Mapping[str, Any]) -> SourceTemperatureConfig:
     if isinstance(config, SourceTemperatureConfig):
-        return config
+        return source_temperature_config(temperatures=config.temperatures, epsilon=config.epsilon)
     return source_temperature_config(**dict(config))
 
 
@@ -167,8 +169,19 @@ def _metadata(cfg: SourceTemperatureConfig, *, n_source_rows: int, n_test_rows: 
     }
 
 
-def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+def _reject_array_scalar(value: Any, *, name: str) -> None:
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be a scalar value, not an array.")
+
+
+def _positive_float(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be numeric, not boolean.")
+    _reject_array_scalar(value, name=name)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
