@@ -6,8 +6,10 @@ import pytest
 from neureptrace.decoding.source_quantile import (
     SOURCE_QUANTILE_CATEGORY,
     apply_source_quantile_clip,
+    apply_source_quantile_rank,
     source_feature_quantiles,
     source_quantile_clip,
+    source_quantile_rank,
 )
 
 
@@ -38,6 +40,42 @@ def test_source_quantile_clip_uses_source_bounds_for_test_rows() -> None:
     assert result.metadata["source_quantile_clip_test_values_clipped"] == int(np.count_nonzero(result.test_clipped_mask))
 
 
+def test_source_quantile_rank_uses_source_reference_for_test_rows() -> None:
+    source = np.asarray([[0.0], [1.0], [2.0], [3.0]], dtype=float)
+    test = np.asarray([[-1.0], [0.5], [2.5], [4.0]], dtype=float)
+
+    result = source_quantile_rank(source_features=source, test_features=test, epsilon=0.01)
+
+    assert result.train_features.shape == source.shape
+    assert result.test_features.shape == test.shape
+    assert np.all(result.test_features >= 0.01)
+    assert np.all(result.test_features <= 0.99)
+    assert np.allclose(result.sorted_source_values.ravel(), source.ravel())
+    assert result.metadata["source_quantile_rank_protocol_category"] == SOURCE_QUANTILE_CATEGORY
+    assert result.metadata["source_quantile_rank_uses_source_features"] is True
+    assert result.metadata["source_quantile_rank_uses_test_features_for_fitting"] is False
+    assert result.metadata["source_quantile_rank_uses_test_labels"] is False
+
+
+def test_source_quantile_rank_centered_output_is_bounded() -> None:
+    source = np.asarray([[0.0], [1.0], [2.0], [3.0]], dtype=float)
+    test = np.asarray([[0.0], [3.0]], dtype=float)
+
+    result = source_quantile_rank(source_features=source, test_features=test, centered=True, epsilon=0.01)
+
+    assert np.all(result.test_features >= -0.98)
+    assert np.all(result.test_features <= 0.98)
+    assert result.metadata["source_quantile_rank_centered"] is True
+
+
+def test_apply_source_quantile_rank_handles_ties() -> None:
+    sorted_values = np.asarray([[0.0], [1.0], [1.0], [2.0]], dtype=float)
+
+    ranks = apply_source_quantile_rank([[1.0]], sorted_values=sorted_values, epsilon=0.01)
+
+    assert np.allclose(ranks, np.asarray([[0.5]]))
+
+
 def test_apply_source_quantile_clip_returns_mask() -> None:
     clipped, mask = apply_source_quantile_clip([[0.0, 5.0], [10.0, -5.0]], lower=[1.0, 0.0], upper=[9.0, 4.0])
 
@@ -45,14 +83,21 @@ def test_apply_source_quantile_clip_returns_mask() -> None:
     assert mask.tolist() == [[True, True], [True, True]]
 
 
-def test_source_quantile_clip_rejects_width_mismatch() -> None:
+def test_source_quantile_helpers_reject_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         source_quantile_clip(source_features=[[0.0, 1.0]], test_features=[[0.0]])
+    with pytest.raises(ValueError, match="same feature width"):
+        source_quantile_rank(source_features=[[0.0, 1.0]], test_features=[[0.0]])
 
 
 def test_source_feature_quantiles_validate_bounds() -> None:
     with pytest.raises(ValueError, match="lower"):
         source_feature_quantiles([[0.0], [1.0]], lower=0.9, upper=0.1)
+
+
+def test_source_quantile_rank_validates_epsilon() -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=0.5)
 
 
 def test_source_feature_quantiles_reject_nonfinite_values() -> None:
@@ -65,3 +110,5 @@ def test_heldout_arguments_are_not_part_of_public_api() -> None:
         source_feature_quantiles([[0.0], [1.0]], heldout_features=[[0.5]])  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], heldout_labels=[0])  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], heldout_labels=[0])  # type: ignore[call-arg]
