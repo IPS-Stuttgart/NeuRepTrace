@@ -19,7 +19,15 @@ REQUIRED_CONDITIONS = ("observed_effect",)
 PAIRED_EMISSION_MODES = ("calibrated", "uncalibrated")
 
 
+def _contains_boolean_values(values: pd.Series) -> bool:
+    if pd.api.types.is_bool_dtype(values):
+        return True
+    return bool(values.map(lambda value: isinstance(value, (bool, np.bool_))).any())
+
+
 def _coerce_finite_numeric_column(frame: pd.DataFrame, column: str) -> None:
+    if _contains_boolean_values(frame[column]):
+        raise ValueError(f"{column} values must be numeric, not boolean.")
     try:
         frame[column] = pd.to_numeric(frame[column])
     except (TypeError, ValueError) as exc:
@@ -32,6 +40,8 @@ def _validate_optional_unit_interval_column(frame: pd.DataFrame, column: str) ->
     present = frame[column].notna()
     if not present.any():
         return
+    if _contains_boolean_values(frame.loc[present, column]):
+        raise ValueError(f"{column} values must be numeric, not boolean.")
     try:
         frame.loc[present, column] = pd.to_numeric(frame.loc[present, column])
     except (TypeError, ValueError) as exc:
