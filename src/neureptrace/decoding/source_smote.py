@@ -230,7 +230,13 @@ def _normalize_optional_random_state(value: Any, *, name: str) -> int | None:
 
 def _coerce_config(config: SourceSmoteConfig | Mapping[str, Any]) -> SourceSmoteConfig:
     if isinstance(config, SourceSmoteConfig):
-        return config
+        return source_smote_config(
+            synthetic_per_class=config.synthetic_per_class,
+            cross_domain_partner=config.cross_domain_partner,
+            preserve_original=config.preserve_original,
+            random_state=config.random_state,
+            jitter_std=config.jitter_std,
+        )
     return source_smote_config(**dict(config))
 
 
