@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -10,6 +11,8 @@ SOURCE_QUANTILE_CATEGORY = "1_strict_source_only"
 SOURCE_QUANTILE_CLIP_PROTOCOL = "strict_source_only_quantile_clip"
 SOURCE_QUANTILE_RANK_PROTOCOL = "strict_source_only_quantile_rank"
 SOURCE_QUANTILE_BIN_PROTOCOL = "strict_source_only_quantile_bins"
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,21 +92,24 @@ def source_quantile_clip(*, source_features, test_features, lower=0.01, upper=0.
     )
 
 
-def source_quantile_rank(*, source_features, test_features, centered: bool = False, epsilon=1e-6) -> SourceQuantileRankResult:
+def source_quantile_rank(*, source_features, test_features, centered: bool | str = False, epsilon=1e-6) -> SourceQuantileRankResult:
     """Transform rows to empirical CDF/rank features fitted on source rows only.
 
     ``centered=False`` returns values in ``[epsilon, 1 - epsilon]``.  When
     ``centered=True``, the same source-fitted ranks are mapped to ``[-1, 1]``.
+    String values such as ``"false"`` and ``"true"`` are normalized explicitly
+    for config-driven callers instead of relying on Python truthiness.
     """
 
     source = _matrix(source_features, name="source_features")
     test = _matrix(test_features, name="test_features")
     if source.shape[1] != test.shape[1]:
         raise ValueError("source_features and test_features must have the same feature width.")
+    centered_value = _normalize_bool(centered, name="centered")
     eps = _epsilon(epsilon)
     sorted_values = np.sort(source, axis=0)
-    train = apply_source_quantile_rank(source, sorted_values=sorted_values, centered=centered, epsilon=eps)
-    test_out = apply_source_quantile_rank(test, sorted_values=sorted_values, centered=centered, epsilon=eps)
+    train = apply_source_quantile_rank(source, sorted_values=sorted_values, centered=centered_value, epsilon=eps)
+    test_out = apply_source_quantile_rank(test, sorted_values=sorted_values, centered=centered_value, epsilon=eps)
     metadata = {
         "source_quantile_rank": True,
         "source_quantile_rank_protocol": SOURCE_QUANTILE_RANK_PROTOCOL,
@@ -115,7 +121,7 @@ def source_quantile_rank(*, source_features, test_features, centered: bool = Fal
         "source_quantile_rank_n_source_rows": int(source.shape[0]),
         "source_quantile_rank_n_test_rows": int(test.shape[0]),
         "source_quantile_rank_feature_dim": int(source.shape[1]),
-        "source_quantile_rank_centered": bool(centered),
+        "source_quantile_rank_centered": centered_value,
         "source_quantile_rank_epsilon": float(eps),
     }
     return SourceQuantileRankResult(
@@ -163,11 +169,12 @@ def source_quantile_bins(*, source_features, test_features, n_bins=4) -> SourceQ
     )
 
 
-def apply_source_quantile_rank(features, *, sorted_values, centered: bool = False, epsilon=1e-6):
+def apply_source_quantile_rank(features, *, sorted_values, centered: bool | str = False, epsilon=1e-6):
     matrix = _matrix(features, name="features")
     reference = _matrix(sorted_values, name="sorted_values")
     if matrix.shape[1] != reference.shape[1]:
         raise ValueError("features width must match sorted source values.")
+    centered_value = _normalize_bool(centered, name="centered")
     eps = _epsilon(epsilon)
     n_rows = reference.shape[0]
     ranks = np.empty_like(matrix, dtype=float)
@@ -177,7 +184,7 @@ def apply_source_quantile_rank(features, *, sorted_values, centered: bool = Fals
         right = np.searchsorted(values, matrix[:, column], side="right")
         ranks[:, column] = (left + right) / (2.0 * n_rows)
     ranks = np.clip(ranks, eps, 1.0 - eps)
-    if centered:
+    if centered_value:
         return 2.0 * ranks - 1.0
     return ranks
 
@@ -225,6 +232,32 @@ def _bounds(lower, upper) -> tuple[float, float]:
     if not 0.0 <= lo <= hi <= 1.0:
         raise ValueError("lower and upper must satisfy 0 <= lower <= upper <= 1.")
     return lo, hi
+
+
+def _normalize_bool(value: Any, *, name: str) -> bool:
+    message = f"{name} must be a boolean value."
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return _normalize_bool(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise ValueError(message)
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise ValueError(message)
+    raise ValueError(message)
 
 
 def _epsilon(epsilon) -> float:
