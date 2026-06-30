@@ -27,3 +27,22 @@ def test_openneuro_parse_runs_accepts_numeric_zero_run_id() -> None:
         "sub-01/meg/sub-01_task-MMNHCS_run-0_meg.fif",
         "sub-01/meg/sub-01_task-MMNHCS_run-0_events.tsv",
     ]
+
+
+@pytest.mark.parametrize("runs", ["none", "null", "single"])
+def test_openneuro_parse_runs_rejects_runless_aliases_for_labeled_run_datasets(runs: str) -> None:
+    with pytest.raises(ValueError, match=r"Unsupported OpenNeuro run selection for ds006629: no run"):
+        parse_runs(DATASET_SPECS["ds006629"], runs)
+
+
+def test_openneuro_parse_runs_rejects_unknown_run_after_normalization() -> None:
+    with pytest.raises(ValueError, match=r"Unsupported OpenNeuro run selection for ds000117: 99"):
+        parse_runs(DATASET_SPECS["ds000117"], "99")
+
+
+def test_openneuro_parse_runs_keeps_runless_aliases_for_runless_datasets() -> None:
+    assert parse_runs(DATASET_SPECS["ds004276"], "single") == (None,)
+
+
+def test_openneuro_parse_runs_validates_after_width_normalization() -> None:
+    assert parse_runs(DATASET_SPECS["ds000117"], ["run-1", "02"]) == ("01", "02")

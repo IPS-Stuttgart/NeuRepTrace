@@ -50,6 +50,14 @@ def test_margin_and_entropy_scores() -> None:
     assert entropy[1] == pytest.approx(0.0)
 
 
+def test_source_confidence_weighting_rejects_zero_mass_rows() -> None:
+    with pytest.raises(ValueError, match="positive probability mass"):
+        compute_source_confidence_weights([[0.0, 0.0], [0.7, 0.3]])
+
+    with pytest.raises(ValueError, match="positive probability mass"):
+        confidence_scores([[0.0, 0.0]], mode="confidence")
+
+
 def test_aliases_and_validation() -> None:
     assert normalize_confidence_weight_mode("max-prob") == "confidence"
     assert normalize_confidence_weight_mode("label-confidence") == "correct_confidence"
