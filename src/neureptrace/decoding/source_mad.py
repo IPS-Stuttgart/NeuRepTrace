@@ -29,6 +29,14 @@ class SourceMADConfig:
     normal_consistency: bool = True
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "center", _bool_value(self.center, name="center"))
+        object.__setattr__(self, "scale", _bool_value(self.scale, name="scale"))
+        object.__setattr__(self, "normal_consistency", _bool_value(self.normal_consistency, name="normal_consistency"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceMADReference:
@@ -153,7 +161,12 @@ def _matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
