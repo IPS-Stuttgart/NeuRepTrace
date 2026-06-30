@@ -57,6 +57,24 @@ def test_interpolate_rows_and_config_validation() -> None:
         interpolate_rows([0.0], [1.0], 1.5)
 
 
+def test_source_interpolation_accepts_null_random_state_strings() -> None:
+    cfg = source_interpolation_config(random_state="NULL")
+    assert cfg.random_state is None
+
+    features = np.asarray([[0.0], [1.0], [10.0], [11.0]], dtype=float)
+    labels = np.asarray(["a", "a", "b", "b"], dtype=object)
+    result = augment_source_with_interpolation(features, labels, config={"synthetic_per_class": 1, "random_state": "null"})
+
+    assert result.n_synthetic == 2
+    assert result.metadata["source_interpolation_random_state"] == ""
+
+
+@pytest.mark.parametrize("bad_seed", [True, np.asarray([7])])
+def test_source_interpolation_rejects_invalid_random_state_values(bad_seed: object) -> None:
+    with pytest.raises(ValueError, match="random_state"):
+        source_interpolation_config(random_state=bad_seed)  # type: ignore[arg-type]
+
+
 def test_disabled_interpolation_returns_original_rows() -> None:
     features = np.asarray([[0.0], [1.0]])
     labels = np.asarray([0, 1], dtype=object)
