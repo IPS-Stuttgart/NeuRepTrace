@@ -2,14 +2,16 @@
 
 The installed shim also normalizes prediction-time feature validation for the
 PyTorch-backed decoders so bad prediction inputs raise stable ValueErrors before
-falling through to low-level tensor/matrix errors.
+falling through to low-level tensor/matrix errors. It additionally validates the
+Torch MLP estimator's scalar numeric options before the optional torch import so
+misspecified configs fail deterministically even in lightweight environments.
 """
 
 from __future__ import annotations
 
 import importlib
 from functools import wraps
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -30,6 +32,85 @@ def _validate_weight_option(value: Any, *, name: str) -> None:
     if value is None or value == "balanced":
         return
     raise ValueError(f"{name} must be None or 'balanced'.")
+
+
+def _integer_value(value: Any, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    return int(number)
+
+
+def _positive_integer_value(value: Any, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be a positive integer.")
+    integer = int(number)
+    if integer < 1:
+        raise ValueError(f"{name} must be a positive integer.")
+    return integer
+
+
+def _optional_integer_value(value: Any, *, name: str) -> int | None:
+    if value is None:
+        return None
+    return _integer_value(value, name=name)
+
+
+def _float_value(value: Any, *, name: str, expectation: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be {expectation}.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be {expectation}.") from exc
+    return number
+
+
+def _positive_float_value(value: Any, *, name: str) -> float:
+    number = _float_value(value, name=name, expectation="positive and finite")
+    if not np.isfinite(number) or number <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return number
+
+
+def _nonnegative_float_value(value: Any, *, name: str) -> float:
+    number = _float_value(value, name=name, expectation="non-negative and finite")
+    if not np.isfinite(number) or number < 0.0:
+        raise ValueError(f"{name} must be non-negative and finite.")
+    return number
+
+
+def _bounded_float_value(value: Any, *, name: str, lower: float, upper: float) -> float:
+    expectation = f"finite in [{lower}, {upper})"
+    number = _float_value(value, name=name, expectation=expectation)
+    if not np.isfinite(number) or number < lower or number >= upper:
+        raise ValueError(f"{name} must be {expectation}.")
+    return number
+
+
+def _validate_torch_mlp_numeric_options(estimator: Any) -> None:
+    """Reject ambiguous TorchMLPClassifier scalar options before importing torch."""
+
+    _positive_integer_value(getattr(estimator, "hidden_units", 64), name="hidden_units")
+    _positive_integer_value(getattr(estimator, "max_iter", 100), name="max_iter")
+    _positive_integer_value(getattr(estimator, "batch_size", 128), name="batch_size")
+    _positive_integer_value(getattr(estimator, "patience", 8), name="patience")
+    _positive_float_value(getattr(estimator, "learning_rate", 1e-3), name="learning_rate")
+    _nonnegative_float_value(getattr(estimator, "weight_decay", 1e-4), name="weight_decay")
+    _bounded_float_value(getattr(estimator, "validation_fraction", 0.1), name="validation_fraction", lower=0.0, upper=1.0)
+    _bounded_float_value(getattr(estimator, "dropout", 0.1), name="dropout", lower=0.0, upper=1.0)
+    _optional_integer_value(getattr(estimator, "random_state", None), name="random_state")
 
 
 def _valid_fraction(value: Any) -> float | None:
@@ -147,13 +228,19 @@ def _import_optional_torch_module(module_name: str) -> Any | None:
         raise
 
 
-def _install_fit_guard(class_object: type, *attribute_names: str) -> None:
+def _install_fit_guard(
+    class_object: type,
+    *attribute_names: str,
+    option_validator: Callable[[Any], None] | None = None,
+) -> None:
     original_fit = class_object.fit
     if getattr(original_fit, _PATCH_MARKER, False):
         return
 
     @wraps(original_fit)
     def fit(self, *args, **kwargs):
+        if option_validator is not None:
+            option_validator(self)
         for attribute_name in attribute_names:
             _validate_weight_option(getattr(self, attribute_name, None), name=attribute_name)
         labels = _labels_from_call(args, kwargs)
@@ -203,7 +290,11 @@ def install() -> None:
     """Install validation for torch-backed decoders without requiring optional extras."""
 
     decoding = importlib.import_module("neureptrace.decoding")
-    _install_fit_guard(decoding.TorchMLPClassifier, "class_weight")
+    _install_fit_guard(
+        decoding.TorchMLPClassifier,
+        "class_weight",
+        option_validator=_validate_torch_mlp_numeric_options,
+    )
     _install_prediction_guard(decoding.TorchMLPClassifier, "decision_function", estimator_name="TorchMLPClassifier")
     _install_prediction_guard(decoding.TorchMLPClassifier, "predict_proba", estimator_name="TorchMLPClassifier")
 
