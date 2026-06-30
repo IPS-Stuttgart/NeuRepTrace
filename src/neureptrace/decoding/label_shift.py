@@ -289,11 +289,11 @@ def _normalize_prior(values, *, epsilon: float) -> np.ndarray:
     vector = np.asarray(values, dtype=float).reshape(-1)
     if vector.size < 1 or not np.all(np.isfinite(vector)) or np.any(vector < 0.0):
         raise ValueError("Prior vectors must contain finite non-negative values.")
-    vector = np.maximum(vector, epsilon)
     total = float(np.sum(vector))
     if total <= 0.0:
         raise ValueError("Prior vectors must have positive mass.")
-    return vector / total
+    clipped = np.maximum(vector, epsilon)
+    return clipped / np.sum(clipped)
 
 
 def _probability_matrix(values, *, name: str, epsilon: float | str, expected_classes: int | None = None) -> np.ndarray:
@@ -309,11 +309,12 @@ def _probability_matrix(values, *, name: str, epsilon: float | str, expected_cla
 
 
 def _normalize_probability_rows(matrix: np.ndarray, *, epsilon: float) -> np.ndarray:
-    clipped = np.maximum(np.asarray(matrix, dtype=float), epsilon)
-    row_sums = np.sum(clipped, axis=1, keepdims=True)
+    matrix = np.asarray(matrix, dtype=float)
+    row_sums = np.sum(matrix, axis=1, keepdims=True)
     if np.any(row_sums <= 0.0):
         raise ValueError("Probability rows must have positive mass.")
-    return clipped / row_sums
+    clipped = np.maximum(matrix, epsilon)
+    return clipped / np.sum(clipped, axis=1, keepdims=True)
 
 
 def _confusion_matrix(values, *, n_classes: int, epsilon: float | str) -> np.ndarray:
