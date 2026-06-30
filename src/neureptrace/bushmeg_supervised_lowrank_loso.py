@@ -167,16 +167,17 @@ def _as_list(value: Any, default: Sequence[Any]) -> list[Any]:
 
 
 def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
     if isinstance(value, str):
         normalized = value.strip().lower()
         if normalized in {"1", "true", "yes", "y", "on"}:
             return True
         if normalized in {"0", "false", "no", "n", "off"}:
             return False
-    if isinstance(value, (int, np.integer)):
-        return bool(value)
+    if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
+        if int(value) in {0, 1}:
+            return bool(value)
     raise ValueError(f"Expected a boolean value, got {value!r}.")
 
 
