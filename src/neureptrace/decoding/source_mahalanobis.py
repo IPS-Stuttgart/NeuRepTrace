@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import label_counts, label_equal_mask
+
 SOURCE_MAHALANOBIS_PROTOCOL = "strict_source_only_mahalanobis_decoder"
 SOURCE_MAHALANOBIS_CATEGORY = "1_strict_source_only"
 PRIOR_MODES = ("empirical", "uniform")
@@ -62,7 +64,7 @@ def fit_source_mahalanobis_decoder(
     if source.shape[1] != test.shape[1]:
         raise ValueError(f"source_features and test_features must have the same feature width: {source.shape[1]} != {test.shape[1]}.")
     labels = _label_vector(source_labels, expected_length=source.shape[0], name="source_labels")
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+    classes, _ = label_counts(labels)
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
 
@@ -125,14 +127,14 @@ def tied_covariance(
 
     x = _feature_matrix(features, name="features")
     y = _label_vector(labels, expected_length=x.shape[0], name="labels")
-    class_values = np.asarray(tuple(dict.fromkeys(y.tolist())) if classes is None else tuple(classes), dtype=object)
+    class_values = label_counts(y)[0] if classes is None else _class_vector(classes, name="classes")
     mean_matrix = np.asarray(means, dtype=float) if means is not None else _class_means(x, y, classes=class_values)[0]
     if mean_matrix.shape != (class_values.shape[0], x.shape[1]):
         raise ValueError("means must have shape n_classes x n_features.")
     scatter = np.zeros((x.shape[1], x.shape[1]), dtype=float)
     total = 0
     for index, class_label in enumerate(class_values.tolist()):
-        rows = x[y == class_label]
+        rows = x[label_equal_mask(y, class_label)]
         if rows.size == 0:
             continue
         centered = rows - mean_matrix[index]
@@ -165,7 +167,11 @@ def mahalanobis_distances(
 
 def _coerce_config(config: SourceMahalanobisConfig | Mapping[str, Any]) -> SourceMahalanobisConfig:
     if isinstance(config, SourceMahalanobisConfig):
-        return config
+        return source_mahalanobis_config(
+            regularization=config.regularization,
+            prior=config.prior,
+            temperature=config.temperature,
+        )
     return source_mahalanobis_config(**dict(config))
 
 
@@ -173,7 +179,7 @@ def _class_means(features: np.ndarray, labels: np.ndarray, *, classes: np.ndarra
     means = np.zeros((classes.shape[0], features.shape[1]), dtype=float)
     counts = np.zeros(classes.shape[0], dtype=int)
     for index, class_label in enumerate(classes.tolist()):
-        mask = labels == class_label
+        mask = label_equal_mask(labels, class_label)
         counts[index] = int(np.count_nonzero(mask))
         if counts[index] == 0:
             raise ValueError(f"No source rows available for class {class_label!r}.")
@@ -234,21 +240,66 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    if isinstance(values, (str, bytes)):
+        vector = _object_vector([values])
+    else:
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            vector = _object_vector([array.item()])
+        elif array.ndim == 1:
+            if array.shape[0] == expected_length:
+                vector = _object_vector(array.reshape(-1).tolist())
+            elif expected_length == 1:
+                vector = _object_vector([tuple(array.tolist())])
+            else:
+                vector = _object_vector(array.reshape(-1).tolist())
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if rows.shape[1] == 1:
+                vector = _object_vector(rows[:, 0].tolist())
+            else:
+                vector = _object_vector(tuple(row.tolist()) for row in rows)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
     return vector
 
 
+def _class_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
+    if isinstance(values, (str, bytes)):
+        return _object_vector([values])
+    array = np.asarray(values, dtype=object)
+    if array.ndim == 0:
+        return _object_vector([array.item()])
+    return _label_vector(values, expected_length=array.shape[0], name=name)
+
+
+def _object_vector(values: Sequence[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_, np.ndarray)):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_, np.ndarray)):
+        raise ValueError(f"{name} must be non-negative and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be non-negative and finite.") from exc
     if not np.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be non-negative and finite.")
     return parsed
