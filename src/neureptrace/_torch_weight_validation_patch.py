@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_torch_weight_validation_patch_installed"
+_OPTIONAL_TORCH_IMPORT_ROOTS = ("torch", "pytorch_lightning", "lightning")
 _ROW_STRATIFIED_FALLBACK_CLASSES = frozenset(
     {
         "TorchMLPClassifier",
@@ -128,6 +129,24 @@ def _prediction_feature_matrix(features: Any, *, n_features: Any, estimator_name
     return matrix
 
 
+def _missing_optional_torch_dependency(exc: ModuleNotFoundError) -> bool:
+    """Return whether an import failed only because an optional torch extra is absent."""
+
+    missing_name = getattr(exc, "name", "") or ""
+    return any(missing_name == root or missing_name.startswith(f"{root}.") for root in _OPTIONAL_TORCH_IMPORT_ROOTS)
+
+
+def _import_optional_torch_module(module_name: str) -> Any | None:
+    """Import a torch-backed module without making optional extras mandatory at package import."""
+
+    try:
+        return importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        if _missing_optional_torch_dependency(exc):
+            return None
+        raise
+
+
 def _install_fit_guard(class_object: type, *attribute_names: str) -> None:
     original_fit = class_object.fit
     if getattr(original_fit, _PATCH_MARKER, False):
@@ -181,35 +200,39 @@ def _install_logits_guard(class_object: type, *, estimator_name: str) -> None:
 
 
 def install() -> None:
-    """Install weight-option validation for torch-backed decoders."""
+    """Install validation for torch-backed decoders without requiring optional extras."""
 
     decoding = importlib.import_module("neureptrace.decoding")
     _install_fit_guard(decoding.TorchMLPClassifier, "class_weight")
     _install_prediction_guard(decoding.TorchMLPClassifier, "decision_function", estimator_name="TorchMLPClassifier")
     _install_prediction_guard(decoding.TorchMLPClassifier, "predict_proba", estimator_name="TorchMLPClassifier")
 
-    dann = importlib.import_module("neureptrace.decoding.dann")
-    _install_fit_guard(dann.TorchDANNClassifier, "class_weight")
-    _install_logits_guard(dann.TorchDANNClassifier, estimator_name="TorchDANNClassifier")
+    dann = _import_optional_torch_module("neureptrace.decoding.dann")
+    if dann is not None:
+        _install_fit_guard(dann.TorchDANNClassifier, "class_weight")
+        _install_logits_guard(dann.TorchDANNClassifier, estimator_name="TorchDANNClassifier")
 
-    cdan = importlib.import_module("neureptrace.decoding.cdan")
-    _install_fit_guard(cdan.TorchCDANClassifier, "class_weight")
-    _install_logits_guard(cdan.TorchCDANClassifier, estimator_name="TorchCDANClassifier")
+    cdan = _import_optional_torch_module("neureptrace.decoding.cdan")
+    if cdan is not None:
+        _install_fit_guard(cdan.TorchCDANClassifier, "class_weight")
+        _install_logits_guard(cdan.TorchCDANClassifier, estimator_name="TorchCDANClassifier")
 
-    source_domain_generalization = importlib.import_module("neureptrace.decoding.source_domain_generalization")
-    _install_fit_guard(
-        source_domain_generalization.TorchSourceDomainGeneralizationClassifier,
-        "class_weight",
-        "domain_weight",
-    )
-    _install_logits_guard(
-        source_domain_generalization.TorchSourceDomainGeneralizationClassifier,
-        estimator_name="TorchSourceDomainGeneralizationClassifier",
-    )
+    source_domain_generalization = _import_optional_torch_module("neureptrace.decoding.source_domain_generalization")
+    if source_domain_generalization is not None:
+        _install_fit_guard(
+            source_domain_generalization.TorchSourceDomainGeneralizationClassifier,
+            "class_weight",
+            "domain_weight",
+        )
+        _install_logits_guard(
+            source_domain_generalization.TorchSourceDomainGeneralizationClassifier,
+            estimator_name="TorchSourceDomainGeneralizationClassifier",
+        )
 
-    source_vrex = importlib.import_module("neureptrace.decoding.source_vrex")
-    _install_fit_guard(source_vrex.TorchVRExClassifier, "class_weight")
-    _install_logits_guard(source_vrex.TorchVRExClassifier, estimator_name="TorchVRExClassifier")
+    source_vrex = _import_optional_torch_module("neureptrace.decoding.source_vrex")
+    if source_vrex is not None:
+        _install_fit_guard(source_vrex.TorchVRExClassifier, "class_weight")
+        _install_logits_guard(source_vrex.TorchVRExClassifier, estimator_name="TorchVRExClassifier")
 
 
 __all__ = ["install"]
