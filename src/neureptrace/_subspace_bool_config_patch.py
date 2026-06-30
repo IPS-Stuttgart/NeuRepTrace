@@ -11,6 +11,7 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_subspace_bool_config_patch_installed"
 _RANDOM_SUBSPACE_PATCH_MARKER = "_neureptrace_random_subspace_bool_config_patch_installed"
 _RANDOM_SUBSPACE_RANDOM_STATE_PATCH_MARKER = "_neureptrace_random_subspace_random_state_patch_installed"
+_RANDOM_SUBSPACE_DECISION_ALIGNMENT_PATCH_MARKER = "_neureptrace_random_subspace_decision_alignment_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 _NONE_STRINGS = {"", "none", "null"}
@@ -86,6 +87,38 @@ def _normalize_random_subspace_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _aligned_decision_probabilities(random_subspace: Any, model: Any, features: Any, *, classes: np.ndarray, epsilon: float) -> np.ndarray:
+    """Convert decision-function scores onto the full ensemble class axis."""
+
+    feature_rows = np.asarray(features).shape[0]
+    scores = np.asarray(model.decision_function(features), dtype=float)
+    model_classes = np.asarray(getattr(model, "classes_", classes), dtype=object).reshape(-1)
+    if scores.ndim == 1:
+        if model_classes.shape[0] != 2:
+            raise ValueError("A one-dimensional decision_function output requires exactly two model classes.")
+        scores = np.column_stack([-scores, scores])
+    elif scores.ndim != 2:
+        raise ValueError("decision_function must return a one- or two-dimensional score array.")
+    if scores.shape[0] != feature_rows:
+        raise ValueError(f"decision_function returned {scores.shape[0]} rows for {feature_rows} feature rows.")
+    if scores.shape[1] != model_classes.shape[0]:
+        raise ValueError(
+            "decision_function column count must match the fitted estimator's classes_: "
+            f"{scores.shape[1]} != {model_classes.shape[0]}."
+        )
+
+    shifted = scores - np.max(scores, axis=1, keepdims=True)
+    local_probabilities = random_subspace._normalize_probability_rows(np.exp(np.clip(shifted, -50.0, 50.0)), epsilon=epsilon)
+    target_classes = np.asarray(classes, dtype=object).reshape(-1)
+    aligned = np.full((feature_rows, target_classes.shape[0]), epsilon, dtype=float)
+    for source_column, class_label in enumerate(model_classes.tolist()):
+        for target_column, target_label in enumerate(target_classes.tolist()):
+            if random_subspace._labels_equal(class_label, target_label):
+                aligned[:, target_column] = local_probabilities[:, source_column]
+                break
+    return random_subspace._normalize_probability_rows(aligned, epsilon=epsilon)
+
+
 def install() -> None:
     """Install strict normalization for subspace and random-subspace config."""
 
@@ -142,6 +175,17 @@ def install() -> None:
 
         setattr(sample_feature_subspaces, _RANDOM_SUBSPACE_RANDOM_STATE_PATCH_MARKER, True)
         random_subspace.sample_feature_subspaces = sample_feature_subspaces
+
+    original_aligned_probabilities = random_subspace._aligned_probabilities
+    if not getattr(original_aligned_probabilities, _RANDOM_SUBSPACE_DECISION_ALIGNMENT_PATCH_MARKER, False):
+        @wraps(original_aligned_probabilities)
+        def _aligned_probabilities(model, features, *, classes, epsilon):
+            if not hasattr(model, "predict_proba") and hasattr(model, "decision_function"):
+                return _aligned_decision_probabilities(random_subspace, model, features, classes=classes, epsilon=epsilon)
+            return original_aligned_probabilities(model, features, classes=classes, epsilon=epsilon)
+
+        setattr(_aligned_probabilities, _RANDOM_SUBSPACE_DECISION_ALIGNMENT_PATCH_MARKER, True)
+        random_subspace._aligned_probabilities = _aligned_probabilities
 
 
 __all__ = ["install"]
