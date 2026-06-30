@@ -150,7 +150,7 @@ def combine_probability_variants(
 
     matrices = _probability_tensor(probability_variants)
     normalized_weights = _normalize_weights(
-        np.ones(matrices.shape[0], dtype=float) if weights is None else np.asarray(weights, dtype=float),
+        np.ones(matrices.shape[0], dtype=float) if weights is None else weights,
         n_variants=matrices.shape[0],
     )
     parsed_mode = _consensus_mode(mode)
@@ -209,6 +209,8 @@ def _coerce_variants(
             if not isinstance(kwargs, Mapping):
                 raise ValueError("variant kwargs must be a mapping.")
             weight = variant.get("weight")
+            if weight is not None and _contains_boolean_values(weight):
+                raise ValueError("variant weight must be numeric, not boolean.")
             specs.append(SourceFreeConsensusVariant(name=name, kwargs=dict(kwargs), weight=None if weight is None else float(weight)))
         else:
             raise ValueError("variants must contain names, mappings, or SourceFreeConsensusVariant instances.")
@@ -239,7 +241,7 @@ def _resolve_variant_weights(
     if any(weight is not None for weight in specified):
         if any(weight is None for weight in specified):
             raise ValueError("Either specify all consensus variant weights or none of them.")
-        return _normalize_weights(np.asarray(specified, dtype=float), n_variants=len(specs))
+        return _normalize_weights(specified, n_variants=len(specs))
     return estimate_consensus_variant_weights(
         probability_variants,
         confidence_weight=confidence_weight,
@@ -293,6 +295,8 @@ def _probability_tensor(probability_variants: Sequence[np.ndarray]) -> np.ndarra
 
 
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
+    if _contains_boolean_values(probabilities):
+        raise ValueError("probabilities must be numeric, not boolean.")
     matrix = np.asarray(probabilities, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a non-empty 2D matrix with at least two classes.")
@@ -304,7 +308,9 @@ def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
     return matrix / row_sums
 
 
-def _normalize_weights(weights: np.ndarray, *, n_variants: int) -> np.ndarray:
+def _normalize_weights(weights: Sequence[float] | np.ndarray, *, n_variants: int) -> np.ndarray:
+    if _contains_boolean_values(weights):
+        raise ValueError("weights must be numeric, not boolean.")
     vector = np.asarray(weights, dtype=float).reshape(-1)
     if vector.shape[0] != int(n_variants):
         raise ValueError("weights must contain one entry per probability variant.")
@@ -313,6 +319,24 @@ def _normalize_weights(weights: np.ndarray, *, n_variants: int) -> np.ndarray:
     if float(vector.sum()) <= 0.0:
         raise ValueError("weights must contain positive mass.")
     return vector / vector.sum()
+
+
+def _contains_boolean_values(values: Any) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_values(value) for value in values.ravel())
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return False
+    return any(_contains_boolean_values(value) for value in iterator)
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
