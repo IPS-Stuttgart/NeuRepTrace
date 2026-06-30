@@ -11,6 +11,12 @@ from neureptrace.decoding.source_gaussian import (
     normalize_prior_mode,
     source_gaussian_config,
 )
+from neureptrace.decoding.source_mahalanobis import (
+    SOURCE_MAHALANOBIS_CATEGORY,
+    SourceMahalanobisConfig,
+    fit_source_mahalanobis_decoder,
+    source_mahalanobis_config,
+)
 
 
 def test_source_gaussian_predicts_separated_classes() -> None:
@@ -79,3 +85,74 @@ def test_source_gaussian_rejects_width_mismatch() -> None:
             source_labels=[0, 1],
             test_features=[[0.0]],
         )
+
+
+def test_source_mahalanobis_fits_source_only_decoder() -> None:
+    source = np.asarray([[0.0, 0.0], [0.2, 0.0], [3.0, 3.0], [3.2, 3.0]], dtype=float)
+    test = np.asarray([[0.1, 0.0], [3.1, 3.0]], dtype=float)
+    labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+
+    result = fit_source_mahalanobis_decoder(
+        source_features=source,
+        source_labels=labels,
+        test_features=test,
+        config={"prior": "uniform", "regularization": "0.01", "temperature": "1.5"},
+    )
+
+    assert result.probabilities.shape == (2, 2)
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+    assert result.predictions.tolist() == ["left", "right"]
+    assert result.metadata["source_mahalanobis_protocol_category"] == SOURCE_MAHALANOBIS_CATEGORY
+    assert result.metadata["source_mahalanobis_uses_source_features"] is True
+    assert result.metadata["source_mahalanobis_uses_test_features_for_fitting"] is False
+    assert result.metadata["source_mahalanobis_uses_test_labels"] is False
+    assert result.metadata["source_mahalanobis_valid_for_strict_source_only"] is True
+
+
+def test_source_mahalanobis_preserves_composite_source_labels() -> None:
+    source = np.asarray([[0.0, 0.0], [0.2, 0.0], [3.0, 3.0], [3.2, 3.0]], dtype=float)
+    test = np.asarray([[0.1, 0.0], [3.1, 3.0]], dtype=float)
+    labels = [("left", 1), ("left", 1), ("right", 2), ("right", 2)]
+
+    result = fit_source_mahalanobis_decoder(source_features=source, source_labels=labels, test_features=test)
+
+    assert result.classes.tolist() == [("left", 1), ("right", 2)]
+    assert result.predictions.tolist() == [("left", 1), ("right", 2)]
+    assert "('left', 1):2" in result.metadata["source_mahalanobis_class_counts"]
+
+
+def test_source_mahalanobis_revalidates_direct_dataclass_config() -> None:
+    source = np.asarray([[0.0, 0.0], [0.2, 0.0], [3.0, 3.0], [3.2, 3.0]], dtype=float)
+    test = np.asarray([[0.1, 0.0], [3.1, 3.0]], dtype=float)
+    labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+
+    result = fit_source_mahalanobis_decoder(
+        source_features=source,
+        source_labels=labels,
+        test_features=test,
+        config=SourceMahalanobisConfig(regularization="0.01", prior="flat", temperature="2.0"),  # type: ignore[arg-type]
+    )
+
+    assert result.metadata["source_mahalanobis_regularization"] == pytest.approx(0.01)
+    assert result.metadata["source_mahalanobis_prior"] == "uniform"
+    assert result.metadata["source_mahalanobis_temperature"] == pytest.approx(2.0)
+
+    with pytest.raises(ValueError, match="temperature"):
+        fit_source_mahalanobis_decoder(
+            source_features=source,
+            source_labels=labels,
+            test_features=test,
+            config=SourceMahalanobisConfig(temperature=float("nan")),
+        )
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"regularization": 1}, np.asarray(0.1), np.asarray([0.1])])
+def test_source_mahalanobis_rejects_invalid_regularization_values(value: object) -> None:
+    with pytest.raises(ValueError, match="regularization"):
+        source_mahalanobis_config(regularization=value)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"temperature": 1}, np.asarray(1.0), np.asarray([1.0])])
+def test_source_mahalanobis_rejects_invalid_temperature_values(value: object) -> None:
+    with pytest.raises(ValueError, match="temperature"):
+        source_mahalanobis_config(temperature=value)  # type: ignore[arg-type]
