@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_bushmeg_all_protocols_topk_tie_patch_installed"
+_LABEL_INDEX_ERROR = "labels must contain finite integer class indices."
 
 
 def _normalize_k(k: Any) -> int:
@@ -24,11 +25,46 @@ def _normalize_k(k: Any) -> int:
     return int(k_float)
 
 
+def _contains_boolean_token(values: Any) -> bool:
+    try:
+        array = np.asarray(values, dtype=object)
+    except (TypeError, ValueError):
+        return isinstance(values, (bool, np.bool_))
+    if array.ndim == 0:
+        return isinstance(array.item(), (bool, np.bool_))
+    return any(isinstance(value, (bool, np.bool_)) for value in array.reshape(-1).tolist())
+
+
+def _label_index_vector(labels: Any) -> np.ndarray:
+    if _contains_boolean_token(labels):
+        raise ValueError(_LABEL_INDEX_ERROR)
+    try:
+        raw = np.asarray(labels)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_LABEL_INDEX_ERROR) from exc
+    if raw.ndim == 0:
+        raw = raw.reshape(1)
+    elif raw.ndim == 2 and raw.shape[1] == 1:
+        raw = raw.reshape(-1)
+    elif raw.ndim != 1:
+        raise ValueError("labels must have one entry per probability row.")
+    try:
+        numeric = raw.astype(float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_LABEL_INDEX_ERROR) from exc
+    if not np.all(np.isfinite(numeric)):
+        raise ValueError(_LABEL_INDEX_ERROR)
+    rounded = np.rint(numeric)
+    if not np.all(np.isclose(numeric, rounded, rtol=0.0, atol=1.0e-12)):
+        raise ValueError(_LABEL_INDEX_ERROR)
+    return rounded.astype(int, copy=False)
+
+
 def _top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
     """Compute exact-k top-k accuracy with stable class-index tie handling."""
 
     probability_matrix = np.asarray(probabilities, dtype=float)
-    label_indices = np.asarray(labels, dtype=int).reshape(-1)
+    label_indices = _label_index_vector(labels)
     if probability_matrix.size == 0:
         return float("nan")
     if probability_matrix.ndim != 2:
