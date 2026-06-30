@@ -41,6 +41,13 @@ def test_random_projection_is_reproducible_with_fixed_seed() -> None:
     assert np.allclose(first.projection, second.projection)
 
 
+@pytest.mark.parametrize("text_seed", ["", "none", "None", "null", "NULL"])
+def test_random_projection_accepts_text_optional_seed(text_seed: str) -> None:
+    cfg = source_random_projection_config(random_state=text_seed)
+
+    assert cfg.random_state is None
+
+
 def test_sparse_projection_contains_zeros() -> None:
     reference = fit_source_random_projection_reference(16, config={"n_components": 8, "distribution": "sparse", "density": 0.25, "random_state": 1})
 
