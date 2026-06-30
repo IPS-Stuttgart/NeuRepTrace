@@ -139,7 +139,12 @@ def normalize_source_scale_method(value: str | None) -> str:
 
 def _coerce_config(config: SourceFeatureScaleConfig | Mapping[str, Any]) -> SourceFeatureScaleConfig:
     if isinstance(config, SourceFeatureScaleConfig):
-        return config
+        return source_feature_scale_config(
+            method=config.method,
+            center=config.center,
+            scale=config.scale,
+            epsilon=config.epsilon,
+        )
     return source_feature_scale_config(**dict(config))
 
 
