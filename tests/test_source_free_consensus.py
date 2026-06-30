@@ -129,3 +129,31 @@ def test_combine_probability_variants_rejects_shape_mismatch() -> None:
                 np.array([[0.5, 0.5], [0.6, 0.4]], dtype=float),
             ]
         )
+
+
+def test_combine_probability_variants_rejects_boolean_probabilities() -> None:
+    boolean_probabilities = np.array([[True, False], [False, True]])
+    numeric_probabilities = np.array([[0.70, 0.30], [0.20, 0.80]], dtype=float)
+
+    with pytest.raises(ValueError, match="probabilities must be numeric, not boolean"):
+        combine_probability_variants([boolean_probabilities, numeric_probabilities])
+
+
+def test_combine_probability_variants_rejects_boolean_weights() -> None:
+    first = np.array([[0.80, 0.20], [0.40, 0.60]], dtype=float)
+    second = np.array([[0.60, 0.40], [0.20, 0.80]], dtype=float)
+
+    with pytest.raises(ValueError, match="weights must be numeric, not boolean"):
+        combine_probability_variants([first, second], weights=[True, False])
+
+
+def test_fit_source_free_consensus_rejects_boolean_fixed_variant_weights() -> None:
+    with pytest.raises(ValueError, match="weights must be numeric, not boolean"):
+        fit_source_free_consensus_predict_proba(
+            source_model=_ToySourceModel(),
+            target_features=np.array([[-1.0], [1.0]], dtype=float),
+            variants=[
+                SourceFreeConsensusVariant("raw", {"max_iterations": 0, "target_prior_correction": "none"}, weight=True),
+                SourceFreeConsensusVariant("prior", {"max_iterations": 0, "target_prior_correction": "none"}, weight=0.5),
+            ],
+        )
