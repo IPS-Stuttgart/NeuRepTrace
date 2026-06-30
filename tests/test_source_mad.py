@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_mad import (
     SOURCE_MAD_CATEGORY,
+    SourceMADConfig,
     apply_source_mad_transform,
     fit_source_mad_reference,
     fit_source_mad_transform,
@@ -73,6 +74,29 @@ def test_source_mad_config_validation() -> None:
 
     with pytest.raises(ValueError, match="epsilon"):
         source_mad_config(epsilon=0.0)
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"epsilon": 1}, np.asarray(1e-5), np.asarray([1e-5])])
+def test_source_mad_rejects_invalid_epsilon_values(value: object) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        source_mad_config(epsilon=value)  # type: ignore[arg-type]
+
+
+def test_source_mad_revalidates_direct_dataclass_config() -> None:
+    reference = fit_source_mad_reference(
+        [[1.0], [3.0], [5.0]],
+        config=SourceMADConfig(center="false", scale="true", normal_consistency="false", epsilon="1e-4"),  # type: ignore[arg-type]
+    )
+
+    assert reference.config.center is False
+    assert reference.config.scale is True
+    assert reference.config.normal_consistency is False
+    assert reference.config.epsilon == pytest.approx(1e-4)
+    assert np.allclose(reference.center, np.asarray([0.0]))
+    assert np.allclose(reference.scale, np.asarray([2.0]))
+
+    with pytest.raises(ValueError, match="epsilon"):
+        fit_source_mad_reference([[1.0], [2.0]], config=SourceMADConfig(epsilon=float("nan")))
 
 
 def test_source_mad_rejects_width_mismatch() -> None:
