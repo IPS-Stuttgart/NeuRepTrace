@@ -121,6 +121,8 @@ def _prediction_feature_matrix(features: Any, *, n_features: Any, estimator_name
         raise ValueError(f"{estimator_name} prediction features must be numeric.") from exc
     if matrix.ndim != 2:
         raise ValueError(f"{estimator_name} prediction features must be a two-dimensional feature matrix.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(f"{estimator_name} prediction features must be finite.")
     if matrix.shape[1] != expected_width:
         raise ValueError(f"{estimator_name} prediction features width {matrix.shape[1]} does not match fitted width {expected_width}.")
     return matrix
