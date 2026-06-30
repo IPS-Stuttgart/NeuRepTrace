@@ -71,9 +71,10 @@ def fit_source_temperature_scaling(
 def apply_temperature(probabilities: Sequence[Sequence[float]] | np.ndarray, *, temperature: float | str, epsilon: float = DEFAULT_EPSILON) -> np.ndarray:
     """Apply scalar temperature to probability rows."""
 
-    matrix = _probability_matrix(probabilities, name="probabilities", epsilon=epsilon)
+    eps = _probability_epsilon(epsilon)
+    matrix = _probability_matrix(probabilities, name="probabilities", epsilon=eps)
     temp = _positive_float(temperature, name="temperature")
-    logits = np.log(np.maximum(matrix, float(epsilon))) / temp
+    logits = np.log(np.maximum(matrix, eps)) / temp
     logits = logits - np.max(logits, axis=1, keepdims=True)
     exp_logits = np.exp(np.clip(logits, -80.0, 80.0))
     return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
@@ -82,9 +83,10 @@ def apply_temperature(probabilities: Sequence[Sequence[float]] | np.ndarray, *, 
 def negative_log_likelihood(probabilities: Sequence[Sequence[float]] | np.ndarray, labels: Sequence[int] | np.ndarray, *, epsilon: float = DEFAULT_EPSILON) -> float:
     """Return mean negative log likelihood for integer label indices."""
 
-    matrix = _probability_matrix(probabilities, name="probabilities", epsilon=epsilon)
+    eps = _probability_epsilon(epsilon)
+    matrix = _probability_matrix(probabilities, name="probabilities", epsilon=eps)
     indices = _label_index_vector(labels, n_rows=matrix.shape[0], n_classes=matrix.shape[1])
-    return float(-np.mean(np.log(np.maximum(matrix[np.arange(matrix.shape[0]), indices], float(epsilon)))))
+    return float(-np.mean(np.log(np.maximum(matrix[np.arange(matrix.shape[0]), indices], eps))))
 
 
 def source_temperature_config(
@@ -104,7 +106,7 @@ def source_temperature_config(
     values = tuple(_positive_float(value, name="temperatures") for value in raw_values)
     if not values:
         raise ValueError("temperatures must contain at least one value.")
-    return SourceTemperatureConfig(temperatures=values, epsilon=_positive_float(epsilon, name="epsilon"))
+    return SourceTemperatureConfig(temperatures=values, epsilon=_probability_epsilon(epsilon))
 
 
 def _coerce_config(config: SourceTemperatureConfig | Mapping[str, Any]) -> SourceTemperatureConfig:
@@ -246,6 +248,7 @@ def _label_index_vector(labels: Sequence[int] | np.ndarray, *, n_rows: int, n_cl
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
+    eps = _probability_epsilon(epsilon)
     if _contains_boolean(values):
         raise ValueError(f"{name} must contain numeric probabilities, not boolean values.")
     matrix = np.asarray(values, dtype=float)
@@ -254,7 +257,7 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name:
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError(f"{name} must contain finite non-negative values.")
     row_sums = np.sum(matrix, axis=1, keepdims=True)
-    if np.any(row_sums <= float(epsilon)):
+    if np.any(row_sums <= eps):
         raise ValueError(f"{name} rows must have positive probability mass.")
     return matrix / row_sums
 
@@ -295,3 +298,10 @@ def _positive_float(value: Any, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
+
+
+def _probability_epsilon(value: Any, *, name: str = "epsilon") -> float:
+    epsilon = _positive_float(value, name=name)
+    if epsilon >= 1.0:
+        raise ValueError(f"{name} must be smaller than one.")
+    return epsilon
