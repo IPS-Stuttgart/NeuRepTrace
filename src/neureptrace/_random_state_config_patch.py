@@ -46,6 +46,8 @@ def _normalize_optional_nonnegative_int(
     scalar_value = _scalar_random_state_value(value, name=name)
     if _is_none_random_state(scalar_value):
         return None
+    if isinstance(scalar_value, (bool, np.bool_)):
+        raise _random_state_error(name)
     return normalizer(scalar_value, name=name)
 
 
@@ -212,6 +214,39 @@ def _patch_source_domain_mask() -> None:
     source_domain_mask_module.source_domain_mask = source_domain_mask
 
 
+def _patch_source_interpolation() -> None:
+    source_interpolation = importlib.import_module("neureptrace.decoding.source_interpolation")
+
+    original_config = source_interpolation.source_interpolation_config
+    if getattr(original_config, _PATCH_MARKER, False):
+        return
+
+    @wraps(original_config)
+    def source_interpolation_config(
+        *,
+        synthetic_per_class: int | str = source_interpolation.DEFAULT_SYNTHETIC_PER_CLASS,
+        pair_mode: str | None = "same_class",
+        alpha: float | str = source_interpolation.DEFAULT_ALPHA,
+        preserve_original: bool | int | str = True,
+        random_state: int | str | None = 13,
+    ):
+        seed = _normalize_optional_nonnegative_int(
+            random_state,
+            normalizer=source_interpolation._nonnegative_int,
+            name="random_state",
+        )
+        return original_config(
+            synthetic_per_class=synthetic_per_class,
+            pair_mode=pair_mode,
+            alpha=alpha,
+            preserve_original=preserve_original,
+            random_state=seed,
+        )
+
+    setattr(source_interpolation_config, _PATCH_MARKER, True)
+    source_interpolation.source_interpolation_config = source_interpolation_config
+
+
 def install() -> None:
     """Install random-state validation patches for config helpers."""
 
@@ -221,6 +256,7 @@ def install() -> None:
     _patch_feature_mixstyle()
     _patch_domain_mixstyle()
     _patch_source_domain_mask()
+    _patch_source_interpolation()
     _INSTALLED = True
 
 
