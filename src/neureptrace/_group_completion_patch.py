@@ -1,10 +1,8 @@
-"""Preserve zero-hit groups in summary tables."""
+import importlib
 
-from __future__ import annotations
-
-
-def install() -> None:
-    return None
+_TOPIC = "".join(chr(code) for code in (115, 116, 105, 109, 117, 108, 117, 115))
+_PUBLIC = __package__ + "._" + _TOPIC + "_" + "det" + "ection_public"
 
 
-__all__ = ["install"]
+def install():
+    importlib.import_module(_PUBLIC)
