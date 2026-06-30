@@ -62,7 +62,7 @@ def fit_source_mahalanobis_decoder(
     if source.shape[1] != test.shape[1]:
         raise ValueError(f"source_features and test_features must have the same feature width: {source.shape[1]} != {test.shape[1]}.")
     labels = _label_vector(source_labels, expected_length=source.shape[0], name="source_labels")
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+    classes = _unique_labels(labels)
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
 
@@ -125,14 +125,14 @@ def tied_covariance(
 
     x = _feature_matrix(features, name="features")
     y = _label_vector(labels, expected_length=x.shape[0], name="labels")
-    class_values = np.asarray(tuple(dict.fromkeys(y.tolist())) if classes is None else tuple(classes), dtype=object)
+    class_values = _unique_labels(y) if classes is None else _coerce_label_values(classes)
     mean_matrix = np.asarray(means, dtype=float) if means is not None else _class_means(x, y, classes=class_values)[0]
     if mean_matrix.shape != (class_values.shape[0], x.shape[1]):
         raise ValueError("means must have shape n_classes x n_features.")
     scatter = np.zeros((x.shape[1], x.shape[1]), dtype=float)
     total = 0
     for index, class_label in enumerate(class_values.tolist()):
-        rows = x[y == class_label]
+        rows = x[_label_equal_mask(y, class_label)]
         if rows.size == 0:
             continue
         centered = rows - mean_matrix[index]
@@ -173,7 +173,7 @@ def _class_means(features: np.ndarray, labels: np.ndarray, *, classes: np.ndarra
     means = np.zeros((classes.shape[0], features.shape[1]), dtype=float)
     counts = np.zeros(classes.shape[0], dtype=int)
     for index, class_label in enumerate(classes.tolist()):
-        mask = labels == class_label
+        mask = _label_equal_mask(labels, class_label)
         counts[index] = int(np.count_nonzero(mask))
         if counts[index] == 0:
             raise ValueError(f"No source rows available for class {class_label!r}.")
@@ -234,10 +234,72 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _coerce_label_values(values)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _coerce_label_values(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            items = array.tolist()
+        elif array.shape[1:] == (1,):
+            items = array.reshape(-1).tolist()
+        else:
+            items = [tuple(np.asarray(row, dtype=object).reshape(-1).tolist()) for row in array]
+    elif isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        try:
+            items = list(values)
+        except TypeError:
+            items = [values]
+    return _object_vector(_canonical_label(item) for item in items)
+
+
+def _canonical_label(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            return array.item()
+        return tuple(array.reshape(-1).tolist())
+    if isinstance(value, list):
+        return tuple(value)
+    return value
+
+
+def _object_vector(values: Sequence[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
+    return vector
+
+
+def _unique_labels(labels: np.ndarray) -> np.ndarray:
+    classes: list[Any] = []
+    for label in labels.tolist():
+        if not any(_labels_equal(label, class_label) for class_label in classes):
+            classes.append(label)
+    return _object_vector(classes)
+
+
+def _label_equal_mask(labels: np.ndarray, class_label: Any) -> np.ndarray:
+    return np.asarray([_labels_equal(label, class_label) for label in labels.tolist()], dtype=bool)
+
+
+def _labels_equal(left: Any, right: Any) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
