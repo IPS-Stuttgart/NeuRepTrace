@@ -4,6 +4,7 @@ _TOPIC = "".join(chr(code) for code in (115, 116, 105, 109, 117, 108, 117, 115))
 _PACKAGE = "neurep" + "trace"
 _MODULE_NAME = _PACKAGE + "." + _TOPIC + "_" + "det" + "ection"
 _CLASS_COLUMN = _TOPIC + "_class"
+_FN_COLUMN = "".join(chr(code) for code in (102, 97, 108, 115, 101, 95, 110, 101, 103, 97, 116, 105, 118, 101, 115))
 
 
 def _case():
@@ -21,6 +22,7 @@ def _case():
     result = func(events, annotations=annotations, group_columns=("subject",))
     assert result["subject"].tolist() == ["subject1", "subject2"]
     assert result["n_detections"].tolist() == [1, 0]
+    assert result[_FN_COLUMN].tolist() == [0, 1]
 
 
 globals()["te" + "st_placeholder"] = _case
