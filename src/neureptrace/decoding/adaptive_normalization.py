@@ -136,20 +136,32 @@ def fit_adaptive_feature_normalization(
 def adaptive_normalization_config(
     *,
     mode: str | None = "domain_wise",
-    center: bool = True,
-    scale: bool = True,
-    robust: bool = False,
+    center: Any = True,
+    scale: Any = True,
+    robust: Any = False,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> AdaptiveNormalizationConfig:
     """Normalize public options for adaptive feature normalization."""
 
     return AdaptiveNormalizationConfig(
         mode=normalize_adaptive_normalization_mode(mode),
-        center=bool(center),
-        scale=bool(scale),
-        robust=bool(robust),
+        center=_bool_config(center, name="center"),
+        scale=_bool_config(scale, name="scale"),
+        robust=_bool_config(robust, name="robust"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
+
+
+def _bool_config(value: Any, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean value.")
 
 
 def normalize_adaptive_normalization_mode(mode: str | None) -> str:
@@ -258,24 +270,24 @@ def _metadata(
     }
 
 
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    matrix = np.asarray(features, dtype=float)
     if matrix.ndim != 2:
         raise ValueError(f"{name} must be a two-dimensional feature matrix.")
-    if matrix.shape[0] < 1 or matrix.shape[1] < 1:
-        raise ValueError(f"{name} must contain at least one row and one feature column.")
+    if matrix.shape[0] == 0:
+        raise ValueError(f"{name} must contain at least one row.")
+    if matrix.shape[1] == 0:
+        raise ValueError(f"{name} must contain at least one feature column.")
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain only finite values.")
     return matrix
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive and finite.") from exc
+        raise ValueError(f"{name} must be a positive finite float.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(f"{name} must be a positive finite float.")
     return parsed
