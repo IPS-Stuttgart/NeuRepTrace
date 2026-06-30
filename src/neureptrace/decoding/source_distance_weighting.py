@@ -395,5 +395,12 @@ def _bool_value(value: bool | int | str, *, name: str) -> bool:
 
 def _coerce_config(config: SourceDistanceWeightConfig | Mapping[str, Any]) -> SourceDistanceWeightConfig:
     if isinstance(config, SourceDistanceWeightConfig):
-        return config
+        return source_distance_weight_config(
+            group_mode=config.group_mode,
+            temperature=config.temperature,
+            min_weight=config.min_weight,
+            normalize_weights=config.normalize_weights,
+            robust=config.robust,
+            epsilon=config.epsilon,
+        )
     return source_distance_weight_config(**dict(config))
