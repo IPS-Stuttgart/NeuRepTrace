@@ -63,7 +63,8 @@ def select_confident_probability_rows(
     elif cfg.mode == "top_k":
         selected &= _top_k_mask(confidences, cfg.top_k or matrix.shape[0])
     elif cfg.mode == "per_class_top_k":
-        selected &= _per_class_top_k_mask(confidences, predicted, matrix.shape[1], cfg.per_class_top_k or 1)
+        per_class_k = cfg.per_class_top_k if cfg.per_class_top_k is not None else matrix.shape[0]
+        selected &= _per_class_top_k_mask(confidences, predicted, matrix.shape[1], per_class_k)
     else:
         raise ValueError(f"Unhandled selection mode {cfg.mode!r}.")
     return ConfidenceSelectionResult(

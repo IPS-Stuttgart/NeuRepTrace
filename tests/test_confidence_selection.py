@@ -67,6 +67,25 @@ def test_per_class_top_k_keeps_one_row_per_predicted_class() -> None:
     assert result.predicted_indices[result.selected_mask].tolist() == [0, 1, 2]
 
 
+def test_per_class_top_k_all_keeps_all_rows_per_predicted_class() -> None:
+    probabilities = np.asarray(
+        [
+            [0.90, 0.10],
+            [0.80, 0.20],
+            [0.20, 0.80],
+            [0.30, 0.70],
+        ]
+    )
+
+    result = select_confident_probability_rows(
+        probabilities,
+        config={"mode": "per_class_top_k", "per_class_top_k": "all"},
+    )
+
+    assert result.selected_indices.tolist() == [0, 1, 2, 3]
+    assert result.n_selected == 4
+
+
 def test_margin_filter_combines_with_threshold() -> None:
     probabilities = np.asarray(
         [
