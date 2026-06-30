@@ -103,14 +103,11 @@ def fit_random_subspace_ensemble(
     test = _feature_matrix(test_features, name="test_features")
     if train.shape[1] != test.shape[1]:
         raise ValueError(f"train_features and test_features must have the same feature width: {train.shape[1]} != {test.shape[1]}.")
-    labels = np.asarray(train_labels, dtype=object).reshape(-1)
-    if labels.shape[0] != train.shape[0]:
-        raise ValueError(f"train_labels must contain one value per train row: {labels.shape[0]} != {train.shape[0]}.")
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+    labels = _label_vector(train_labels, expected_length=train.shape[0], name="train_labels")
+    classes = _unique_labels_in_order(labels)
     if classes.shape[0] < 2:
         raise ValueError("Random-subspace ensemble requires at least two classes.")
-    class_to_code = {class_label: index for index, class_label in enumerate(classes.tolist())}
-    label_codes = np.asarray([class_to_code[class_label] for class_label in labels.tolist()], dtype=int)
+    label_codes = np.asarray([_label_index(classes, class_label) for class_label in labels.tolist()], dtype=int)
     encoded_classes = np.arange(classes.shape[0], dtype=int)
     weights = None if sample_weight is None else _sample_weight(sample_weight, expected_length=train.shape[0])
     rng = np.random.default_rng(cfg.random_state)
@@ -131,7 +128,7 @@ def fit_random_subspace_ensemble(
             bootstrap_rows=cfg.bootstrap_rows,
             rng=rng,
         )
-        if np.unique(labels[row_indices]).shape[0] < 2:
+        if np.unique(label_codes[row_indices]).shape[0] < 2:
             row_indices = np.arange(train.shape[0], dtype=int)
         model = clone(model_template)
         fit_kwargs = {} if weights is None else {"sample_weight": weights[row_indices]}
@@ -311,6 +308,74 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain only finite values.")
     return matrix
+
+
+def _object_vector(values: Sequence[Any]) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
+    return vector
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    """Return one object-valued label per train row.
+
+    Rectangular inputs such as ``[("semantic", "left"), ...]`` should be treated
+    as atomic composite labels, not flattened into separate class tokens.
+    """
+
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            items = array.tolist()
+        elif array.ndim == 2 and array.shape[1] == 1:
+            items = array.reshape(-1).tolist()
+        elif array.ndim == 2:
+            items = [tuple(row.tolist()) for row in array]
+        else:
+            raise ValueError(f"{name} must be one-dimensional or a two-dimensional composite-label matrix.")
+    elif isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        try:
+            items = list(values)
+        except TypeError as exc:
+            raise ValueError(f"{name} must be one-dimensional.") from exc
+        items = [tuple(item) if isinstance(item, list) else item for item in items]
+    vector = _object_vector(items)
+    if vector.shape[0] != expected_length:
+        raise ValueError(f"{name} must contain one value per train row: {vector.shape[0]} != {expected_length}.")
+    return vector
+
+
+def _labels_equal(left: Any, right: Any) -> bool:
+    try:
+        equal = left == right
+    except Exception:
+        return False
+    if isinstance(equal, np.ndarray):
+        return bool(np.array_equal(left, right))
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
+
+
+def _unique_labels_in_order(labels: np.ndarray) -> np.ndarray:
+    unique: list[Any] = []
+    for label in labels.tolist():
+        if not any(_labels_equal(label, existing) for existing in unique):
+            unique.append(label)
+    return _object_vector(unique)
+
+
+def _label_index(classes: np.ndarray, label: Any) -> int:
+    for index, candidate in enumerate(classes.tolist()):
+        if _labels_equal(label, candidate):
+            return int(index)
+    raise ValueError(f"train_labels contain unknown class label {label!r}.")
 
 
 def _sample_weight(values: Sequence[float] | np.ndarray, *, expected_length: int) -> np.ndarray:
