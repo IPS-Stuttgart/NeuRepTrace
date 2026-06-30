@@ -108,6 +108,35 @@ def test_aliases_and_validation() -> None:
         fit_source_knn_decoder(source_features=[[0.0], [1.0]], source_labels=[0, 1], test_features=[[0.5]], config={"k": 0})
 
 
+def test_source_knn_normalizes_dataclass_config_values() -> None:
+    reference = fit_source_knn_reference(
+        source_features=[[0.0], [10.0]],
+        source_labels=[0, 1],
+        config=SourceKNNConfig(k=1, weights="equal", standardize="false"),
+    )
+
+    assert reference.config.weights == "uniform"
+    assert reference.config.standardize is False
+    assert np.allclose(reference.mean, [0.0])
+    assert np.allclose(reference.scale, [1.0])
+
+
+def test_source_knn_rejects_invalid_dataclass_config_values() -> None:
+    with pytest.raises(ValueError, match="weight mode"):
+        fit_source_knn_reference(
+            source_features=[[0.0], [1.0]],
+            source_labels=[0, 1],
+            config=SourceKNNConfig(weights="bad"),
+        )
+
+    with pytest.raises(ValueError, match="standardize"):
+        fit_source_knn_reference(
+            source_features=[[0.0], [1.0]],
+            source_labels=[0, 1],
+            config=SourceKNNConfig(standardize="sometimes"),
+        )
+
+
 @pytest.mark.parametrize("bad_k", [True, False, np.bool_(True)])
 def test_source_knn_rejects_boolean_k(bad_k) -> None:
     with pytest.raises(ValueError, match="k"):
