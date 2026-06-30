@@ -115,6 +115,16 @@ def test_subspace_aligned_classifier_preserves_tuple_labels() -> None:
     assert set(result.predictions.tolist()) <= {("left", 1), ("right", 2)}
 
 
+def test_subspace_aligned_classifier_preserves_unhashable_list_labels() -> None:
+    source, target, _labels = _toy_domains()
+    labels = [["left", 1] for _ in range(8)] + [["right", 2] for _ in range(8)]
+
+    result = fit_subspace_aligned_classifier(source_features=source, source_labels=labels, target_features=target, n_components=2)
+
+    assert result.classes.tolist() == [["left", 1], ["right", 2]]
+    assert all(prediction in (["left", 1], ["right", 2]) for prediction in result.predictions.tolist())
+
+
 def test_subspace_alignment_rejects_mismatched_feature_width() -> None:
     source, target, _labels = _toy_domains()
 
