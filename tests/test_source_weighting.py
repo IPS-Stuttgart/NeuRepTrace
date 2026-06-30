@@ -175,3 +175,32 @@ def test_sample_weight_helpers_reject_array_like_weights():
 
     with pytest.raises(ValueError, match="source_group_weight"):
         selected_source_groups({"s1": np.asarray([1.0])})
+
+
+@pytest.mark.parametrize(
+    "bad_target_features",
+    [
+        np.asarray([[1.0, np.nan], [1.0, 0.0]]),
+        np.asarray([1.0, np.inf]),
+    ],
+)
+def test_target_similarity_rejects_nonfinite_target_features(bad_target_features):
+    source_features = {"s1": np.asarray([[1.0, 0.0], [0.9, 0.1]])}
+
+    with pytest.raises(ValueError, match="finite"):
+        target_similarity_scores(source_features, bad_target_features)
+
+
+@pytest.mark.parametrize(
+    "bad_source_features",
+    [
+        np.asarray([[1.0, np.nan], [1.0, 0.0]]),
+        np.asarray([np.inf, 1.0]),
+    ],
+)
+def test_target_similarity_rejects_nonfinite_source_features(bad_source_features):
+    source_features = {"bad": bad_source_features}
+    target_features = np.asarray([[1.0, 0.0], [1.1, -0.1]])
+
+    with pytest.raises(ValueError, match="finite"):
+        target_similarity_scores(source_features, target_features)
