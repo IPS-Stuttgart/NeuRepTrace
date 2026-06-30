@@ -179,8 +179,12 @@ def _coerce_config(config: SourceKNNConfig | Mapping[str, Any]) -> SourceKNNConf
     if isinstance(config, SourceKNNConfig):
         if isinstance(config.k, (bool, np.bool_)):
             raise ValueError(_K_ERROR)
-        _positive_float(config.epsilon, name="epsilon")
-        return config
+        return SourceKNNConfig(
+            k=config.k,
+            weights=normalize_weight_mode(config.weights),
+            standardize=_bool_value(config.standardize, name="standardize"),
+            epsilon=_positive_float(config.epsilon, name="epsilon"),
+        )
     return source_knn_config(**dict(config))
 
 
