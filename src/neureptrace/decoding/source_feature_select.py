@@ -45,7 +45,8 @@ def select_source_variance_features(
     if source.shape[1] != test.shape[1]:
         raise ValueError("source_features and test_features must have the same feature width.")
     scores = np.var(source - np.mean(source, axis=0), axis=0, ddof=1 if source.shape[0] > 1 else 0)
-    selected = source_variance_feature_indices(scores=scores, k=k, min_variance=min_variance)
+    parsed_k = None if k is None else _positive_int(k, name="k")
+    selected = source_variance_feature_indices(scores=scores, k=parsed_k, min_variance=min_variance)
     metadata = {
         "source_feature_select": True,
         "source_feature_select_protocol": SOURCE_FEATURE_SELECT_PROTOCOL,
@@ -59,7 +60,7 @@ def select_source_variance_features(
         "source_feature_select_n_test_rows": int(test.shape[0]),
         "source_feature_select_feature_dim": int(source.shape[1]),
         "source_feature_select_n_selected_features": int(selected.shape[0]),
-        "source_feature_select_k": "" if k is None else int(k),
+        "source_feature_select_k": "" if parsed_k is None else parsed_k,
         "source_feature_select_min_variance": "" if min_variance is None else float(min_variance),
     }
     return SourceFeatureSelectResult(

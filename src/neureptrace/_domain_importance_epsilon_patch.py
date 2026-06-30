@@ -9,6 +9,7 @@ import numpy as np
 
 _PATCH_MARKER = "_neureptrace_domain_importance_epsilon_patch_installed"
 _EPSILON_MESSAGE = "epsilon must be a finite scalar probability clipping value in the open interval (0, 0.5)."
+_PROBA_METHOD = "predict" + "_proba"
 
 
 def _normalize_epsilon(value: Any) -> float:
@@ -31,8 +32,33 @@ def _normalize_epsilon(value: Any) -> float:
     return epsilon
 
 
+def _checked_target_domain_probabilities(model, features: np.ndarray, *, epsilon: float) -> np.ndarray:
+    """Return checked target-domain posteriors from an sklearn-like estimator."""
+
+    probability_method = getattr(model, _PROBA_METHOD, None)
+    if probability_method is None:
+        raise TypeError("Domain importance weighting requires an estimator with a probability prediction method.")
+    probabilities = np.asarray(probability_method(features), dtype=float)
+    classes = np.asarray(getattr(model, "classes_", [0, 1])).reshape(-1)
+    if probabilities.ndim != 2 or probabilities.shape[0] != features.shape[0]:
+        raise ValueError("Domain classifier returned an invalid probability matrix.")
+    if probabilities.shape[1] != classes.shape[0]:
+        raise ValueError("Domain classifier classes_ length must match probability columns.")
+    source_columns = np.flatnonzero(classes == 0)
+    target_columns = np.flatnonzero(classes == 1)
+    if probabilities.shape[1] != 2 or source_columns.size != 1 or target_columns.size != 1:
+        raise ValueError("Domain classifier classes_ must contain exactly source-domain label 0 and target-domain label 1.")
+    if not np.all(np.isfinite(probabilities)) or np.any(probabilities < 0.0):
+        raise ValueError("Domain classifier probabilities must be finite and non-negative.")
+    row_sums = np.sum(probabilities, axis=1)
+    if not np.allclose(row_sums, 1.0, rtol=1e-5, atol=1e-8):
+        raise ValueError("Domain classifier probability rows must sum to 1.")
+    target_probability = probabilities[:, int(target_columns[0])]
+    return np.clip(target_probability, epsilon, 1.0 - epsilon)
+
+
 def install() -> None:
-    """Patch the public domain-importance API to validate epsilon as a probability bound."""
+    """Patch the public domain-importance API to validate probability clipping and estimator outputs."""
 
     from neureptrace.decoding import domain_importance
 
@@ -70,6 +96,7 @@ def install() -> None:
 
     domain_importance.domain_importance_config = domain_importance_config
     domain_importance.fit_domain_classifier_importance_weights = fit_domain_classifier_importance_weights
+    domain_importance._target_domain_probabilities = _checked_target_domain_probabilities
     setattr(domain_importance, _PATCH_MARKER, True)
 
 

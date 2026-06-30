@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Mapping, Sequence
 from functools import wraps
 from typing import Any
@@ -142,6 +143,9 @@ def install() -> None:
 
         setattr(sample_feature_subspaces, _RANDOM_SUBSPACE_RANDOM_STATE_PATCH_MARKER, True)
         random_subspace.sample_feature_subspaces = sample_feature_subspaces
+
+    pipeline_weight_patch = importlib.import_module("neureptrace._random_subspace_pipeline_weight_patch")
+    pipeline_weight_patch.install()
 
 
 __all__ = ["install"]
