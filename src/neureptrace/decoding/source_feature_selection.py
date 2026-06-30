@@ -56,7 +56,7 @@ def fit_source_feature_selection(
     test = _feature_matrix(test_features, name="test_features")
     if source.shape[1] != test.shape[1]:
         raise ValueError(f"source_features and test_features must have the same feature width: {source.shape[1]} != {test.shape[1]}.")
-    labels = np.asarray(source_labels, dtype=object).reshape(-1)
+    labels = _label_vector(source_labels)
     if labels.shape[0] != source.shape[0]:
         raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {source.shape[0]}.")
     scores = source_feature_scores(source, labels, method=cfg.method, epsilon=cfg.epsilon)
@@ -81,21 +81,21 @@ def source_feature_scores(
     """Score features using source rows only."""
 
     source = _feature_matrix(source_features, name="source_features")
-    labels = np.asarray(source_labels, dtype=object).reshape(-1)
+    labels = _label_vector(source_labels)
     if labels.shape[0] != source.shape[0]:
         raise ValueError("source_labels must contain one value per source row.")
     resolved = normalize_score_method(method)
     if resolved == "variance":
         return np.var(source, axis=0, ddof=1 if source.shape[0] > 1 else 0)
     epsilon_value = _positive_float(epsilon, name="epsilon")
-    classes = tuple(dict.fromkeys(labels.tolist()))
+    classes = _unique_labels(labels)
     if len(classes) < 2:
         raise ValueError("ANOVA feature scoring requires at least two classes.")
     overall = np.mean(source, axis=0)
     between = np.zeros(source.shape[1], dtype=float)
     within = np.zeros(source.shape[1], dtype=float)
-    for label in classes:
-        mask = labels == label
+    for class_label in classes:
+        mask = np.asarray([_values_equal(label, class_label) for label in labels.tolist()], dtype=bool)
         rows = source[mask]
         if rows.shape[0] == 0:
             continue
@@ -205,6 +205,47 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain finite values.")
     return matrix
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    """Return one source label object per sample, preserving composite row labels."""
+
+    array = np.asarray(values, dtype=object)
+    if array.ndim == 0:
+        items = [array.item()]
+    elif array.ndim == 1:
+        items = array.reshape(-1).tolist()
+    else:
+        rows = array.reshape(array.shape[0], -1)
+        if rows.shape[1] == 1:
+            items = rows[:, 0].tolist()
+        else:
+            items = [tuple(row.tolist()) for row in rows]
+    vector = np.empty(len(items), dtype=object)
+    for index, item in enumerate(items):
+        vector[index] = item
+    return vector
+
+
+def _unique_labels(labels: np.ndarray) -> tuple[Any, ...]:
+    unique: list[Any] = []
+    for label in labels.tolist():
+        if not any(_values_equal(label, seen) for seen in unique):
+            unique.append(label)
+    return tuple(unique)
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(equal, np.ndarray):
+        return bool(np.array_equal(left, right))
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
 
 
 def _is_missing_min_score(value: Any) -> bool:
