@@ -122,7 +122,10 @@ def predict_source_knn_probabilities(
 
     test = _feature_matrix(test_features, name="test_features")
     if test.shape[1] != reference.features.shape[1]:
-        raise ValueError(f"test_features width {test.shape[1]} does not match source width {reference.features.shape[1]}.")
+        raise ValueError(
+            "source_features and test_features must have the same feature width: "
+            f"{reference.features.shape[1]} != {test.shape[1]}."
+        )
     prepared = (test - reference.mean) / reference.scale
     squared = _squared_euclidean(prepared, reference.features)
     distances = np.sqrt(np.maximum(squared, 0.0))

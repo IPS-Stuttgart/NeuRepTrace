@@ -92,7 +92,11 @@ def test_aliases_and_validation() -> None:
 
 def test_source_knn_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
-        fit_source_knn_decoder(source_features=[[0.0, 1.0]], source_labels=[0], test_features=[[0.0]])
+        fit_source_knn_decoder(
+            source_features=[[0.0, 1.0], [1.0, 2.0]],
+            source_labels=[0, 1],
+            test_features=[[0.0]],
+        )
 
 
 def test_heldout_labels_are_not_part_of_public_api() -> None:
