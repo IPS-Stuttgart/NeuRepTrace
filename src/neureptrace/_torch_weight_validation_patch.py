@@ -47,7 +47,15 @@ def _integer_value(value: Any, *, name: str) -> int:
 
 
 def _positive_integer_value(value: Any, *, name: str) -> int:
-    integer = _integer_value(value, name=name)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be a positive integer.")
+    integer = int(number)
     if integer < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return integer
