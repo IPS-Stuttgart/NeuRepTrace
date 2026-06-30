@@ -1,1 +1,8 @@
-setattr(obj, "predict" + "_proba", fn)
+class _StaticDomainEstimator(BaseEstimator):
+    def __init__(self, probabilities, classes=(0, 1)):
+        self.probabilities = probabilities
+        self.classes = classes
+
+    def fit(self, X, y):
+        self.classes_ = np.asarray(self.classes)
+        return self
