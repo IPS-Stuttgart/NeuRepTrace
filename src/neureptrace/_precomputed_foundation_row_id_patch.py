@@ -86,8 +86,22 @@ def _requested_row_ids(values: Any, index: dict[Any, int]) -> tuple[Any, ...]:
     return _row_id_tuple(values, name="row_ids")
 
 
+def _positive_float(value: Any, *, name: str) -> float:
+    """Normalize scalar positive floats with a stable public ValueError."""
+
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return parsed
+
+
 def install() -> None:
-    """Patch precomputed foundation-feature row-id and probability normalization."""
+    """Patch precomputed foundation-feature row-id, probability, and scalar validation."""
 
     module = importlib.import_module("neureptrace.decoding.precomputed_foundation")
     if getattr(module, _PATCH_MARKER, False):
@@ -223,6 +237,7 @@ def install() -> None:
         )
 
     module._row_id_tuple = _row_id_tuple
+    module._positive_float = _positive_float
     module.PrecomputedFoundationFeatureTable.__post_init__ = __post_init__
     module._load_npz_features = _load_npz_features
     module.make_precomputed_foundation_feature_table = make_precomputed_foundation_feature_table
