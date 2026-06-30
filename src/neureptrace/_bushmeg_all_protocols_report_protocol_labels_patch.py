@@ -1,4 +1,4 @@
-"""Preserve fractional protocol labels in BUSH-MEG all-protocol reports."""
+"""Preserve fractional protocol labels and tolerate legacy BUSH-MEG report schemas."""
 
 from __future__ import annotations
 
@@ -28,6 +28,37 @@ def _format_protocol_label(value: Any) -> str:
         if np.isfinite(numeric_value):
             return str(int(numeric_value)) if numeric_value.is_integer() else f"{numeric_value:g}"
     return str(value)
+
+
+def _summary_with_method_family(summary: pd.DataFrame, method_metadata: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Return ``summary`` with a method-family column required by report groupers."""
+
+    if summary.empty:
+        return summary.copy()
+
+    normalized = summary.copy()
+    if "method_family" not in normalized.columns:
+        normalized["method_family"] = pd.NA
+    else:
+        normalized["method_family"] = normalized["method_family"].replace("", pd.NA)
+
+    if (
+        method_metadata is not None
+        and not method_metadata.empty
+        and "method" in normalized.columns
+        and {"method", "method_family"}.issubset(method_metadata.columns)
+    ):
+        family_by_method = (
+            method_metadata.dropna(subset=["method"])
+            .assign(_method_key=lambda frame: frame["method"].astype(str))
+            .drop_duplicates("_method_key")
+            .set_index("_method_key")["method_family"]
+        )
+        mapped_family = normalized["method"].astype(str).map(family_by_method)
+        normalized["method_family"] = normalized["method_family"].where(normalized["method_family"].notna(), mapped_family)
+
+    normalized["method_family"] = normalized["method_family"].fillna("unknown")
+    return normalized
 
 
 def _build_protocol_summary(summary: pd.DataFrame, leaderboard: pd.DataFrame) -> pd.DataFrame:
@@ -166,6 +197,23 @@ def _write_markdown_report(
 def install() -> None:
     if getattr(_report, "_fractional_protocol_report_patch_installed", False):
         return
+
+    original_build_leaderboard = _report.build_leaderboard
+    original_build_subject_summary = _report.build_subject_summary
+    original_build_protocol3_kshot_leaderboard = _report.build_protocol3_kshot_leaderboard
+
+    def build_leaderboard(summary: pd.DataFrame, method_metadata: pd.DataFrame) -> pd.DataFrame:
+        return original_build_leaderboard(_summary_with_method_family(summary, method_metadata), method_metadata)
+
+    def build_subject_summary(summary: pd.DataFrame) -> pd.DataFrame:
+        return original_build_subject_summary(_summary_with_method_family(summary))
+
+    def build_protocol3_kshot_leaderboard(summary: pd.DataFrame) -> pd.DataFrame:
+        return original_build_protocol3_kshot_leaderboard(_summary_with_method_family(summary))
+
+    _report.build_leaderboard = build_leaderboard
+    _report.build_subject_summary = build_subject_summary
+    _report.build_protocol3_kshot_leaderboard = build_protocol3_kshot_leaderboard
     _report.build_protocol_summary = _build_protocol_summary
     _report._plot_balanced_accuracy_by_protocol = _plot_balanced_accuracy_by_protocol
     _report._write_markdown_report = _write_markdown_report
