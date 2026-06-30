@@ -34,3 +34,22 @@ def test_from_decoded_fold_rejects_invalid_probability_values(probabilities: np.
             probabilities=probabilities,
             **_BASE_DECODED_FOLD_ARGS,
         )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "test_labels",
+        "predictions",
+        "test_indices",
+    ],
+)
+def test_from_decoded_fold_rejects_boolean_label_and_index_values(field_name: str) -> None:
+    kwargs = dict(_BASE_DECODED_FOLD_ARGS)
+    kwargs[field_name] = np.array([False, True])
+
+    with pytest.raises(ValueError, match=fr"from_decoded_fold {field_name} .* not boolean"):
+        ProbabilityObservationTable.from_decoded_fold(
+            probabilities=np.array([[0.8, 0.2], [0.2, 0.8]]),
+            **kwargs,
+        )
