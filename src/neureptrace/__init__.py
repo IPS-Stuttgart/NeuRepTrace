@@ -8,174 +8,328 @@ import importlib
 __all__ = ["__version__"]
 __version__ = "0.1.1"
 
-_PATCH_MODULE_NAMES = """
-_adaptive_normalization_bool_config_patch
-_adversarial_composite_labels_patch
-_alignment_window_config_patch
-_dataset_config_participant_patch
-_dataset_config_files_string_patch
-_dataset_name_config_patch
-_dataset_spec_csv_group_column_patch
-_dataset_spec_numeric_validation_patch
-_dataset_spec_role_reference_patch
-_metadata_column_validation_patch
-_confusion_metadata_lookup_patch
-_confusion_permutation_seed_patch
-_correlation_prototype_sample_weight_patch
-_classifier_tuple_labels_patch
-_config_workflow_float_bool_patch
-_decode_from_config_section_validation_patch
-_conditional_coral_bool_config_patch
-_event_detection_extensions
-_onset_boolean_summary_patch
-_stimulus_detection_boolean_summary_patch
-_fieldtrip_sampleinfo_validation_patch
-_fieldtrip_cli_path_patch
-_few_shot_array_integer_patch
-_few_shot_split_validation_patch
-_few_shot_tuple_labels_patch
-_few_shot_target_index_patch
-_generative_augmentation_random_state_patch
-_generative_augmentation_composite_labels_patch
-_kernel_mean_matching_bool_validation_patch
-_joint_distribution_adaptation_config_bool_patch
-_label_shift_source_prior_patch
-_label_shift_source_label_metadata_patch
-_label_proportion_block_ids_patch
-_label_proportion_tuple_prediction_patch
-_lora_few_shot_tuple_subject_patch
-_lora_few_shot_numeric_config_patch
-_loso_diagnostics_finite_time_selection_patch
-_loso_source_cv_group_support_patch
-_decoding_regularization_patch
-_decoder_random_state_patch
-_decoding_adaptive_calibration
-_decoding_c_grid_patch
-_decoding_classifier_param_patch
-_decoding_grouped_cv_patch
-_decoding_option_type_validation_patch
-_decoding_probability_patch
-_domain_importance_epsilon_patch
-_observation_schema_bool_numeric_patch
-_observation_schema_probability_patch
-_observation_schema_label_patch
-_observation_schema_string_columns_patch
-_observation_ensemble_partial_class_columns_patch
-_observation_ensemble_source_debias_bool_patch
-_observation_ensemble_string_groups_patch
-_observation_ensemble_ungrouped_metrics_patch
-_observation_ensemble_missing_label_patch
-_probability_stacking_group_summary_patch
-_probability_stacking_bool_validation_patch
-_pls_da_composite_labels_patch
-_precomputed_foundation_row_id_patch
-_openneuro_alignment_compare_missing_context_patch
-_openneuro_alignment_compare_structured_values_patch
-_openneuro_decode_diagnostics_scalar_bool_patch
-_openneuro_parse_runs_patch
-_openneuro_pre_stimulus_finite_patch
-_openneuro_real_shuffle_bool_patch
-_openneuro_real_shuffle_time_selection_patch
-_bushmeg_category2_autoencoder_config_patch
-_bushmeg_source_loso_ensemble_numeric_patch
-_category2_autoencoder_all_protocols_patch
-_category2_autoencoder_max_folds_patch
-_bushmeg_audit_index_set_patch
-_bushmeg_all_protocols_timeout_patch
-_bushmeg_smoke_enabled_bool_patch
-_bushmeg_all_protocols_prediction_metric_patch
-_bushmeg_protocol3_index_validation_patch
-_bushmeg_protocol_selection_patch
-_bushmeg_all_protocols_audit_list_values_patch
-_bushmeg_all_protocols_report_bool_patch
-_bushmeg_all_protocols_report_protocol_labels_patch
-_bushmeg_all_protocols_topk_tie_patch
-_bushmeg_all_protocols_subject_loader_patch
-_bushmeg_cue_temporal_bins_patch
-_reconstruction_encoder_config_patch
-_reconstruction_tuple_labels_patch
-_bushmeg_source_loso_prototype_patch
-_mcca_component_count_patch
-_mcca_repetition_count_patch
-_mcca_subject_pca_components_patch
-_mekt_vector_validation_patch
-_mmd_source_weighting_gamma_patch
-_mixstyle_boolean_config_patch
-_mne_alignment_calibration_anchor_patch
-_mne_pseudo_alignment_fallback_validity_patch
-_mne_time_decode_ensemble_param_validation_patch
-_mne_time_decode_float_sequence_validation_patch
-_nll_eps_validation_patch
-_calibration_weight_fraction_patch
-_sample_weight_validation_patch
-_sampling_composite_label_array_patch
-_semi_supervised_lora_tuple_labels_patch
-_report_finite_metric_selection_patch
-_results_metric_boolean_patch
-_results_observation_condition_patch
-_response_window_bool_numeric_patch
-_response_window_time_validation_patch
-_paired_stats_tie_patch
-_sign_flip_scalar_controls_patch
-_riemannian_vector_validation_patch
-_source_alignment_anchor_patch
-_source_alignment_pseudo_calibration_patch
-_source_alignment_pseudo_repetition_patch
-_source_alignment_optimal_transport_patch
-_source_alignment_contrastive_patch
-_source_alignment_oracle_patch
-_source_alignment_target_calibration_offsets_patch
-_source_alignment_times_validation_patch
-_source_alignment_target_seed_patch
-_source_alignment_cli_choices_patch
-_source_bagging_fraction_bounds_patch
-_source_centroid_numeric_config_patch
-_source_domain_generalization_composite_patch
-_source_ensemble_tuple_domains_patch
-_source_free_standardize_target_patch
-_source_free_probability_rows_patch
-_source_free_soft_prototypes_patch
-_source_free_tuple_labels_patch
-_source_jitter_boolean_config_patch
-_source_label_vector_patch
-_source_mixup_boolean_config_patch
-_source_mixup_random_state_patch
-_source_mixstyle_tuple_labels_patch
-_source_mixstyle_tuple_vectors_patch
-_source_quantile_bin_dtype_patch
-_random_state_config_patch
-_reaction_time_trial_index_base_patch
-_reaction_time_trial_value_type_patch
-_source_selection_composite_ids_patch
-_source_selection_class_balance_patch
-_source_selection_optional_bounds_patch
-_source_selection_temperature_patch
-_source_selection_vector_shape_patch
-_source_weighting_enabled_alias_patch
-_source_weighting_tuple_row_groups_patch
-_subspace_bool_config_patch
-_subspace_adaptation_config_bool_patch
-_temporal_generalization_string_groups_patch
-_temporal_smoothing_singleton_sequence_patch
-_temporal_smoothing_topk_tie_patch
-_torch_weight_validation_patch
-_transfer_array_label_null_patch
-_transfer_component_analysis_validation_patch
-_transfer_components_validation_patch
-_transfer_config_class_count_patch
-_transfer_cross_validation_label_patch
-_transfer_null_fallback_patch
-_transfer_null_label_conflict_patch
-_tuple_label_calibration_split_patch
-_unlabeled_anchor_tuple_patch
-_vrex_numeric_config_patch
-_windowed_composite_labels_patch
-""".split()
+from . import (  # noqa: E402
+    _adaptive_normalization_bool_config_patch,
+    _adversarial_composite_labels_patch,
+    _alignment_window_config_patch,
+    _bushmeg_audit_index_set_patch,
+    _bushmeg_all_protocols_audit_list_values_patch,
+    _bushmeg_all_protocols_prediction_metric_patch,
+    _bushmeg_all_protocols_report_bool_patch,
+    _bushmeg_all_protocols_report_protocol_labels_patch,
+    _bushmeg_all_protocols_topk_tie_patch,
+    _bushmeg_all_protocols_subject_loader_patch,
+    _bushmeg_all_protocols_timeout_patch,
+    _bushmeg_smoke_enabled_bool_patch,
+    _bushmeg_category2_autoencoder_config_patch,
+    _bushmeg_cue_temporal_bins_patch,
+    _bushmeg_protocol3_index_validation_patch,
+    _bushmeg_protocol_selection_patch,
+    _bushmeg_source_loso_ensemble_numeric_patch,
+    _bushmeg_source_loso_prototype_patch,
+    _calibration_weight_fraction_patch,
+    _category2_autoencoder_all_protocols_patch,
+    _category2_autoencoder_max_folds_patch,
+    _classifier_tuple_labels_patch,
+    _config_workflow_float_bool_patch,
+    _decode_from_config_section_validation_patch,
+    _conditional_coral_bool_config_patch,
+    _confusion_metadata_lookup_patch,
+    _confusion_permutation_seed_patch,
+    _correlation_prototype_sample_weight_patch,
+    _dataset_config_files_string_patch,
+    _dataset_config_participant_patch,
+    _dataset_name_config_patch,
+    _dataset_spec_csv_group_column_patch,
+    _dataset_spec_numeric_validation_patch,
+    _dataset_spec_role_reference_patch,
+    _decoding_adaptive_calibration,
+    _decoding_c_grid_patch,
+    _decoding_classifier_param_patch,
+    _decoding_grouped_cv_patch,
+    _decoding_option_type_validation_patch,
+    _decoding_probability_patch,
+    _decoding_regularization_patch,
+    _decoder_random_state_patch,
+    _domain_importance_epsilon_patch,
+    _event_detection_extensions,
+    _fieldtrip_cli_path_patch,
+    _fieldtrip_sampleinfo_validation_patch,
+    _few_shot_array_integer_patch,
+    _few_shot_split_validation_patch,
+    _few_shot_target_index_patch,
+    _few_shot_tuple_labels_patch,
+    _generative_augmentation_composite_labels_patch,
+    _generative_augmentation_random_state_patch,
+    _joint_distribution_adaptation_config_bool_patch,
+    _kernel_mean_matching_bool_validation_patch,
+    _label_shift_source_prior_patch,
+    _label_shift_source_label_metadata_patch,
+    _label_proportion_block_ids_patch,
+    _label_proportion_tuple_prediction_patch,
+    _lora_few_shot_numeric_config_patch,
+    _lora_few_shot_tuple_subject_patch,
+    _loso_diagnostics_finite_time_selection_patch,
+    _loso_source_cv_group_support_patch,
+    _mcca_component_count_patch,
+    _mcca_repetition_count_patch,
+    _mcca_subject_pca_components_patch,
+    _mekt_vector_validation_patch,
+    _metadata_column_validation_patch,
+    _mixstyle_boolean_config_patch,
+    _mmd_source_weighting_gamma_patch,
+    _mne_alignment_calibration_anchor_patch,
+    _mne_pseudo_alignment_fallback_validity_patch,
+    _mne_time_decode_ensemble_param_validation_patch,
+    _mne_time_decode_float_sequence_validation_patch,
+    _nll_eps_validation_patch,
+    _observation_schema_bool_numeric_patch,
+    _observation_schema_label_patch,
+    _observation_schema_probability_patch,
+    _observation_schema_string_columns_patch,
+    _observation_ensemble_missing_label_patch,
+    _observation_ensemble_partial_class_columns_patch,
+    _observation_ensemble_source_debias_bool_patch,
+    _observation_ensemble_string_groups_patch,
+    _observation_ensemble_ungrouped_metrics_patch,
+    _onset_boolean_summary_patch,
+    _openneuro_alignment_compare_missing_context_patch,
+    _openneuro_alignment_compare_structured_values_patch,
+    _openneuro_decode_diagnostics_scalar_bool_patch,
+    _openneuro_parse_runs_patch,
+    _openneuro_pre_stimulus_finite_patch,
+    _openneuro_real_shuffle_bool_patch,
+    _openneuro_real_shuffle_time_selection_patch,
+    _paired_stats_tie_patch,
+    _pls_da_composite_labels_patch,
+    _precomputed_foundation_row_id_patch,
+    _probability_stacking_group_summary_patch,
+    _probability_stacking_bool_validation_patch,
+    _random_state_config_patch,
+    _reaction_time_trial_index_base_patch,
+    _reaction_time_trial_value_type_patch,
+    _reconstruction_encoder_config_patch,
+    _reconstruction_tuple_labels_patch,
+    _report_finite_metric_selection_patch,
+    _results_metric_boolean_patch,
+    _results_observation_condition_patch,
+    _response_window_bool_numeric_patch,
+    _response_window_time_validation_patch,
+    _riemannian_vector_validation_patch,
+    _sample_weight_validation_patch,
+    _sampling_composite_label_array_patch,
+    _semi_supervised_lora_tuple_labels_patch,
+    _sign_flip_scalar_controls_patch,
+    _source_alignment_anchor_patch,
+    _source_alignment_cli_choices_patch,
+    _source_alignment_contrastive_patch,
+    _source_alignment_optimal_transport_patch,
+    _source_alignment_oracle_patch,
+    _source_alignment_pseudo_calibration_patch,
+    _source_alignment_pseudo_repetition_patch,
+    _source_alignment_target_calibration_offsets_patch,
+    _source_alignment_target_seed_patch,
+    _source_alignment_times_validation_patch,
+    _source_bagging_fraction_bounds_patch,
+    _source_centroid_numeric_config_patch,
+    _source_domain_generalization_composite_patch,
+    _source_ensemble_tuple_domains_patch,
+    _source_free_standardize_target_patch,
+    _source_free_probability_rows_patch,
+    _source_free_soft_prototypes_patch,
+    _source_free_tuple_labels_patch,
+    _source_jitter_boolean_config_patch,
+    _source_label_vector_patch,
+    _source_mixup_boolean_config_patch,
+    _source_mixup_random_state_patch,
+    _source_mixstyle_tuple_labels_patch,
+    _source_mixstyle_tuple_vectors_patch,
+    _source_quantile_bin_dtype_patch,
+    _source_selection_class_balance_patch,
+    _source_selection_composite_ids_patch,
+    _source_selection_optional_bounds_patch,
+    _source_selection_temperature_patch,
+    _source_selection_vector_shape_patch,
+    _source_weighting_enabled_alias_patch,
+    _source_weighting_tuple_row_groups_patch,
+    _stimulus_detection_boolean_summary_patch,
+    _subspace_bool_config_patch,
+    _subspace_adaptation_config_bool_patch,
+    _temporal_generalization_string_groups_patch,
+    _temporal_smoothing_singleton_sequence_patch,
+    _temporal_smoothing_topk_tie_patch,
+    _torch_weight_validation_patch,
+    _transfer_array_label_null_patch,
+    _transfer_component_analysis_validation_patch,
+    _transfer_components_validation_patch,
+    _transfer_config_class_count_patch,
+    _transfer_cross_validation_label_patch,
+    _transfer_null_fallback_patch,
+    _transfer_null_label_conflict_patch,
+    _tuple_label_calibration_split_patch,
+    _unlabeled_anchor_tuple_patch,
+    _vrex_numeric_config_patch,
+    _windowed_composite_labels_patch,
+)
 
-_PATCH_MODULES = {
-    name: importlib.import_module(f"{__name__}.{name}") for name in _PATCH_MODULE_NAMES
-}
-globals().update(_PATCH_MODULES)
-
-for _patch_name in _PATCH_MODULE_NAMES:
-    _PATCH_MODULES[_patch_name].install()
+_adaptive_normalization_bool_config_patch.install()
+_adversarial_composite_labels_patch.install()
+_alignment_window_config_patch.install()
+_dataset_config_participant_patch.install()
+_dataset_config_files_string_patch.install()
+_dataset_name_config_patch.install()
+_dataset_spec_csv_group_column_patch.install()
+_dataset_spec_numeric_validation_patch.install()
+_dataset_spec_role_reference_patch.install()
+_metadata_column_validation_patch.install()
+_confusion_metadata_lookup_patch.install()
+_confusion_permutation_seed_patch.install()
+_correlation_prototype_sample_weight_patch.install()
+_classifier_tuple_labels_patch.install()
+_config_workflow_float_bool_patch.install()
+_decode_from_config_section_validation_patch.install()
+_conditional_coral_bool_config_patch.install()
+_event_detection_extensions.install()
+_onset_boolean_summary_patch.install()
+_stimulus_detection_boolean_summary_patch.install()
+_fieldtrip_sampleinfo_validation_patch.install()
+_fieldtrip_cli_path_patch.install()
+_few_shot_array_integer_patch.install()
+_few_shot_split_validation_patch.install()
+_few_shot_tuple_labels_patch.install()
+_few_shot_target_index_patch.install()
+_generative_augmentation_random_state_patch.install()
+_generative_augmentation_composite_labels_patch.install()
+_kernel_mean_matching_bool_validation_patch.install()
+_joint_distribution_adaptation_config_bool_patch.install()
+_label_shift_source_prior_patch.install()
+_label_shift_source_label_metadata_patch.install()
+_label_proportion_block_ids_patch.install()
+_label_proportion_tuple_prediction_patch.install()
+_lora_few_shot_tuple_subject_patch.install()
+_lora_few_shot_numeric_config_patch.install()
+_loso_diagnostics_finite_time_selection_patch.install()
+_loso_source_cv_group_support_patch.install()
+_decoding_regularization_patch.install()
+_decoder_random_state_patch.install()
+_decoding_adaptive_calibration.install()
+_decoding_c_grid_patch.install()
+_decoding_classifier_param_patch.install()
+_decoding_grouped_cv_patch.install()
+_decoding_option_type_validation_patch.install()
+_decoding_probability_patch.install()
+_domain_importance_epsilon_patch.install()
+_observation_schema_bool_numeric_patch.install()
+_observation_schema_probability_patch.install()
+_observation_schema_label_patch.install()
+_observation_schema_string_columns_patch.install()
+_observation_ensemble_partial_class_columns_patch.install()
+_observation_ensemble_source_debias_bool_patch.install()
+_observation_ensemble_string_groups_patch.install()
+_observation_ensemble_ungrouped_metrics_patch.install()
+_observation_ensemble_missing_label_patch.install()
+_probability_stacking_group_summary_patch.install()
+_probability_stacking_bool_validation_patch.install()
+_pls_da_composite_labels_patch.install()
+_precomputed_foundation_row_id_patch.install()
+_openneuro_alignment_compare_missing_context_patch.install()
+_openneuro_alignment_compare_structured_values_patch.install()
+_openneuro_decode_diagnostics_scalar_bool_patch.install()
+_openneuro_parse_runs_patch.install()
+_openneuro_pre_stimulus_finite_patch.install()
+_openneuro_real_shuffle_bool_patch.install()
+_openneuro_real_shuffle_time_selection_patch.install()
+_bushmeg_category2_autoencoder_config_patch.install()
+_bushmeg_source_loso_ensemble_numeric_patch.install()
+_category2_autoencoder_all_protocols_patch.install()
+_category2_autoencoder_max_folds_patch.install()
+_bushmeg_audit_index_set_patch.install()
+_bushmeg_all_protocols_timeout_patch.install()
+_bushmeg_smoke_enabled_bool_patch.install()
+_bushmeg_all_protocols_prediction_metric_patch.install()
+_bushmeg_protocol3_index_validation_patch.install()
+_bushmeg_protocol_selection_patch.install()
+_bushmeg_all_protocols_audit_list_values_patch.install()
+_bushmeg_all_protocols_report_bool_patch.install()
+_bushmeg_all_protocols_report_protocol_labels_patch.install()
+_bushmeg_all_protocols_topk_tie_patch.install()
+_bushmeg_all_protocols_subject_loader_patch.install()
+_bushmeg_cue_temporal_bins_patch.install()
+_reconstruction_encoder_config_patch.install()
+_reconstruction_tuple_labels_patch.install()
+_bushmeg_source_loso_prototype_patch.install()
+_mcca_component_count_patch.install()
+_mcca_repetition_count_patch.install()
+_mcca_subject_pca_components_patch.install()
+_mekt_vector_validation_patch.install()
+_mmd_source_weighting_gamma_patch.install()
+_mixstyle_boolean_config_patch.install()
+_mne_alignment_calibration_anchor_patch.install()
+_mne_pseudo_alignment_fallback_validity_patch.install()
+_mne_time_decode_ensemble_param_validation_patch.install()
+_mne_time_decode_float_sequence_validation_patch.install()
+_nll_eps_validation_patch.install()
+_calibration_weight_fraction_patch.install()
+_sample_weight_validation_patch.install()
+_sampling_composite_label_array_patch.install()
+_semi_supervised_lora_tuple_labels_patch.install()
+_report_finite_metric_selection_patch.install()
+_results_metric_boolean_patch.install()
+_results_observation_condition_patch.install()
+_response_window_bool_numeric_patch.install()
+_response_window_time_validation_patch.install()
+_paired_stats_tie_patch.install()
+_sign_flip_scalar_controls_patch.install()
+_riemannian_vector_validation_patch.install()
+_source_alignment_anchor_patch.install()
+_source_alignment_pseudo_calibration_patch.install()
+_source_alignment_pseudo_repetition_patch.install()
+_source_alignment_optimal_transport_patch.install()
+_source_alignment_contrastive_patch.install()
+_source_alignment_oracle_patch.install()
+_source_alignment_target_calibration_offsets_patch.install()
+_source_alignment_times_validation_patch.install()
+_source_alignment_target_seed_patch.install()
+_source_alignment_cli_choices_patch.install()
+_source_bagging_fraction_bounds_patch.install()
+_source_centroid_numeric_config_patch.install()
+_source_domain_generalization_composite_patch.install()
+_source_ensemble_tuple_domains_patch.install()
+_source_free_standardize_target_patch.install()
+_source_free_probability_rows_patch.install()
+_source_free_soft_prototypes_patch.install()
+_source_free_tuple_labels_patch.install()
+_source_jitter_boolean_config_patch.install()
+_source_label_vector_patch.install()
+_source_mixup_boolean_config_patch.install()
+_source_mixup_random_state_patch.install()
+_source_mixstyle_tuple_labels_patch.install()
+_source_mixstyle_tuple_vectors_patch.install()
+_source_quantile_bin_dtype_patch.install()
+_random_state_config_patch.install()
+_reaction_time_trial_index_base_patch.install()
+_reaction_time_trial_value_type_patch.install()
+_source_selection_composite_ids_patch.install()
+_source_selection_class_balance_patch.install()
+_source_selection_optional_bounds_patch.install()
+_source_selection_temperature_patch.install()
+_source_selection_vector_shape_patch.install()
+_source_weighting_enabled_alias_patch.install()
+_source_weighting_tuple_row_groups_patch.install()
+_subspace_bool_config_patch.install()
+_subspace_adaptation_config_bool_patch.install()
+_temporal_generalization_string_groups_patch.install()
+_temporal_smoothing_singleton_sequence_patch.install()
+_temporal_smoothing_topk_tie_patch.install()
+_torch_weight_validation_patch.install()
+_transfer_array_label_null_patch.install()
+_transfer_component_analysis_validation_patch.install()
+_transfer_components_validation_patch.install()
+_transfer_config_class_count_patch.install()
+_transfer_cross_validation_label_patch.install()
+_transfer_null_fallback_patch.install()
+_transfer_null_label_conflict_patch.install()
+_tuple_label_calibration_split_patch.install()
+_unlabeled_anchor_tuple_patch.install()
+_vrex_numeric_config_patch.install()
+_windowed_composite_labels_patch.install()
