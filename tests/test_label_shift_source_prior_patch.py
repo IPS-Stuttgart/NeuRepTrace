@@ -23,3 +23,23 @@ def test_label_shift_source_prior_mapping_preserves_explicit_class_order() -> No
     )
 
     assert np.allclose(result.source_prior, (0.25, 0.75))
+
+
+def test_label_shift_rejects_boolean_target_probabilities() -> None:
+    with pytest.raises(ValueError, match="target_probabilities must be numeric probability values, not boolean"):
+        adapt_label_shift_probabilities(
+            np.array([[True, False], [False, True]]),
+            source_prior=[0.5, 0.5],
+        )
+
+
+def test_label_shift_rejects_boolean_bbse_validation_probabilities() -> None:
+    with pytest.raises(ValueError, match="source_validation_probabilities must be numeric probability values, not boolean"):
+        adapt_label_shift_probabilities(
+            [[0.55, 0.45], [0.35, 0.65]],
+            method="bbse",
+            source_prior=[0.5, 0.5],
+            source_validation_probabilities=np.array([[True, False], [False, True]]),
+            source_validation_labels=[0, 1],
+            classes=[0, 1],
+        )
