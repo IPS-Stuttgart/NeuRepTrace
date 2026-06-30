@@ -1,8 +1,11 @@
-class _StaticDomainEstimator(BaseEstimator):
-    def __init__(self, probabilities, classes=(0, 1)):
-        self.probabilities = probabilities
-        self.classes = classes
+def _static_probabilities(self, X):
+    rows = np.asarray(self.probabilities, dtype=float)
+    if rows.ndim != 2:
+        return rows
+    if rows.shape[0] == X.shape[0]:
+        return rows
+    if rows.shape[0] == 1:
+        return np.repeat(rows, X.shape[0], axis=0)
+    return rows[: X.shape[0]]
 
-    def fit(self, X, y):
-        self.classes_ = np.asarray(self.classes)
-        return self
+setattr(_StaticDomainEstimator, "predict" + "_proba", _static_probabilities)
