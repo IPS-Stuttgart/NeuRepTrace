@@ -208,7 +208,27 @@ def _value_key(value: Any) -> Any:
     return value
 
 
+def _contains_boolean(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if value.dtype == np.bool_:
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean(item) for item in value.reshape(-1).tolist())
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    try:
+        iterator = iter(value)
+    except TypeError:
+        return False
+    return any(_contains_boolean(item) for item in iterator)
+
+
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
+    if _contains_boolean(values):
+        raise ValueError(f"{name} must contain numeric probabilities, not boolean values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix with at least two columns.")
