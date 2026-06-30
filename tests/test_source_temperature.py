@@ -117,12 +117,25 @@ def test_source_temperature_rejects_boolean_and_array_scalar_controls(call) -> N
         call()
 
 
+@pytest.mark.parametrize("bad_epsilon", [0.0, -1e-12, 1.0, 2.0, np.nan, np.inf])
+def test_source_temperature_rejects_invalid_probability_floor(bad_epsilon) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        source_temperature_config(epsilon=bad_epsilon)
+
+    with pytest.raises(ValueError, match="epsilon"):
+        apply_temperature([[0.5, 0.5]], temperature=1.0, epsilon=bad_epsilon)
+
+    with pytest.raises(ValueError, match="epsilon"):
+        negative_log_likelihood([[0.5, 0.5]], [0], epsilon=bad_epsilon)
+
+
 @pytest.mark.parametrize(
     "bad_config",
     [
         SourceTemperatureConfig(temperatures=(True,)),  # type: ignore[arg-type]
         SourceTemperatureConfig(temperatures=(np.asarray([1.0]),)),  # type: ignore[arg-type]
         SourceTemperatureConfig(temperatures=(1.0,), epsilon=np.asarray([1e-9])),  # type: ignore[arg-type]
+        SourceTemperatureConfig(temperatures=(1.0,), epsilon=1.0),
     ],
 )
 def test_fit_source_temperature_scaling_revalidates_direct_config_objects(bad_config) -> None:
