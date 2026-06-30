@@ -80,6 +80,22 @@ def test_distance_group_aliases_and_validation() -> None:
         source_distance_weight_config(temperature=0.0)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"temperature": True}, "temperature"),
+        ({"temperature": np.asarray(1.0)}, "temperature"),
+        ({"min_weight": False}, "min_weight"),
+        ({"min_weight": np.asarray(0.5)}, "min_weight"),
+        ({"epsilon": True}, "epsilon"),
+        ({"epsilon": np.asarray(1e-8)}, "epsilon"),
+    ],
+)
+def test_distance_weight_config_rejects_boolean_and_array_numeric_controls(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        source_distance_weight_config(**kwargs)
+
+
 def test_distance_weighting_rejects_shape_mismatch() -> None:
     with pytest.raises(ValueError, match="source_labels"):
         compute_source_distance_weights([[0.0], [1.0]], [0])
