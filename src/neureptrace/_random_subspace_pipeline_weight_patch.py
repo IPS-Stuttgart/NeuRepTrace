@@ -32,14 +32,11 @@ class _PipelineSampleWeightAdapter(BaseEstimator):
             self.classes_ = np.asarray(classes)
         return self
 
-    def predict_proba(self, features):
-        return self.pipeline_.predict_proba(features)
-
-    def decision_function(self, features):
-        return self.pipeline_.decision_function(features)
-
-    def predict(self, features):
-        return self.pipeline_.predict(features)
+    def __getattr__(self, name: str):
+        pipeline = self.__dict__.get("pipeline_")
+        if pipeline is not None and hasattr(pipeline, name):
+            return getattr(pipeline, name)
+        raise AttributeError(name)
 
 
 def _wrap_pipeline(estimator):
