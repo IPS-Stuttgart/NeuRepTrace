@@ -83,11 +83,7 @@ def negative_log_likelihood(probabilities: Sequence[Sequence[float]] | np.ndarra
     """Return mean negative log likelihood for integer label indices."""
 
     matrix = _probability_matrix(probabilities, name="probabilities", epsilon=epsilon)
-    indices = np.asarray(labels, dtype=int).reshape(-1)
-    if indices.shape[0] != matrix.shape[0]:
-        raise ValueError("labels must contain one value per probability row.")
-    if np.any(indices < 0) or np.any(indices >= matrix.shape[1]):
-        raise ValueError("labels contain class indices outside the probability width.")
+    indices = _label_index_vector(labels, n_rows=matrix.shape[0], n_classes=matrix.shape[1])
     return float(-np.mean(np.log(np.maximum(matrix[np.arange(matrix.shape[0]), indices], float(epsilon)))))
 
 
@@ -224,6 +220,29 @@ def _contains_boolean(value: Any) -> bool:
     except TypeError:
         return False
     return any(_contains_boolean(item) for item in iterator)
+
+
+def _label_index_vector(labels: Sequence[int] | np.ndarray, *, n_rows: int, n_classes: int) -> np.ndarray:
+    if _contains_boolean(labels):
+        raise ValueError("labels must contain finite integer class indices.")
+    try:
+        raw = np.asarray(labels)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("labels must contain finite integer class indices.") from exc
+    if raw.ndim == 2 and raw.shape[1] == 1:
+        raw = raw.reshape(-1)
+    if raw.ndim != 1 or raw.shape[0] != n_rows:
+        raise ValueError("labels must contain one value per probability row.")
+    try:
+        numeric = raw.astype(float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("labels must contain finite integer class indices.") from exc
+    if not np.all(np.isfinite(numeric)) or not np.all(numeric == np.floor(numeric)):
+        raise ValueError("labels must contain finite integer class indices.")
+    indices = numeric.astype(int, copy=False)
+    if np.any(indices < 0) or np.any(indices >= n_classes):
+        raise ValueError("labels contain class indices outside the probability width.")
+    return indices
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
