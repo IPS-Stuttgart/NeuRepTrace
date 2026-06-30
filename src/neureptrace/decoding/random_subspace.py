@@ -10,12 +10,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from inspect import signature
 from typing import Any
 
 import numpy as np
 from sklearn.base import BaseEstimator, clone
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 RANDOM_SUBSPACE_PROTOCOL = "strict_source_only_random_subspace_ensemble"
@@ -131,11 +132,8 @@ def fit_random_subspace_ensemble(
         if np.unique(label_codes[row_indices]).shape[0] < 2:
             row_indices = np.arange(train.shape[0], dtype=int)
         model = clone(model_template)
-        fit_kwargs = {} if weights is None else {"sample_weight": weights[row_indices]}
-        try:
-            model.fit(train[row_indices][:, feature_indices], label_codes[row_indices], **fit_kwargs)
-        except TypeError:
-            model.fit(train[row_indices][:, feature_indices], label_codes[row_indices])
+        row_weights = None if weights is None else weights[row_indices]
+        _fit_model(model, train[row_indices][:, feature_indices], label_codes[row_indices], sample_weight=row_weights)
         probabilities = _aligned_probabilities(model, test[:, feature_indices], classes=encoded_classes, epsilon=cfg.epsilon)
         members.append(
             RandomSubspaceMember(
@@ -221,6 +219,35 @@ def _row_indices(*, n_rows: int, row_fraction: float, bootstrap_rows: bool, rng:
         return np.arange(n_rows, dtype=int)
     n_selected = max(1, min(n_rows, int(round(n_rows * row_fraction))))
     return np.sort(rng.choice(n_rows, size=n_selected, replace=bootstrap_rows)).astype(int, copy=False)
+
+
+def _fit_model(model: BaseEstimator, features: np.ndarray, labels: np.ndarray, *, sample_weight: np.ndarray | None) -> None:
+    fit_kwargs = {} if sample_weight is None else _sample_weight_fit_kwargs(model, sample_weight)
+    model.fit(features, labels, **fit_kwargs)
+
+
+def _sample_weight_fit_kwargs(model: BaseEstimator, sample_weight: np.ndarray) -> dict[str, np.ndarray]:
+    if isinstance(model, Pipeline):
+        if not model.steps:
+            return {}
+        step_name, final_estimator = model.steps[-1]
+        if final_estimator is not None and _fit_accepts_parameter(final_estimator, "sample_weight"):
+            return {f"{step_name}__sample_weight": sample_weight}
+        return {}
+    if _fit_accepts_parameter(model, "sample_weight"):
+        return {"sample_weight": sample_weight}
+    return {}
+
+
+def _fit_accepts_parameter(estimator: Any, parameter: str) -> bool:
+    fit = getattr(estimator, "fit", None)
+    if fit is None:
+        return False
+    try:
+        parameters = signature(fit).parameters
+    except (TypeError, ValueError):
+        return False
+    return parameter in parameters
 
 
 def _aligned_probabilities(model: BaseEstimator, features: np.ndarray, *, classes: np.ndarray, epsilon: float) -> np.ndarray:

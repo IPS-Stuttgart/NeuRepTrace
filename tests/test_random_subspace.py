@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from sklearn.base import BaseEstimator
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 from neureptrace.decoding.random_subspace import (
     RANDOM_SUBSPACE_CATEGORY,
@@ -27,6 +29,16 @@ def _toy_data():
     train_labels = np.asarray(["left", "left", "left", "right", "right", "right"], dtype=object)
     test_features = np.asarray([[-1.7, 0.0, 0.0, 0.1], [1.9, 0.0, 0.1, 0.0]], dtype=float)
     return train_features, train_labels, test_features
+
+
+class _WeightRecordingClassifier(BaseEstimator):
+    def fit(self, X, y, sample_weight=None):
+        self.classes_ = np.unique(y)
+        self.sample_weight_ = None if sample_weight is None else np.asarray(sample_weight, dtype=float).copy()
+        return self
+
+    def predict_proba(self, X):
+        return np.full((X.shape[0], self.classes_.shape[0]), 1.0 / self.classes_.shape[0], dtype=float)
 
 
 class _SubsetDecisionOnlyEstimator(BaseEstimator):
@@ -62,6 +74,23 @@ def test_random_subspace_ensemble_outputs_probabilities_and_metadata() -> None:
     assert result.metadata["random_subspace_uses_test_features_for_fit"] is False
     assert result.metadata["random_subspace_uses_test_labels"] is False
     assert result.metadata["random_subspace_valid_for_strict_source_only"] is True
+
+
+def test_random_subspace_routes_sample_weight_to_pipeline_final_estimator() -> None:
+    train_features, train_labels, test_features = _toy_data()
+    sample_weight = np.asarray([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=float)
+
+    result = fit_random_subspace_ensemble(
+        train_features=train_features,
+        train_labels=train_labels,
+        test_features=test_features,
+        config={"n_estimators": 1, "feature_fraction": 1.0, "random_state": 3},
+        estimator=make_pipeline(StandardScaler(), _WeightRecordingClassifier()),
+        sample_weight=sample_weight,
+    )
+
+    fitted_classifier = result.members[0].model.steps[-1][1]
+    assert np.array_equal(fitted_classifier.sample_weight_, sample_weight)
 
 
 def test_random_subspace_preserves_composite_class_labels() -> None:
