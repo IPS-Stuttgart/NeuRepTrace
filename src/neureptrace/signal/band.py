@@ -20,6 +20,22 @@ def _is_bool_like(value: object) -> bool:
     return isinstance(value, (bool, np.bool_))
 
 
+def _contains_bool_like(value: object) -> bool:
+    if _is_bool_like(value):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype == object:
+            return any(_contains_bool_like(item) for item in value.ravel())
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Sequence):
+        return any(_contains_bool_like(item) for item in value)
+    return False
+
+
 def _normalize_axis(axis: int, ndim: int) -> int:
     if _is_bool_like(axis):
         raise ValueError("axis must be an integer, not boolean.")
@@ -38,6 +54,8 @@ def _normalize_axis(axis: int, ndim: int) -> int:
 def validate_time_axis(time_vector) -> np.ndarray:
     """Return a validated, one-dimensional, uniformly sampled time axis."""
 
+    if _contains_bool_like(time_vector):
+        raise ValueError("time_vector must contain numeric time values, not boolean values.")
     time_vector = np.asarray(time_vector, dtype=float)
     if time_vector.ndim == 0:
         raise ValueError("time_vector must contain at least two samples.")
