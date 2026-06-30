@@ -103,6 +103,7 @@ from . import (  # noqa: E402
     _paired_stats_tie_patch,
     _pls_da_composite_labels_patch,
     _precomputed_foundation_row_id_patch,
+    _probability_stacking_bool_validation_patch,
     _probability_stacking_group_summary_patch,
     _random_state_config_patch,
     _reaction_time_trial_index_base_patch,
@@ -225,6 +226,7 @@ _observation_ensemble_source_debias_bool_patch.install()
 _observation_ensemble_string_groups_patch.install()
 _observation_ensemble_ungrouped_metrics_patch.install()
 _observation_ensemble_missing_label_patch.install()
+_probability_stacking_bool_validation_patch.install()
 _probability_stacking_group_summary_patch.install()
 _pls_da_composite_labels_patch.install()
 _precomputed_foundation_row_id_patch.install()
@@ -258,8 +260,6 @@ _mcca_component_count_patch.install()
 _mcca_repetition_count_patch.install()
 _mcca_subject_pca_components_patch.install()
 _mekt_vector_validation_patch.install()
-_mmd_source_weighting_gamma_patch.install()
-_mixstyle_boolean_config_patch.install()
 _mne_alignment_calibration_anchor_patch.install()
 _mne_pseudo_alignment_fallback_validity_patch.install()
 _mne_time_decode_ensemble_param_validation_patch.install()
