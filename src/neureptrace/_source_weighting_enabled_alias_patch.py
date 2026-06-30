@@ -11,6 +11,7 @@ _AFFIRMATIVE_ENABLE_ALIASES = {"1", "true", "on", "yes", "enable", "enabled"}
 _DISABLED_ENABLE_ALIASES = {"0", "false", "off", "no", "disable", "disabled"}
 _MODE_ALIAS_PATCH_ATTR = "_enabled_alias_patch"
 _SCALAR_VALIDATION_PATCH_ATTR = "_source_weighting_scalar_validation_patch"
+_FINITE_FEATURE_PATCH_ATTR = "_source_weighting_finite_feature_patch"
 
 
 def _normalized_alias(value: Any) -> str:
@@ -33,6 +34,27 @@ def _numeric_scalar(value: Any, *, message: str) -> float:
         return float(scalar)
     except (TypeError, ValueError):
         raise ValueError(message) from None
+
+
+def _feature_centroid(features: Any) -> np.ndarray:
+    try:
+        matrix = np.asarray(features, dtype=np.float64)
+    except (TypeError, ValueError):
+        raise ValueError("Source/target features must be numeric.") from None
+    if matrix.ndim == 1:
+        centroid = matrix
+    elif matrix.ndim == 2:
+        if matrix.shape[0] == 0:
+            raise ValueError("Feature matrix must contain at least one row.")
+        centroid = matrix.mean(axis=0)
+    else:
+        raise ValueError("Source/target features must be a one- or two-dimensional array.")
+    centroid = np.asarray(centroid, dtype=np.float64).reshape(-1)
+    if centroid.size == 0:
+        raise ValueError("Feature centroid must contain at least one value.")
+    if not np.all(np.isfinite(centroid)):
+        raise ValueError("Source/target features must contain only finite values.")
+    return centroid
 
 
 def _score_to_utility(score: Any, *, metric: str) -> float:
@@ -132,6 +154,10 @@ def install() -> None:
 
         setattr(normalize_source_group_weighting_mode, _MODE_ALIAS_PATCH_ATTR, True)
         source_weighting.normalize_source_group_weighting_mode = normalize_source_group_weighting_mode
+
+    if not getattr(source_weighting, _FINITE_FEATURE_PATCH_ATTR, False):
+        source_weighting._feature_centroid = _feature_centroid
+        setattr(source_weighting, _FINITE_FEATURE_PATCH_ATTR, True)
 
     if getattr(source_weighting, _SCALAR_VALIDATION_PATCH_ATTR, False):
         return
