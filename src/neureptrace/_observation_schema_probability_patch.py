@@ -19,7 +19,7 @@ _PATCH_MARKER = "_neureptrace_observation_probability_patch_installed"
 _DECODED_FOLD_PATCH_MARKER = "_neureptrace_from_decoded_fold_probability_patch_installed"
 
 
- def _contains_boolean_values(values: Any) -> bool:
+def _contains_boolean_values(values: Any) -> bool:
     """Return whether an array-like value contains Python or NumPy booleans."""
 
     try:
