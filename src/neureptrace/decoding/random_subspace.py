@@ -172,7 +172,7 @@ def random_subspace_ensemble_config(
     n_estimators: int | str = DEFAULT_N_ESTIMATORS,
     feature_fraction: float | str = DEFAULT_FEATURE_FRACTION,
     min_features: int | str = 1,
-    bootstrap_rows: bool = False,
+    bootstrap_rows: bool | str | int | float = False,
     row_fraction: float | str = 1.0,
     random_state: int | str | None = 13,
     epsilon: float | str = DEFAULT_EPSILON,
@@ -183,9 +183,9 @@ def random_subspace_ensemble_config(
         n_estimators=_positive_int(n_estimators, name="n_estimators"),
         feature_fraction=_unit_interval_float(feature_fraction, name="feature_fraction", include_zero=False),
         min_features=_positive_int(min_features, name="min_features"),
-        bootstrap_rows=bool(bootstrap_rows),
+        bootstrap_rows=_bool_value(bootstrap_rows, name="bootstrap_rows"),
         row_fraction=_unit_interval_float(row_fraction, name="row_fraction", include_zero=False),
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
+        random_state=_optional_random_state(random_state, name="random_state"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -205,7 +205,7 @@ def sample_feature_subspaces(
     fraction = _unit_interval_float(feature_fraction, name="feature_fraction", include_zero=False)
     minimum = min(_positive_int(min_features, name="min_features"), total_features)
     subset_size = min(total_features, max(minimum, int(round(total_features * fraction))))
-    seed = None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state")
+    seed = _optional_random_state(random_state, name="random_state")
     rng = np.random.default_rng(seed)
     return tuple(np.sort(rng.choice(total_features, size=subset_size, replace=False)).astype(int, copy=False) for _ in range(n_members))
 
@@ -404,6 +404,51 @@ def _sample_weight(values: Sequence[float] | np.ndarray, *, expected_length: int
     if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
         raise ValueError("sample_weight must contain finite non-negative values.")
     return weights
+
+
+def _bool_value(value: Any, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        return _bool_value(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    raise ValueError(f"{name} must be a boolean value.")
+
+
+def _optional_random_state(value: Any, *, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.lower() in {"", "none", "null"}:
+            return None
+        value = stripped
+    elif isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a non-negative integer or None.")
+        return _optional_random_state(value.item(), name=name)
+    elif isinstance(value, (Mapping, Sequence)) and not isinstance(value, (str, bytes, bytearray)):
+        raise ValueError(f"{name} must be a non-negative integer or None.")
+    try:
+        return _nonnegative_int(value, name=name)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a non-negative integer or None.") from exc
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
