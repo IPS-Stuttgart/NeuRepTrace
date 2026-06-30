@@ -25,6 +25,14 @@ def test_validate_time_axis_rejects_multidimensional_axes() -> None:
         validate_time_axis(np.array([[0.0, 0.01], [0.02, 0.03]]))
 
 
+def test_validate_time_axis_rejects_boolean_values() -> None:
+    with pytest.raises(ValueError, match="not boolean"):
+        validate_time_axis([False, True])
+
+    with pytest.raises(ValueError, match="not boolean"):
+        validate_time_axis([0.0, True])
+
+
 def test_bandpass_filter_and_hilbert_keep_shape() -> None:
     sampling_rate = 200.0
     time = np.arange(400, dtype=float) / sampling_rate

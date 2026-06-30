@@ -1,4 +1,4 @@
-"""Preserve composite labels in supervised PLS low-rank features."""
+"""Preserve composite labels in supervised PLS low-rank features and config parsing."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_supervised_pls_tuple_labels_patch_installed"
+_BOOL_PATCH_MARKER = "_neureptrace_supervised_lowrank_bool_config_patch_installed"
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 def _as_label_vector(labels: Any, *, expected_length: int) -> np.ndarray:
@@ -100,10 +103,50 @@ def _encode_labels(labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
     return np.asarray([class_to_index[_label_key(label)] for label in labels.tolist()], dtype=int)
 
 
+def _bool_error(value: Any) -> ValueError:
+    return ValueError(f"Expected a boolean value, got {value!r}.")
+
+
+def _normalize_bool_config(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise _bool_error(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise _bool_error(value)
+        return _normalize_bool_config(value.item())
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise _bool_error(value)
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise _bool_error(value)
+    raise _bool_error(value)
+
+
 def install() -> None:
-    """Patch supervised PLS label handling for composite class labels."""
+    """Patch supervised PLS label handling and low-rank boolean parsing."""
 
     lowrank = importlib.import_module("neureptrace.bushmeg_supervised_lowrank_loso")
+
+    current_as_bool = lowrank._as_bool
+    if not getattr(current_as_bool, _BOOL_PATCH_MARKER, False):
+
+        @wraps(current_as_bool)
+        def _as_bool(value: Any) -> bool:
+            return _normalize_bool_config(value)
+
+        setattr(_as_bool, _BOOL_PATCH_MARKER, True)
+        lowrank._as_bool = _as_bool
+
     original_fit = lowrank.SupervisedPLSTransformer.fit
     if getattr(original_fit, _PATCH_MARKER, False):
         return
