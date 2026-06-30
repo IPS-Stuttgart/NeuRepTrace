@@ -183,7 +183,7 @@ def _normalize_components_option(value: int | str) -> int | str:
 def _optional_random_state(value: int | str | None) -> int | None:
     if value is None:
         return None
-    if isinstance(value, str) and value.strip().lower() in {"", "none"}:
+    if isinstance(value, str) and value.strip().lower() in {"", "none", "null"}:
         return None
     return _nonnegative_int(value, name="random_state")
 
