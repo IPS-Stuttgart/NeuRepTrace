@@ -119,7 +119,12 @@ def source_mad_config(
 
 def _coerce_config(config: SourceMADConfig | Mapping[str, Any]) -> SourceMADConfig:
     if isinstance(config, SourceMADConfig):
-        return config
+        return source_mad_config(
+            center=config.center,
+            scale=config.scale,
+            normal_consistency=config.normal_consistency,
+            epsilon=config.epsilon,
+        )
     return source_mad_config(**dict(config))
 
 
@@ -153,7 +158,12 @@ def _matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_, np.ndarray)):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
