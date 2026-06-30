@@ -12,8 +12,14 @@ def _case():
     name = next(item for item in names if item.startswith("summ"))
     func = vars(module)[name]
     events = pd.DataFrame([{"subject": "subject1", "stream_id": "run1", "onset_time": 0.1, _CLASS_COLUMN: "target"}])
-    result = func(events, group_columns=("subject",))
-    assert result["subject"].tolist() == ["subject1"]
+    annotations = pd.DataFrame(
+        [
+            {"subject": "subject1", "stream_id": "run1", "annotation_id": 1, "onset_time": 0.1, _CLASS_COLUMN: "target"},
+            {"subject": "subject2", "stream_id": "run1", "annotation_id": 1, "onset_time": 0.1, _CLASS_COLUMN: "target"},
+        ]
+    )
+    result = func(events, annotations=annotations, group_columns=("subject",))
+    assert result["subject"].tolist() == ["subject1", "subject2"]
 
 
 globals()["te" + "st_placeholder"] = _case
