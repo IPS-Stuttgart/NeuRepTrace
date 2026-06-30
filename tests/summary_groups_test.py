@@ -20,6 +20,7 @@ def _case():
     )
     result = func(events, annotations=annotations, group_columns=("subject",))
     assert result["subject"].tolist() == ["subject1", "subject2"]
+    assert result["n_detections"].tolist() == [1, 0]
 
 
 globals()["te" + "st_placeholder"] = _case
