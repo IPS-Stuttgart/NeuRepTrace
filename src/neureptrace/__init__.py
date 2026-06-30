@@ -155,6 +155,7 @@ from . import (  # noqa: E402
     _stimulus_detection_boolean_summary_patch,
     _subspace_bool_config_patch,
     _subspace_adaptation_config_bool_patch,
+    _supervised_pls_tuple_labels_patch,
     _temporal_generalization_string_groups_patch,
     _temporal_smoothing_singleton_sequence_patch,
     _temporal_smoothing_topk_tie_patch,
@@ -318,6 +319,7 @@ _source_weighting_enabled_alias_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _subspace_bool_config_patch.install()
 _subspace_adaptation_config_bool_patch.install()
+_supervised_pls_tuple_labels_patch.install()
 _temporal_generalization_string_groups_patch.install()
 _temporal_smoothing_singleton_sequence_patch.install()
 _temporal_smoothing_topk_tie_patch.install()
