@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import label_counts, label_equal_mask
+
 SOURCE_GAUSSIAN_PROTOCOL = "strict_source_only_gaussian_decoder"
 SOURCE_GAUSSIAN_CATEGORY = "1_strict_source_only"
 COVARIANCE_TYPES = ("diagonal", "tied_diagonal", "spherical", "tied_spherical")
@@ -67,7 +69,7 @@ def fit_source_gaussian_decoder(
     if source.shape[1] != test.shape[1]:
         raise ValueError(f"source_features and test_features must have the same feature width: {source.shape[1]} != {test.shape[1]}.")
     labels = _label_vector(source_labels, expected_length=source.shape[0], name="source_labels")
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+    classes, _ = label_counts(labels)
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
 
@@ -177,7 +179,7 @@ def _class_gaussian_stats(features: np.ndarray, labels: np.ndarray, *, classes: 
     variances = np.zeros_like(means)
     counts = np.zeros(classes.shape[0], dtype=int)
     for index, class_label in enumerate(classes.tolist()):
-        mask = labels == class_label
+        mask = label_equal_mask(labels, class_label)
         counts[index] = int(np.count_nonzero(mask))
         if counts[index] == 0:
             raise ValueError(f"No source rows available for class {class_label!r}.")
@@ -251,9 +253,35 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    if isinstance(values, (str, bytes)):
+        vector = _object_vector([values])
+    else:
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            vector = _object_vector([array.item()])
+        elif array.ndim == 1:
+            if array.shape[0] == expected_length:
+                vector = _object_vector(array.reshape(-1).tolist())
+            elif expected_length == 1:
+                vector = _object_vector([tuple(array.tolist())])
+            else:
+                vector = _object_vector(array.reshape(-1).tolist())
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if rows.shape[1] == 1:
+                vector = _object_vector(rows[:, 0].tolist())
+            else:
+                vector = _object_vector(tuple(row.tolist()) for row in rows)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
+    return vector
+
+
+def _object_vector(values: Sequence[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
     return vector
 
 
