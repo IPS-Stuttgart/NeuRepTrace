@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neureptrace.decoding.source_centroid import SOURCE_CENTROID_CATEGORY, fit_source_centroid_decoder, source_centroid_config
+from neureptrace.decoding.source_centroid import SOURCE_CENTROID_CATEGORY, fit_source_centroid_decoder, normalize_centroid_prototype, source_centroid_config
 
 
 def test_source_centroid_predicts_nearest_classes() -> None:
@@ -23,6 +23,30 @@ def test_source_centroid_predicts_nearest_classes() -> None:
     assert np.allclose(result.probabilities.sum(axis=1), 1.0)
     assert result.metadata["source_centroid_protocol_category"] == SOURCE_CENTROID_CATEGORY
     assert result.metadata["source_centroid_valid_for_strict_source_only"] is True
+
+
+def test_source_centroid_median_prototype_is_robust_to_outlier() -> None:
+    source_features = np.asarray([[0.0], [1.0], [100.0], [10.0], [11.0], [12.0]], dtype=float)
+    source_labels = np.asarray(["a", "a", "a", "b", "b", "b"], dtype=object)
+    test_features = np.asarray([[1.0], [11.0]], dtype=float)
+
+    mean_result = fit_source_centroid_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        test_features=test_features,
+        config={"prototype": "mean", "use_diagonal_scale": False},
+    )
+    median_result = fit_source_centroid_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        test_features=test_features,
+        config={"prototype": "median", "use_diagonal_scale": False},
+    )
+
+    assert np.allclose(mean_result.centroids.ravel(), np.asarray([101.0 / 3.0, 11.0]))
+    assert np.allclose(median_result.centroids.ravel(), np.asarray([1.0, 11.0]))
+    assert median_result.predictions.tolist() == ["a", "b"]
+    assert median_result.metadata["source_centroid_prototype"] == "median"
 
 
 def test_source_centroid_shrinkage_moves_centroids_toward_global_mean() -> None:
@@ -48,12 +72,17 @@ def test_source_centroid_shrinkage_moves_centroids_toward_global_mean() -> None:
 
 
 def test_source_centroid_config_validation() -> None:
-    cfg = source_centroid_config(temperature="2.5", shrinkage="0.25")
+    cfg = source_centroid_config(temperature="2.5", shrinkage="0.25", prototype="robust")
     assert cfg.temperature == 2.5
     assert cfg.shrinkage == 0.25
+    assert cfg.prototype == "median"
+    assert normalize_centroid_prototype("average") == "mean"
 
     with pytest.raises(ValueError, match="shrinkage"):
         source_centroid_config(shrinkage=1.5)
+
+    with pytest.raises(ValueError, match="centroid prototype"):
+        normalize_centroid_prototype("bad")
 
 
 @pytest.mark.parametrize(
