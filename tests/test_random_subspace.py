@@ -49,6 +49,44 @@ def test_random_subspace_ensemble_outputs_probabilities_and_metadata() -> None:
     assert result.metadata["random_subspace_valid_for_strict_source_only"] is True
 
 
+def test_random_subspace_preserves_composite_class_labels() -> None:
+    train_features = np.asarray(
+        [
+            [-2.0, 0.0],
+            [-1.7, 0.1],
+            [-1.9, -0.1],
+            [1.7, 0.0],
+            [2.0, -0.1],
+            [1.8, 0.1],
+        ],
+        dtype=float,
+    )
+    train_labels = np.asarray(
+        [
+            ("semantic", "left"),
+            ("semantic", "left"),
+            ("semantic", "left"),
+            ("semantic", "right"),
+            ("semantic", "right"),
+            ("semantic", "right"),
+        ],
+        dtype=object,
+    )
+    test_features = np.asarray([[-1.8, 0.0], [1.9, 0.0]], dtype=float)
+
+    result = fit_random_subspace_ensemble(
+        train_features=train_features,
+        train_labels=train_labels,
+        test_features=test_features,
+        config={"n_estimators": 4, "feature_fraction": 1.0, "random_state": 7},
+    )
+
+    assert result.classes.tolist() == [("semantic", "left"), ("semantic", "right")]
+    assert result.predictions.tolist() == [("semantic", "left"), ("semantic", "right")]
+    assert result.probabilities.shape == (2, 2)
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+
+
 def test_sample_feature_subspaces_are_reproducible() -> None:
     first = sample_feature_subspaces(n_features=10, n_estimators=4, feature_fraction=0.3, min_features=2, random_state=13)
     second = sample_feature_subspaces(n_features=10, n_estimators=4, feature_fraction=0.3, min_features=2, random_state=13)
