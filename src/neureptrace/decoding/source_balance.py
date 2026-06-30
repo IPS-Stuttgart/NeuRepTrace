@@ -187,7 +187,12 @@ def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
 
 def _coerce_config(config: SourceBalanceConfig | Mapping[str, Any]) -> SourceBalanceConfig:
     if isinstance(config, SourceBalanceConfig):
-        return config
+        return source_balance_config(
+            strategy=config.strategy,
+            target=config.target,
+            normalize_weights=config.normalize_weights,
+            random_state=config.random_state,
+        )
     return source_balance_config(**dict(config))
 
 
