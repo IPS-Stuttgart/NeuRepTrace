@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 _PATCH_MARKER = "_neureptrace_classifier_tuple_labels_patch_installed"
 
 
@@ -41,11 +43,7 @@ def _atomic_label_vector(labels: Sequence[Any] | np.ndarray) -> np.ndarray:
 
 
 def _labels_equal(left: object, right: object) -> bool:
-    try:
-        equal = left == right
-        return bool(equal)
-    except (TypeError, ValueError):
-        return False
+    return values_equal(left, right)
 
 
 def _label_mask(labels: np.ndarray, target: object) -> np.ndarray:
