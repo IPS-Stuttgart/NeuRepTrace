@@ -48,8 +48,28 @@ def _normalize_runs_for_original(runs: Any) -> Any:
     return (runs,)
 
 
+def _run_label(value: Any) -> str:
+    return "no run" if value is None else str(value)
+
+
+def _validate_supported_runs(spec: Any, parsed: tuple[str | None, ...]) -> None:
+    supported_runs = tuple(getattr(spec, "runs", ()))
+    if not supported_runs:
+        return
+
+    supported = set(supported_runs)
+    unsupported = tuple(run for run in parsed if run not in supported)
+    if not unsupported:
+        return
+
+    dataset_id = str(getattr(spec, "dataset_id", "dataset"))
+    requested_text = ", ".join(_run_label(run) for run in unsupported)
+    supported_text = ", ".join(_run_label(run) for run in supported_runs)
+    raise ValueError(f"Unsupported OpenNeuro run selection for {dataset_id}: {requested_text}. Supported runs: {supported_text}.")
+
+
 def install() -> None:
-    """Reject empty and boolean-like OpenNeuro run selectors."""
+    """Reject empty, boolean-like, and unsupported OpenNeuro run selectors."""
 
     import neureptrace.openneuro_meg as openneuro_meg
 
@@ -69,9 +89,10 @@ def install() -> None:
                 for entry in entries:
                     _validate_run_entry(entry)
 
-        parsed = original_parse_runs(spec, _normalize_runs_for_original(runs))
+        parsed = tuple(original_parse_runs(spec, _normalize_runs_for_original(runs)))
         if not parsed:
             raise ValueError("OpenNeuro run selection must include at least one run or 'all'.")
+        _validate_supported_runs(spec, parsed)
         return parsed
 
     setattr(parse_runs, _PATCH_MARKER, True)
