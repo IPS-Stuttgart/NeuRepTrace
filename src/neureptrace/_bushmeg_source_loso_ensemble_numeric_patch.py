@@ -1,4 +1,4 @@
-"""Runtime guardrail for BUSH-MEG source-LOSO ensemble numeric config parsing.
+"""Runtime guardrails for BUSH-MEG source-LOSO ensemble parsing and reranking.
 
 The ensemble workflow historically coerced several user-facing configuration
 values with ``int(...)`` or ``float(...)`` at the point of use.  That made YAML
@@ -8,6 +8,13 @@ different ensemble size or reranking configuration than the config author
 intended.  This patch rejects ambiguous boolean and fractional integer controls
 before the expensive LOSO workflow starts while preserving existing integer and
 string disable aliases.
+
+The optional top-k pairwise reranker fits pairwise log-odds corrections between
+classes.  Apply each fitted logit once by splitting the correction evenly between
+the two classes; adding the full logit to one class and subtracting it from the
+other doubles the intended pairwise score difference.  The default alpha grid is
+extended to 4.0 so the corrected half-split still explores the same maximum
+pairwise score difference as the old doubled implementation with alpha=2.0.
 """
 
 from __future__ import annotations
@@ -27,6 +34,7 @@ _TARGET_MODULE = "neureptrace.bushmeg_source_loso_ensemble"
 _PATCH_MARKER = "_neureptrace_bushmeg_source_loso_ensemble_numeric_patch_installed"
 _FINDER_MARKER = "_neureptrace_bushmeg_source_loso_ensemble_numeric_finder"
 _DISABLE_RERANK_TEXT = {"", "none", "off", "false", "no"}
+_CORRECTED_RERANK_ALPHA_GRID = (0.0, 0.25, 0.5, 1.0, 2.0, 4.0)
 
 
 def _is_boolean_scalar(value: Any) -> bool:
@@ -82,6 +90,7 @@ def _patch_module(module: ModuleType) -> None:
     original_parse_float_grid = module._parse_float_grid
     original_fit_stacking_weights = module._fit_stacking_weights
     original_run = module.run_bushmeg_source_loso_ensemble
+    module.DEFAULT_RERANK_ALPHA_GRID = _CORRECTED_RERANK_ALPHA_GRID
 
     def _normalize_rerank_top_k(value: Any) -> int:
         if value is None:
@@ -119,6 +128,34 @@ def _patch_module(module: ModuleType) -> None:
             learning_rate=learning_rate,
             epsilon=epsilon,
         )
+
+    def _apply_topk_pairwise_reranker(probabilities: np.ndarray, reranker: Any | None) -> np.ndarray:
+        probabilities = np.asarray(probabilities, dtype=float)
+        module._validate_probability_matrix(probabilities, context="Reranker input")
+        if reranker is None or reranker.alpha <= 0.0 or reranker.top_k <= 1:
+            return probabilities
+        n_classes = int(reranker.n_classes)
+        module._validate_probability_matrix(probabilities, context="Reranker input", n_classes=n_classes)
+        intercepts = np.asarray(reranker.intercepts, dtype=float).reshape(n_classes, n_classes)
+        slopes = np.asarray(reranker.slopes, dtype=float).reshape(n_classes, n_classes)
+        log_probabilities = np.log(np.clip(probabilities, module.DEFAULT_STACKING_EPSILON, 1.0))
+        scores = log_probabilities.copy()
+        top_k = min(int(reranker.top_k), n_classes)
+        top_indices = np.argsort(log_probabilities, axis=1)[:, -top_k:]
+        for row_index, row_classes in enumerate(top_indices):
+            bonuses = np.zeros(n_classes, dtype=float)
+            for left_position in range(len(row_classes)):
+                for right_position in range(left_position + 1, len(row_classes)):
+                    left = int(row_classes[left_position])
+                    right = int(row_classes[right_position])
+                    class_i, class_j = (left, right) if left < right else (right, left)
+                    margin = log_probabilities[row_index, class_i] - log_probabilities[row_index, class_j]
+                    pairwise_logit = intercepts[class_i, class_j] + slopes[class_i, class_j] * margin
+                    pairwise_bonus = 0.5 * pairwise_logit
+                    bonuses[class_i] += pairwise_bonus
+                    bonuses[class_j] -= pairwise_bonus
+            scores[row_index, row_classes] += float(reranker.alpha) * bonuses[row_classes] / float(max(top_k - 1, 1))
+        return module._softmax_scores(scores)
 
     def _validate_runner_config(config: dict[str, Any]) -> None:
         source_loso = module._section(config, "source_loso")
@@ -162,6 +199,7 @@ def _patch_module(module: ModuleType) -> None:
     module._normalize_temperature = _normalize_temperature
     module._parse_float_grid = _parse_float_grid
     module._fit_stacking_weights = _fit_stacking_weights
+    module._apply_topk_pairwise_reranker = _apply_topk_pairwise_reranker
     module.run_bushmeg_source_loso_ensemble = run_bushmeg_source_loso_ensemble
     setattr(module, _PATCH_MARKER, True)
 
@@ -218,7 +256,7 @@ class _BushmegSourceLosoEnsembleNumericPatchFinder(importlib.abc.MetaPathFinder)
 
 
 def install() -> None:
-    """Install stricter source-LOSO ensemble numeric validation."""
+    """Install stricter source-LOSO ensemble validation and reranker scaling."""
 
     loaded = sys.modules.get(_TARGET_MODULE)
     if loaded is not None:
