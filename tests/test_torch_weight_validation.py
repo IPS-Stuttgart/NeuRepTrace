@@ -145,6 +145,8 @@ def test_torch_mlp_rejects_bad_prediction_feature_shape() -> None:
 
     with pytest.raises(ValueError, match="TorchMLPClassifier prediction features must be a two-dimensional"):
         model.predict_proba(np.asarray([0.5], dtype=float))
+    with pytest.raises(ValueError, match="TorchMLPClassifier prediction features must be finite"):
+        model.predict_proba(np.asarray([[np.nan]], dtype=float))
     with pytest.raises(ValueError, match="TorchMLPClassifier prediction features width 2 does not match fitted width 1"):
         model.predict(np.zeros((2, 2), dtype=float))
 
@@ -165,5 +167,7 @@ def test_dann_rejects_bad_prediction_feature_shape() -> None:
 
     with pytest.raises(ValueError, match="TorchDANNClassifier prediction features must be a two-dimensional"):
         model.predict_proba(np.asarray([0.5], dtype=float))
+    with pytest.raises(ValueError, match="TorchDANNClassifier prediction features must be finite"):
+        model.predict_proba(np.asarray([[np.inf]], dtype=float))
     with pytest.raises(ValueError, match="TorchDANNClassifier prediction features width 2 does not match fitted width 1"):
         model.decision_function(np.zeros((2, 2), dtype=float))
