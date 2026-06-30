@@ -35,6 +35,23 @@ def test_source_knn_predicts_nearest_source_labels() -> None:
     assert result.metadata["source_knn_valid_for_strict_source_only"] is True
 
 
+def test_source_knn_preserves_tuple_class_labels() -> None:
+    source = np.asarray([[-2.0], [-1.5], [1.5], [2.0]], dtype=float)
+    labels = [("semantic", "left"), ("semantic", "left"), ("semantic", "right"), ("semantic", "right")]
+    test = np.asarray([[-1.8], [1.8]], dtype=float)
+
+    result = fit_source_knn_decoder(
+        source_features=source,
+        source_labels=labels,
+        test_features=test,
+        config={"k": 1, "standardize": False},
+    )
+
+    assert result.classes.tolist() == [("semantic", "left"), ("semantic", "right")]
+    assert result.predictions.tolist() == [("semantic", "left"), ("semantic", "right")]
+    assert np.allclose(result.probabilities, [[1.0, 0.0], [0.0, 1.0]])
+
+
 def test_distance_weighting_prefers_closer_neighbor() -> None:
     source = np.asarray([[0.0], [2.0], [10.0]], dtype=float)
     labels = np.asarray(["a", "b", "b"], dtype=object)

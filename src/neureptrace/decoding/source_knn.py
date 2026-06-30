@@ -91,10 +91,8 @@ def fit_source_knn_reference(
 
     cfg = source_knn_config() if config is None else _coerce_config(config)
     features = _feature_matrix(source_features, name="source_features")
-    labels = np.asarray(source_labels, dtype=object).reshape(-1)
-    if labels.shape[0] != features.shape[0]:
-        raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {features.shape[0]}.")
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+    labels = _label_vector(source_labels, expected_length=features.shape[0])
+    classes = _as_label_vector(_unique_labels_in_order(labels), name="classes")
     if classes.shape[0] < 2:
         raise ValueError("Source kNN requires at least two source classes.")
     if cfg.standardize:
@@ -133,14 +131,15 @@ def predict_source_knn_probabilities(
     neighbor_indices = np.argsort(distances, axis=1, kind="mergesort")[:, :k]
     neighbor_distances = np.take_along_axis(distances, neighbor_indices, axis=1)
     probabilities = np.zeros((test.shape[0], reference.classes.shape[0]), dtype=float)
-    class_to_column = {class_label: index for index, class_label in enumerate(reference.classes.tolist())}
     if reference.config.weights == "uniform":
         weights = np.ones_like(neighbor_distances, dtype=float)
     else:
         weights = 1.0 / np.maximum(neighbor_distances, reference.config.epsilon)
     for row in range(test.shape[0]):
         for local_col, source_index in enumerate(neighbor_indices[row]):
-            class_col = class_to_column[reference.labels[source_index]]
+            class_col = _label_index(reference.classes, reference.labels[source_index])
+            if class_col is None:
+                raise ValueError(f"Source kNN reference contains unknown class label {reference.labels[source_index]!r}.")
             probabilities[row, class_col] += weights[row, local_col]
     probabilities = probabilities / np.sum(probabilities, axis=1, keepdims=True)
     return probabilities, neighbor_indices.astype(int, copy=False), neighbor_distances.astype(float, copy=False)
@@ -227,6 +226,65 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain finite values.")
     return matrix
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> np.ndarray:
+    labels = _as_label_vector(values, name="source_labels")
+    if labels.shape[0] != expected_length:
+        raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {expected_length}.")
+    return labels
+
+
+def _as_label_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
+    """Return a one-dimensional object vector without expanding composite labels."""
+
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            items = array.tolist()
+        elif array.ndim == 2 and array.shape[1] == 1:
+            items = array.reshape(-1).tolist()
+        elif array.ndim == 2:
+            items = [tuple(row.tolist()) for row in array]
+        else:
+            raise ValueError(f"{name} must be one-dimensional or a two-dimensional composite-label matrix.")
+    elif isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        try:
+            items = list(values)
+        except TypeError as exc:
+            raise ValueError(f"{name} must be one-dimensional.") from exc
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
+    return vector
+
+
+def _labels_equal(left: Any, right: Any) -> bool:
+    try:
+        equal = left == right
+    except Exception:
+        return False
+    if isinstance(equal, np.ndarray):
+        return bool(np.array_equal(left, right))
+    return bool(equal)
+
+
+def _unique_labels_in_order(labels: np.ndarray) -> list[Any]:
+    unique: list[Any] = []
+    for label in labels.tolist():
+        if not any(_labels_equal(label, seen) for seen in unique):
+            unique.append(label)
+    return unique
+
+
+def _label_index(classes: np.ndarray, label: Any) -> int | None:
+    for index, candidate in enumerate(classes.tolist()):
+        if _labels_equal(label, candidate):
+            return index
+    return None
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
