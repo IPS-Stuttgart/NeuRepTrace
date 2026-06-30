@@ -235,10 +235,29 @@ def _aligned_probabilities(model: BaseEstimator, features: np.ndarray, *, classe
         return _normalize_probability_rows(aligned, epsilon=epsilon)
     if hasattr(model, "decision_function"):
         scores = np.asarray(model.decision_function(features), dtype=float)
+        model_classes = np.asarray(getattr(model, "classes_", classes), dtype=object).reshape(-1)
         if scores.ndim == 1:
+            if model_classes.shape[0] != 2:
+                raise ValueError("A one-dimensional decision_function output requires exactly two model classes.")
             scores = np.column_stack([-scores, scores])
+        elif scores.ndim != 2:
+            raise ValueError("decision_function must return a one- or two-dimensional score array.")
+        if scores.shape[0] != features.shape[0]:
+            raise ValueError(f"decision_function returned {scores.shape[0]} rows for {features.shape[0]} feature rows.")
+        if scores.shape[1] != model_classes.shape[0]:
+            raise ValueError(
+                "decision_function column count must match the fitted estimator's classes_: "
+                f"{scores.shape[1]} != {model_classes.shape[0]}."
+            )
         shifted = scores - np.max(scores, axis=1, keepdims=True)
-        return _normalize_probability_rows(np.exp(np.clip(shifted, -50.0, 50.0)), epsilon=epsilon)
+        local = _normalize_probability_rows(np.exp(np.clip(shifted, -50.0, 50.0)), epsilon=epsilon)
+        aligned = np.full((features.shape[0], classes.shape[0]), epsilon, dtype=float)
+        for source_column, class_label in enumerate(model_classes.tolist()):
+            for target_column, target_label in enumerate(classes.tolist()):
+                if _labels_equal(class_label, target_label):
+                    aligned[:, target_column] = local[:, source_column]
+                    break
+        return _normalize_probability_rows(aligned, epsilon=epsilon)
     predictions = np.asarray(model.predict(features), dtype=object)
     output = np.full((features.shape[0], classes.shape[0]), epsilon, dtype=float)
     class_to_column = {class_label: index for index, class_label in enumerate(classes.tolist())}
