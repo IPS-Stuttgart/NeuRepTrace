@@ -49,9 +49,7 @@ def apply_source_domain_subset(
     source_domains: Sequence[Hashable] | np.ndarray,
     **kwargs: Any,
 ) -> tuple[np.ndarray, np.ndarray, SourceDomainSubsetResult]:
-    matrix = np.asarray(features, dtype=float)
-    if matrix.ndim != 2:
-        raise ValueError("features must be a two-dimensional matrix.")
+    matrix = _feature_matrix(features, name="features")
     label_vector = _object_vector(labels, name="labels")
     if label_vector.shape[0] != matrix.shape[0]:
         raise ValueError("labels must contain one value per feature row.")
@@ -59,6 +57,15 @@ def apply_source_domain_subset(
     if result.selected_mask.shape[0] != matrix.shape[0]:
         raise ValueError("source_domains must contain one value per feature row.")
     return matrix[result.selected_mask].astype(np.float32, copy=False), label_vector[result.selected_mask], result
+
+
+def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    matrix = np.asarray(values, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
+        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(f"{name} must contain finite values.")
+    return matrix
 
 
 def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str = "values") -> np.ndarray:
@@ -133,10 +140,11 @@ def _hashable_value(value: Any, *, reject_missing: bool = False) -> Hashable:
 
 
 def _validate_positive_int(value: object, *, name: str) -> int:
-    if isinstance(value, (bool, np.bool_)):
+    scalar_value = _scalar_config_value(value, name=name, expected="a positive integer")
+    if isinstance(scalar_value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a positive integer.")
     try:
-        numeric = float(value)
+        numeric = float(scalar_value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a positive integer.") from exc
     if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1:
@@ -145,10 +153,11 @@ def _validate_positive_int(value: object, *, name: str) -> int:
 
 
 def _validate_unit_interval(value: object, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    scalar_value = _scalar_config_value(value, name=name, expected="in [0, 1]")
+    if isinstance(scalar_value, (bool, np.bool_)):
         raise ValueError(f"{name} must be in [0, 1].")
     try:
-        numeric = float(value)
+        numeric = float(scalar_value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be in [0, 1].") from exc
     if not np.isfinite(numeric) or not 0.0 <= numeric <= 1.0:
@@ -157,7 +166,7 @@ def _validate_unit_interval(value: object, *, name: str) -> float:
 
 
 def _validate_optional_nonnegative_int(value: object, *, name: str) -> int | None:
-    scalar_value = _scalar_config_value(value, name=name)
+    scalar_value = _scalar_config_value(value, name=name, expected="a non-negative integer")
     if _none_like_config_value(scalar_value):
         return None
     return _validate_nonnegative_int(scalar_value, name=name)
@@ -171,13 +180,13 @@ def _none_like_config_value(value: object) -> bool:
     return False
 
 
-def _scalar_config_value(value: object, *, name: str) -> object:
+def _scalar_config_value(value: object, *, name: str, expected: str) -> object:
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
-            raise ValueError(f"{name} must be a non-negative integer.")
+            raise ValueError(f"{name} must be {expected}.")
         return value.item()
     if isinstance(value, (list, tuple, dict, set)):
-        raise ValueError(f"{name} must be a non-negative integer.")
+        raise ValueError(f"{name} must be {expected}.")
     return value
 
 
