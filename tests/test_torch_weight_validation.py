@@ -68,6 +68,34 @@ def test_torch_mlp_rejects_unknown_class_weight_before_torch_initialization() ->
         model.fit(SOURCE_FEATURES, SOURCE_LABELS)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"hidden_units": True}, "hidden_units must be a positive integer"),
+        ({"batch_size": 1.5}, "batch_size must be a positive integer"),
+        ({"learning_rate": True}, "learning_rate must be positive and finite"),
+        ({"weight_decay": False}, "weight_decay must be non-negative and finite"),
+        ({"dropout": True}, "dropout must be finite in \\[0.0, 1.0\\)"),
+        ({"validation_fraction": 1.0}, "validation_fraction must be finite in \\[0.0, 1.0\\)"),
+        ({"random_state": True}, "random_state must be an integer"),
+    ],
+)
+def test_torch_mlp_rejects_invalid_numeric_options_before_torch_initialization(
+    kwargs: dict[str, object],
+    message: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = TorchMLPClassifier(**kwargs)
+
+    def fail_torch_import():
+        raise AssertionError("torch should not be initialized for invalid scalar options")
+
+    monkeypatch.setattr(model, "_torch", fail_torch_import)
+
+    with pytest.raises(ValueError, match=message):
+        model.fit(SOURCE_FEATURES, SOURCE_LABELS)
+
+
 def test_dann_rejects_unknown_class_weight_before_torch_initialization() -> None:
     model = TorchDANNClassifier(class_weight="balance")
 
