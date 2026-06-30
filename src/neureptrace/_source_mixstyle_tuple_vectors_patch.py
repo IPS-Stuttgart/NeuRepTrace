@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Hashable, Sequence
+from collections.abc import Hashable, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
 
 _INSTALLED = False
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 def _object_vector_from_items(items: Sequence[Any]) -> np.ndarray:
@@ -83,6 +86,35 @@ def _domain_equal_mask(domains: np.ndarray, domain: Hashable) -> np.ndarray:
     return np.asarray([candidate == domain for candidate in domains.tolist()], dtype=bool)
 
 
+def _bool_error(name: str) -> ValueError:
+    return ValueError(f"{name} must be a boolean value.")
+
+
+def _normalize_bool(value: Any, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise _bool_error(name)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise _bool_error(name)
+        return _normalize_bool(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise _bool_error(name)
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise _bool_error(name)
+    raise _bool_error(name)
+
+
 def install() -> None:
     """Install atomic tuple-label/domain handling for Source MixStyle."""
 
@@ -91,6 +123,13 @@ def install() -> None:
         return
 
     module = importlib.import_module("neureptrace.decoding.source_mixstyle")
+
+    def _coerce_config_with_bool(config: Any):
+        normalized_config = dict(config) if isinstance(config, Mapping) else config
+        if isinstance(normalized_config, Mapping) and "include_original" in normalized_config:
+            normalized_config["include_original"] = _normalize_bool(normalized_config["include_original"], name="include_original")
+        cfg = module._coerce_config(normalized_config)
+        return replace(cfg, include_original=_normalize_bool(cfg.include_original, name="include_original"))
 
     def _domain_stats(features: np.ndarray, domains: np.ndarray, unique_domains: Sequence[Hashable]) -> dict[Hashable, Any]:
         stats: dict[Hashable, Any] = {}
@@ -116,7 +155,7 @@ def install() -> None:
         *,
         config: Any = None,
     ):
-        cfg = module._coerce_config(config)
+        cfg = _coerce_config_with_bool(config)
         features = module._feature_matrix(source_features, name="source_features")
         labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
         domains = _hashable_domain_vector(source_domains, expected_length=features.shape[0])
