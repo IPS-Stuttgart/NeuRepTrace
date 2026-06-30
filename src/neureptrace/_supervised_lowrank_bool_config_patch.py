@@ -10,7 +10,7 @@ _PATCH_MARKER = "_neureptrace_supervised_lowrank_bool_config_patch_installed"
 
 
 def _as_bool(value: Any) -> bool:
-    """Normalize only unambiguous supervised-lowrank boolean tokens."""
+    """Normalize unambiguous supervised-lowrank boolean tokens."""
 
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
@@ -22,6 +22,9 @@ def _as_bool(value: Any) -> bool:
             return False
     if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
         if int(value) in {0, 1}:
+            return bool(value)
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
             return bool(value)
     raise ValueError(f"Expected a boolean value, got {value!r}.")
 
