@@ -126,6 +126,8 @@ def _normalize_bool_config(value: Any) -> bool:
             return bool(value)
         raise _bool_error(value)
     if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
         raise _bool_error(value)
     raise _bool_error(value)
 
