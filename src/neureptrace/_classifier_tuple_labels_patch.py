@@ -46,6 +46,13 @@ def _labels_equal(left: object, right: object) -> bool:
     return values_equal(left, right)
 
 
+def _patch_calibration_split_label_equality() -> None:
+    """Route calibration split equality through the shared object-label comparator."""
+
+    calibration_patch = importlib.import_module("neureptrace._tuple_label_calibration_split_patch")
+    calibration_patch._values_equal = values_equal
+
+
 def _label_mask(labels: np.ndarray, target: object) -> np.ndarray:
     return np.asarray([_labels_equal(label, target) for label in labels], dtype=bool)
 
@@ -86,6 +93,7 @@ def _validate_sample_weights(*, n_samples: int, class_labels: np.ndarray, class_
 
 def install() -> None:
     classifiers = importlib.import_module("neureptrace.decoding.classifiers")
+    _patch_calibration_split_label_equality()
     if getattr(classifiers, _PATCH_MARKER, False):
         return
 
