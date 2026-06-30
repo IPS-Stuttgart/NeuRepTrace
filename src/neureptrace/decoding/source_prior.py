@@ -114,7 +114,7 @@ def normalize_target_prior(value: str | None) -> str:
 
 def _coerce_config(config: SourcePriorConfig | Mapping[str, Any]) -> SourcePriorConfig:
     if isinstance(config, SourcePriorConfig):
-        return config
+        return source_prior_config(target_prior=config.target_prior, smoothing=config.smoothing, epsilon=config.epsilon)
     return source_prior_config(**dict(config))
 
 
