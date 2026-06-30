@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_scale import (
     SOURCE_SCALE_CATEGORY,
+    SourceFeatureScaleConfig,
     apply_source_feature_scale,
     fit_source_feature_scale,
     fit_source_feature_scale_stats,
@@ -66,6 +67,11 @@ def test_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="epsilon"):
         source_feature_scale_config(epsilon=0.0)
+
+
+def test_source_scale_revalidates_direct_dataclass_config() -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        fit_source_feature_scale_stats([[0.0], [1.0]], config=SourceFeatureScaleConfig(epsilon=float("nan")))
 
 
 @pytest.mark.parametrize("value", [True, np.bool_(True), [], {"epsilon": 1}, np.asarray(1e-8), np.asarray([1e-8])])
