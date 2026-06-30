@@ -3,7 +3,13 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from neureptrace.bushmeg_all_protocols_report import LEADERBOARD_COLUMNS, build_bushmeg_all_protocols_report
+from neureptrace.bushmeg_all_protocols_report import (
+    LEADERBOARD_COLUMNS,
+    build_bushmeg_all_protocols_report,
+    build_leaderboard,
+    build_protocol3_kshot_leaderboard,
+    build_subject_summary,
+)
 
 
 def test_bushmeg_all_protocols_report_writes_expected_outputs(tmp_path) -> None:
@@ -221,3 +227,46 @@ def test_protocol3_kshot_tables_and_plots_are_written(tmp_path) -> None:
 
     assert set(result.protocol3_by_k["k_per_class"].tolist()) == {2, 4}
     assert "Protocol 3 K-Shot Summary" in result.report_md.read_text(encoding="utf-8")
+
+
+def test_report_builders_accept_summary_without_method_family() -> None:
+    summary = pd.DataFrame(
+        [
+            {
+                "protocol_category": 1,
+                "method": "source_loso_logistic",
+                "outer_test_subject": "1",
+                "balanced_accuracy": 0.50,
+                "accuracy": 0.50,
+            },
+            {
+                "protocol_category": 3,
+                "method": "few_shot_decoder_k2",
+                "outer_test_subject": "1",
+                "balanced_accuracy": 0.60,
+                "accuracy": 0.60,
+                "k_per_class": 2,
+                "n_target_evaluation_trials": 10,
+                "n_target_calibration_trials": 4,
+            },
+        ]
+    )
+    method_metadata = pd.DataFrame(
+        [
+            {"method": "source_loso_logistic", "method_family": "source"},
+            {"method": "few_shot_decoder_k2", "method_family": "few_shot"},
+        ]
+    )
+
+    leaderboard = build_leaderboard(summary, method_metadata)
+    assert leaderboard.loc[leaderboard["method"] == "source_loso_logistic", "method_family"].iloc[0] == "source"
+    assert leaderboard.loc[leaderboard["method"] == "few_shot_decoder_k2", "method_family"].iloc[0] == "few_shot"
+
+    subject_summary = build_subject_summary(summary)
+    assert not subject_summary.empty
+    assert set(subject_summary["method_family"]) == {"unknown"}
+
+    kshot = build_protocol3_kshot_leaderboard(summary)
+    assert len(kshot) == 1
+    assert kshot.iloc[0]["method_family"] == "unknown"
+    assert kshot.iloc[0]["mean_delta_vs_source_loso_logistic"] == pytest.approx(0.10)
