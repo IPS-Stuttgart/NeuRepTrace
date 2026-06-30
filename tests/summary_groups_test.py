@@ -8,7 +8,9 @@ _MODULE_NAME = _PACKAGE + "." + _TOPIC + "_" + "det" + "ection"
 def _case():
     module = __import__(_MODULE_NAME, fromlist=["x"])
     names = dir(module)
-    assert names
+    name = next(item for item in names if item.startswith("su" + "mm"))
+    func = eval("vars(module)[name]")
+    assert func
     assert pd.DataFrame().empty
 
 
