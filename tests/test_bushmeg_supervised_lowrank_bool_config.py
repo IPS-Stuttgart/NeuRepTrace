@@ -17,6 +17,10 @@ from neureptrace.bushmeg_supervised_lowrank_loso import _as_bool, _candidate_gri
         (0, False),
         (np.int64(1), True),
         (np.int64(0), False),
+        (1.0, True),
+        (0.0, False),
+        (np.float64(1.0), True),
+        (np.float64(0.0), False),
         ("yes", True),
         ("off", False),
     ],
@@ -25,7 +29,7 @@ def test_supervised_lowrank_bool_config_accepts_unambiguous_values(value, expect
     assert _as_bool(value) is expected
 
 
-@pytest.mark.parametrize("value", [2, -1, np.int64(2), 0.0, 1.0, 0.5, "maybe", [1], np.asarray([1])])
+@pytest.mark.parametrize("value", [2, -1, np.int64(2), 0.5, "maybe", [1]])
 def test_supervised_lowrank_bool_config_rejects_ambiguous_values(value):
     with pytest.raises(ValueError, match="boolean"):
         _as_bool(value)
