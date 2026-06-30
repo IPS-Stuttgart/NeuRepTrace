@@ -45,5 +45,5 @@ def test_summary_from_csv_keeps_grouped_sem_aligned(tmp_path: Path):
     indexed = summary.set_index(["decoder", "time"])
     assert indexed.loc[("linear", 0.0), "accuracy_mean"] == 0.7
     assert abs(indexed.loc[("linear", 0.0), "accuracy_sem"] - 0.1) < 1e-12
-    assert indexed.loc[("ridge", 0.0), "accuracy_mean"] == 0.3
+    assert abs(indexed.loc[("ridge", 0.0), "accuracy_mean"] - 0.3) < 1e-12
     assert abs(indexed.loc[("ridge", 0.0), "accuracy_sem"] - 0.1) < 1e-12
