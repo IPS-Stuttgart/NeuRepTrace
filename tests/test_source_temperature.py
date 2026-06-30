@@ -61,6 +61,28 @@ def test_negative_log_likelihood_validates_labels() -> None:
         negative_log_likelihood([[0.5, 0.5]], [2])
 
 
+def test_negative_log_likelihood_accepts_integer_like_column_labels() -> None:
+    value = negative_log_likelihood([[0.25, 0.75], [0.8, 0.2]], [[1.0], [0]])
+
+    assert np.isclose(value, -np.mean(np.log([0.75, 0.8])))
+
+
+@pytest.mark.parametrize(
+    ("probabilities", "labels", "message"),
+    [
+        ([[0.5, 0.5]], [True], "integer"),
+        ([[0.5, 0.5]], [np.bool_(False)], "integer"),
+        ([[0.5, 0.5]], [0.5], "integer"),
+        ([[0.5, 0.5]], [np.nan], "integer"),
+        ([[0.5, 0.5]], [np.inf], "integer"),
+        ([[0.5, 0.5], [0.4, 0.6]], [[0, 1]], "one value"),
+    ],
+)
+def test_negative_log_likelihood_rejects_malformed_label_indices(probabilities, labels, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        negative_log_likelihood(probabilities, labels)
+
+
 def test_source_temperature_config_parses_grid() -> None:
     cfg = source_temperature_config(temperatures="0.5,1,2", epsilon="1e-9")
 
