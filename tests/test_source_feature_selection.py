@@ -43,6 +43,41 @@ def test_anova_feature_selection_selects_discriminative_columns() -> None:
     assert result.metadata["source_feature_selection_valid_for_strict_source_only"] is True
 
 
+def test_anova_feature_selection_preserves_composite_label_rows() -> None:
+    source = np.asarray(
+        [
+            [0.0, 10.0, 0.1],
+            [0.2, 10.1, 0.2],
+            [5.0, 10.2, 0.1],
+            [5.2, 10.3, 0.2],
+        ],
+        dtype=float,
+    )
+    labels = np.asarray(
+        [
+            ["animal", "seen"],
+            ["animal", "seen"],
+            ["tool", "imagined"],
+            ["tool", "imagined"],
+        ],
+        dtype=object,
+    )
+    test = np.asarray([[0.1, 9.9, 0.0], [5.1, 10.4, 0.3]], dtype=float)
+
+    scores = source_feature_scores(source, labels, method="anova")
+    result = fit_source_feature_selection(
+        source_features=source,
+        source_labels=[("animal", "seen"), ("animal", "seen"), ("tool", "imagined"), ("tool", "imagined")],
+        test_features=test,
+        config={"method": "anova", "k": 1},
+    )
+
+    assert scores[0] > scores[1]
+    assert result.selected_indices.tolist() == [0]
+    assert result.train_features.shape == (4, 1)
+    assert result.test_features.shape == (2, 1)
+
+
 def test_variance_scores_do_not_require_multiple_classes() -> None:
     source = np.asarray([[0.0, 1.0], [0.0, 3.0], [0.0, 5.0]], dtype=float)
     scores = source_feature_scores(source, ["same", "same", "same"], method="variance")
