@@ -1,4 +1,4 @@
-"""Validate label-shift source priors and probability matrices."""
+"""Validate label-shift source priors, probability matrices, and scalar controls."""
 
 from __future__ import annotations
 
@@ -11,6 +11,12 @@ import numpy as np
 
 _SOURCE_PRIOR_PATCH_MARKER = "_neureptrace_label_shift_source_prior_patch_installed"
 _PROBABILITY_MATRIX_PATCH_MARKER = "_neureptrace_label_shift_probability_matrix_patch_installed"
+_SCALAR_CONFIG_PATCH_MARKER = "_neureptrace_label_shift_scalar_config_patch_installed"
+_SCALAR_ERROR_SUFFIXES = {
+    "_positive_int": "must be a positive integer.",
+    "_positive_float": "must be positive and finite.",
+    "_nonnegative_float": "must be finite and non-negative.",
+}
 
 
 def _missing_class_labels(source_prior: Mapping[Any, float], classes: Sequence[Any]) -> list[Any]:
@@ -39,8 +45,32 @@ def _reject_boolean_probability_values(values: Any, *, name: str) -> None:
         raise ValueError(f"{name} must be numeric probability values, not boolean indicators.")
 
 
+def _array_scalar_error(name: str, suffix: str) -> ValueError:
+    return ValueError(f"{name} {suffix}")
+
+
+def _guarded_scalar_helper(original: Any, error_suffix: str):
+    @wraps(original)
+    def _helper(value: Any, *, name: str):
+        if isinstance(value, np.ndarray):
+            raise _array_scalar_error(name, error_suffix)
+        return original(value, name=name)
+
+    setattr(_helper, _SCALAR_CONFIG_PATCH_MARKER, True)
+    _helper.__wrapped__ = original
+    return _helper
+
+
+def _install_scalar_config_guards(label_shift: Any) -> None:
+    for helper_name, error_suffix in _SCALAR_ERROR_SUFFIXES.items():
+        original = getattr(label_shift, helper_name)
+        if getattr(original, _SCALAR_CONFIG_PATCH_MARKER, False):
+            continue
+        setattr(label_shift, helper_name, _guarded_scalar_helper(original, error_suffix))
+
+
 def install() -> None:
-    """Reject incomplete source-prior mappings and boolean probability matrices."""
+    """Reject malformed label-shift priors, probabilities, and scalar config values."""
 
     label_shift = importlib.import_module("neureptrace.decoding.label_shift")
 
@@ -80,17 +110,18 @@ def install() -> None:
         label_shift._resolve_source_prior = _resolve_source_prior
 
     original_probability_matrix = label_shift._probability_matrix
-    if getattr(original_probability_matrix, _PROBABILITY_MATRIX_PATCH_MARKER, False):
-        return
+    if not getattr(original_probability_matrix, _PROBABILITY_MATRIX_PATCH_MARKER, False):
 
-    @wraps(original_probability_matrix)
-    def _probability_matrix(values, *, name: str, epsilon: float | str, expected_classes: int | None = None):
-        _reject_boolean_probability_values(values, name=name)
-        return original_probability_matrix(values, name=name, epsilon=epsilon, expected_classes=expected_classes)
+        @wraps(original_probability_matrix)
+        def _probability_matrix(values, *, name: str, epsilon: float | str, expected_classes: int | None = None):
+            _reject_boolean_probability_values(values, name=name)
+            return original_probability_matrix(values, name=name, epsilon=epsilon, expected_classes=expected_classes)
 
-    setattr(_probability_matrix, _PROBABILITY_MATRIX_PATCH_MARKER, True)
-    _probability_matrix.__wrapped__ = original_probability_matrix
-    label_shift._probability_matrix = _probability_matrix
+        setattr(_probability_matrix, _PROBABILITY_MATRIX_PATCH_MARKER, True)
+        _probability_matrix.__wrapped__ = original_probability_matrix
+        label_shift._probability_matrix = _probability_matrix
+
+    _install_scalar_config_guards(label_shift)
 
 
 __all__ = ["install"]
