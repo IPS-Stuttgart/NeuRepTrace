@@ -109,6 +109,36 @@ def test_standalone_em_and_bbse_estimators() -> None:
     assert np.allclose(bbse_prior, target_probabilities.mean(axis=0), atol=1e-5)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"max_iter": np.asarray(True)}, "max_iter must be a positive integer"),
+        ({"max_iter": np.asarray([2])}, "max_iter must be a positive integer"),
+        ({"tol": np.asarray(0.0)}, "tol must be finite and non-negative"),
+        ({"epsilon": np.asarray(1e-12)}, "epsilon must be positive and finite"),
+    ],
+)
+def test_label_shift_rejects_array_scalar_controls(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        adapt_label_shift_probabilities(
+            [[0.8, 0.2], [0.2, 0.8]],
+            source_prior=[0.5, 0.5],
+            **kwargs,
+        )
+
+
+def test_bbse_rejects_array_regularization_control() -> None:
+    with pytest.raises(ValueError, match="regularization must be finite and non-negative"):
+        adapt_label_shift_probabilities(
+            [[0.8, 0.2], [0.2, 0.8]],
+            method="bbse",
+            source_validation_probabilities=[[0.9, 0.1], [0.1, 0.9]],
+            source_validation_labels=["a", "b"],
+            classes=["a", "b"],
+            bbse_regularization=np.asarray(0.0),
+        )
+
+
 def test_soft_confusion_matrix_columns_are_normalized() -> None:
     probabilities = np.asarray([[0.8, 0.2], [0.7, 0.3], [0.1, 0.9], [0.2, 0.8]])
     labels = [("left", 1), ("left", 1), ("right", 2), ("right", 2)]
