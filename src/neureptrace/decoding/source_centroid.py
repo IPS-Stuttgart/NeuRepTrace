@@ -1,7 +1,7 @@
 """Source-only nearest-centroid decoder.
 
 This module provides a small dependency-light baseline for strict cross-subject
-decoding.  Class centroids are estimated from source rows and source labels only;
+feature decoding.  Class centroids are estimated from source rows and source labels only;
 held-out rows are scored by scaled squared distance to the source centroids.
 """
 
@@ -250,6 +250,16 @@ def _label_equal_mask(labels: np.ndarray, target: Any) -> np.ndarray:
 
 
 def _labels_equal(left: Any, right: Any) -> bool:
+    if _is_nan_like_scalar(left) and _is_nan_like_scalar(right):
+        return True
+    if isinstance(left, np.generic):
+        left = left.item()
+    if isinstance(right, np.generic):
+        right = right.item()
+    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
+        return _array_labels_equal(left, right)
+    if isinstance(left, (list, tuple)) or isinstance(right, (list, tuple)):
+        return _sequence_labels_equal(left, right)
     try:
         equal = left == right
     except (TypeError, ValueError):
@@ -260,6 +270,28 @@ def _labels_equal(left: Any, right: Any) -> bool:
         return bool(np.all(equal))
     except (TypeError, ValueError):
         return False
+
+
+def _is_nan_like_scalar(value: Any) -> bool:
+    if isinstance(value, np.generic):
+        value = value.item()
+    return isinstance(value, (float, np.floating)) and bool(np.isnan(value))
+
+
+def _array_labels_equal(left: Any, right: Any) -> bool:
+    left_array = np.asarray(left, dtype=object)
+    right_array = np.asarray(right, dtype=object)
+    if left_array.shape != right_array.shape:
+        return False
+    return all(_labels_equal(left_item, right_item) for left_item, right_item in zip(left_array.reshape(-1).tolist(), right_array.reshape(-1).tolist(), strict=True))
+
+
+def _sequence_labels_equal(left: Any, right: Any) -> bool:
+    if not isinstance(left, (list, tuple)) or not isinstance(right, (list, tuple)):
+        return False
+    if len(left) != len(right):
+        return False
+    return all(_labels_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
 
 
 def _boolean(value: Any, *, name: str) -> bool:
