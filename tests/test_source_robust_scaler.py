@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_robust_scaler import (
     SOURCE_ROBUST_SCALER_CATEGORY,
+    SourceRobustScalerConfig,
     apply_source_robust_scaler,
     fit_source_robust_scaler,
     fit_source_robust_scaler_stats,
@@ -67,6 +68,41 @@ def test_source_robust_scaler_config_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="scale"):
         normalize_scale_mode("bad")
+
+
+@pytest.mark.parametrize(
+    ("name", "kwargs"),
+    [
+        ("lower_quantile", {"lower_quantile": False}),
+        ("upper_quantile", {"upper_quantile": True}),
+        ("epsilon", {"epsilon": True}),
+        ("lower_quantile", {"lower_quantile": np.asarray(0.25)}),
+        ("lower_quantile", {"lower_quantile": np.asarray([0.25])}),
+        ("upper_quantile", {"upper_quantile": np.asarray(0.75)}),
+        ("upper_quantile", {"upper_quantile": np.asarray([0.75])}),
+        ("epsilon", {"epsilon": np.asarray(1e-8)}),
+        ("epsilon", {"epsilon": np.asarray([1e-8])}),
+    ],
+)
+def test_source_robust_scaler_rejects_non_scalar_numeric_controls(name: str, kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match=name):
+        source_robust_scaler_config(**kwargs)
+
+
+def test_direct_source_robust_scaler_config_normalizes_and_validates_controls() -> None:
+    config = SourceRobustScalerConfig(center="avg", scale="sd", lower_quantile="0.1", upper_quantile="0.9", epsilon="1e-6")
+
+    assert config.center == "mean"
+    assert config.scale == "std"
+    assert config.lower_quantile == 0.1
+    assert config.upper_quantile == 0.9
+    assert np.isclose(config.epsilon, 1e-6)
+
+    with pytest.raises(ValueError, match="lower_quantile"):
+        SourceRobustScalerConfig(lower_quantile=np.asarray(0.25))
+
+    with pytest.raises(ValueError, match="epsilon"):
+        SourceRobustScalerConfig(epsilon=np.asarray([1e-8]))
 
 
 def test_source_robust_scaler_rejects_feature_width_mismatch() -> None:

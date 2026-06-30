@@ -26,8 +26,7 @@ def rank_class_scores(
     y_true = _label_vector(y_true, name="y_true")
     top_k = tuple(_validate_integer(k, name="top_k", minimum=1) for k in top_k)
     row_top_k = _validate_integer(row_top_k, name="row_top_k", minimum=0)
-    if not class_column:
-        raise ValueError("class_column must be non-empty.")
+    class_column = _validate_class_column_name(class_column)
 
     if scores is None or classes is None:
         return _empty_class_rank_result(y_true, top_k)
@@ -143,6 +142,12 @@ def _object_vector(items: Sequence[object]) -> np.ndarray:
     vector = np.empty(len(items), dtype=object)
     vector[:] = items
     return vector
+
+
+def _validate_class_column_name(value: object) -> str:
+    if not isinstance(value, str) or value == "":
+        raise ValueError("class_column must be a non-empty string.")
+    return value
 
 
 def _validate_integer(value: object, *, name: str, minimum: int) -> int:

@@ -1,9 +1,13 @@
-"""Reject boolean inputs in probability-stacking numeric paths.
+"""Reject malformed numeric inputs in probability-stacking paths.
 
 Probability stacking accepts labels, probability matrices, and metric tables from
 CSV-like sources where pandas and NumPy otherwise coerce booleans to integer
 ``0``/``1`` values.  Booleans are malformed probability/label data in these
 paths, so reject them before the core numeric validators run.
+
+Scalar configuration values are also guarded here.  NumPy zero-dimensional and
+size-one arrays can otherwise pass through ``float(...)`` / ``int(...)``-style
+validators as if they were genuine scalars.
 """
 
 from __future__ import annotations
@@ -39,6 +43,12 @@ def _contains_boolean_values(values: Any) -> bool:
     return False
 
 
+def _is_array_valued_scalar_control(value: Any) -> bool:
+    """Return whether a scalar config value was supplied as an array-like container."""
+
+    return isinstance(value, (np.ndarray, pd.Series, pd.Index, pd.DataFrame))
+
+
 def _reject_boolean_values(values: Any, *, message: str) -> None:
     if _contains_boolean_values(values):
         raise ValueError(message)
@@ -52,6 +62,11 @@ def _reject_boolean_probabilities(values: Any, *, context: str = "Probability va
     _reject_boolean_values(values, message=f"{context} must be numeric, not boolean.")
 
 
+def _reject_array_scalar_control(value: Any, *, name: str) -> None:
+    if _is_array_valued_scalar_control(value):
+        raise ValueError(f"{name} must be a scalar, not an array.")
+
+
 def _reject_boolean_probability_columns(observations: pd.DataFrame, *, context: str = "Probability values") -> None:
     prob_columns = probability_columns(observations)
     if prob_columns:
@@ -59,7 +74,7 @@ def _reject_boolean_probability_columns(observations: pd.DataFrame, *, context: 
 
 
 def install() -> None:
-    """Install boolean guards on probability-stacking public numeric paths."""
+    """Install boolean and scalar guards on probability-stacking public numeric paths."""
 
     from neureptrace import probability_stacking as ps
 
@@ -73,6 +88,20 @@ def install() -> None:
         _reject_boolean_label_values(labels, name=name)
         return original_integer_label_array(labels, name=name)
 
+    original_validate_positive_integer = ps._validate_positive_integer
+
+    @wraps(original_validate_positive_integer)
+    def _validate_positive_integer(value: Any, *, name: str):
+        _reject_array_scalar_control(value, name=name)
+        return original_validate_positive_integer(value, name=name)
+
+    original_validate_positive_finite_float = ps._validate_positive_finite_float
+
+    @wraps(original_validate_positive_finite_float)
+    def _validate_positive_finite_float(value: Any, *, name: str):
+        _reject_array_scalar_control(value, name=name)
+        return original_validate_positive_finite_float(value, name=name)
+
     original_renormalize_probabilities = ps._renormalize_probabilities
 
     @wraps(original_renormalize_probabilities)
@@ -83,6 +112,7 @@ def install() -> None:
         require_normalized: bool = True,
     ):
         _reject_boolean_probabilities(values)
+        _reject_array_scalar_control(min_probability, name="min_probability")
         return original_renormalize_probabilities(
             values,
             min_probability=min_probability,
@@ -155,6 +185,8 @@ def install() -> None:
         return original_summarize_stacked_metrics(observations)
 
     ps._integer_label_array = _integer_label_array
+    ps._validate_positive_integer = _validate_positive_integer
+    ps._validate_positive_finite_float = _validate_positive_finite_float
     ps._renormalize_probabilities = _renormalize_probabilities
     ps._validate_probability_matrix = _validate_probability_matrix
     ps._top_k_accuracy = _top_k_accuracy

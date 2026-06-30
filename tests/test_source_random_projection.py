@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_random_projection import (
     SOURCE_RANDOM_PROJECTION_CATEGORY,
+    SourceRandomProjectionConfig,
     apply_source_random_projection,
     fit_source_random_projection_reference,
     fit_source_random_projection_transform,
@@ -72,6 +73,50 @@ def test_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="density"):
         source_random_projection_config(distribution="sparse", density=0.0)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("n_components", np.asarray(3)),
+        ("n_components", np.asarray([3])),
+        ("n_components", True),
+        ("random_state", np.asarray(7)),
+        ("random_state", np.asarray([7])),
+        ("random_state", np.asarray(True)),
+        ("random_state", True),
+        ("density", np.asarray(0.5)),
+        ("density", np.asarray([0.5])),
+        ("density", np.asarray(True)),
+        ("density", True),
+    ],
+)
+def test_random_projection_rejects_array_like_scalar_controls(field: str, value: object) -> None:
+    kwargs: dict[str, object] = {field: value}
+    if field == "density":
+        kwargs["distribution"] = "sparse"
+
+    with pytest.raises(ValueError, match=field):
+        source_random_projection_config(**kwargs)
+
+
+def test_random_projection_rejects_array_valued_distribution() -> None:
+    with pytest.raises(ValueError, match="distribution"):
+        source_random_projection_config(distribution=np.asarray("gaussian"))
+
+
+def test_random_projection_revalidates_direct_config_objects() -> None:
+    with pytest.raises(ValueError, match="n_components"):
+        fit_source_random_projection_reference(
+            4,
+            config=SourceRandomProjectionConfig(n_components=np.asarray([2])),
+        )
+
+    with pytest.raises(ValueError, match="density"):
+        fit_source_random_projection_reference(
+            4,
+            config=SourceRandomProjectionConfig(n_components=2, distribution="sparse", density=np.asarray([0.25])),
+        )
 
 
 def test_random_projection_rejects_width_mismatch() -> None:

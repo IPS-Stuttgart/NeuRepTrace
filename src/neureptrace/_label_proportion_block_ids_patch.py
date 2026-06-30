@@ -13,6 +13,7 @@ _BLOCK_ID_PATCH_MARKER = "_neureptrace_label_proportion_block_ids_patch_installe
 _ZERO_SUPPORT_PATCH_MARKER = "_neureptrace_label_proportion_zero_support_patch_installed"
 _POSITIVE_FLOAT_PATCH_MARKER = "_neureptrace_label_proportion_positive_float_validation_patch_installed"
 _NONNEGATIVE_FLOAT_PATCH_MARKER = "_neureptrace_label_proportion_nonnegative_float_validation_patch_installed"
+_PROPORTION_VECTOR_PATCH_MARKER = "_neureptrace_label_proportion_vector_validation_patch_installed"
 
 
 def _object_block_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int | None = None) -> np.ndarray:
@@ -112,6 +113,21 @@ def _normalize_nonnegative_float(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be non-negative and finite.")
     return parsed
+
+
+def _proportion_values_to_float_array(values: Any) -> np.ndarray:
+    """Return a numeric 1-D proportion vector without flattening matrices."""
+
+    array = np.asarray(values, dtype=object)
+    if array.ndim > 1:
+        raise ValueError("target_proportions must be a one-dimensional sequence of class proportions.")
+    raw = array.reshape(-1)
+    if any(isinstance(value, (bool, np.bool_)) for value in raw):
+        raise ValueError("target_proportions must be numeric counts or proportions, not boolean flags.")
+    try:
+        return raw.astype(float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("target_proportions must be finite and non-negative.") from exc
 
 
 def _adjust_probability_blocks_to_label_proportions(
@@ -228,6 +244,11 @@ def install() -> None:
     if not getattr(current_nonnegative_float, _NONNEGATIVE_FLOAT_PATCH_MARKER, False):
         setattr(_normalize_nonnegative_float, _NONNEGATIVE_FLOAT_PATCH_MARKER, True)
         _label_proportions._normalize_nonnegative_float = _normalize_nonnegative_float
+
+    current_proportion_values = _label_proportions._proportion_values_to_float_array
+    if not getattr(current_proportion_values, _PROPORTION_VECTOR_PATCH_MARKER, False):
+        setattr(_proportion_values_to_float_array, _PROPORTION_VECTOR_PATCH_MARKER, True)
+        _label_proportions._proportion_values_to_float_array = _proportion_values_to_float_array
 
 
 __all__ = ["install"]
