@@ -41,6 +41,27 @@ def test_uniform_prior_adjustment_reweights_probabilities() -> None:
     assert result.metadata["source_prior_valid_for_strict_source_only"] is True
 
 
+def test_source_prior_accepts_rectangular_numpy_composite_values() -> None:
+    probabilities = np.asarray([[0.8, 0.2], [0.3, 0.7]], dtype=float)
+    source_labels = np.asarray([("left", 1), ("right", 2), ("left", 1), ("right", 2)], dtype=object)
+    classes = np.asarray([("left", 1), ("right", 2)], dtype=object)
+
+    prior, inferred_classes = estimate_source_class_prior(source_labels, classes=classes)
+    result = adjust_probabilities_to_source_prior(
+        probabilities,
+        source_labels=source_labels,
+        classes=classes,
+        config={"target_prior": "source"},
+    )
+
+    assert inferred_classes.tolist() == [("left", 1), ("right", 2)]
+    assert result.classes.tolist() == [("left", 1), ("right", 2)]
+    assert np.allclose(prior, np.asarray([0.5, 0.5]))
+    assert np.allclose(result.source_prior, np.asarray([0.5, 0.5]))
+    assert np.allclose(result.probabilities, probabilities)
+    assert result.metadata["source_prior_n_classes"] == 2
+
+
 def test_source_prior_target_source_is_identity_after_normalization() -> None:
     probabilities = np.asarray([[0.2, 0.8], [0.7, 0.3]], dtype=float)
 
