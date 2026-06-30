@@ -173,7 +173,7 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, np.ndarray)):
         raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)

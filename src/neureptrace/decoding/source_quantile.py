@@ -15,6 +15,16 @@ _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
+def _bin_index_dtype(max_index: int) -> np.dtype:
+    """Return the narrowest signed integer dtype that can store ``max_index``."""
+
+    if max_index <= np.iinfo(np.int16).max:
+        return np.dtype(np.int16)
+    if max_index <= np.iinfo(np.int32).max:
+        return np.dtype(np.int32)
+    return np.dtype(np.int64)
+
+
 @dataclass(frozen=True, slots=True)
 class SourceQuantileClipResult:
     """Feature matrices clipped with source-fitted quantiles."""
@@ -196,9 +206,10 @@ def apply_source_quantile_bins(features, *, bin_edges):
         raise ValueError("bin_edges must be a two-dimensional matrix.")
     if matrix.shape[1] != edges.shape[1]:
         raise ValueError("features width must match source quantile bin edges.")
-    output = np.zeros(matrix.shape, dtype=np.int16)
+    dtype = _bin_index_dtype(edges.shape[0])
+    output = np.zeros(matrix.shape, dtype=dtype)
     for column in range(matrix.shape[1]):
-        output[:, column] = np.searchsorted(edges[:, column], matrix[:, column], side="right").astype(np.int16, copy=False)
+        output[:, column] = np.searchsorted(edges[:, column], matrix[:, column], side="right").astype(dtype, copy=False)
     return output
 
 
@@ -221,7 +232,14 @@ def _matrix(values, *, name: str):
     return matrix
 
 
+def _reject_array_scalar(value: Any, *, name: str) -> None:
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be a scalar value, not an array.")
+
+
 def _bounds(lower, upper) -> tuple[float, float]:
+    _reject_array_scalar(lower, name="lower")
+    _reject_array_scalar(upper, name="upper")
     if isinstance(lower, (bool, np.bool_)) or isinstance(upper, (bool, np.bool_)):
         raise ValueError("lower and upper must be numeric quantiles, not boolean.")
     try:
@@ -261,16 +279,26 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
 
 
 def _epsilon(epsilon) -> float:
-    value = float(epsilon)
+    _reject_array_scalar(epsilon, name="epsilon")
+    if isinstance(epsilon, (bool, np.bool_)):
+        raise ValueError("epsilon must be numeric, not boolean.")
+    try:
+        value = float(epsilon)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("epsilon must be finite and in (0, 0.5).") from exc
     if not np.isfinite(value) or value <= 0.0 or value >= 0.5:
         raise ValueError("epsilon must be finite and in (0, 0.5).")
     return value
 
 
 def _positive_int(value, *, name: str) -> int:
+    _reject_array_scalar(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a positive integer.")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)

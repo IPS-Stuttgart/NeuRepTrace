@@ -55,6 +55,7 @@ from . import (  # noqa: E402
     _event_detection_extensions,
     _fieldtrip_cli_path_patch,
     _fieldtrip_sampleinfo_validation_patch,
+    _few_shot_array_integer_patch,
     _few_shot_split_validation_patch,
     _few_shot_target_index_patch,
     _few_shot_tuple_labels_patch,
@@ -140,6 +141,7 @@ from . import (  # noqa: E402
     _source_mixup_random_state_patch,
     _source_mixstyle_tuple_labels_patch,
     _source_mixstyle_tuple_vectors_patch,
+    _source_quantile_bin_dtype_patch,
     _source_selection_class_balance_patch,
     _source_selection_composite_ids_patch,
     _source_selection_optional_bounds_patch,
@@ -189,6 +191,7 @@ _onset_boolean_summary_patch.install()
 _stimulus_detection_boolean_summary_patch.install()
 _fieldtrip_sampleinfo_validation_patch.install()
 _fieldtrip_cli_path_patch.install()
+_few_shot_array_integer_patch.install()
 _few_shot_split_validation_patch.install()
 _few_shot_tuple_labels_patch.install()
 _few_shot_target_index_patch.install()
@@ -296,6 +299,7 @@ _source_mixup_boolean_config_patch.install()
 _source_mixup_random_state_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
 _source_mixstyle_tuple_vectors_patch.install()
+_source_quantile_bin_dtype_patch.install()
 _random_state_config_patch.install()
 _reaction_time_trial_index_base_patch.install()
 _reaction_time_trial_value_type_patch.install()

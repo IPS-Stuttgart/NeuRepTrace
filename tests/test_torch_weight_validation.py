@@ -129,3 +129,45 @@ def test_cdan_restores_requested_fraction_after_small_validation_fallback() -> N
     assert model.validation_fraction == 0.1
     assert model.n_classes_ == 16
     assert model.source_rows_ == 32
+
+
+def test_torch_mlp_rejects_bad_prediction_feature_shape() -> None:
+    pytest.importorskip("torch")
+    model = TorchMLPClassifier(
+        hidden_units=4,
+        max_iter=1,
+        batch_size=2,
+        patience=1,
+        validation_fraction=0.0,
+        random_state=7,
+    )
+    model.fit(SOURCE_FEATURES, SOURCE_LABELS)
+
+    with pytest.raises(ValueError, match="TorchMLPClassifier prediction features must be a two-dimensional"):
+        model.predict_proba(np.asarray([0.5], dtype=float))
+    with pytest.raises(ValueError, match="TorchMLPClassifier prediction features must be finite"):
+        model.predict_proba(np.asarray([[np.nan]], dtype=float))
+    with pytest.raises(ValueError, match="TorchMLPClassifier prediction features width 2 does not match fitted width 1"):
+        model.predict(np.zeros((2, 2), dtype=float))
+
+
+def test_dann_rejects_bad_prediction_feature_shape() -> None:
+    pytest.importorskip("torch")
+    model = TorchDANNClassifier(
+        hidden_units=4,
+        embedding_dim=2,
+        max_epochs=1,
+        batch_size=2,
+        patience=1,
+        validation_fraction=0.0,
+        random_state=7,
+        device="cpu",
+    )
+    model.fit(SOURCE_FEATURES, SOURCE_LABELS, target_features=TARGET_FEATURES)
+
+    with pytest.raises(ValueError, match="TorchDANNClassifier prediction features must be a two-dimensional"):
+        model.predict_proba(np.asarray([0.5], dtype=float))
+    with pytest.raises(ValueError, match="TorchDANNClassifier prediction features must be finite"):
+        model.predict_proba(np.asarray([[np.inf]], dtype=float))
+    with pytest.raises(ValueError, match="TorchDANNClassifier prediction features width 2 does not match fitted width 1"):
+        model.decision_function(np.zeros((2, 2), dtype=float))

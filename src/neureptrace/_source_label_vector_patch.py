@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Iterable
 from functools import wraps
 from typing import Any
@@ -48,6 +49,9 @@ def _as_label_vector(source_labels: Any, *, n_rows: int, row_error: str, shape_e
 
 def install() -> None:
     """Install source-label vector normalization for neural source decoders."""
+    source_centroid_patch = importlib.import_module("neureptrace._source_centroid_numeric_config_patch")
+    source_centroid_patch.install()
+
     import neureptrace.decoding.dann as dann
     import neureptrace.decoding.source_domain_generalization as source_dg
 

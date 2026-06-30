@@ -11,6 +11,7 @@ import numpy as np
 
 _SAMPLE_WEIGHTS_PATCH_MARKER = "_neureptrace_source_weighting_tuple_row_groups_patch_installed"
 _GROUP_LIST_PATCH_MARKER = "_neureptrace_source_weighting_tuple_group_list_patch_installed"
+_SOURCE_BALANCE_CONFIG_PATCH_MARKER = "_neureptrace_source_balance_config_revalidation_patch_installed"
 
 
 def _hashable_group_value(value: Any) -> Any:
@@ -57,9 +58,7 @@ def _row_group_vector(row_groups: Sequence[Any] | np.ndarray) -> np.ndarray:
     return _object_vector(items)
 
 
-def install() -> None:
-    """Patch source weighting to keep composite row-group keys atomic."""
-
+def _install_source_weighting_tuple_row_groups() -> None:
     source_weighting = importlib.import_module("neureptrace.decoding.source_weighting")
 
     original_sample_weights = source_weighting.sample_weights_from_group_weights
@@ -99,6 +98,34 @@ def install() -> None:
         source_weighting._group_list = _group_list
 
     source_weighting._row_group_vector = _row_group_vector
+
+
+def _install_source_balance_config_revalidation() -> None:
+    source_balance = importlib.import_module("neureptrace.decoding.source_balance")
+    original_coerce_config = source_balance._coerce_config
+    if getattr(original_coerce_config, _SOURCE_BALANCE_CONFIG_PATCH_MARKER, False):
+        return
+
+    @wraps(original_coerce_config)
+    def _coerce_config(config):
+        if isinstance(config, source_balance.SourceBalanceConfig):
+            return source_balance.source_balance_config(
+                strategy=config.strategy,
+                target=config.target,
+                normalize_weights=config.normalize_weights,
+                random_state=config.random_state,
+            )
+        return original_coerce_config(config)
+
+    setattr(_coerce_config, _SOURCE_BALANCE_CONFIG_PATCH_MARKER, True)
+    source_balance._coerce_config = _coerce_config
+
+
+def install() -> None:
+    """Patch source weighting/balancing helpers to keep composite and config inputs safe."""
+
+    _install_source_weighting_tuple_row_groups()
+    _install_source_balance_config_revalidation()
 
 
 install()

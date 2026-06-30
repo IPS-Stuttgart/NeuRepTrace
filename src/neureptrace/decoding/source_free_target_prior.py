@@ -247,21 +247,34 @@ def _target_prior_estimator_mode(value: Any) -> str:
     raise ValueError("target_prior_estimator must be one of: mean, confidence_weighted, entropy_weighted.")
 
 
-def _bounded_strength(value: Any, *, name: str = "target_prior_strength") -> float:
+def _coerce_scalar_float(value: Any, message: str) -> float:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be finite in [0, 1].")
-    number = float(value)
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        raise ValueError(message)
+    elif isinstance(value, np.generic):
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
+def _bounded_strength(value: Any, *, name: str = "target_prior_strength") -> float:
+    message = f"{name} must be finite in [0, 1]."
+    number = _coerce_scalar_float(value, message)
     if not np.isfinite(number) or number < 0.0 or number > 1.0:
-        raise ValueError(f"{name} must be finite in [0, 1].")
+        raise ValueError(message)
     return number
 
 
 def _bounded_floor(value: Any) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError("target_prior_floor must be finite in [0, 1).")
-    number = float(value)
+    message = "target_prior_floor must be finite in [0, 1)."
+    number = _coerce_scalar_float(value, message)
     if not np.isfinite(number) or number < 0.0 or number >= 1.0:
-        raise ValueError("target_prior_floor must be finite in [0, 1).")
+        raise ValueError(message)
     return number
 
 

@@ -182,6 +182,22 @@ def test_source_feature_quantiles_reject_boolean_bounds() -> None:
         source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], lower=0.0, upper=np.bool_(True))
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: source_feature_quantiles([[0.0], [1.0]], lower=np.asarray([0.25]), upper=0.75),
+        lambda: source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], lower=0.0, upper=np.asarray(0.75)),
+        lambda: source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=np.asarray([0.01])),
+        lambda: apply_source_quantile_rank([[0.5]], sorted_values=[[0.0], [1.0]], epsilon=np.asarray(0.01)),
+        lambda: source_quantile_bins(source_features=[[0.0], [1.0]], test_features=[[0.5]], n_bins=np.asarray([4])),
+        lambda: source_quantile_bins(source_features=[[0.0], [1.0]], test_features=[[0.5]], n_bins=np.asarray(True)),
+    ],
+)
+def test_source_quantile_helpers_reject_array_valued_scalar_controls(call) -> None:
+    with pytest.raises(ValueError, match="array"):
+        call()
+
+
 def test_source_feature_quantiles_reject_nonfinite_values() -> None:
     with pytest.raises(ValueError, match="finite"):
         source_feature_quantiles([[0.0], [float("nan")]])

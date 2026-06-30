@@ -34,7 +34,7 @@ class SourceRankTransformResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def fit_source_rank_reference(source_features, *, output: str = "uniform", clip_extremes: bool | str = True, epsilon: float = 1e-6) -> SourceRankReference:
+def fit_source_rank_reference(source_features, *, output: str = "uniform", clip_extremes: bool | str = True, epsilon: float | str = 1e-6) -> SourceRankReference:
     """Fit an empirical rank reference from source rows only."""
 
     source = _matrix(source_features, name="source_features")
@@ -146,10 +146,23 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise ValueError(message)
 
 
-def _epsilon(value: float | str) -> float:
+def _numeric_scalar(value: Any, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError("epsilon must be finite and in (0, 0.5).")
-    parsed = float(value)
+        raise ValueError(f"{name} must be a numeric scalar, not a boolean.")
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be a numeric scalar, not a NumPy array.")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a numeric scalar.") from exc
+
+
+def _epsilon(value: float | str) -> float:
+    message = "epsilon must be a finite numeric scalar in (0, 0.5)."
+    try:
+        parsed = _numeric_scalar(value, name="epsilon")
+    except ValueError as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0 or parsed >= 0.5:
-        raise ValueError("epsilon must be finite and in (0, 0.5).")
+        raise ValueError(message)
     return parsed
