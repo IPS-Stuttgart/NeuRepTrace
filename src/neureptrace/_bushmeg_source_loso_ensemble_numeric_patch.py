@@ -12,7 +12,9 @@ string disable aliases.
 The optional top-k pairwise reranker fits pairwise log-odds corrections between
 classes.  Apply each fitted logit once by splitting the correction evenly between
 the two classes; adding the full logit to one class and subtracting it from the
-other doubles the intended pairwise score difference.
+other doubles the intended pairwise score difference.  The default alpha grid is
+extended to 4.0 so the corrected half-split still explores the same maximum
+pairwise score difference as the old doubled implementation with alpha=2.0.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ _TARGET_MODULE = "neureptrace.bushmeg_source_loso_ensemble"
 _PATCH_MARKER = "_neureptrace_bushmeg_source_loso_ensemble_numeric_patch_installed"
 _FINDER_MARKER = "_neureptrace_bushmeg_source_loso_ensemble_numeric_finder"
 _DISABLE_RERANK_TEXT = {"", "none", "off", "false", "no"}
+_CORRECTED_RERANK_ALPHA_GRID = (0.0, 0.25, 0.5, 1.0, 2.0, 4.0)
 
 
 def _is_boolean_scalar(value: Any) -> bool:
@@ -87,6 +90,7 @@ def _patch_module(module: ModuleType) -> None:
     original_parse_float_grid = module._parse_float_grid
     original_fit_stacking_weights = module._fit_stacking_weights
     original_run = module.run_bushmeg_source_loso_ensemble
+    module.DEFAULT_RERANK_ALPHA_GRID = _CORRECTED_RERANK_ALPHA_GRID
 
     def _normalize_rerank_top_k(value: Any) -> int:
         if value is None:
