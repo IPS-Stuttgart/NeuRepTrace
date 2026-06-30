@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from neureptrace import _torch_weight_validation_patch as torch_weight_patch
 from neureptrace._torch_weight_validation_patch import _small_stratified_holdout
 from neureptrace.decoding import TorchMLPClassifier
 from neureptrace.decoding.cdan import TorchCDANClassifier
@@ -27,6 +28,37 @@ def _many_class_source_target() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     )
     target_features = source_features[:5] + np.asarray([0.05, 0.0])
     return source_features.astype(float), labels, target_features.astype(float)
+
+
+def test_torch_patch_install_skips_missing_optional_torch_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_import_module = torch_weight_patch.importlib.import_module
+    attempted_modules: list[str] = []
+
+    def import_module(name: str, *args, **kwargs):
+        attempted_modules.append(name)
+        if name == "neureptrace.decoding.cdan":
+            raise ModuleNotFoundError("No module named 'torch'", name="torch")
+        return original_import_module(name, *args, **kwargs)
+
+    monkeypatch.setattr(torch_weight_patch.importlib, "import_module", import_module)
+
+    torch_weight_patch.install()
+
+    assert "neureptrace.decoding.cdan" in attempted_modules
+
+
+def test_torch_patch_install_preserves_internal_import_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_import_module = torch_weight_patch.importlib.import_module
+
+    def import_module(name: str, *args, **kwargs):
+        if name == "neureptrace.decoding.cdan":
+            raise ModuleNotFoundError("No module named 'neureptrace.decoding.cdan'", name="neureptrace.decoding.cdan")
+        return original_import_module(name, *args, **kwargs)
+
+    monkeypatch.setattr(torch_weight_patch.importlib, "import_module", import_module)
+
+    with pytest.raises(ModuleNotFoundError, match="neureptrace.decoding.cdan"):
+        torch_weight_patch.install()
 
 
 def test_torch_mlp_rejects_unknown_class_weight_before_torch_initialization() -> None:
