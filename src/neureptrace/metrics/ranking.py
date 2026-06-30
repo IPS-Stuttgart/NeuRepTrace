@@ -82,9 +82,32 @@ def rank_class_scores(
 def _has_incompatible_array_label_shape(y_true: object, classes: object) -> bool:
     if not _is_matrix_label_array(y_true):
         return False
+    label_shape = tuple(y_true.shape[1:])
     if not _is_matrix_label_array(classes):
+        return not _sequence_labels_match_shape(classes, label_shape)
+    return label_shape != tuple(classes.shape[1:])
+
+
+def _sequence_labels_match_shape(values: object, label_shape: tuple[int, ...]) -> bool:
+    if isinstance(values, (str, bytes)):
+        return False
+    try:
+        items = list(values)
+    except TypeError:
+        return False
+    if not items:
         return True
-    return y_true.shape[1:] != classes.shape[1:]
+    return all(_label_item_shape(item) == label_shape for item in items)
+
+
+def _label_item_shape(value: object) -> tuple[int, ...]:
+    if isinstance(value, (str, bytes)):
+        return ()
+    if isinstance(value, np.ndarray):
+        return tuple(value.shape) if value.ndim != 0 else ()
+    if isinstance(value, (list, tuple)):
+        return tuple(np.asarray(value, dtype=object).shape)
+    return ()
 
 
 def _has_incompatible_class_matrix(classes: object, *, expected_n_classes: int) -> bool:
@@ -204,8 +227,8 @@ def _find_duplicate_class_label(class_order: np.ndarray):
 
 
 def _class_labels_equal(left, right) -> bool:
-    left = _as_python_scalar(left)
-    right = _as_python_scalar(right)
+    left = _as_comparable_label(left)
+    right = _as_comparable_label(right)
     try:
         comparison = left == right
     except (TypeError, ValueError):
@@ -224,6 +247,20 @@ def _class_labels_equal(left, right) -> bool:
         return bool(np.isscalar(left) and np.isscalar(right) and np.isnan(left) and np.isnan(right))
     except (TypeError, ValueError):
         return False
+
+
+def _as_comparable_label(value):
+    value = _as_python_scalar(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _as_comparable_label(value.item())
+        return tuple(_as_comparable_label(item) for item in value.tolist())
+    if isinstance(value, (list, tuple)):
+        return tuple(_as_comparable_label(item) for item in value)
+    if isinstance(value, dict):
+        pairs = [(_as_comparable_label(key), _as_comparable_label(item)) for key, item in value.items()]
+        return tuple(sorted(pairs, key=repr))
+    return value
 
 
 def _as_python_scalar(value):
