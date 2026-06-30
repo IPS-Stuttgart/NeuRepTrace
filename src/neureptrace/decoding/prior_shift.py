@@ -327,24 +327,36 @@ def _object_equal(left: Any, right: Any) -> bool:
         return False
 
 
+def _numeric_scalar(value: object, *, message: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+        raise ValueError(message)
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
 def _positive_int(value: int | str, *, name: str) -> int:
-    number = float(value)
+    message = f"{name} must be a positive integer."
+    number = _numeric_scalar(value, message=message)
     if not np.isfinite(number) or number % 1.0 != 0.0 or number < 1:
-        raise ValueError(f"{name} must be a positive integer.")
+        raise ValueError(message)
     return int(number)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    number = float(value)
+    message = f"{name} must be positive and finite."
+    number = _numeric_scalar(value, message=message)
     if not np.isfinite(number) or number <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return number
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
-    number = float(value)
+    message = f"{name} must be finite and non-negative."
+    number = _numeric_scalar(value, message=message)
     if not np.isfinite(number) or number < 0.0:
-        raise ValueError(f"{name} must be finite and non-negative.")
+        raise ValueError(message)
     return number
 
 

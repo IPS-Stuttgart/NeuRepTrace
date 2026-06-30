@@ -86,7 +86,7 @@ def fit_source_free_consensus_predict_proba(
     source_model: Any,
     target_features: Sequence[Sequence[float]] | np.ndarray,
     classes: Sequence[Any] | np.ndarray | None = None,
-    variants: Sequence[SourceFreeConsensusVariant | Mapping[str, Any] | str] | None = None,
+    variants: SourceFreeConsensusVariant | Mapping[str, Any] | str | Sequence[SourceFreeConsensusVariant | Mapping[str, Any] | str] | None = None,
     consensus_mode: ConsensusMode | str = "logit_mean",
     confidence_weight: float | str = 1.0,
     balance_weight: float | str = 1.0,
@@ -186,12 +186,19 @@ def estimate_consensus_variant_weights(
 
 
 def _coerce_variants(
-    variants: Sequence[SourceFreeConsensusVariant | Mapping[str, Any] | str] | None,
+    variants: SourceFreeConsensusVariant | Mapping[str, Any] | str | Sequence[SourceFreeConsensusVariant | Mapping[str, Any] | str] | None,
 ) -> tuple[SourceFreeConsensusVariant, ...]:
     if variants is None:
         return default_source_free_consensus_variants()
+    if isinstance(variants, (SourceFreeConsensusVariant, Mapping, str)):
+        variant_items = (variants,)
+    else:
+        try:
+            variant_items = tuple(variants)
+        except TypeError as exc:
+            raise ValueError("variants must contain names, mappings, or SourceFreeConsensusVariant instances.") from exc
     specs: list[SourceFreeConsensusVariant] = []
-    for index, variant in enumerate(variants):
+    for index, variant in enumerate(variant_items):
         if isinstance(variant, SourceFreeConsensusVariant):
             specs.append(variant)
         elif isinstance(variant, str):

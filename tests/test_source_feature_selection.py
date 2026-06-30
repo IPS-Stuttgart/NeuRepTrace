@@ -5,10 +5,12 @@ import pytest
 
 from neureptrace.decoding.source_feature_selection import (
     SOURCE_FEATURE_SELECTION_CATEGORY,
+    SourceFeatureSelectionConfig,
     fit_source_feature_selection,
     normalize_score_method,
     select_top_source_features,
     source_feature_scores,
+    source_feature_selection_config,
 )
 
 
@@ -63,6 +65,45 @@ def test_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="No features selected"):
         select_top_source_features([0.1, 0.2], k=2, min_score=1.0)
+
+
+def test_feature_selection_config_rejects_malformed_numeric_controls() -> None:
+    for kwargs, match in [
+        ({"k": True}, "k"),
+        ({"k": np.asarray([1])}, "k"),
+        ({"min_score": True}, "min_score"),
+        ({"min_score": np.asarray([0.1])}, "min_score"),
+        ({"epsilon": False}, "epsilon"),
+        ({"epsilon": np.asarray([1e-12])}, "epsilon"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            source_feature_selection_config(**kwargs)
+
+
+def test_feature_selection_config_preserves_numpy_numeric_scalars() -> None:
+    cfg = source_feature_selection_config(k=np.int64(2), min_score=np.float64(0.1), epsilon=np.float64(1e-9))
+
+    assert cfg.k == 2
+    assert cfg.min_score == pytest.approx(0.1)
+    assert cfg.epsilon == pytest.approx(1e-9)
+
+
+def test_select_top_features_rejects_malformed_numeric_controls() -> None:
+    with pytest.raises(ValueError, match="k"):
+        select_top_source_features([0.1, 0.2], k=True)
+
+    with pytest.raises(ValueError, match="min_score"):
+        select_top_source_features([0.1, 0.2], min_score=np.asarray([0.1]))
+
+
+def test_direct_feature_selection_config_is_revalidated() -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        fit_source_feature_selection(
+            source_features=[[0.0], [1.0]],
+            source_labels=[0, 1],
+            test_features=[[0.5]],
+            config=SourceFeatureSelectionConfig(epsilon=True),
+        )
 
 
 def test_source_feature_selection_rejects_width_mismatch() -> None:

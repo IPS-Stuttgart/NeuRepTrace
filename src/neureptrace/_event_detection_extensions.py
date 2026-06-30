@@ -11,6 +11,7 @@ from neureptrace._onset_detection_runs import detection_runs as _enumerate_detec
 from neureptrace._onset_detection_runs import first_detection_run as _select_first_detection_run
 
 _BOOL_NUMERIC_PATCH_MARKER = "_neureptrace_onset_detection_bool_numeric_patch_installed"
+_OPTION_VALIDATION_PATCH_MARKER = "_neureptrace_onset_detection_option_validation_patch_installed"
 
 
 def _is_boolean_numeric(value: object) -> bool:
@@ -19,6 +20,12 @@ def _is_boolean_numeric(value: object) -> bool:
 
 def _boolean_numeric_mask(values: pd.Series) -> pd.Series:
     return values.map(_is_boolean_numeric).fillna(False).astype(bool)
+
+
+def _validate_require_stable_prediction(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    raise ValueError("require_stable_prediction must be a boolean.")
 
 
 def _label_values_from_probability_columns(prob_columns: Sequence[str]) -> tuple[int, ...]:
@@ -337,8 +344,149 @@ def _install_threshold_annotation_extensions() -> None:
     onset._threshold_annotation_compat_patched = True  # noqa: SLF001
 
 
+def _install_option_validation_guards() -> None:
+    """Validate public onset-detector option controls before truthiness coercion."""
+    from neureptrace import onset_detection as onset
+    from neureptrace._onset_utils import validate_detection_options
+
+    if getattr(onset, _OPTION_VALIDATION_PATCH_MARKER, False):
+        return
+
+    original_annotate_threshold_crossings = onset.annotate_threshold_crossings
+    original_detect_onsets = onset.detect_onsets
+    original_detect_onsets_from_csvs = onset.detect_onsets_from_csvs
+
+    def _validate_public_options(
+        *,
+        threshold_quantile: float,
+        threshold_method: str,
+        min_consecutive: int,
+        min_duration: float | None,
+        require_stable_prediction: bool,
+    ) -> bool:
+        validate_detection_options(
+            threshold_quantile=threshold_quantile,
+            threshold_method=threshold_method,
+            threshold_methods=onset.THRESHOLD_METHODS,
+            min_consecutive=min_consecutive,
+            min_duration=min_duration,
+        )
+        return _validate_require_stable_prediction(require_stable_prediction)
+
+    def annotate_threshold_crossings(
+        observations: pd.DataFrame,
+        *,
+        threshold_window: tuple[float, float] = onset.DEFAULT_THRESHOLD_WINDOW,
+        threshold_quantile: float = onset.DEFAULT_THRESHOLD_QUANTILE,
+        score_column: str = "confidence",
+        threshold_method: str = "point",
+        min_consecutive: int = 1,
+        min_duration: float | None = None,
+        require_stable_prediction: bool = False,
+    ) -> pd.DataFrame:
+        require_stable_prediction = _validate_public_options(
+            threshold_quantile=threshold_quantile,
+            threshold_method=threshold_method,
+            min_consecutive=min_consecutive,
+            min_duration=min_duration,
+            require_stable_prediction=require_stable_prediction,
+        )
+        return original_annotate_threshold_crossings(
+            observations,
+            threshold_window=threshold_window,
+            threshold_quantile=threshold_quantile,
+            score_column=score_column,
+            threshold_method=threshold_method,
+            min_consecutive=min_consecutive,
+            min_duration=min_duration,
+            require_stable_prediction=require_stable_prediction,
+        )
+
+    def detect_onsets(
+        observations: pd.DataFrame,
+        *,
+        threshold_window: tuple[float, float] = onset.DEFAULT_THRESHOLD_WINDOW,
+        threshold_quantile: float = onset.DEFAULT_THRESHOLD_QUANTILE,
+        score_column: str = "confidence",
+        threshold_method: str = "point",
+        detection_start: float | None = None,
+        detection_window: tuple[float, float] | None = None,
+        min_consecutive: int = 1,
+        min_duration: float | None = None,
+        require_stable_prediction: bool = False,
+    ) -> pd.DataFrame:
+        require_stable_prediction = _validate_public_options(
+            threshold_quantile=threshold_quantile,
+            threshold_method=threshold_method,
+            min_consecutive=min_consecutive,
+            min_duration=min_duration,
+            require_stable_prediction=require_stable_prediction,
+        )
+        return original_detect_onsets(
+            observations,
+            threshold_window=threshold_window,
+            threshold_quantile=threshold_quantile,
+            score_column=score_column,
+            threshold_method=threshold_method,
+            detection_start=detection_start,
+            detection_window=detection_window,
+            min_consecutive=min_consecutive,
+            min_duration=min_duration,
+            require_stable_prediction=require_stable_prediction,
+        )
+
+    def detect_onsets_from_csvs(
+        observation_csvs: list,
+        *,
+        threshold_window: tuple[float, float] = onset.DEFAULT_THRESHOLD_WINDOW,
+        threshold_quantile: float = onset.DEFAULT_THRESHOLD_QUANTILE,
+        score_column: str = "confidence",
+        threshold_method: str = "point",
+        detection_start: float | None = None,
+        event_window: tuple[float, float] | None = None,
+        min_consecutive: int = 1,
+        min_duration: float | None = None,
+        require_stable_prediction: bool = False,
+        out_events=None,
+        out_summary=None,
+        out_thresholded_observations=None,
+        out_threshold_summary=None,
+        detection_window: tuple[float, float] = onset.DEFAULT_DETECTION_WINDOW,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        require_stable_prediction = _validate_public_options(
+            threshold_quantile=threshold_quantile,
+            threshold_method=threshold_method,
+            min_consecutive=min_consecutive,
+            min_duration=min_duration,
+            require_stable_prediction=require_stable_prediction,
+        )
+        return original_detect_onsets_from_csvs(
+            observation_csvs,
+            threshold_window=threshold_window,
+            threshold_quantile=threshold_quantile,
+            score_column=score_column,
+            threshold_method=threshold_method,
+            detection_start=detection_start,
+            event_window=event_window,
+            min_consecutive=min_consecutive,
+            min_duration=min_duration,
+            require_stable_prediction=require_stable_prediction,
+            out_events=out_events,
+            out_summary=out_summary,
+            out_thresholded_observations=out_thresholded_observations,
+            out_threshold_summary=out_threshold_summary,
+            detection_window=detection_window,
+        )
+
+    onset.annotate_threshold_crossings = annotate_threshold_crossings
+    onset.detect_onsets = detect_onsets
+    onset.detect_onsets_from_csvs = detect_onsets_from_csvs
+    setattr(onset, _OPTION_VALIDATION_PATCH_MARKER, True)
+
+
 def install() -> None:
     _install_onset_detection_extensions()
     _install_probability_suffix_extensions()
     _install_bool_numeric_guards()
     _install_threshold_annotation_extensions()
+    _install_option_validation_guards()

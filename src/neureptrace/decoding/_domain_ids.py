@@ -23,7 +23,7 @@ def atomic_domain_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
         return _object_vector([array.item()])
     if array.ndim == 1:
         return array.reshape(-1)
-    if array.ndim == 2 and 1 in array.shape:
+    if array.ndim == 2 and array.shape[1] == 1:
         return array.reshape(-1)
     rows = [tuple(row.tolist()) for row in array.reshape(array.shape[0], -1)]
     return _object_vector(rows)

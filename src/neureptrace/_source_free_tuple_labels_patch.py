@@ -39,14 +39,48 @@ def _sequence_label_from_row(row: np.ndarray) -> Any:
     return tuple(value.item() if isinstance(value, np.generic) else value for value in row.tolist())
 
 
+def _as_python_scalar(value: Any) -> Any:
+    return value.item() if isinstance(value, np.generic) else value
+
+
+def _is_nan_scalar(value: Any) -> bool:
+    value = _as_python_scalar(value)
+    try:
+        return bool(np.isscalar(value) and np.isnan(value))
+    except (TypeError, ValueError):
+        return False
+
+
 def _labels_equal(left: Any, right: Any) -> bool:
+    left = _as_python_scalar(left)
+    right = _as_python_scalar(right)
+    if _is_nan_scalar(left) and _is_nan_scalar(right):
+        return True
+    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
+        try:
+            return bool(np.array_equal(left, right, equal_nan=True))
+        except TypeError:
+            return bool(np.array_equal(left, right))
+    if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+        return len(left) == len(right) and all(
+            _labels_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right, strict=True)
+        )
     try:
         equal = left == right
     except Exception:
         return False
     if isinstance(equal, np.ndarray):
-        return bool(np.array_equal(left, right))
-    return bool(equal)
+        try:
+            return bool(np.array_equal(left, right, equal_nan=True))
+        except TypeError:
+            return bool(np.array_equal(left, right))
+    try:
+        if bool(equal):
+            return True
+    except (TypeError, ValueError):
+        return False
+    return _is_nan_scalar(left) and _is_nan_scalar(right)
 
 
 def _ensure_unique_labels(labels: np.ndarray, *, name: str) -> None:
@@ -76,7 +110,12 @@ def _resolve_classes(model: Any, classes: np.ndarray | list[Any] | tuple[Any, ..
     return resolved
 
 
-def _align_probability_columns(probabilities: np.ndarray, *, model_classes: np.ndarray, classes: np.ndarray) -> np.ndarray:
+def _align_probability_columns(
+    probabilities: np.ndarray,
+    *,
+    model_classes: np.ndarray,
+    classes: np.ndarray,
+) -> np.ndarray:
     probabilities = np.asarray(probabilities, dtype=float)
     model_classes = _as_label_vector(model_classes, name="source_model.classes_")
     classes = _as_label_vector(classes, name="classes")

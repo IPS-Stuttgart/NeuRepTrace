@@ -1,9 +1,14 @@
-"""Runtime guardrail for M-CCA subject PCA component parsing.
+"""Runtime guardrails for M-CCA subject PCA component parsing.
 
 ``subject_pca_components`` caps the within-subject whitening rank before the
 multiset CCA solve. Python and NumPy booleans are integer-like, and bare
 ``int(...)`` conversion silently truncates finite fractional values. Both cases
 can turn a configuration mistake into a valid but unintended low-rank alignment.
+
+The public config builders also expose the optional
+``mcca_subject_pca_components`` knob. They should treat disabled string aliases
+as ``None`` and reject array-like values before the legacy membership checks can
+raise ``TypeError`` or coerce single-element arrays as scalar component counts.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ from __future__ import annotations
 import importlib.abc
 import importlib.util
 import sys
+from collections.abc import Mapping
 from functools import wraps
 from types import ModuleType
 from typing import Any
@@ -18,9 +24,15 @@ from typing import Any
 import numpy as np
 
 _TARGET_MODULE = "neureptrace.decoding.mcca"
+_SOURCE_ALIGNMENT_MODULE = "neureptrace.decoding.source_alignment"
+_UNLABELED_CALIBRATION_MODULE = "neureptrace.decoding.unlabeled_calibration_alignment"
 _PATCH_MARKER = "_neureptrace_mcca_subject_pca_components_patch_installed"
 _FINDER_MARKER = "_neureptrace_mcca_subject_pca_components_finder"
+_SOURCE_CONFIG_PATCH_MARKER = "_neureptrace_mcca_subject_pca_config_patch_installed"
+_UNLABELED_CONFIG_PATCH_MARKER = "_neureptrace_unlabeled_mcca_subject_pca_config_patch_installed"
 _ERROR_MESSAGE = "subject_pca_components must be a positive integer, infinity, or None."
+_CONFIG_ERROR_MESSAGE = "mcca_subject_pca_components must be a scalar component count, infinity, or None."
+_DISABLED_OPTIONAL_COMPONENT_STRINGS = {"", "none", "null"}
 
 
 def _normalize_subject_pca_components(value: Any) -> int | float | None:
@@ -45,6 +57,21 @@ def _normalize_subject_pca_components(value: Any) -> int | float | None:
     return components
 
 
+def _normalize_optional_subject_pca_config(value: Any) -> Any:
+    """Normalize disabled aliases and reject array-like optional config values."""
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _DISABLED_OPTIONAL_COMPONENT_STRINGS:
+            return None
+        return value
+    if isinstance(value, (np.ndarray, list, tuple, set, frozenset, Mapping)):
+        raise ValueError(_CONFIG_ERROR_MESSAGE)
+    return value
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
@@ -59,6 +86,82 @@ def _patch_module(module: ModuleType) -> None:
 
     module._fit_subject_prewhitener = _fit_subject_prewhitener
     setattr(module, _PATCH_MARKER, True)
+
+
+def _patch_source_alignment_config() -> None:
+    source_alignment = importlib.import_module(_SOURCE_ALIGNMENT_MODULE)
+    original_config = source_alignment.source_alignment_config
+    if getattr(original_config, _SOURCE_CONFIG_PATCH_MARKER, False):
+        return
+
+    @wraps(original_config)
+    def source_alignment_config(
+        *,
+        method: str | None = None,
+        anchor_mode: str | None = None,
+        anchor_column: str | None = None,
+        repetition_cap: int | str | None = source_alignment.DEFAULT_ALIGNMENT_REPETITION_CAP,
+        components: int | float | str | None = source_alignment.DEFAULT_ALIGNMENT_COMPONENTS,
+        times: Any = None,
+        target_projection: str | None = "group_projection",
+        target_calibration_per_anchor: int | str | None = 1,
+        target_calibration_seed: int = 13,
+        hyperalignment_iterations: int = 10,
+        mcca_regularization: float = 1e-6,
+        mcca_subject_pca_components: int | float | str | None = None,
+    ):
+        return original_config(
+            method=method,
+            anchor_mode=anchor_mode,
+            anchor_column=anchor_column,
+            repetition_cap=repetition_cap,
+            components=components,
+            times=times,
+            target_projection=target_projection,
+            target_calibration_per_anchor=target_calibration_per_anchor,
+            target_calibration_seed=target_calibration_seed,
+            hyperalignment_iterations=hyperalignment_iterations,
+            mcca_regularization=mcca_regularization,
+            mcca_subject_pca_components=_normalize_optional_subject_pca_config(mcca_subject_pca_components),
+        )
+
+    setattr(source_alignment_config, _SOURCE_CONFIG_PATCH_MARKER, True)
+    source_alignment.source_alignment_config = source_alignment_config
+
+
+def _patch_unlabeled_calibration_config() -> None:
+    unlabeled_alignment = importlib.import_module(_UNLABELED_CALIBRATION_MODULE)
+    original_config = unlabeled_alignment.unlabeled_calibration_alignment_config
+    if getattr(original_config, _UNLABELED_CONFIG_PATCH_MARKER, False):
+        return
+
+    @wraps(original_config)
+    def unlabeled_calibration_alignment_config(
+        *,
+        method: str = "hyperalignment",
+        anchor_mode: str = "stimulus_id_mean",
+        repetition_cap: int | str | None = None,
+        repetition_selection: str = "random",
+        repetition_seed: int | str | None = 0,
+        components: int | float | str | None = 64,
+        hyperalignment_iterations: int | str = 10,
+        mcca_regularization: float | str = 1e-6,
+        mcca_subject_pca_components: int | float | str | None = None,
+    ):
+        return original_config(
+            method=method,
+            anchor_mode=anchor_mode,
+            repetition_cap=repetition_cap,
+            repetition_selection=repetition_selection,
+            repetition_seed=repetition_seed,
+            components=components,
+            hyperalignment_iterations=hyperalignment_iterations,
+            mcca_regularization=mcca_regularization,
+            mcca_subject_pca_components=_normalize_optional_subject_pca_config(mcca_subject_pca_components),
+        )
+
+    setattr(unlabeled_calibration_alignment_config, _UNLABELED_CONFIG_PATCH_MARKER, True)
+    unlabeled_alignment.unlabeled_calibration_alignment_config = unlabeled_calibration_alignment_config
 
 
 class _MCCASubjectPCAComponentsPatchLoader(importlib.abc.Loader):
@@ -119,8 +222,10 @@ def install() -> None:
     if loaded is not None:
         _patch_module(loaded)
 
-    if any(getattr(finder, _FINDER_MARKER, False) for finder in sys.meta_path):
-        return
-    finder = _MCCASubjectPCAComponentsPatchFinder()
-    setattr(finder, _FINDER_MARKER, True)
-    sys.meta_path.insert(0, finder)
+    if not any(getattr(finder, _FINDER_MARKER, False) for finder in sys.meta_path):
+        finder = _MCCASubjectPCAComponentsPatchFinder()
+        setattr(finder, _FINDER_MARKER, True)
+        sys.meta_path.insert(0, finder)
+
+    _patch_source_alignment_config()
+    _patch_unlabeled_calibration_config()

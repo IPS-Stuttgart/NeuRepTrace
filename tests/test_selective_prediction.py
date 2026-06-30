@@ -85,6 +85,41 @@ def test_invalid_probability_rows_are_rejected() -> None:
         selective_predict([[0.8, -0.2]])
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "name"),
+    [
+        ({"epsilon": np.asarray(1e-12)}, "epsilon"),
+        ({"confidence_threshold": np.asarray([0.75])}, "confidence_threshold"),
+        ({"max_entropy": np.asarray(0.68)}, "max_entropy"),
+        ({"min_margin": np.asarray([0.3])}, "min_margin"),
+        ({"target_coverage": np.asarray([0.5])}, "target_coverage"),
+    ],
+)
+def test_array_valued_scalar_controls_are_rejected(kwargs: dict[str, object], name: str) -> None:
+    with pytest.raises(ValueError, match=name):
+        selective_predict([[0.9, 0.1], [0.2, 0.8]], **kwargs)  # type: ignore[arg-type]
+
+
+def test_probability_entropy_rejects_array_valued_epsilon() -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        probability_entropy([[0.5, 0.5]], epsilon=np.asarray([1e-12]))  # type: ignore[arg-type]
+
+
+def test_numpy_scalar_controls_remain_allowed() -> None:
+    result = selective_predict(
+        [[0.9, 0.1], [0.6, 0.4]],
+        confidence_threshold=np.float64(0.5),
+        max_entropy=np.float64(1.0),
+        min_margin=np.float64(0.1),
+        epsilon=np.float64(1e-12),
+    )
+
+    assert result.selected_mask.tolist() == [True, True]
+    assert result.metadata["selective_prediction_confidence_threshold"] == pytest.approx(0.5)
+    assert result.metadata["selective_prediction_max_entropy"] == pytest.approx(1.0)
+    assert result.metadata["selective_prediction_min_margin"] == pytest.approx(0.1)
+
+
 def test_target_labels_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
         selective_predict(

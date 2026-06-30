@@ -151,6 +151,43 @@ def test_blockwise_prior_shift_rejects_tiny_blocks() -> None:
         adapt_probability_blocks_for_prior_shift(probabilities, ["a", "b"], min_block_rows=2)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"max_iter": True}, "max_iter"),
+        ({"max_iter": np.asarray(3)}, "max_iter"),
+        ({"tol": False}, "tol"),
+        ({"tol": np.asarray([1e-3])}, "tol"),
+        ({"smoothing": np.asarray(0.0)}, "smoothing"),
+        ({"damping": np.asarray([0.5])}, "damping"),
+        ({"epsilon": np.asarray(1e-12)}, "epsilon"),
+    ],
+)
+def test_prior_shift_rejects_boolean_and_array_scalar_controls(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        adapt_probabilities_for_prior_shift([[0.5, 0.5]], **kwargs)
+
+
+def test_blockwise_prior_shift_rejects_array_min_block_rows() -> None:
+    probabilities = np.asarray([[0.6, 0.4], [0.4, 0.6]])
+
+    with pytest.raises(ValueError, match="min_block_rows"):
+        adapt_probability_blocks_for_prior_shift(probabilities, ["a", "a"], min_block_rows=np.asarray(1))
+
+
+def test_prior_shift_accepts_numpy_numeric_scalar_controls() -> None:
+    result = adapt_probabilities_for_prior_shift(
+        [[0.6, 0.4], [0.4, 0.6]],
+        max_iter=np.int64(2),
+        tol=np.float64(1e-8),
+        smoothing=np.float64(0.0),
+        damping=np.float64(1.0),
+        epsilon=np.float64(1e-12),
+    )
+
+    assert result.probabilities.shape == (2, 2)
+
+
 def test_prior_from_labels_uses_source_labels_only() -> None:
     prior, classes = prior_from_labels(["left", "left", "right", "left"], classes=["left", "right"])
 

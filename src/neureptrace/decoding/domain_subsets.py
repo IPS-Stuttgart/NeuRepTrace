@@ -27,13 +27,25 @@ def domain_subsets(domains, subset_size=None):
     return tuple(subsets)
 
 
-def _normalize_subset_size(value) -> int:
+def _scalar_subset_size_value(value, *, message: str):
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError("subset_size must be a positive integer.")
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
+    return value
+
+
+def _normalize_subset_size(value) -> int:
+    message = "subset_size must be a positive integer."
+    scalar = _scalar_subset_size_value(value, message=message)
     try:
-        parsed = float(value)
+        parsed = float(scalar)
     except (TypeError, ValueError) as exc:
-        raise ValueError("subset_size must be a positive integer.") from exc
-    if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
-        raise ValueError("subset_size must be a positive integer.")
+        raise ValueError(message) from exc
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
+        raise ValueError(message)
     return int(parsed)

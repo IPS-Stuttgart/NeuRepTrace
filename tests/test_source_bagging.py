@@ -70,6 +70,12 @@ def test_source_bagging_config_validation() -> None:
         source_bagging_config(n_estimators=0)
 
 
+@pytest.mark.parametrize("value", [np.asarray(3), np.asarray([3]), np.asarray(True)])
+def test_source_bagging_rejects_array_valued_n_estimators(value: object) -> None:
+    with pytest.raises(ValueError, match="n_estimators"):
+        source_bagging_config(n_estimators=value)
+
+
 @pytest.mark.parametrize("option_name", ["sample_fraction", "feature_fraction"])
 def test_source_bagging_rejects_fraction_above_one(option_name: str) -> None:
     with pytest.raises(ValueError, match=option_name):
@@ -87,6 +93,20 @@ def test_source_bagging_rejects_direct_config_fraction_above_one() -> None:
             source_labels=source_labels,
             test_features=test_features,
             config=SourceBaggingConfig(n_estimators=1, feature_fraction=1.5),
+        )
+
+
+def test_source_bagging_rejects_direct_config_invalid_n_estimators() -> None:
+    source_features = np.asarray([[-2.0], [-1.0], [1.0], [2.0]], dtype=float)
+    source_labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+    test_features = np.asarray([[-1.8], [1.8]], dtype=float)
+
+    with pytest.raises(ValueError, match="n_estimators"):
+        fit_source_bagging_decoder(
+            source_features=source_features,
+            source_labels=source_labels,
+            test_features=test_features,
+            config=SourceBaggingConfig(n_estimators=0),
         )
 
 

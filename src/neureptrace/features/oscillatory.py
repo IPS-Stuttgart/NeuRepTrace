@@ -91,6 +91,8 @@ def _normalize_window_endpoint(
         allow_negative_infinity=allow_negative_infinity,
         allow_positive_infinity=allow_positive_infinity,
     )
+    if isinstance(value, np.ndarray):
+        raise ValueError(message)
     if _is_bool_like(value):
         raise ValueError(message)
     try:

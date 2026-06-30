@@ -16,6 +16,19 @@ import pandas as pd
 
 DEFAULT_SUMMARY_METRICS = ("balanced_accuracy", "accuracy", "top2_accuracy", "top3_accuracy", "log_loss")
 DEFAULT_GROUP_COLUMN = "outer_test_subject"
+PREDICTION_KEY_DISAMBIGUATORS = (
+    "analysis",
+    "fold_index",
+    "window_center",
+    "window_start",
+    "window_stop",
+    "target_calibration_per_class",
+    "k_per_class",
+    "target_calibration_seed",
+    "target_calibration_effective_seed",
+    "target_repeat",
+    "repeat_index",
+)
 
 
 def _existing_columns(frame: pd.DataFrame, columns: Sequence[str]) -> list[str]:
@@ -63,7 +76,13 @@ def compare_summary_frames(
 def _prediction_key_columns(reference: pd.DataFrame, candidate: pd.DataFrame) -> list[str]:
     for columns in (("outer_test_subject", "trial_index"), ("participant", "trial_index"), ("participant", "trial"), ("validation_trial_index",), ("trial_index",)):
         if all(column in reference.columns and column in candidate.columns for column in columns):
-            return list(columns)
+            base_columns = list(columns)
+            disambiguators = [
+                column
+                for column in PREDICTION_KEY_DISAMBIGUATORS
+                if column in reference.columns and column in candidate.columns and column not in base_columns
+            ]
+            return [*base_columns, *disambiguators]
     return []
 
 
