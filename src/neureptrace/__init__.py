@@ -131,6 +131,7 @@ from . import (  # noqa: E402
     _source_alignment_times_validation_patch,
     _source_bagging_fraction_bounds_patch,
     _source_domain_generalization_composite_patch,
+    _source_ensemble_tuple_domains_patch,
     _source_free_standardize_target_patch,
     _source_free_probability_rows_patch,
     _source_free_soft_prototypes_patch,
@@ -289,6 +290,7 @@ _source_alignment_target_seed_patch.install()
 _source_alignment_cli_choices_patch.install()
 _source_bagging_fraction_bounds_patch.install()
 _source_domain_generalization_composite_patch.install()
+_source_ensemble_tuple_domains_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_probability_rows_patch.install()
 _source_free_soft_prototypes_patch.install()
