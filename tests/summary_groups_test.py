@@ -7,7 +7,8 @@ _MODULE_NAME = _PACKAGE + "." + _TOPIC + "_" + "det" + "ection"
 
 def _case():
     module = __import__(_MODULE_NAME, fromlist=["x"])
-    assert module
+    names = dir(module)
+    assert names
     assert pd.DataFrame().empty
 
 
