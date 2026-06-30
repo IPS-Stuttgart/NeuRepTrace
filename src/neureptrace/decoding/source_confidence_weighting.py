@@ -177,12 +177,37 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
 
 
 def _label_indices(values: Sequence[int] | np.ndarray, *, expected_length: int, n_classes: int) -> np.ndarray:
-    labels = np.asarray(values, dtype=int).reshape(-1)
-    if labels.shape[0] != expected_length:
+    shape_message = "source_labels must be one-dimensional."
+    value_message = "source_labels must contain integer class indices."
+    try:
+        raw = np.asarray(values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(value_message) from exc
+    if raw.dtype == np.dtype(bool) or _contains_boolean_label(raw):
+        raise ValueError(value_message)
+    raw = np.squeeze(raw)
+    if raw.ndim == 0:
+        raw = raw.reshape(1)
+    if raw.ndim != 1:
+        raise ValueError(shape_message)
+    if raw.shape[0] != expected_length:
         raise ValueError("source_labels must contain one label per probability row.")
+    try:
+        numeric = np.asarray(raw, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(value_message) from exc
+    if not np.all(np.isfinite(numeric)) or not np.all(np.equal(numeric, np.floor(numeric))):
+        raise ValueError(value_message)
+    labels = numeric.astype(np.int64, copy=False)
     if np.any(labels < 0) or np.any(labels >= n_classes):
         raise ValueError("source_labels contain class indices outside the probability columns.")
     return labels
+
+
+def _contains_boolean_label(values: np.ndarray) -> bool:
+    if values.dtype != object:
+        return False
+    return any(isinstance(value, (bool, np.bool_)) for value in values.reshape(-1).tolist())
 
 
 def _unit_interval_float(value: float | str, *, name: str) -> float:

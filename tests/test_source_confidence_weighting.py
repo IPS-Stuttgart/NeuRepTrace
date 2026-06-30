@@ -39,6 +39,30 @@ def test_correct_confidence_uses_source_labels() -> None:
     assert result.metadata["source_confidence_weighting_uses_source_labels"] is True
 
 
+def test_correct_confidence_accepts_integral_column_source_labels() -> None:
+    probabilities = np.asarray([[0.9, 0.1], [0.2, 0.8]], dtype=float)
+
+    scores = confidence_scores(probabilities, labels=np.asarray([[0.0], [1.0]]), mode="correct_confidence")
+
+    assert scores.tolist() == pytest.approx([0.9, 0.8])
+
+
+@pytest.mark.parametrize(
+    "bad_labels",
+    [
+        [0.9, 1],
+        [True, False],
+        [0, np.nan],
+        np.asarray([[0, 1], [1, 0]]),
+    ],
+)
+def test_correct_confidence_rejects_malformed_source_labels(bad_labels) -> None:
+    probabilities = np.asarray([[0.9, 0.1], [0.2, 0.8]], dtype=float)
+
+    with pytest.raises(ValueError, match="source_labels"):
+        confidence_scores(probabilities, labels=bad_labels, mode="correct_confidence")
+
+
 def test_margin_and_entropy_scores() -> None:
     probabilities = np.asarray([[0.8, 0.2], [0.5, 0.5]], dtype=float)
 
