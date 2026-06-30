@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_knn import (
     SOURCE_KNN_CATEGORY,
+    SourceKNNConfig,
     fit_source_knn_decoder,
     fit_source_knn_reference,
     normalize_weight_mode,
@@ -105,6 +106,34 @@ def test_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="k"):
         fit_source_knn_decoder(source_features=[[0.0], [1.0]], source_labels=[0, 1], test_features=[[0.5]], config={"k": 0})
+
+
+@pytest.mark.parametrize("bad_k", [True, False, np.bool_(True)])
+def test_source_knn_rejects_boolean_k(bad_k) -> None:
+    with pytest.raises(ValueError, match="k"):
+        source_knn_config(k=bad_k)
+
+    with pytest.raises(ValueError, match="k"):
+        fit_source_knn_decoder(
+            source_features=[[0.0], [1.0]],
+            source_labels=[0, 1],
+            test_features=[[0.5]],
+            config=SourceKNNConfig(k=bad_k),
+        )
+
+
+@pytest.mark.parametrize("bad_epsilon", [True, False, np.bool_(True)])
+def test_source_knn_rejects_boolean_epsilon(bad_epsilon) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        source_knn_config(epsilon=bad_epsilon)
+
+    with pytest.raises(ValueError, match="epsilon"):
+        fit_source_knn_decoder(
+            source_features=[[0.0], [1.0]],
+            source_labels=[0, 1],
+            test_features=[[0.5]],
+            config=SourceKNNConfig(epsilon=bad_epsilon),
+        )
 
 
 def test_source_knn_rejects_width_mismatch() -> None:

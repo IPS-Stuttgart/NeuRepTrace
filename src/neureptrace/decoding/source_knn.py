@@ -18,6 +18,7 @@ SOURCE_KNN_CATEGORY = "1_strict_source_only"
 WEIGHT_MODES = ("uniform", "distance")
 DEFAULT_K = 5
 DEFAULT_EPSILON = 1e-8
+_K_ERROR = "k must be a positive integer, 'all', or 'full'."
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +155,8 @@ def source_knn_config(
 ) -> SourceKNNConfig:
     """Normalize source-kNN options."""
 
+    if isinstance(k, (bool, np.bool_)):
+        raise ValueError(_K_ERROR)
     return SourceKNNConfig(
         k=k,
         weights=normalize_weight_mode(weights),
@@ -174,6 +177,9 @@ def normalize_weight_mode(value: str | None) -> str:
 
 def _coerce_config(config: SourceKNNConfig | Mapping[str, Any]) -> SourceKNNConfig:
     if isinstance(config, SourceKNNConfig):
+        if isinstance(config.k, (bool, np.bool_)):
+            raise ValueError(_K_ERROR)
+        _positive_float(config.epsilon, name="epsilon")
         return config
     return source_knn_config(**dict(config))
 
@@ -201,15 +207,23 @@ def _metadata(reference: SourceKNNReference, *, n_test_rows: int) -> dict[str, A
 
 
 def _resolve_k(value: int | str, *, n_source: int) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(_K_ERROR)
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"all", "full"}:
             return int(n_source)
-        parsed = float(text)
+        try:
+            parsed = float(text)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(_K_ERROR) from exc
     else:
-        parsed = float(value)
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(_K_ERROR) from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
-        raise ValueError("k must be a positive integer, 'all', or 'full'.")
+        raise ValueError(_K_ERROR)
     return min(int(parsed), int(n_source))
 
 
@@ -288,9 +302,19 @@ def _label_index(classes: np.ndarray, label: Any) -> int | None:
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be positive and finite."
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.generic):
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
