@@ -352,17 +352,30 @@ def _sequence_values_equal(left: Any, right: Any) -> bool:
     return all(_values_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
 
 
+def _numeric_scalar(value: Any, *, message: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        raise ValueError(message)
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be positive and finite."
+    parsed = _numeric_scalar(value, message=message)
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
 def _unit_interval_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be in [0, 1]."
+    parsed = _numeric_scalar(value, message=message)
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
-        raise ValueError(f"{name} must be in [0, 1].")
+        raise ValueError(message)
     return parsed
 
 
