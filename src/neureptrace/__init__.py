@@ -104,6 +104,7 @@ from . import (  # noqa: E402
     _pls_da_composite_labels_patch,
     _precomputed_foundation_row_id_patch,
     _probability_stacking_group_summary_patch,
+    _probability_stacking_bool_validation_patch,
     _random_state_config_patch,
     _reaction_time_trial_index_base_patch,
     _reaction_time_trial_value_type_patch,
@@ -130,6 +131,7 @@ from . import (  # noqa: E402
     _source_alignment_target_seed_patch,
     _source_alignment_times_validation_patch,
     _source_bagging_fraction_bounds_patch,
+    _source_centroid_numeric_config_patch,
     _source_domain_generalization_composite_patch,
     _source_ensemble_tuple_domains_patch,
     _source_free_standardize_target_patch,
@@ -227,6 +229,7 @@ _observation_ensemble_string_groups_patch.install()
 _observation_ensemble_ungrouped_metrics_patch.install()
 _observation_ensemble_missing_label_patch.install()
 _probability_stacking_group_summary_patch.install()
+_probability_stacking_bool_validation_patch.install()
 _pls_da_composite_labels_patch.install()
 _precomputed_foundation_row_id_patch.install()
 _openneuro_alignment_compare_missing_context_patch.install()
@@ -289,6 +292,7 @@ _source_alignment_times_validation_patch.install()
 _source_alignment_target_seed_patch.install()
 _source_alignment_cli_choices_patch.install()
 _source_bagging_fraction_bounds_patch.install()
+_source_centroid_numeric_config_patch.install()
 _source_domain_generalization_composite_patch.install()
 _source_ensemble_tuple_domains_patch.install()
 _source_free_standardize_target_patch.install()
