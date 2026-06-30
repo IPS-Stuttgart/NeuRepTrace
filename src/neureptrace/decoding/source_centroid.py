@@ -15,6 +15,7 @@ import numpy as np
 
 SOURCE_CENTROID_PROTOCOL = "strict_source_only_centroid_decoder"
 SOURCE_CENTROID_CATEGORY = "1_strict_source_only"
+CENTROID_PROTOTYPES = ("mean", "median")
 DEFAULT_TEMPERATURE = 1.0
 DEFAULT_EPSILON = 1e-8
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
@@ -25,6 +26,7 @@ _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 class SourceCentroidConfig:
     """Configuration for the source-centroid decoder."""
 
+    prototype: str = "mean"
     temperature: float = DEFAULT_TEMPERATURE
     use_diagonal_scale: bool = True
     shrinkage: float = 0.0
@@ -69,7 +71,7 @@ def fit_source_centroid_decoder(
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
 
-    centroids, counts = _class_centroids(source, labels, classes=classes)
+    centroids, counts = _class_centroids(source, labels, classes=classes, prototype=cfg.prototype)
     if cfg.shrinkage > 0.0:
         global_mean = np.mean(source, axis=0, keepdims=True)
         centroids = (1.0 - cfg.shrinkage) * centroids + cfg.shrinkage * global_mean
@@ -98,6 +100,7 @@ def fit_source_centroid_decoder(
 
 def source_centroid_config(
     *,
+    prototype: str | None = "mean",
     temperature: float | str = DEFAULT_TEMPERATURE,
     use_diagonal_scale: bool | str | int | float = True,
     shrinkage: float | str = 0.0,
@@ -106,11 +109,22 @@ def source_centroid_config(
     """Normalize public source-centroid options."""
 
     return SourceCentroidConfig(
+        prototype=normalize_centroid_prototype(prototype),
         temperature=_positive_float(temperature, name="temperature"),
         use_diagonal_scale=_boolean(use_diagonal_scale, name="use_diagonal_scale"),
         shrinkage=_unit_interval_float(shrinkage, name="shrinkage"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
+
+
+def normalize_centroid_prototype(value: str | None) -> str:
+    """Normalize centroid prototype aliases."""
+
+    normalized = "mean" if value is None else str(value).strip().lower().replace("-", "_")
+    normalized = {"average": "mean", "centroid": "mean", "med": "median", "robust": "median"}.get(normalized, normalized)
+    if normalized not in CENTROID_PROTOTYPES:
+        raise ValueError(f"Unknown centroid prototype {value!r}. Available values: {', '.join(CENTROID_PROTOTYPES)}.")
+    return normalized
 
 
 def _coerce_config(config: SourceCentroidConfig | Mapping[str, Any]) -> SourceCentroidConfig:
@@ -119,7 +133,7 @@ def _coerce_config(config: SourceCentroidConfig | Mapping[str, Any]) -> SourceCe
     return source_centroid_config(**dict(config))
 
 
-def _class_centroids(features: np.ndarray, labels: np.ndarray, *, classes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _class_centroids(features: np.ndarray, labels: np.ndarray, *, classes: np.ndarray, prototype: str = "mean") -> tuple[np.ndarray, np.ndarray]:
     centroids = np.zeros((classes.shape[0], features.shape[1]), dtype=float)
     counts = np.zeros(classes.shape[0], dtype=int)
     for index, class_label in enumerate(classes.tolist()):
@@ -127,7 +141,12 @@ def _class_centroids(features: np.ndarray, labels: np.ndarray, *, classes: np.nd
         counts[index] = int(np.count_nonzero(mask))
         if counts[index] == 0:
             raise ValueError(f"No source rows available for class {class_label!r}.")
-        centroids[index] = np.mean(features[mask], axis=0)
+        if prototype == "mean":
+            centroids[index] = np.mean(features[mask], axis=0)
+        elif prototype == "median":
+            centroids[index] = np.median(features[mask], axis=0)
+        else:
+            raise ValueError(f"Unhandled centroid prototype {prototype!r}.")
     return centroids, counts
 
 
@@ -167,6 +186,7 @@ def _metadata(cfg: SourceCentroidConfig, *, n_source_rows: int, n_test_rows: int
         "source_centroid_n_test_rows": int(n_test_rows),
         "source_centroid_feature_dim": int(feature_dim),
         "source_centroid_n_classes": int(classes.shape[0]),
+        "source_centroid_prototype": cfg.prototype,
         "source_centroid_temperature": float(cfg.temperature),
         "source_centroid_use_diagonal_scale": bool(cfg.use_diagonal_scale),
         "source_centroid_shrinkage": float(cfg.shrinkage),
