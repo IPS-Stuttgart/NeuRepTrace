@@ -18,6 +18,8 @@ import numpy as np
 from sklearn.base import BaseEstimator, clone
 from sklearn.linear_model import LogisticRegression
 
+from neureptrace._object_label_utils import label_counts, values_equal
+
 SUBSPACE_ALIGNMENT_PROTOCOL = "unlabeled_target_subspace_alignment"
 SUBSPACE_ALIGNMENT_CATEGORY = "2_unlabeled_target_adaptive"
 SUBSPACE_STANDARDIZATION_SCOPES = ("source", "source_target", "none")
@@ -298,14 +300,11 @@ def _probabilities_or_none(model: BaseEstimator, features: np.ndarray) -> np.nda
 
 
 def _encode_object_labels(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    class_values = list(dict.fromkeys(labels.tolist()))
-    classes = np.empty(len(class_values), dtype=object)
-    for index, value in enumerate(class_values):
-        classes[index] = value
+    classes, _counts = label_counts(labels.tolist())
     encoded = np.empty(labels.shape[0], dtype=int)
     for row, label in enumerate(labels.tolist()):
-        for class_index, class_label in enumerate(class_values):
-            if label == class_label:
+        for class_index, class_label in enumerate(classes):
+            if values_equal(label, class_label):
                 encoded[row] = class_index
                 break
         else:  # pragma: no cover - defensive only
@@ -327,9 +326,21 @@ def _encode_class_weight(class_weight: str | Mapping[Any, float] | None, classes
         return class_weight
     encoded = {}
     for index, class_label in enumerate(classes.tolist()):
-        if class_label in class_weight:
-            encoded[index] = float(class_weight[class_label])
+        found, weight = _class_weight_for_label(class_weight, class_label)
+        if found:
+            encoded[index] = float(weight)
     return encoded
+
+
+def _class_weight_for_label(class_weight: Mapping[Any, float], label: Any) -> tuple[bool, float | None]:
+    try:
+        return True, class_weight[label]
+    except (KeyError, TypeError):
+        pass
+    for class_label, weight in class_weight.items():
+        if values_equal(label, class_label):
+            return True, weight
+    return False, None
 
 
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
