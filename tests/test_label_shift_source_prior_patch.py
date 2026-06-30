@@ -43,3 +43,19 @@ def test_label_shift_rejects_boolean_bbse_validation_probabilities() -> None:
             source_validation_labels=[0, 1],
             classes=[0, 1],
         )
+
+
+def test_label_shift_rejects_zero_mass_target_probability_rows() -> None:
+    with pytest.raises(ValueError, match="Probability rows must have positive mass"):
+        adapt_label_shift_probabilities(
+            [[0.0, 0.0], [0.7, 0.3]],
+            source_prior=[0.5, 0.5],
+        )
+
+
+def test_label_shift_rejects_zero_mass_source_prior() -> None:
+    with pytest.raises(ValueError, match="Prior vectors must have positive mass"):
+        adapt_label_shift_probabilities(
+            [[0.8, 0.2], [0.6, 0.4]],
+            source_prior=[0.0, 0.0],
+        )
