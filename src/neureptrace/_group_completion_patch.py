@@ -1,3 +1,3 @@
 def install():
-    obj = object()
-    getattr(obj, "x", None)
+    data = {}
+    data["x"] = 1
