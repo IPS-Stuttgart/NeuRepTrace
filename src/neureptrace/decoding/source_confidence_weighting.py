@@ -168,6 +168,10 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
         raise ValueError("source_probabilities must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("source_probabilities must be finite and non-negative.")
+    row_sums = np.sum(matrix, axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("source_probabilities rows must have positive probability mass.")
+    matrix = matrix / row_sums
     matrix = np.maximum(matrix, float(epsilon))
     return matrix / np.sum(matrix, axis=1, keepdims=True)
 
