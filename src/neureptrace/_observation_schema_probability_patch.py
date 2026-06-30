@@ -19,7 +19,7 @@ _PATCH_MARKER = "_neureptrace_observation_probability_patch_installed"
 _DECODED_FOLD_PATCH_MARKER = "_neureptrace_from_decoded_fold_probability_patch_installed"
 
 
-def _contains_boolean_values(values: Any) -> bool:
+ def _contains_boolean_values(values: Any) -> bool:
     """Return whether an array-like value contains Python or NumPy booleans."""
 
     try:
@@ -60,6 +60,13 @@ def _validate_decoded_fold_probabilities(probabilities: Any) -> None:
         )
 
 
+def _validate_decoded_fold_integer_values(values: Any, *, name: str) -> None:
+    """Reject boolean label/index vectors before NumPy coerces them to 0/1."""
+
+    if _contains_boolean_values(values):
+        raise ValueError(f"from_decoded_fold {name} must be integer-valued, not boolean.")
+
+
 def _install_decoded_fold_probability_guard() -> None:
     """Install a classmethod wrapper for decoded-fold observation construction."""
 
@@ -75,6 +82,9 @@ def _install_decoded_fold_probability_guard() -> None:
     def from_decoded_fold(cls, *args: Any, **kwargs: Any):
         if "probabilities" in kwargs:
             _validate_decoded_fold_probabilities(kwargs["probabilities"])
+        for name in ("test_labels", "predictions", "test_indices"):
+            if name in kwargs:
+                _validate_decoded_fold_integer_values(kwargs[name], name=name)
         return original_from_decoded_fold(cls, *args, **kwargs)
 
     ProbabilityObservationTable.from_decoded_fold = from_decoded_fold
