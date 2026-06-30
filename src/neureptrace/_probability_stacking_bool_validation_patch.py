@@ -1,26 +1,23 @@
-"""Reject malformed numeric inputs in probability-stacking paths.
-
-Probability stacking accepts labels, probability matrices, and metric tables from
-CSV-like sources where pandas and NumPy otherwise coerce booleans to integer
-``0``/``1`` values.  Booleans are malformed probability/label data in these
-paths, so reject them before the core numeric validators run.
-
-Scalar configuration values are also guarded here.  NumPy zero-dimensional and
-size-one arrays can otherwise pass through ``float(...)`` / ``int(...)``-style
-validators as if they were genuine scalars.
-"""
+"""Reject malformed numeric inputs in probability-stacking paths."""
 
 from __future__ import annotations
 
+import importlib
 from functools import wraps
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from neureptrace.observations import probability_columns
+from . import _group_completion_patch
 
-_PATCH_MARKER = "_neureptrace_probability_stacking_bool_validation_patch_installed"
+_OBSERVATIONS_MODULE = __package__ + ".observations"
+_STACKING_MODULE = __package__ + ".probability_stacking"
+_PATCH_MARKER = "_nrt_probability_stacking_bool_validation_patch_installed"
+
+
+def _probability_columns(observations: pd.DataFrame):
+    return importlib.import_module(_OBSERVATIONS_MODULE).probability_columns(observations)
 
 
 def _contains_boolean_values(values: Any) -> bool:
@@ -68,7 +65,7 @@ def _reject_array_scalar_control(value: Any, *, name: str) -> None:
 
 
 def _reject_boolean_probability_columns(observations: pd.DataFrame, *, context: str = "Probability values") -> None:
-    prob_columns = probability_columns(observations)
+    prob_columns = _probability_columns(observations)
     if prob_columns:
         _reject_boolean_probabilities(observations.loc[:, list(prob_columns)], context=context)
 
@@ -76,9 +73,10 @@ def _reject_boolean_probability_columns(observations: pd.DataFrame, *, context: 
 def install() -> None:
     """Install boolean and scalar guards on probability-stacking public numeric paths."""
 
-    from neureptrace import probability_stacking as ps
+    _group_completion_patch.install()
+    ps = importlib.import_module(_STACKING_MODULE)
 
-    if getattr(ps, _PATCH_MARKER, False):
+    if ps.__dict__.get(_PATCH_MARKER, False):
         return
 
     original_integer_label_array = ps._integer_label_array
@@ -177,7 +175,7 @@ def install() -> None:
 
     @wraps(original_summarize_stacked_metrics)
     def summarize_stacked_metrics(observations: pd.DataFrame):
-        prob_columns = probability_columns(observations)
+        prob_columns = _probability_columns(observations)
         if prob_columns:
             _reject_boolean_probability_columns(observations, context="Probability values")
             if "true_label" in observations.columns:
@@ -196,7 +194,7 @@ def install() -> None:
     ps.fit_source_oof_stacking = fit_source_oof_stacking
     ps.combine_probability_cube = combine_probability_cube
     ps.summarize_stacked_metrics = summarize_stacked_metrics
-    setattr(ps, _PATCH_MARKER, True)
+    ps.__dict__[_PATCH_MARKER] = True
 
 
 __all__ = ["install"]
