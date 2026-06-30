@@ -34,6 +34,23 @@ def test_select_source_variance_features_uses_source_scores_only() -> None:
     assert result.metadata["source_feature_select_valid_for_strict_source_only"] is True
 
 
+def test_select_source_variance_features_accepts_integral_string_k_in_metadata() -> None:
+    source = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 3.0],
+            [0.0, 2.0, 6.0],
+        ],
+        dtype=float,
+    )
+    test = np.asarray([[10.0, 11.0, 12.0]], dtype=float)
+
+    result = select_source_variance_features(source_features=source, test_features=test, k="2.0")
+
+    assert result.selected_indices.tolist() == [1, 2]
+    assert result.metadata["source_feature_select_k"] == 2
+
+
 def test_source_variance_feature_indices_respects_min_variance() -> None:
     selected = source_variance_feature_indices(scores=[0.0, 0.5, 2.0, 1.0], min_variance=0.75)
 
