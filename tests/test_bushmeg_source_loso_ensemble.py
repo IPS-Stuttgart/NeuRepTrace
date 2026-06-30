@@ -84,7 +84,7 @@ def test_topk_pairwise_reranker_can_flip_consistent_source_pair_confusion():
         labels,
         n_classes=3,
         top_k=2,
-        alpha_grid=[0.0, 1.0, 2.0],
+        alpha_grid=[0.0, 1.0, 2.0, 4.0],
     )
 
     assert reranker is not None
