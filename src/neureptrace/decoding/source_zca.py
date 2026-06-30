@@ -149,18 +149,19 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _positive_float(value: Any, *, name: str) -> float:
+    message = f"{name} must be a positive finite scalar."
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     if isinstance(value, np.ndarray):
-        if value.ndim != 0:
-            raise ValueError(f"{name} must be positive and finite.")
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(message)
         value = value.item()
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"{name} must be positive and finite.") from None
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
