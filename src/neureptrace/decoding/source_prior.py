@@ -49,12 +49,10 @@ def estimate_source_class_prior(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Estimate a class prior distribution from source labels only."""
 
-    labels = np.asarray(source_labels, dtype=object).reshape(-1)
-    if labels.shape[0] < 1:
-        raise ValueError("source_labels must contain at least one value.")
+    labels = _object_vector(source_labels, name="source_labels")
     class_values = _classes(labels, classes)
     smooth = _nonnegative_float(smoothing, name="smoothing")
-    counts = np.asarray([np.count_nonzero(labels == label) for label in class_values.tolist()], dtype=float)
+    counts = np.asarray([np.count_nonzero(_object_mask(labels, label)) for label in class_values.tolist()], dtype=float)
     counts = counts + smooth
     prior = _normalize_probability_vector(counts, epsilon=_positive_float(epsilon, name="epsilon"))
     return prior.astype(np.float32, copy=False), class_values
@@ -130,15 +128,13 @@ def _target_prior(source_prior: np.ndarray, *, target_prior: str, epsilon: float
 
 def _classes(labels: np.ndarray, classes: Sequence[Any] | np.ndarray | None) -> np.ndarray:
     if classes is None:
-        return np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
-    class_values = np.asarray(classes, dtype=object).reshape(-1)
-    if class_values.shape[0] < 1:
-        raise ValueError("classes must contain at least one value.")
-    if len(set(class_values.tolist())) != class_values.shape[0]:
+        return _object_array(_unique_object_values(labels))
+    class_values = _object_vector(classes, name="classes")
+    if len(_unique_object_values(class_values)) != class_values.shape[0]:
         raise ValueError("classes must be unique.")
-    unknown = sorted({label for label in labels.tolist() if label not in set(class_values.tolist())}, key=repr)
+    unknown = [label for label in _unique_object_values(labels) if not _object_contains(class_values, label)]
     if unknown:
-        raise ValueError(f"source_labels contain labels absent from classes: {unknown}.")
+        raise ValueError(f"source_labels contain labels absent from classes: {sorted(unknown, key=repr)}.")
     return class_values
 
 
@@ -181,6 +177,80 @@ def _metadata(cfg: SourcePriorConfig, *, n_rows: int, n_classes: int) -> dict[st
         "source_prior_smoothing": float(cfg.smoothing),
         "source_prior_epsilon": float(cfg.epsilon),
     }
+
+
+def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            items = array.tolist()
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            items = [row[0] if rows.shape[1] == 1 else tuple(row.tolist()) for row in rows]
+    elif isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        try:
+            items = list(values)
+        except TypeError:
+            items = [values]
+    if len(items) < 1:
+        raise ValueError(f"{name} must contain at least one value.")
+    return _object_array(_hashable_object_value(item) for item in items)
+
+
+def _object_array(values: Sequence[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _hashable_object_value(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            return _hashable_object_value(array.item())
+        return tuple(_hashable_object_value(item) for item in array.tolist())
+    if isinstance(value, list):
+        return tuple(_hashable_object_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_hashable_object_value(item) for item in value)
+    if isinstance(value, dict):
+        return tuple(sorted((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items()))
+    return value
+
+
+def _unique_object_values(values: Sequence[Any] | np.ndarray) -> tuple[Any, ...]:
+    unique: list[Any] = []
+    for value in _object_vector(values, name="values").tolist():
+        if not any(_object_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return tuple(unique)
+
+
+def _object_contains(values: Sequence[Any] | np.ndarray, target: Any) -> bool:
+    return any(_object_equal(value, target) for value in _object_vector(values, name="values").tolist())
+
+
+def _object_equal(left: Any, right: Any) -> bool:
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(equal, (bool, np.bool_)):
+        return bool(equal)
+    try:
+        return bool(np.all(equal))
+    except (TypeError, ValueError):
+        return False
+
+
+def _object_mask(values: Sequence[Any] | np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_object_equal(value, target) for value in _object_vector(values, name="values").tolist()], dtype=bool)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
