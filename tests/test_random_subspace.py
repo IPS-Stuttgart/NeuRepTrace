@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from sklearn.base import BaseEstimator
 
 from neureptrace.decoding.random_subspace import (
     RANDOM_SUBSPACE_CATEGORY,
@@ -26,6 +27,20 @@ def _toy_data():
     train_labels = np.asarray(["left", "left", "left", "right", "right", "right"], dtype=object)
     test_features = np.asarray([[-1.7, 0.0, 0.0, 0.1], [1.9, 0.0, 0.1, 0.0]], dtype=float)
     return train_features, train_labels, test_features
+
+
+class _SubsetDecisionOnlyEstimator(BaseEstimator):
+    """Decision-function-only classifier that exposes only fitted classes."""
+
+    def fit(self, features, labels):
+        del features
+        self.classes_ = np.unique(np.asarray(labels, dtype=int))
+        return self
+
+    def decision_function(self, features):
+        rows = np.asarray(features, dtype=float)
+        centers = self.classes_.astype(float)
+        return -np.abs(rows[:, [0]] - centers[None, :])
 
 
 def test_random_subspace_ensemble_outputs_probabilities_and_metadata() -> None:
@@ -85,6 +100,34 @@ def test_random_subspace_preserves_composite_class_labels() -> None:
     assert result.predictions.tolist() == [("semantic", "left"), ("semantic", "right")]
     assert result.probabilities.shape == (2, 2)
     assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+
+
+def test_decision_function_members_align_subset_classes_to_global_probability_axis() -> None:
+    train_features = np.asarray([[0.0], [0.1], [1.0], [1.1], [2.0], [2.1]], dtype=float)
+    train_labels = np.asarray(["zero", "zero", "one", "one", "two", "two"], dtype=object)
+    test_features = np.asarray([[1.0], [2.0]], dtype=float)
+
+    result = fit_random_subspace_ensemble(
+        train_features=train_features,
+        train_labels=train_labels,
+        test_features=test_features,
+        config={
+            "n_estimators": 1,
+            "feature_fraction": 1.0,
+            "bootstrap_rows": False,
+            "row_fraction": 2.0 / 3.0,
+            "random_state": 4,
+        },
+        estimator=_SubsetDecisionOnlyEstimator(),
+    )
+
+    assert result.members[0].row_indices.tolist() == [2, 3, 4, 5]
+    assert result.classes.tolist() == ["zero", "one", "two"]
+    assert result.probabilities.shape == (2, 3)
+    assert result.member_probabilities[0].shape == (2, 3)
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+    assert np.all(result.probabilities[:, 0] < 1e-6)
+    assert result.predictions.tolist() == ["one", "two"]
 
 
 def test_sample_feature_subspaces_are_reproducible() -> None:
