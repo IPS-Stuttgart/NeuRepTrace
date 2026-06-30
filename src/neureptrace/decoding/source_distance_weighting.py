@@ -75,13 +75,13 @@ def compute_source_distance_weights(
     labels = _value_vector(source_labels, expected_length=features.shape[0], name="source_labels")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
     keys = _group_keys(labels, domains, mode=cfg.group_mode)
-    key_array = np.asarray(keys, dtype=object)
+    key_array = _object_vector(keys)
     scores = np.zeros(features.shape[0], dtype=float)
     centers: dict[Hashable, np.ndarray] = {}
     scales: dict[Hashable, np.ndarray] = {}
 
-    for key in tuple(dict.fromkeys(keys)):
-        mask = key_array == key
+    for key in _unique_values(keys):
+        mask = _equal_mask(key_array, key)
         rows = features[mask]
         center, scale = _center_scale(rows, robust=cfg.robust, epsilon=cfg.epsilon)
         centers[key] = center
@@ -224,10 +224,33 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _value_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
-    return vector
+    items = _value_items(values, expected_length=expected_length)
+    if len(items) != expected_length:
+        raise ValueError(f"{name} must contain one value per row: {len(items)} != {expected_length}.")
+    return _object_vector(_hashable_value(value) for value in items)
+
+
+def _value_items(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> list[Any]:
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            return [array.item()]
+        if array.ndim == 1:
+            if array.shape[0] == expected_length:
+                return array.tolist()
+            if expected_length == 1:
+                return [tuple(array.tolist())]
+            return array.reshape(-1).tolist()
+        rows = array.reshape(array.shape[0], -1)
+        if rows.shape[1] == 1:
+            return rows[:, 0].tolist()
+        return [tuple(row.tolist()) for row in rows]
+    if isinstance(values, (str, bytes)):
+        return [values]
+    try:
+        return list(values)
+    except TypeError:
+        return [values]
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
@@ -240,6 +263,93 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_l
         except TypeError as exc:
             raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
     return vector
+
+
+def _object_vector(values: Sequence[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _hashable_value(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            return _hashable_value(array.item())
+        return tuple(_hashable_value(item) for item in array.reshape(-1).tolist())
+    if isinstance(value, list):
+        return tuple(_hashable_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_hashable_value(item) for item in value)
+    if isinstance(value, dict):
+        return tuple((_hashable_value(key), _hashable_value(item)) for key, item in sorted(value.items(), key=_dict_item_sort_key))
+    return value
+
+
+def _dict_item_sort_key(item: tuple[Any, Any]) -> tuple[str, str, str]:
+    key, _value = item
+    return (type(key).__module__, type(key).__qualname__, repr(key))
+
+
+def _unique_values(values: Sequence[Any]) -> tuple[Any, ...]:
+    unique: list[Any] = []
+    for value in values:
+        if not any(_values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return tuple(unique)
+
+
+def _equal_mask(values: np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([_values_equal(value, target) for value in values.tolist()], dtype=bool)
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    if _is_nan_like_scalar(left) and _is_nan_like_scalar(right):
+        return True
+    if isinstance(left, np.generic):
+        left = left.item()
+    if isinstance(right, np.generic):
+        right = right.item()
+    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
+        return _array_values_equal(left, right)
+    if isinstance(left, (list, tuple)) or isinstance(right, (list, tuple)):
+        return _sequence_values_equal(left, right)
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(equal, (bool, np.bool_)):
+        return bool(equal)
+    try:
+        return bool(np.all(equal))
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_nan_like_scalar(value: Any) -> bool:
+    if isinstance(value, np.generic):
+        value = value.item()
+    return isinstance(value, (float, np.floating)) and bool(np.isnan(value))
+
+
+def _array_values_equal(left: Any, right: Any) -> bool:
+    left_array = np.asarray(left, dtype=object)
+    right_array = np.asarray(right, dtype=object)
+    if left_array.shape != right_array.shape:
+        return False
+    return all(_values_equal(left_item, right_item) for left_item, right_item in zip(left_array.reshape(-1).tolist(), right_array.reshape(-1).tolist(), strict=True))
+
+
+def _sequence_values_equal(left: Any, right: Any) -> bool:
+    if not isinstance(left, (list, tuple)) or not isinstance(right, (list, tuple)):
+        return False
+    if len(left) != len(right):
+        return False
+    return all(_values_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
