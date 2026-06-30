@@ -9,6 +9,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from . import _source_ensemble_tuple_domains_patch
+
 _PATCH_MARKER = "_neureptrace_source_domain_generalization_composite_patch_installed"
 
 
@@ -101,6 +103,7 @@ def _encode_atomic(values: Sequence[Any] | np.ndarray, *, name: str, reject_matr
 def install() -> None:
     """Patch source-domain generalization input encoding."""
 
+    _source_ensemble_tuple_domains_patch.install()
     module = importlib.import_module("neureptrace.decoding.source_domain_generalization")
     if getattr(module, _PATCH_MARKER, False):
         return
