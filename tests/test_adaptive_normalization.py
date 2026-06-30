@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+
 import numpy as np
 import pytest
 
@@ -17,6 +19,20 @@ def test_adaptive_normalization_config_parses_boolean_strings() -> None:
 def test_adaptive_normalization_config_rejects_ambiguous_boolean_strings() -> None:
     with pytest.raises(ValueError, match="center"):
         adaptive_normalization_config(center="sometimes")
+
+
+def test_adaptive_normalization_core_config_parses_boolean_strings_after_reload() -> None:
+    import neureptrace.decoding.adaptive_normalization as adaptive_normalization
+
+    # Reloading the implementation module removes package-level monkeypatch wrappers.
+    # The core implementation must therefore parse string booleans itself.
+    reloaded = importlib.reload(adaptive_normalization)
+
+    cfg = reloaded.adaptive_normalization_config(center="false", scale="off", robust="yes")
+
+    assert cfg.center is False
+    assert cfg.scale is False
+    assert cfg.robust is True
 
 
 def test_adaptive_normalization_string_false_disables_transform() -> None:
