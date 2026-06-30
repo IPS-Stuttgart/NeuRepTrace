@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
+
 
 def install() -> None:
-    return None
+    importlib.import_module("math")
 
 
 __all__ = ["install"]
