@@ -104,6 +104,11 @@ def test_source_rff_accepts_scalar_numpy_array_config_values() -> None:
     )
     reference = fit_source_rff_reference(source, config=direct)
 
+    assert direct.n_components == 4
+    assert direct.gamma == 0.5
+    assert direct.random_state == 7
+    assert direct.standardize is False
+    assert np.isclose(direct.epsilon, 1e-6)
     assert reference.config.n_components == 4
     assert reference.config.gamma == 0.5
     assert reference.config.random_state == 7
@@ -123,6 +128,11 @@ def test_source_rff_revalidates_direct_config_instances() -> None:
 
     reference = fit_source_rff_reference(source, config=cfg)
 
+    assert cfg.n_components == 4
+    assert cfg.gamma == 0.5
+    assert cfg.random_state == 3
+    assert cfg.standardize is False
+    assert np.isclose(cfg.epsilon, 1e-6)
     assert reference.config.n_components == 4
     assert reference.config.gamma == 0.5
     assert reference.config.random_state == 3
@@ -148,6 +158,24 @@ def test_source_rff_rejects_bool_and_array_numeric_controls() -> None:
     for config in invalid_configs:
         with pytest.raises(ValueError):
             source_rff_config(**config)  # type: ignore[arg-type]
+
+
+def test_source_rff_direct_config_rejects_bool_and_array_numeric_controls() -> None:
+    invalid_configs = [
+        {"n_components": True},
+        {"n_components": np.asarray([4])},
+        {"gamma": True},
+        {"gamma": np.asarray([0.5])},
+        {"random_state": True},
+        {"random_state": np.asarray([7])},
+        {"standardize": np.asarray([True])},
+        {"epsilon": True},
+        {"epsilon": np.asarray([1e-6])},
+    ]
+
+    for config in invalid_configs:
+        with pytest.raises(ValueError):
+            SourceRFFConfig(**config)  # type: ignore[arg-type]
 
 
 def test_source_rff_rejects_width_mismatch() -> None:
