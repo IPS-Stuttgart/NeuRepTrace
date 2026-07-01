@@ -88,7 +88,7 @@ def source_outlier_config(
     mad_multiplier: float | str = 3.0,
     weight_mode: str | None = "soft",
     temperature: float | str = 1.0,
-    use_diagonal_scale: bool = True,
+    use_diagonal_scale: bool | int | str = True,
     epsilon: float | str = 1e-8,
 ) -> SourceOutlierConfig:
     """Normalize public source-outlier options."""
@@ -99,7 +99,7 @@ def source_outlier_config(
         mad_multiplier=_positive_float(mad_multiplier, name="mad_multiplier"),
         weight_mode=normalize_weight_mode(weight_mode),
         temperature=_positive_float(temperature, name="temperature"),
-        use_diagonal_scale=bool(use_diagonal_scale),
+        use_diagonal_scale=_bool_value(use_diagonal_scale, name="use_diagonal_scale"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -217,3 +217,27 @@ def _unit_interval_float(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
+
+
+def _bool_value(value: Any, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        return _bool_value(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean value.")
