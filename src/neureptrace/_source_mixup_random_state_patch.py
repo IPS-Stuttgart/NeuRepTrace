@@ -1,8 +1,9 @@
-"""Validate Source MixUp/SMOTE random-state values before RNG construction."""
+"""Validate Source MixUp numeric config and random-state values before RNG construction."""
 
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
 from dataclasses import replace
 from functools import wraps
 from typing import Any
@@ -44,8 +45,70 @@ def _normalize_optional_random_state(value: Any, *, normalizer: Any) -> int | No
         raise _random_state_error() from exc
 
 
+def _scalar_config_value(value: Any, *, name: str, expected: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be {expected}.")
+        value = value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be {expected}.")
+    return value
+
+
+def _numeric_scalar(value: Any, *, name: str, expected: str) -> float:
+    scalar_value = _scalar_config_value(value, name=name, expected=expected)
+    if isinstance(scalar_value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be {expected}.")
+    try:
+        numeric = float(scalar_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be {expected}.") from exc
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be {expected}.")
+    return numeric
+
+
+def _normalize_integer(value: Any, *, name: str) -> int:
+    numeric = _numeric_scalar(value, name=name, expected="an integer")
+    if numeric % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    return int(numeric)
+
+
+def _normalize_nonnegative_int(value: Any, *, name: str) -> int:
+    integer = _normalize_integer(value, name=name)
+    if integer < 0:
+        raise ValueError(f"{name} must be non-negative.")
+    return integer
+
+
+def _positive_float(value: Any, *, name: str) -> float:
+    numeric = _numeric_scalar(value, name=name, expected="positive and finite")
+    if numeric <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
+    return numeric
+
+
+def _validate_mixup_numeric_values(*, synthetic_per_class: Any, alpha: Any) -> None:
+    _normalize_nonnegative_int(synthetic_per_class, name="synthetic_per_class")
+    _positive_float(alpha, name="alpha")
+
+
+def _validate_mixup_config_numeric_values(source_mixup: Any, config: Any) -> None:
+    if config is None:
+        return
+    if isinstance(config, source_mixup.SourceMixUpConfig):
+        _validate_mixup_numeric_values(synthetic_per_class=config.synthetic_per_class, alpha=config.alpha)
+        return
+    if isinstance(config, Mapping):
+        if "synthetic_per_class" in config:
+            _normalize_nonnegative_int(config["synthetic_per_class"], name="synthetic_per_class")
+        if "alpha" in config:
+            _positive_float(config["alpha"], name="alpha")
+
+
 def install() -> None:
-    """Install early Source MixUp/SMOTE random-state validation."""
+    """Install early Source MixUp/SMOTE random-state and numeric-config validation."""
 
     source_mixup = importlib.import_module("neureptrace.decoding.source_mixup")
 
@@ -68,8 +131,8 @@ def install() -> None:
                 normalizer=source_mixup._normalize_nonnegative_int,
             )
             return original_config(
-                synthetic_per_class=synthetic_per_class,
-                alpha=alpha,
+                synthetic_per_class=_normalize_nonnegative_int(synthetic_per_class, name="synthetic_per_class"),
+                alpha=_positive_float(alpha, name="alpha"),
                 random_state=seed,
                 same_class_partner=same_class_partner,
                 cross_domain_partner=cross_domain_partner,
@@ -86,12 +149,18 @@ def install() -> None:
         def _coerce_config_with_seed(config: Any):
             if config is None:
                 return None
+            _validate_mixup_config_numeric_values(source_mixup, config)
             cfg = source_mixup._coerce_config(config)
             seed = _normalize_optional_random_state(
                 cfg.random_state,
                 normalizer=source_mixup._normalize_nonnegative_int,
             )
-            return replace(cfg, random_state=seed)
+            return replace(
+                cfg,
+                synthetic_per_class=_normalize_nonnegative_int(cfg.synthetic_per_class, name="synthetic_per_class"),
+                alpha=_positive_float(cfg.alpha, name="alpha"),
+                random_state=seed,
+            )
 
         @wraps(original_augment)
         def augment_source_with_mixup(
