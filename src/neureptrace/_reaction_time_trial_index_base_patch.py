@@ -27,7 +27,7 @@ def _validate_reaction_time_scale(reaction_time_scale: Any) -> float:
         scale = float(reaction_time_scale)
     except (TypeError, ValueError) as exc:
         raise _scale_error(reaction_time_scale) from exc
-    if not np.isfinite(scale):
+    if not np.isfinite(scale) or scale <= 0.0:
         raise _scale_error(reaction_time_scale)
     return scale
 
