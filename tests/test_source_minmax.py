@@ -37,6 +37,17 @@ def test_source_minmax_custom_range() -> None:
     assert np.allclose(result.test_features.ravel(), np.asarray([0.0]))
 
 
+def test_source_minmax_zero_source_range_uses_unit_denominator() -> None:
+    result = fit_source_minmax_transform(
+        source_features=[[5.0, 0.0], [5.0, 2.0]],
+        test_features=[[6.0, 1.0]],
+    )
+
+    assert np.allclose(result.train_features[:, 0], np.asarray([0.0, 0.0]))
+    assert np.allclose(result.test_features, np.asarray([[1.0, 0.5]], dtype=np.float32))
+    assert np.all(np.isfinite(result.test_features))
+
+
 def test_source_minmax_accepts_numpy_vector_range() -> None:
     reference = fit_source_minmax_reference([[0.0], [2.0]], feature_range=np.asarray([-1.0, 1.0]))
 
