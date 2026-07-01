@@ -32,6 +32,15 @@ class SourceSmoteConfig:
     random_state: int | None = 13
     jitter_std: float = 0.0
 
+    def __post_init__(self) -> None:
+        """Validate direct dataclass construction as strictly as the public helper."""
+
+        object.__setattr__(self, "synthetic_per_class", _nonnegative_int(self.synthetic_per_class, name="synthetic_per_class"))
+        object.__setattr__(self, "cross_domain_partner", _bool_value(self.cross_domain_partner, name="cross_domain_partner"))
+        object.__setattr__(self, "preserve_original", _bool_value(self.preserve_original, name="preserve_original"))
+        object.__setattr__(self, "random_state", _normalize_optional_random_state(self.random_state, name="random_state"))
+        object.__setattr__(self, "jitter_std", _nonnegative_float(self.jitter_std, name="jitter_std"))
+
     @property
     def enabled(self) -> bool:
         """Whether this config requests synthetic rows."""
