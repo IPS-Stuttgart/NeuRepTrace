@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_gaussian import (
     SOURCE_GAUSSIAN_CATEGORY,
+    SourceGaussianConfig,
     fit_source_gaussian_decoder,
     gaussian_log_likelihoods,
     normalize_covariance_type,
@@ -76,6 +77,44 @@ def test_aliases_and_config_validation() -> None:
 
     with pytest.raises(ValueError, match="covariance_type"):
         normalize_covariance_type("full")
+
+
+def test_source_gaussian_revalidates_direct_dataclass_config() -> None:
+    source = np.asarray([[0.0], [0.2], [3.0], [3.2]], dtype=float)
+    test = np.asarray([[0.1], [3.1]], dtype=float)
+    labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+
+    result = fit_source_gaussian_decoder(
+        source_features=source,
+        source_labels=labels,
+        test_features=test,
+        config=SourceGaussianConfig(covariance_type="diag", prior="flat", variance_floor="1e-5", temperature="2.0"),  # type: ignore[arg-type]
+    )
+
+    assert result.metadata["source_gaussian_covariance_type"] == "diagonal"
+    assert result.metadata["source_gaussian_prior"] == "uniform"
+    assert result.metadata["source_gaussian_variance_floor"] == pytest.approx(1e-5)
+    assert result.metadata["source_gaussian_temperature"] == pytest.approx(2.0)
+
+    with pytest.raises(ValueError, match="temperature"):
+        fit_source_gaussian_decoder(
+            source_features=source,
+            source_labels=labels,
+            test_features=test,
+            config=SourceGaussianConfig(temperature=float("nan")),
+        )
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"variance_floor": 1}, np.asarray(1.0), np.asarray([1.0])])
+def test_source_gaussian_rejects_invalid_variance_floor_values(value: object) -> None:
+    with pytest.raises(ValueError, match="variance_floor"):
+        source_gaussian_config(variance_floor=value)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"temperature": 1}, np.asarray(1.0), np.asarray([1.0])])
+def test_source_gaussian_rejects_invalid_temperature_values(value: object) -> None:
+    with pytest.raises(ValueError, match="temperature"):
+        source_gaussian_config(temperature=value)  # type: ignore[arg-type]
 
 
 def test_source_gaussian_rejects_width_mismatch() -> None:
