@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.target_probability_smoothing import (
     TARGET_PROBABILITY_SMOOTHING_CATEGORY,
+    TargetProbabilitySmoothingConfig,
     rbf_affinity,
     row_normalize,
     smooth_target_probabilities,
@@ -75,6 +76,42 @@ def test_config_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="probabilities"):
         smooth_target_probabilities([[0.0], [1.0]], [[0.5, 0.5]])
+
+
+def test_direct_config_is_normalized_like_mapping_config() -> None:
+    features = np.asarray([[0.0], [1.0], [2.0]], dtype=float)
+    probabilities = np.asarray([[0.7, 0.3], [0.4, 0.6], [0.1, 0.9]], dtype=float)
+
+    result = smooth_target_probabilities(
+        features,
+        probabilities,
+        config=TargetProbabilitySmoothingConfig(
+            alpha="0.0",
+            n_neighbors="none",
+            max_iter="3",
+            tol="1e-6",
+            standardize="false",
+            epsilon="1e-9",
+        ),
+    )
+
+    assert result.metadata["target_probability_smoothing_alpha"] == 0.0
+    assert result.metadata["target_probability_smoothing_n_neighbors"] == ""
+    assert result.metadata["target_probability_smoothing_max_iter"] == 3
+    assert result.metadata["target_probability_smoothing_standardize"] is False
+    np.testing.assert_allclose(result.probabilities, probabilities, atol=1e-6)
+
+
+def test_direct_config_rejects_invalid_controls_before_smoothing() -> None:
+    features = np.asarray([[0.0], [1.0], [2.0]], dtype=float)
+    probabilities = np.asarray([[0.7, 0.3], [0.4, 0.6], [0.1, 0.9]], dtype=float)
+
+    with pytest.raises(ValueError, match="alpha"):
+        smooth_target_probabilities(
+            features,
+            probabilities,
+            config=TargetProbabilitySmoothingConfig(alpha=True),
+        )
 
 
 def test_config_accepts_numpy_numeric_scalars() -> None:
