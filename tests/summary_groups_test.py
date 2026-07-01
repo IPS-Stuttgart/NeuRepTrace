@@ -11,7 +11,7 @@ def _case():
     module = __import__(_MODULE_NAME, fromlist=["x"])
     names = dir(module)
     name = next(item for item in names if item.startswith("su" + "mm"))
-    func = eval("vars(module)[name]")
+    func = vars(module)[name]
     events = pd.DataFrame([{"subject": "subject1", "stream_id": "run1", "onset_time": 0.1, _CLASS_COLUMN: "target"}])
     annotations = pd.DataFrame(
         [
