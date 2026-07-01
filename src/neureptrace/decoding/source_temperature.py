@@ -117,7 +117,7 @@ def _coerce_config(config: SourceTemperatureConfig | Mapping[str, Any]) -> Sourc
 
 def _classes(labels: np.ndarray, classes: Sequence[Any] | np.ndarray | None, *, n_classes: int) -> np.ndarray:
     if classes is None:
-        values = _unique_values(labels)
+        values = _infer_classes(labels, n_classes=n_classes)
     else:
         values = _object_vector(classes, expected_length=n_classes, name="classes")
     if values.shape[0] != n_classes:
@@ -134,6 +134,44 @@ def _classes(labels: np.ndarray, classes: Sequence[Any] | np.ndarray | None, *, 
     missing = sorted(missing_by_key.values(), key=repr)
     if missing:
         raise ValueError(f"source_labels contain labels absent from classes: {missing}.")
+    return values
+
+
+def _infer_classes(labels: np.ndarray, *, n_classes: int) -> np.ndarray:
+    index_classes = _integer_index_classes(labels, n_classes=n_classes)
+    if index_classes is not None:
+        return index_classes
+    return _unique_values(labels)
+
+
+def _integer_index_classes(labels: np.ndarray, *, n_classes: int) -> np.ndarray | None:
+    indices: list[int] = []
+    for label in labels.tolist():
+        if isinstance(label, (bool, np.bool_, str, bytes)):
+            return None
+        if isinstance(label, np.generic):
+            label = label.item()
+        if isinstance(label, np.ndarray):
+            if label.ndim != 0:
+                return None
+            label = label.item()
+        try:
+            value = float(label)
+        except (TypeError, ValueError):
+            return None
+        if not np.isfinite(value) or value != np.floor(value):
+            return None
+        indices.append(int(value))
+    if not indices:
+        return None
+    expected = set(range(n_classes))
+    if set(indices) != expected:
+        if any(index < 0 or index >= n_classes for index in indices):
+            raise ValueError(f"integer source_labels must be valid class indices from 0 to {n_classes - 1} when classes is omitted.")
+        return None
+    values = np.empty(n_classes, dtype=object)
+    for index in range(n_classes):
+        values[index] = index
     return values
 
 
