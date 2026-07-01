@@ -150,7 +150,7 @@ def source_knn_config(
     *,
     k: int | str = DEFAULT_K,
     weights: str | None = "distance",
-    standardize: bool | int | str = True,
+    standardize: Any = True,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> SourceKNNConfig:
     """Normalize source-kNN options."""
@@ -197,7 +197,7 @@ def _metadata(reference: SourceKNNReference, *, n_test_rows: int) -> dict[str, A
         "source_knn_valid_for_benchmark": True,
         "source_knn_n_source_rows": int(reference.features.shape[0]),
         "source_knn_n_test_rows": int(n_test_rows),
-        "source_knn_feature_dim": int(reference.features.shape[1]),
+        "source_knn_feature_dim": int(reference.classes.shape[0]),
         "source_knn_n_classes": int(reference.classes.shape[0]),
         "source_knn_k": str(reference.config.k),
         "source_knn_weights": reference.config.weights,
@@ -330,7 +330,13 @@ def _positive_float(value: float | str, *, name: str) -> float:
     return parsed
 
 
-def _bool_value(value: bool | int | str, *, name: str) -> bool:
+def _bool_value(value: Any, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
