@@ -74,7 +74,36 @@ def test_source_scale_revalidates_direct_dataclass_config() -> None:
         fit_source_feature_scale_stats([[0.0], [1.0]], config=SourceFeatureScaleConfig(epsilon=float("nan")))
 
 
-@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"epsilon": 1}, np.asarray(1e-8), np.asarray([1e-8])])
+def test_source_scale_normalizes_direct_dataclass_config() -> None:
+    cfg = SourceFeatureScaleConfig(
+        method="z-score",
+        center=np.asarray(False),
+        scale="1",
+        epsilon=np.asarray(1e-6),
+    )  # type: ignore[arg-type]
+
+    assert cfg.method == "standard"
+    assert cfg.center is False
+    assert cfg.scale is True
+    assert np.isclose(cfg.epsilon, 1e-6)
+
+
+def test_source_scale_accepts_numpy_scalar_config_values() -> None:
+    cfg = source_feature_scale_config(
+        center=np.asarray(False),
+        scale=np.asarray(1.0),
+        epsilon=np.asarray(1e-6),
+    )  # type: ignore[arg-type]
+
+    assert cfg.center is False
+    assert cfg.scale is True
+    assert np.isclose(cfg.epsilon, 1e-6)
+
+    stats = fit_source_feature_scale_stats([[0.0], [1.0]], config=cfg)
+    assert stats.method == "standard"
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"epsilon": 1}, np.asarray(True), np.asarray([1e-8])])
 def test_source_scale_rejects_non_numeric_epsilon_values(value: object) -> None:
     with pytest.raises(ValueError, match="epsilon"):
         source_feature_scale_config(epsilon=value)  # type: ignore[arg-type]
