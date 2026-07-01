@@ -226,7 +226,15 @@ def normalize_scaling_distribution(value: str | None) -> str:
 
 def _coerce_config(config: SourceFeatureScalingConfig | Mapping[str, Any]) -> SourceFeatureScalingConfig:
     if isinstance(config, SourceFeatureScalingConfig):
-        return config
+        return source_feature_scaling_config(
+            synthetic_per_class=config.synthetic_per_class,
+            scale_std=config.scale_std,
+            scaling_mode=config.scaling_mode,
+            distribution=config.distribution,
+            preserve_original=config.preserve_original,
+            random_state=config.random_state,
+            epsilon=config.epsilon,
+        )
     return source_feature_scaling_config(**dict(config))
 
 
