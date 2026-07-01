@@ -31,6 +31,15 @@ class SourcePCAConfig:
     whiten: bool = False
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "n_components", _component_request(self.n_components))
+        object.__setattr__(self, "center", _bool_config(self.center, name="center"))
+        object.__setattr__(self, "scale", _bool_config(self.scale, name="scale"))
+        object.__setattr__(self, "whiten", _bool_config(self.whiten, name="whiten"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourcePCAReference:
