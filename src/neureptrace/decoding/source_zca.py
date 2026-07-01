@@ -27,6 +27,13 @@ class SourceZCAConfig:
     center: bool = True
     recolor: bool = False
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "regularization", _positive_float(self.regularization, name="regularization"))
+        object.__setattr__(self, "center", _bool_value(self.center, name="center"))
+        object.__setattr__(self, "recolor", _bool_value(self.recolor, name="recolor"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceZCAReference:
