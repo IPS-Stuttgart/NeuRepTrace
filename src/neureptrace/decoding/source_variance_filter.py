@@ -27,6 +27,13 @@ class SourceVarianceFilterConfig:
     top_k: int | None = None
     ddof: int = 1
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "variance_threshold", _nonnegative_float(self.variance_threshold, name="variance_threshold"))
+        object.__setattr__(self, "top_k", _optional_positive_int(self.top_k, name="top_k"))
+        object.__setattr__(self, "ddof", _nonnegative_int(self.ddof, name="ddof"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceVarianceFilterResult:
