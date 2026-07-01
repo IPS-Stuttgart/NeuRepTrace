@@ -82,29 +82,67 @@ def test_aliases_and_validation() -> None:
         source_random_projection_config(distribution="sparse", density=0.0)
 
 
+def test_random_projection_accepts_numpy_scalar_numeric_config_values() -> None:
+    cfg = source_random_projection_config(
+        n_components=np.asarray(3),
+        random_state=np.asarray(7),
+        density=np.asarray(0.5),
+    )  # type: ignore[arg-type]
+
+    assert cfg.n_components == 3
+    assert cfg.random_state == 7
+    assert np.isclose(cfg.density, 0.5)
+
+    reference = fit_source_random_projection_reference(np.asarray(4), config=cfg)  # type: ignore[arg-type]
+    assert reference.projection.shape == (4, 3)
+
+
+def test_random_projection_normalizes_direct_dataclass_config() -> None:
+    cfg = SourceRandomProjectionConfig(
+        n_components=np.asarray(2),
+        distribution="normal",
+        random_state=np.asarray(5),
+        density=np.asarray(0.25),
+    )  # type: ignore[arg-type]
+
+    assert cfg.n_components == 2
+    assert cfg.distribution == "gaussian"
+    assert cfg.random_state == 5
+    assert np.isclose(cfg.density, 0.25)
+
+    result = fit_source_random_projection_transform(
+        source_features=np.eye(3),
+        test_features=np.ones((1, 3)),
+        config=cfg,
+    )
+
+    assert result.train_features.shape == (3, 2)
+    assert result.test_features.shape == (1, 2)
+    assert result.metadata["source_random_projection_distribution"] == "gaussian"
+    assert result.metadata["source_random_projection_random_state"] == 5
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("n_components", np.asarray(3)),
         ("n_components", np.asarray([3])),
+        ("n_components", np.asarray(True)),
         ("n_components", True),
-        ("random_state", np.asarray(7)),
         ("random_state", np.asarray([7])),
         ("random_state", np.asarray(True)),
         ("random_state", True),
-        ("density", np.asarray(0.5)),
         ("density", np.asarray([0.5])),
         ("density", np.asarray(True)),
         ("density", True),
     ],
 )
-def test_random_projection_rejects_array_like_scalar_controls(field: str, value: object) -> None:
+def test_random_projection_rejects_non_scalar_or_boolean_controls(field: str, value: object) -> None:
     kwargs: dict[str, object] = {field: value}
     if field == "density":
         kwargs["distribution"] = "sparse"
 
     with pytest.raises(ValueError, match=field):
-        source_random_projection_config(**kwargs)
+        source_random_projection_config(**kwargs)  # type: ignore[arg-type]
 
 
 def test_random_projection_rejects_array_valued_distribution() -> None:
