@@ -154,6 +154,22 @@ def test_cross_validate_feature_decoding_replaces_tuple_null_predictions_with_ob
     assert result.accuracy == 0.5
 
 
+def test_cross_validate_feature_decoding_excludes_tuple_null_rows_atomically():
+    result = cross_validate_feature_decoding(
+        np.array([[-2.0], [1.0], [-1.0], [2.0]]),
+        [("left", "seen"), ("right", "seen"), ("left", "seen"), ("right", "seen")],
+        null_features=np.array([[0.0], [0.0], [0.0], [0.0]]),
+        null_label=("null", "baseline"),
+        n_folds=2,
+        components_pca=float("inf"),
+        fit_model=lambda _features, _labels: _ObjectConstantClassifier(("left", "seen")),
+    )
+
+    assert result.predictions.dtype == object
+    assert result.predictions.tolist() == [("left", "seen"), ("left", "seen"), ("left", "seen"), ("left", "seen")]
+    assert result.accuracy == 0.5
+
+
 def test_cross_validate_feature_decoding_handles_heterogeneous_object_label_fallback():
     result = cross_validate_feature_decoding(
         np.array([[-2.0], [1.0], [-1.0], [2.0]]),

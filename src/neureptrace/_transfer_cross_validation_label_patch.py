@@ -8,7 +8,11 @@ from typing import Any
 
 import numpy as np
 
-from neureptrace._object_label_utils import label_accuracy, replace_null_class_predictions as _replace_null_class_predictions
+from neureptrace._object_label_utils import (
+    label_accuracy,
+    replace_null_class_predictions as _replace_null_class_predictions,
+    values_equal,
+)
 from neureptrace.decoding.generative_augmentation import GenerativeAugmentationConfig
 
 _INSTALLED = False
@@ -58,14 +62,7 @@ def _atomic_label_vector(labels: Sequence | np.ndarray, *, expected_length: int,
 def _values_equal(left: object, right: object) -> bool:
     """Compare possibly composite labels without leaking array-valued equality."""
 
-    try:
-        equal = left == right
-    except (TypeError, ValueError):
-        return False
-    try:
-        return bool(equal)
-    except (TypeError, ValueError):
-        return False
+    return values_equal(left, right)
 
 
 def _label_equal_mask(values: Sequence | np.ndarray, label: object) -> np.ndarray:
@@ -94,6 +91,8 @@ def _needs_object_predictions(labels: np.ndarray) -> bool:
 def _coerced_null_label(null_label: object, labels: np.ndarray) -> object:
     """Match append_null_class_features' label dtype coercion for null rows."""
 
+    if labels.dtype == object:
+        return null_label
     return np.asarray([null_label], dtype=labels.dtype)[0]
 
 
@@ -196,7 +195,7 @@ def install() -> None:
         fallback_label = class_labels[0] if len(class_labels) else null_label_value
         for fold in range(1, n_folds + 1):
             train_mask = augmented_folds != fold
-            test_mask = (augmented_folds == fold) & (augmented_labels != null_label_value)
+            test_mask = (augmented_folds == fold) & ~_label_equal_mask(augmented_labels, null_label_value)
             if not np.any(test_mask):
                 continue
             train_features = features[train_mask]
