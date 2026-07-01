@@ -32,6 +32,15 @@ class SourceRFFConfig:
     standardize: bool = False
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "n_components", _positive_int(self.n_components, name="n_components"))
+        object.__setattr__(self, "gamma", normalize_gamma(self.gamma))
+        object.__setattr__(self, "random_state", _optional_random_state(self.random_state))
+        object.__setattr__(self, "standardize", _bool_value(self.standardize, name="standardize"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceRFFReference:
