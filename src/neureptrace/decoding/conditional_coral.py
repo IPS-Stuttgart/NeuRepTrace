@@ -22,6 +22,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from neureptrace._object_label_utils import label_counts, label_equal_mask, values_equal
+
 CONDITIONAL_CORAL_PROTOCOL = "unlabeled_target_pseudo_label_conditional_coral"
 CONDITIONAL_CORAL_CATEGORY = "2_unlabeled_target_adaptive"
 DEFAULT_CONDITIONAL_CORAL_REGULARIZATION = 1e-6
@@ -117,10 +119,8 @@ def fit_pseudo_label_conditional_coral(
     target = _feature_matrix(target_features, name="target_features")
     if source.shape[1] != target.shape[1]:
         raise ValueError(f"source_features and target_features must have the same feature width: {source.shape[1]} != {target.shape[1]}.")
-    labels = np.asarray(source_labels, dtype=object).reshape(-1)
-    if labels.shape[0] != source.shape[0]:
-        raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {source.shape[0]}.")
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+    labels = _label_vector(source_labels, expected_length=source.shape[0], name="source_labels")
+    classes, _class_counts = label_counts(labels)
     if classes.shape[0] < 2:
         raise ValueError("Conditional CORAL requires at least two source classes.")
 
@@ -135,14 +135,14 @@ def fit_pseudo_label_conditional_coral(
         target_probabilities=target_probabilities,
     )
     confident_mask = pseudo_confidence >= cfg.confidence_threshold
-    source_stats = {class_label: feature_stats(source[labels == class_label], regularization=cfg.regularization) for class_label in classes.tolist()}
+    source_stats = {class_label: feature_stats(source[label_equal_mask(labels, class_label)], regularization=cfg.regularization) for class_label in classes.tolist()}
     global_source = feature_stats(source, regularization=cfg.regularization)
     global_target = feature_stats(target[confident_mask] if np.any(confident_mask) else target, regularization=cfg.regularization)
 
     target_stats: dict[Any, CoralClassStats] = {}
     fallback_classes: list[Any] = []
     for class_label in classes.tolist():
-        class_mask = (pseudo_labels == class_label) & confident_mask
+        class_mask = label_equal_mask(pseudo_labels, class_label) & confident_mask
         if np.count_nonzero(class_mask) >= cfg.min_target_rows_per_class:
             target_stats[class_label] = feature_stats(target[class_mask], regularization=cfg.regularization)
         elif cfg.fallback == "global":
@@ -156,7 +156,7 @@ def fit_pseudo_label_conditional_coral(
 
     aligned_source = np.empty_like(source, dtype=float)
     for class_label in classes.tolist():
-        class_mask = labels == class_label
+        class_mask = label_equal_mask(labels, class_label)
         aligned_source[class_mask] = coral_align_features(
             source[class_mask],
             source_stats=source_stats[class_label],
@@ -279,25 +279,23 @@ def _resolve_pseudo_labels(
         probabilities = probabilities / row_sums
         return classes[np.argmax(probabilities, axis=1)], np.max(probabilities, axis=1), "target_probabilities"
     if target_pseudo_labels is not None:
-        pseudo = np.asarray(target_pseudo_labels, dtype=object).reshape(-1)
-        if pseudo.shape[0] != target.shape[0]:
-            raise ValueError(f"target_pseudo_labels must contain one value per target row: {pseudo.shape[0]} != {target.shape[0]}.")
-        unknown = sorted({value for value in pseudo.tolist() if value not in set(classes.tolist())}, key=repr)
+        pseudo = _label_vector(target_pseudo_labels, expected_length=target.shape[0], name="target_pseudo_labels")
+        unknown = _labels_not_in_classes(pseudo, classes)
         if unknown:
-            raise ValueError(f"target_pseudo_labels contain labels absent from source classes: {unknown}.")
+            raise ValueError(f"target_pseudo_labels contain labels absent from source classes: {sorted(unknown, key=repr)}.")
         return pseudo, np.ones(target.shape[0], dtype=float), "target_pseudo_labels"
     model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000, class_weight="balanced", random_state=config.random_state)) if estimator is None else clone(estimator)
     model.fit(source, labels)
-    pseudo = np.asarray(model.predict(target), dtype=object)
+    pseudo = _label_vector(model.predict(target), expected_length=target.shape[0], name="target_pseudo_labels")
     confidence = np.ones(target.shape[0], dtype=float)
     if hasattr(model, "predict_proba"):
         raw_prob = np.asarray(model.predict_proba(target), dtype=float)
-        model_classes = np.asarray(getattr(model, "classes_", classes), dtype=object)
+        model_classes = _label_vector(getattr(model, "classes_", classes), expected_length=raw_prob.shape[1], name="model_classes")
         aligned = np.zeros((target.shape[0], classes.shape[0]), dtype=float)
-        class_to_column = {class_label: index for index, class_label in enumerate(classes.tolist())}
         for column, class_label in enumerate(model_classes.tolist()):
-            if class_label in class_to_column:
-                aligned[:, class_to_column[class_label]] = raw_prob[:, column]
+            class_col = _label_index(classes, class_label)
+            if class_col is not None:
+                aligned[:, class_col] = raw_prob[:, column]
         row_sums = aligned.sum(axis=1, keepdims=True)
         aligned = np.divide(aligned, row_sums, out=np.full_like(aligned, 1.0 / classes.shape[0]), where=row_sums > 0.0)
         confidence = np.max(aligned, axis=1)
@@ -316,7 +314,8 @@ def _metadata(
     confident_mask: np.ndarray,
     fallback_classes: tuple[Any, ...],
 ) -> dict[str, Any]:
-    unique, counts = np.unique(pseudo_labels.astype(str), return_counts=True)
+    pseudo_label_strings = np.asarray([str(value) for value in pseudo_labels.tolist()], dtype=str)
+    unique, counts = np.unique(pseudo_label_strings, return_counts=True)
     pseudo_counts = "|".join(f"{label}:{int(count)}" for label, count in zip(unique, counts, strict=True))
     return {
         "conditional_coral": True,
@@ -432,3 +431,57 @@ def _float_value(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed):
         raise ValueError(f"{name} must be finite.")
     return parsed
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    """Return one label object per row while preserving composite labels."""
+
+    if isinstance(values, (str, bytes)):
+        items = [values]
+    else:
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            if array.shape[0] == expected_length:
+                items = array.tolist()
+            elif expected_length == 1:
+                items = [tuple(array.tolist())]
+            else:
+                items = array.reshape(-1).tolist()
+        elif array.ndim == 2 and 1 in array.shape and array.size == expected_length:
+            items = array.reshape(-1).tolist()
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if rows.shape[1] == 1:
+                items = rows[:, 0].tolist()
+            else:
+                items = [tuple(row.tolist()) for row in rows]
+    if len(items) != expected_length:
+        raise ValueError(f"{name} must contain one value per row: {len(items)} != {expected_length}.")
+    return _object_vector(items)
+
+
+def _object_vector(values: Sequence[Any]) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
+    return vector
+
+
+def _labels_not_in_classes(labels: np.ndarray, classes: np.ndarray) -> list[Any]:
+    unknown: list[Any] = []
+    class_values = classes.tolist()
+    for label in labels.tolist():
+        if any(values_equal(label, class_label) for class_label in class_values):
+            continue
+        if not any(values_equal(label, seen) for seen in unknown):
+            unknown.append(label)
+    return unknown
+
+
+def _label_index(classes: np.ndarray, label: Any) -> int | None:
+    for index, class_label in enumerate(classes.tolist()):
+        if values_equal(label, class_label):
+            return index
+    return None
