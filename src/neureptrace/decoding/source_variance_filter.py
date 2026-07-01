@@ -95,7 +95,7 @@ def source_variance_filter_config(
 
     return SourceVarianceFilterConfig(
         variance_threshold=_nonnegative_float(variance_threshold, name="variance_threshold"),
-        top_k=None if top_k in {None, "", "none", "None"} else _positive_int(top_k, name="top_k"),
+        top_k=_optional_positive_int(top_k, name="top_k"),
         ddof=_nonnegative_int(ddof, name="ddof"),
     )
 
@@ -134,7 +134,11 @@ def select_variance_features(
 
 def _coerce_config(config: SourceVarianceFilterConfig | Mapping[str, Any]) -> SourceVarianceFilterConfig:
     if isinstance(config, SourceVarianceFilterConfig):
-        return config
+        return source_variance_filter_config(
+            variance_threshold=config.variance_threshold,
+            top_k=config.top_k,
+            ddof=config.ddof,
+        )
     return source_variance_filter_config(**dict(config))
 
 
@@ -147,7 +151,26 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _optional_positive_int(value: Any, *, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a positive integer or None.")
+        value = value.item()
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"", "none", "null"}:
+            return None
+        value = text
+    return _positive_int(value, name=name)
+
+
 def _positive_int(value: int | str, *, name: str) -> int:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a positive integer.")
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a positive integer.")
     try:
@@ -160,6 +183,10 @@ def _positive_int(value: int | str, *, name: str) -> int:
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a non-negative integer.")
     try:
@@ -172,6 +199,10 @@ def _nonnegative_int(value: int | str, *, name: str) -> int:
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be non-negative and finite.")
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be non-negative and finite.")
     try:

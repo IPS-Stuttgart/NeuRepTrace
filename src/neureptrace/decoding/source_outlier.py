@@ -17,6 +17,8 @@ SOURCE_OUTLIER_PROTOCOL = "strict_source_only_class_distance_weighting"
 SOURCE_OUTLIER_CATEGORY = "1_strict_source_only"
 WEIGHT_MODES = ("binary", "linear", "soft")
 THRESHOLD_MODES = ("quantile", "mad")
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +90,7 @@ def source_outlier_config(
     mad_multiplier: float | str = 3.0,
     weight_mode: str | None = "soft",
     temperature: float | str = 1.0,
-    use_diagonal_scale: bool = True,
+    use_diagonal_scale: bool | int | str = True,
     epsilon: float | str = 1e-8,
 ) -> SourceOutlierConfig:
     """Normalize public source-outlier options."""
@@ -99,7 +101,7 @@ def source_outlier_config(
         mad_multiplier=_positive_float(mad_multiplier, name="mad_multiplier"),
         weight_mode=normalize_weight_mode(weight_mode),
         temperature=_positive_float(temperature, name="temperature"),
-        use_diagonal_scale=bool(use_diagonal_scale),
+        use_diagonal_scale=_normalize_bool(use_diagonal_scale, name="use_diagonal_scale"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -185,7 +187,15 @@ def _metadata(cfg: SourceOutlierConfig, *, labels: np.ndarray, classes: np.ndarr
 
 def _coerce_config(config: SourceOutlierConfig | Mapping[str, Any]) -> SourceOutlierConfig:
     if isinstance(config, SourceOutlierConfig):
-        return config
+        return source_outlier_config(
+            threshold_mode=config.threshold_mode,
+            quantile=config.quantile,
+            mad_multiplier=config.mad_multiplier,
+            weight_mode=config.weight_mode,
+            temperature=config.temperature,
+            use_diagonal_scale=config.use_diagonal_scale,
+            epsilon=config.epsilon,
+        )
     return source_outlier_config(**dict(config))
 
 
@@ -205,15 +215,56 @@ def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, n
     return vector
 
 
+def _normalize_bool(value: Any, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        return _normalize_bool(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    raise ValueError(f"{name} must be a boolean value.")
+
+
+def _normalize_float(value: Any, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite.")
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be finite.")
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(f"{name} must be finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite.") from exc
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    return parsed
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
-    if not np.isfinite(parsed) or parsed <= 0.0:
+    parsed = _normalize_float(value, name=name)
+    if parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
 
 
 def _unit_interval_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
-    if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
+    parsed = _normalize_float(value, name=name)
+    if parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed

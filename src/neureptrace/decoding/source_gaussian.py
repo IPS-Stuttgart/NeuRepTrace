@@ -170,7 +170,12 @@ def gaussian_log_likelihoods(
 
 def _coerce_config(config: SourceGaussianConfig | Mapping[str, Any]) -> SourceGaussianConfig:
     if isinstance(config, SourceGaussianConfig):
-        return config
+        return source_gaussian_config(
+            covariance_type=config.covariance_type,
+            prior=config.prior,
+            variance_floor=config.variance_floor,
+            temperature=config.temperature,
+        )
     return source_gaussian_config(**dict(config))
 
 
@@ -286,7 +291,12 @@ def _object_vector(values: Sequence[Any]) -> np.ndarray:
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, (bool, np.bool_, np.ndarray)):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed

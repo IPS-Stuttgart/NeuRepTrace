@@ -108,6 +108,9 @@ def test_source_prior_rejects_bad_inputs() -> None:
     with pytest.raises(ValueError, match="shape"):
         adjust_probabilities_to_source_prior([[0.5, 0.5, 0.0]], source_labels=[0, 1], classes=[0, 1])
 
+    with pytest.raises(ValueError, match="positive mass"):
+        adjust_probabilities_to_source_prior([[0.0, 0.0]], source_labels=[0, 1], classes=[0, 1])
+
 
 def test_heldout_arguments_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):

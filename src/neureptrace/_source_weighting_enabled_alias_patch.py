@@ -12,6 +12,7 @@ _DISABLED_ENABLE_ALIASES = {"0", "false", "off", "no", "disable", "disabled"}
 _MODE_ALIAS_PATCH_ATTR = "_enabled_alias_patch"
 _SCALAR_VALIDATION_PATCH_ATTR = "_source_weighting_scalar_validation_patch"
 _FINITE_FEATURE_PATCH_ATTR = "_source_weighting_finite_feature_patch"
+_CONFIG_NORMALIZATION_PATCH_ATTR = "_source_weighting_direct_config_normalization_patch"
 
 
 def _normalized_alias(value: Any) -> str:
@@ -108,6 +109,44 @@ def selected_source_groups(group_weights: Any, *, min_weight: float = 0.0) -> tu
     return tuple(group for group, weight in group_weights.items() if _nonnegative_float(weight, name="source_group_weight") > threshold)
 
 
+def _normalize_direct_config(config: Any) -> Any:
+    import neureptrace.decoding.source_weighting as source_weighting
+
+    if isinstance(config, source_weighting.SourceGroupWeightingConfig):
+        return source_weighting.source_group_weighting_config(
+            {
+                "mode": config.mode,
+                "metric": config.metric,
+                "temperature": config.temperature,
+                "top_k": config.top_k,
+                "blend": config.blend,
+                "hybrid_target_similarity_weight": config.hybrid_target_similarity_weight,
+            }
+        )
+    return source_weighting.source_group_weighting_config(config)
+
+
+def _make_dynamic_source_group_weights(original_dynamic_source_group_weights: Any) -> Any:
+    @wraps(original_dynamic_source_group_weights)
+    def dynamic_source_group_weights(
+        *,
+        config: Any,
+        groups: Any = None,
+        source_scores: Any = None,
+        source_features: Any = None,
+        target_features: Any = None,
+    ) -> dict[Any, float]:
+        return original_dynamic_source_group_weights(
+            config=_normalize_direct_config(config),
+            groups=groups,
+            source_scores=source_scores,
+            source_features=source_features,
+            target_features=target_features,
+        )
+
+    return dynamic_source_group_weights
+
+
 def _make_combine_source_reliability_and_similarity(source_weighting: Any, original_combine_source_reliability_and_similarity: Any) -> Any:
     @wraps(original_combine_source_reliability_and_similarity)
     def combine_source_reliability_and_similarity(
@@ -159,21 +198,25 @@ def install() -> None:
         source_weighting._feature_centroid = _feature_centroid
         setattr(source_weighting, _FINITE_FEATURE_PATCH_ATTR, True)
 
-    if getattr(source_weighting, _SCALAR_VALIDATION_PATCH_ATTR, False):
-        return
+    if not getattr(source_weighting, _SCALAR_VALIDATION_PATCH_ATTR, False):
+        original_combine_source_reliability_and_similarity = source_weighting.combine_source_reliability_and_similarity
+        source_weighting._score_to_utility = _score_to_utility
+        source_weighting._positive_float = _positive_float
+        source_weighting._nonnegative_float = _nonnegative_float
+        source_weighting._unit_interval_float = _unit_interval_float
+        source_weighting._optional_positive_int = _optional_positive_int
+        source_weighting.selected_source_groups = selected_source_groups
+        source_weighting.combine_source_reliability_and_similarity = _make_combine_source_reliability_and_similarity(
+            source_weighting,
+            original_combine_source_reliability_and_similarity,
+        )
+        setattr(source_weighting, _SCALAR_VALIDATION_PATCH_ATTR, True)
 
-    original_combine_source_reliability_and_similarity = source_weighting.combine_source_reliability_and_similarity
-    source_weighting._score_to_utility = _score_to_utility
-    source_weighting._positive_float = _positive_float
-    source_weighting._nonnegative_float = _nonnegative_float
-    source_weighting._unit_interval_float = _unit_interval_float
-    source_weighting._optional_positive_int = _optional_positive_int
-    source_weighting.selected_source_groups = selected_source_groups
-    source_weighting.combine_source_reliability_and_similarity = _make_combine_source_reliability_and_similarity(
-        source_weighting,
-        original_combine_source_reliability_and_similarity,
-    )
-    setattr(source_weighting, _SCALAR_VALIDATION_PATCH_ATTR, True)
+    original_dynamic_source_group_weights = source_weighting.dynamic_source_group_weights
+    if not getattr(original_dynamic_source_group_weights, _CONFIG_NORMALIZATION_PATCH_ATTR, False):
+        patched_dynamic_source_group_weights = _make_dynamic_source_group_weights(original_dynamic_source_group_weights)
+        setattr(patched_dynamic_source_group_weights, _CONFIG_NORMALIZATION_PATCH_ATTR, True)
+        source_weighting.dynamic_source_group_weights = patched_dynamic_source_group_weights
 
 
 __all__ = ["install"]

@@ -21,8 +21,12 @@ def _as_domain_vector(domains: Any, *, expected_length: int | None = None, name:
             raise ValueError(f"{name} must contain {expected_length} rows")
         return _object_vector([_freeze_domain_label(array.item())])
 
-    if expected_length is not None and int(array.shape[0]) != int(expected_length):
-        raise ValueError(f"{name} must contain {expected_length} rows")
+    if expected_length is not None:
+        expected = int(expected_length)
+        if expected == 1 and array.ndim == 1 and int(array.shape[0]) != 1:
+            return _object_vector([_freeze_domain_label(array.tolist())])
+        if int(array.shape[0]) != expected:
+            raise ValueError(f"{name} must contain {expected_length} rows")
 
     if array.ndim == 1:
         return _object_vector(_freeze_domain_label(value) for value in array.tolist())

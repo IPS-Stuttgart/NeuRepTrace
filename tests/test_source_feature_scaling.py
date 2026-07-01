@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_scaling import (
     SOURCE_SCALING_CATEGORY,
+    SourceFeatureScalingConfig,
     augment_source_with_feature_scaling,
     normalize_scaling_distribution,
     normalize_scaling_mode,
@@ -94,6 +95,44 @@ def test_preserve_original_string_false_returns_only_generated_rows() -> None:
     assert result.features.shape == (2, 2)
     assert result.synthetic_mask.tolist() == [True, True]
     assert result.metadata["source_feature_scaling_preserve_original"] is False
+
+
+def test_source_feature_scaling_revalidates_direct_config_objects() -> None:
+    features = np.asarray([[1.0, 1.0], [2.0, 2.0]], dtype=float)
+    labels = np.asarray(["x", "x"], dtype=object)
+
+    result = augment_source_with_feature_scaling(
+        features,
+        labels,
+        config=SourceFeatureScalingConfig(
+            synthetic_per_class="2",  # type: ignore[arg-type]
+            preserve_original="false",  # type: ignore[arg-type]
+            random_state="3",  # type: ignore[arg-type]
+        ),
+    )
+
+    assert result.features.shape == (2, 2)
+    assert result.synthetic_mask.tolist() == [True, True]
+    assert result.metadata["source_feature_scaling_preserve_original"] is False
+    assert result.metadata["source_feature_scaling_random_state"] == 3
+
+
+@pytest.mark.parametrize(
+    "bad_config",
+    [
+        SourceFeatureScalingConfig(synthetic_per_class=True),  # type: ignore[arg-type]
+        SourceFeatureScalingConfig(scale_std=True),  # type: ignore[arg-type]
+        SourceFeatureScalingConfig(preserve_original="maybe"),  # type: ignore[arg-type]
+        SourceFeatureScalingConfig(random_state=True),  # type: ignore[arg-type]
+        SourceFeatureScalingConfig(epsilon=True),  # type: ignore[arg-type]
+    ],
+)
+def test_source_feature_scaling_rejects_invalid_direct_config_objects(bad_config: SourceFeatureScalingConfig) -> None:
+    features = np.asarray([[1.0, 1.0], [2.0, 2.0]], dtype=float)
+    labels = np.asarray(["x", "x"], dtype=object)
+
+    with pytest.raises(ValueError):
+        augment_source_with_feature_scaling(features, labels, config=bad_config)
 
 
 def test_preserve_original_rejects_invalid_string() -> None:

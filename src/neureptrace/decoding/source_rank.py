@@ -50,7 +50,7 @@ def transform_source_rank_features(features, reference: SourceRankReference) -> 
     """Transform rows to empirical source-rank coordinates."""
 
     matrix = _matrix(features, name="features")
-    sorted_values = _matrix(reference.sorted_values, name="sorted_values")
+    sorted_values, output, clip_extremes, epsilon = _normalized_reference_fields(reference)
     if matrix.shape[1] != sorted_values.shape[1]:
         raise ValueError("features width must match source rank reference.")
     n_ref = sorted_values.shape[0]
@@ -60,9 +60,8 @@ def transform_source_rank_features(features, reference: SourceRankReference) -> 
         left = np.searchsorted(values, matrix[:, column], side="left")
         right = np.searchsorted(values, matrix[:, column], side="right")
         ranks[:, column] = (left + right) / (2.0 * n_ref)
-    if reference.clip_extremes:
-        ranks = np.clip(ranks, reference.epsilon, 1.0 - reference.epsilon)
-    output = normalize_rank_output(reference.output)
+    if clip_extremes:
+        ranks = np.clip(ranks, epsilon, 1.0 - epsilon)
     if output == "uniform":
         return ranks.astype(np.float32, copy=False)
     return (2.0 * ranks - 1.0).astype(np.float32, copy=False)
@@ -94,7 +93,7 @@ def fit_source_rank_transform(*, source_features, eval_features, output: str = "
             "source_rank_n_source_rows": int(source.shape[0]),
             "source_rank_n_eval_rows": int(eval_matrix.shape[0]),
             "source_rank_feature_dim": int(source.shape[1]),
-            "source_rank_output": normalize_rank_output(output),
+            "source_rank_output": reference.output,
             "source_rank_clip_extremes": bool(reference.clip_extremes),
             "source_rank_epsilon": float(reference.epsilon),
         },
@@ -109,6 +108,16 @@ def normalize_rank_output(value: str | None) -> str:
     if normalized not in RANK_OUTPUTS:
         raise ValueError(f"Unknown rank output {value!r}.")
     return normalized
+
+
+def _normalized_reference_fields(reference: SourceRankReference) -> tuple[np.ndarray, str, bool, float]:
+    sorted_values = _matrix(reference.sorted_values, name="sorted_values")
+    return (
+        sorted_values,
+        normalize_rank_output(reference.output),
+        _normalize_bool(reference.clip_extremes, name="clip_extremes"),
+        _epsilon(reference.epsilon),
+    )
 
 
 def _matrix(values, *, name: str) -> np.ndarray:

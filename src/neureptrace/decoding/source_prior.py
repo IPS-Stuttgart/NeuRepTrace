@@ -114,7 +114,7 @@ def normalize_target_prior(value: str | None) -> str:
 
 def _coerce_config(config: SourcePriorConfig | Mapping[str, Any]) -> SourcePriorConfig:
     if isinstance(config, SourcePriorConfig):
-        return config
+        return source_prior_config(target_prior=config.target_prior, smoothing=config.smoothing, epsilon=config.epsilon)
     return source_prior_config(**dict(config))
 
 
@@ -149,6 +149,9 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probability rows must be finite and non-negative.")
+    row_sums = np.sum(matrix, axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("probability rows must have positive mass.")
     matrix = np.maximum(matrix, float(epsilon))
     return matrix / np.sum(matrix, axis=1, keepdims=True)
 

@@ -79,6 +79,38 @@ def test_gamma_aliases_and_config_validation() -> None:
         fit_source_rff_reference([[0.0], [1.0]], config={"n_components": 0})
 
 
+def test_source_rff_accepts_scalar_numpy_array_config_values() -> None:
+    cfg = source_rff_config(
+        n_components=np.asarray(8),  # type: ignore[arg-type]
+        gamma=np.asarray(0.25),  # type: ignore[arg-type]
+        random_state=np.asarray(3),  # type: ignore[arg-type]
+        standardize=np.asarray(True),  # type: ignore[arg-type]
+        epsilon=np.asarray(1e-6),  # type: ignore[arg-type]
+    )
+
+    assert cfg.n_components == 8
+    assert cfg.gamma == 0.25
+    assert cfg.random_state == 3
+    assert cfg.standardize is True
+    assert np.isclose(cfg.epsilon, 1e-6)
+
+    source = np.asarray([[0.0, 2.0], [2.0, 4.0], [4.0, 6.0]], dtype=float)
+    direct = SourceRFFConfig(
+        n_components=np.asarray(4),  # type: ignore[arg-type]
+        gamma=np.asarray(0.5),  # type: ignore[arg-type]
+        random_state=np.asarray(7),  # type: ignore[arg-type]
+        standardize=np.asarray(False),  # type: ignore[arg-type]
+        epsilon=np.asarray(1e-6),  # type: ignore[arg-type]
+    )
+    reference = fit_source_rff_reference(source, config=direct)
+
+    assert reference.config.n_components == 4
+    assert reference.config.gamma == 0.5
+    assert reference.config.random_state == 7
+    assert reference.config.standardize is False
+    assert np.isclose(reference.config.epsilon, 1e-6)
+
+
 def test_source_rff_revalidates_direct_config_instances() -> None:
     source = np.asarray([[0.0, 2.0], [2.0, 4.0], [4.0, 6.0]], dtype=float)
     cfg = SourceRFFConfig(
@@ -108,6 +140,7 @@ def test_source_rff_rejects_bool_and_array_numeric_controls() -> None:
         {"gamma": np.asarray([0.5])},
         {"random_state": True},
         {"random_state": np.asarray([7])},
+        {"standardize": np.asarray([True])},
         {"epsilon": True},
         {"epsilon": np.asarray([1e-6])},
     ]

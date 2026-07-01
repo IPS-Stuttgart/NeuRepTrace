@@ -44,6 +44,33 @@ def test_fit_source_temperature_scaling_selects_source_temperature_and_scales_te
     assert result.metadata["source_temperature_valid_for_strict_source_only"] is True
 
 
+def test_fit_source_temperature_scaling_accepts_numpy_row_vector_labels_and_classes() -> None:
+    source_probabilities = np.asarray(
+        [
+            [0.70, 0.30],
+            [0.65, 0.35],
+            [0.35, 0.65],
+            [0.30, 0.70],
+        ],
+        dtype=float,
+    )
+    source_labels = np.asarray([["a", "a", "b", "b"]], dtype=object)
+    classes = np.asarray([["a", "b"]], dtype=object)
+
+    result = fit_source_temperature_scaling(
+        source_probabilities=source_probabilities,
+        source_labels=source_labels,
+        test_probabilities=[[0.60, 0.40], [0.20, 0.80]],
+        classes=classes,
+        config={"temperatures": [0.5, 1.0, 2.0]},
+    )
+
+    assert result.probabilities.shape == (2, 2)
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+    assert result.temperature in {0.5, 1.0, 2.0}
+    assert set(result.source_losses) == {0.5, 1.0, 2.0}
+
+
 def test_apply_temperature_sharpens_and_smooths_probabilities() -> None:
     probabilities = np.asarray([[0.75, 0.25]], dtype=float)
 
