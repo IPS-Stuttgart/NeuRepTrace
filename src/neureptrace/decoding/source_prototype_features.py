@@ -28,11 +28,20 @@ DEFAULT_EPSILON = 1e-8
 class SourcePrototypeFeatureConfig:
     """Configuration for source-only prototype-distance features."""
 
-    metric: str = "squared_euclidean"
-    output: str = "distance"
-    use_diagonal_scale: bool = True
-    temperature: float = DEFAULT_TEMPERATURE
-    epsilon: float = DEFAULT_EPSILON
+    metric: str | None = "squared_euclidean"
+    output: str | None = "distance"
+    use_diagonal_scale: bool | int | str = True
+    temperature: float | str = DEFAULT_TEMPERATURE
+    epsilon: float | str = DEFAULT_EPSILON
+
+    def __post_init__(self) -> None:
+        """Normalize direct dataclass construction like mapping configs."""
+
+        object.__setattr__(self, "metric", normalize_prototype_metric(self.metric))
+        object.__setattr__(self, "output", normalize_prototype_output(self.output))
+        object.__setattr__(self, "use_diagonal_scale", _bool_value(self.use_diagonal_scale, name="use_diagonal_scale"))
+        object.__setattr__(self, "temperature", _positive_float(self.temperature, name="temperature"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,7 +201,13 @@ def normalize_prototype_output(value: str | None) -> str:
 
 def _coerce_config(config: SourcePrototypeFeatureConfig | Mapping[str, Any]) -> SourcePrototypeFeatureConfig:
     if isinstance(config, SourcePrototypeFeatureConfig):
-        return config
+        return source_prototype_feature_config(
+            metric=config.metric,
+            output=config.output,
+            use_diagonal_scale=config.use_diagonal_scale,
+            temperature=config.temperature,
+            epsilon=config.epsilon,
+        )
     return source_prototype_feature_config(**dict(config))
 
 
@@ -264,13 +279,27 @@ def _object_vector(values: Iterable[Any]) -> np.ndarray:
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be positive and finite."
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
