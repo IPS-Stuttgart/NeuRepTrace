@@ -121,6 +121,34 @@ def test_source_knn_normalizes_dataclass_config_values() -> None:
     assert np.allclose(reference.scale, [1.0])
 
 
+def test_source_knn_config_direct_construction_normalizes_fields() -> None:
+    config = SourceKNNConfig(
+        k=np.asarray(2),
+        weights="inverse-distance",
+        standardize="off",
+        epsilon=np.asarray(1e-6),
+    )
+
+    assert config.k == 2
+    assert config.weights == "distance"
+    assert config.standardize is False
+    assert config.epsilon == pytest.approx(1e-6)
+
+
+def test_source_knn_config_direct_construction_rejects_invalid_fields() -> None:
+    with pytest.raises(ValueError, match="weight mode"):
+        SourceKNNConfig(weights="bad")
+
+    with pytest.raises(ValueError, match="standardize"):
+        SourceKNNConfig(standardize=np.asarray([False]))
+
+    with pytest.raises(ValueError, match="k"):
+        SourceKNNConfig(k=np.bool_(True))
+
+    with pytest.raises(ValueError, match="epsilon"):
+        SourceKNNConfig(epsilon=np.asarray([1e-8]))
+
+
 def test_source_knn_accepts_scalar_numpy_standardize_config() -> None:
     cfg = source_knn_config(
         k=np.asarray(1),
