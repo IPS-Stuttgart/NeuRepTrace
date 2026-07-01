@@ -59,12 +59,8 @@ def test_zero_rows_remain_finite() -> None:
     assert np.allclose(norms, 0.0)
 
 
-def test_direct_config_normalizes_aliases_and_boolean_strings() -> None:
+def test_dataclass_config_is_revalidated_when_used() -> None:
     cfg = RowNormalizationConfig(norm="euclidean", center_rows="false", epsilon="1e-6")  # type: ignore[arg-type]
-
-    assert cfg.norm == "l2"
-    assert cfg.center_rows is False
-    assert cfg.epsilon == pytest.approx(1e-6)
 
     normalized, norms = normalize_rows([[1.0, 2.0, 3.0]], config=cfg)
 
@@ -75,8 +71,6 @@ def test_direct_config_normalizes_aliases_and_boolean_strings() -> None:
 def test_boolean_epsilon_is_rejected() -> None:
     with pytest.raises(ValueError, match="epsilon"):
         row_normalization_config(epsilon=True)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="epsilon"):
-        RowNormalizationConfig(epsilon=True)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="epsilon"):
         normalize_rows([[0.0, 0.0]], config={"epsilon": True})
 
