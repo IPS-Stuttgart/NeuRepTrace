@@ -28,6 +28,15 @@ class SourceFeatureClippingConfig:
     upper_quantile: float = DEFAULT_UPPER_QUANTILE
     copy: bool = True
 
+    def __post_init__(self) -> None:
+        lower = _quantile(self.lower_quantile, name="lower_quantile")
+        upper = _quantile(self.upper_quantile, name="upper_quantile")
+        if lower >= upper:
+            raise ValueError("lower_quantile must be smaller than upper_quantile.")
+        object.__setattr__(self, "lower_quantile", lower)
+        object.__setattr__(self, "upper_quantile", upper)
+        object.__setattr__(self, "copy", _bool_value(self.copy, name="copy"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceFeatureClippingResult:
@@ -153,7 +162,16 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _scalar_array_value(value: object, *, name: str) -> object:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a scalar value.")
+        return value.item()
+    return value
+
+
 def _quantile(value: float | str, *, name: str) -> float:
+    value = _scalar_array_value(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a numeric quantile, not boolean.")
     try:
@@ -166,6 +184,7 @@ def _quantile(value: float | str, *, name: str) -> float:
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    value = _scalar_array_value(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)):
