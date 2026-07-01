@@ -197,7 +197,7 @@ def _metadata(reference: SourceKNNReference, *, n_test_rows: int) -> dict[str, A
         "source_knn_valid_for_benchmark": True,
         "source_knn_n_source_rows": int(reference.features.shape[0]),
         "source_knn_n_test_rows": int(n_test_rows),
-        "source_knn_feature_dim": int(reference.classes.shape[0]),
+        "source_knn_feature_dim": int(reference.features.shape[1]),
         "source_knn_n_classes": int(reference.classes.shape[0]),
         "source_knn_k": str(reference.config.k),
         "source_knn_weights": reference.config.weights,
