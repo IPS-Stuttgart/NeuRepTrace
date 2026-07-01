@@ -81,6 +81,7 @@ from . import (  # noqa: E402
     _mmd_source_weighting_gamma_patch,
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
+    _mne_source_time_selection_guard_patch,
     _mne_time_decode_ensemble_param_validation_patch,
     _mne_time_decode_float_sequence_validation_patch,
     _nll_eps_validation_patch,
@@ -270,6 +271,7 @@ _mmd_source_weighting_gamma_patch.install()
 _mixstyle_boolean_config_patch.install()
 _mne_alignment_calibration_anchor_patch.install()
 _mne_pseudo_alignment_fallback_validity_patch.install()
+_mne_source_time_selection_guard_patch.install()
 _mne_time_decode_ensemble_param_validation_patch.install()
 _mne_time_decode_float_sequence_validation_patch.install()
 _nll_eps_validation_patch.install()
