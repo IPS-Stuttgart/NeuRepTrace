@@ -30,6 +30,14 @@ class SourceKNNConfig:
     standardize: bool = True
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "k", _normalize_k_request(self.k))
+        object.__setattr__(self, "weights", normalize_weight_mode(self.weights))
+        object.__setattr__(self, "standardize", _bool_value(self.standardize, name="standardize"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceKNNReference:
