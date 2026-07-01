@@ -142,7 +142,7 @@ def normalize_norm_mode(value: str | None) -> str:
 
 def _coerce_config(config: RowNormalizationConfig | Mapping[str, Any]) -> RowNormalizationConfig:
     if isinstance(config, RowNormalizationConfig):
-        return config
+        return row_normalization_config(norm=config.norm, center_rows=config.center_rows, epsilon=config.epsilon)
     return row_normalization_config(**dict(config))
 
 
@@ -156,7 +156,18 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(f"{name} must be positive and finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
