@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from neureptrace._object_label_utils import label_equal_mask
 from neureptrace.decoding.conditional_coral import (
     CONDITIONAL_CORAL_CATEGORY,
     conditional_coral_config,
@@ -57,6 +58,46 @@ def test_conditional_coral_aligns_source_class_means_to_pseudo_target_classes() 
         aligned_mean = result.train_features[source_labels == class_label].mean(axis=0)
         target_mean = target_features[pseudo_labels == class_label].mean(axis=0)
         assert np.allclose(aligned_mean, target_mean, atol=1e-5)
+
+
+def test_conditional_coral_preserves_composite_tuple_labels() -> None:
+    left = ("stimulus", "left")
+    right = ("stimulus", "right")
+    source_features = np.asarray(
+        [
+            [0.0, 0.0],
+            [0.2, -0.1],
+            [5.0, 5.0],
+            [5.2, 4.9],
+        ],
+        dtype=float,
+    )
+    source_labels = [left, left, right, right]
+    target_features = np.asarray(
+        [
+            [1.0, 2.0],
+            [1.2, 1.9],
+            [8.0, 9.0],
+            [8.2, 8.9],
+        ],
+        dtype=float,
+    )
+    pseudo_labels = [left, left, right, right]
+
+    result = fit_pseudo_label_conditional_coral(
+        source_features=source_features,
+        source_labels=source_labels,
+        target_features=target_features,
+        target_pseudo_labels=pseudo_labels,
+        config={"regularization": 1e-6, "min_target_rows_per_class": 2},
+    )
+
+    assert result.classes.tolist() == [left, right]
+    assert result.pseudo_labels.tolist() == pseudo_labels
+    for class_label in result.classes.tolist():
+        source_mask = label_equal_mask(source_labels, class_label)
+        target_mask = label_equal_mask(pseudo_labels, class_label)
+        assert np.allclose(result.train_features[source_mask].mean(axis=0), target_features[target_mask].mean(axis=0), atol=1e-5)
 
 
 def test_target_probabilities_define_pseudo_labels_and_confidence_fallback() -> None:
