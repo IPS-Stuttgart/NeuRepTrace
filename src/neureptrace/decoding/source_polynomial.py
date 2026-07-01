@@ -137,7 +137,13 @@ def source_polynomial_config(
 
 def _coerce_config(config: SourcePolynomialConfig | Mapping[str, Any]) -> SourcePolynomialConfig:
     if isinstance(config, SourcePolynomialConfig):
-        return config
+        return source_polynomial_config(
+            include_bias=config.include_bias,
+            include_original=config.include_original,
+            include_squares=config.include_squares,
+            include_interactions=config.include_interactions,
+            max_interactions=config.max_interactions,
+        )
     return source_polynomial_config(**dict(config))
 
 
