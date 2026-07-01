@@ -24,9 +24,16 @@ DEFAULT_EPSILON = 1e-12
 class SourcePriorConfig:
     """Configuration for source-only prior adjustment."""
 
-    target_prior: str = "uniform"
-    smoothing: float = 0.0
-    epsilon: float = DEFAULT_EPSILON
+    target_prior: str | None = "uniform"
+    smoothing: float | str = 0.0
+    epsilon: float | str = DEFAULT_EPSILON
+
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "target_prior", normalize_target_prior(self.target_prior))
+        object.__setattr__(self, "smoothing", _nonnegative_float(self.smoothing, name="smoothing"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
 
 
 @dataclass(frozen=True, slots=True)
