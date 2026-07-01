@@ -417,14 +417,15 @@ def smooth_probability_observations(
         for _, sequence_frame in decoder_frame.sort_values([*key_columns, "time"]).groupby(key_columns, sort=True, dropna=False):
             probabilities = _normalize_probabilities(sequence_frame[prob_columns].to_numpy(dtype=float))
             if len(probabilities) < 2:
-                continue
-            posterior = _smooth_sequence_posteriors(
-                sequence_frame,
-                probabilities,
-                stay_probability=stay_probability,
-                mode=mode,
-                apply_window=apply_window,
-            )
+                posterior = probabilities
+            else:
+                posterior = _smooth_sequence_posteriors(
+                    sequence_frame,
+                    probabilities,
+                    stay_probability=stay_probability,
+                    mode=mode,
+                    apply_window=apply_window,
+                )
             smoothed_frames.append(
                 _with_posterior_columns(
                     sequence_frame,
