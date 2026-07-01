@@ -69,6 +69,15 @@ def test_aliases_and_validation() -> None:
         source_feature_scale_config(epsilon=0.0)
 
 
+@pytest.mark.parametrize("value", [np.asarray("standard"), np.asarray(["standard"])])
+def test_source_scale_rejects_array_method_values(value: object) -> None:
+    with pytest.raises(ValueError, match="source scale method"):
+        source_feature_scale_config(method=value)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="source scale method"):
+        SourceFeatureScaleConfig(method=value)  # type: ignore[arg-type]
+
+
 def test_source_scale_revalidates_direct_dataclass_config() -> None:
     with pytest.raises(ValueError, match="epsilon"):
         fit_source_feature_scale_stats([[0.0], [1.0]], config=SourceFeatureScaleConfig(epsilon=float("nan")))
