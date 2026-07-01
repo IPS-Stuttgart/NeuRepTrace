@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from neureptrace._object_label_utils import values_equal
 from neureptrace.decoding.mixstyle import (
     SOURCE_MIXSTYLE_CATEGORY,
     augment_source_mixstyle,
@@ -146,6 +147,30 @@ def test_mixstyle_preserves_tuple_labels_atomically() -> None:
     assert result.labels[4:].tolist() == labels
     assert result.metadata["source_mixstyle_n_classes"] == 2
     assert all(isinstance(label, tuple) for label in result.labels.tolist())
+
+
+def test_mixstyle_class_conditional_accepts_numpy_array_labels() -> None:
+    features = np.asarray([[0.0, 0.0], [1.0, 0.5], [10.0, 10.0], [11.0, 10.5]], dtype=float)
+    labels = np.empty(4, dtype=object)
+    for index, label in enumerate((["face", 1], ["house", 2], ["face", 1], ["house", 2])):
+        labels[index] = np.asarray(label, dtype=object)
+    domains = np.asarray(["s1", "s1", "s2", "s2"], dtype=object)
+
+    result = augment_source_mixstyle(
+        features,
+        labels,
+        domains,
+        augmentations_per_row=1,
+        class_conditional=True,
+        include_original=False,
+        domain_pairing="nearest",
+        random_state=3,
+    )
+
+    assert result.features.shape == features.shape
+    assert result.labels.dtype == object
+    assert result.metadata["source_mixstyle_n_classes"] == 2
+    assert all(values_equal(observed, expected) for observed, expected in zip(result.labels.tolist(), labels.tolist(), strict=True))
 
 
 def test_mixstyle_preserves_tuple_domains_in_class_conditional_stats() -> None:
