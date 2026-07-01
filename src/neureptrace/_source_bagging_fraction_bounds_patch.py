@@ -127,11 +127,23 @@ def install() -> None:
         setattr(source_bagging_config, _PATCH_MARKER, True)
         source_bagging.source_bagging_config = source_bagging_config
 
+    normalized_config = source_bagging.source_bagging_config
     original_coerce_config = source_bagging._coerce_config
     if not getattr(original_coerce_config, _PATCH_MARKER, False):
 
         @wraps(original_coerce_config)
         def _coerce_config(config: Any):
+            if isinstance(config, source_bagging.SourceBaggingConfig):
+                return normalized_config(
+                    n_estimators=config.n_estimators,
+                    sample_fraction=config.sample_fraction,
+                    feature_fraction=config.feature_fraction,
+                    bootstrap_rows=config.bootstrap_rows,
+                    bootstrap_features=config.bootstrap_features,
+                    class_balanced=config.class_balanced,
+                    random_state=config.random_state,
+                    epsilon=config.epsilon,
+                )
             return _validate_config(original_coerce_config(config))
 
         setattr(_coerce_config, _PATCH_MARKER, True)
