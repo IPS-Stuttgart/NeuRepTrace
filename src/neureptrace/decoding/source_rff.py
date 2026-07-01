@@ -236,7 +236,13 @@ def _numeric_scalar(value: Any, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a numeric scalar, not a boolean.")
     if isinstance(value, np.ndarray):
-        raise ValueError(f"{name} must be a numeric scalar, not a NumPy array.")
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a numeric scalar, not a NumPy array.")
+        if np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(f"{name} must be a numeric scalar, not a boolean.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
@@ -265,6 +271,10 @@ def _positive_float(value: float | str, *, name: str) -> float:
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
