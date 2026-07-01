@@ -101,7 +101,7 @@ def calibrated_prototype_config(
     prior_strength: float | str = DEFAULT_PRIOR_STRENGTH,
     fixed_calibration_weight: float | str | None = None,
     temperature: float | str = DEFAULT_TEMPERATURE,
-    diagonal_scale: bool = True,
+    diagonal_scale: bool | int | str = True,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> CalibratedPrototypeConfig:
     """Normalize calibrated prototype options."""
@@ -111,7 +111,7 @@ def calibrated_prototype_config(
         prior_strength=_positive_float(prior_strength, name="prior_strength"),
         fixed_calibration_weight=fixed,
         temperature=_positive_float(temperature, name="temperature"),
-        diagonal_scale=bool(diagonal_scale),
+        diagonal_scale=_bool_value(diagonal_scale, name="diagonal_scale"),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
 
@@ -215,3 +215,27 @@ def _unit_interval_float(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
+
+
+def _bool_value(value: Any, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        return _bool_value(value.item(), name=name)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, (float, np.floating)):
+        if np.isfinite(value) and float(value) in {0.0, 1.0}:
+            return bool(value)
+        raise ValueError(f"{name} must be a boolean value.")
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean value.")
