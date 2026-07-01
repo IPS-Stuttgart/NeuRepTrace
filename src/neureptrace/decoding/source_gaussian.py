@@ -33,6 +33,14 @@ class SourceGaussianConfig:
     variance_floor: float = DEFAULT_VARIANCE_FLOOR
     temperature: float = DEFAULT_TEMPERATURE
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "covariance_type", normalize_covariance_type(self.covariance_type))
+        object.__setattr__(self, "prior", normalize_prior_mode(self.prior))
+        object.__setattr__(self, "variance_floor", _positive_float(self.variance_floor, name="variance_floor"))
+        object.__setattr__(self, "temperature", _positive_float(self.temperature, name="temperature"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceGaussianResult:
