@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_variance_filter import (
     SOURCE_VARIANCE_FILTER_CATEGORY,
+    SourceVarianceFilterConfig,
     fit_source_variance_filter,
     select_variance_features,
     source_feature_variances,
@@ -55,6 +56,23 @@ def test_source_variance_filter_config_validation() -> None:
 
     with pytest.raises(ValueError):
         source_variance_filter_config(top_k=0)
+
+
+def test_source_variance_filter_config_normalizes_none_like_top_k() -> None:
+    for value in ("", "none", " None ", "null", np.asarray("none", dtype=object)):
+        assert source_variance_filter_config(top_k=value).top_k is None
+
+
+def test_source_variance_filter_dataclass_config_is_revalidated_before_use() -> None:
+    source = np.asarray([[1.0, 0.0, 0.0, 5.0], [1.0, 1.0, 0.0, 7.0], [1.0, 2.0, 0.0, 9.0]])
+    test = np.asarray([[99.0, 3.0, 4.0, 11.0]])
+    config = SourceVarianceFilterConfig(variance_threshold="0.0", top_k=" none ", ddof="0")
+
+    result = fit_source_variance_filter(source_features=source, test_features=test, config=config)
+
+    assert result.selected_indices.tolist() == [1, 3]
+    assert result.metadata["source_variance_filter_top_k"] == ""
+    assert result.metadata["source_variance_filter_ddof"] == 0
 
 
 @pytest.mark.parametrize(
