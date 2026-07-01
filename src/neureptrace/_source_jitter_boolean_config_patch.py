@@ -10,8 +10,10 @@ import numpy as np
 
 _PATCH_MARKER = "_neureptrace_source_jitter_boolean_config_patch_installed"
 _AUGMENT_METADATA_PATCH_MARKER = "_neureptrace_source_jitter_disabled_metadata_patch_installed"
+_JITTER_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_feature_jitter_dataclass_init_patch_installed"
 _MASKING_INT_PATCH_MARKER = "_neureptrace_source_feature_masking_int_config_patch_installed"
 _MASKING_AUGMENT_CONFIG_PATCH_MARKER = "_neureptrace_source_feature_masking_dataclass_config_patch_installed"
+_MASKING_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_feature_masking_dataclass_init_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 _NONE_STRINGS = {"", "none", "null"}
@@ -192,8 +194,49 @@ def _normalize_masking_dataclass_config(source_masking: Any, config: Any) -> Any
     )
 
 
+def _patch_jitter_dataclass_init(source_jitter: Any) -> None:
+    original_init = source_jitter.SourceFeatureJitterConfig.__init__
+    if getattr(original_init, _JITTER_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(self, "synthetic_per_class", _nonnegative_integer(self.synthetic_per_class, name="synthetic_per_class"))
+        object.__setattr__(self, "noise_scale", _nonnegative_float(self.noise_scale, name="noise_scale"))
+        object.__setattr__(self, "scale_mode", source_jitter.normalize_jitter_scale_mode(self.scale_mode))
+        object.__setattr__(self, "preserve_original", _normalize_bool(self.preserve_original, name="preserve_original"))
+        object.__setattr__(self, "random_state", _nonnegative_optional_integer(self.random_state, name="random_state"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
+    setattr(__init__, _JITTER_DATACLASS_INIT_PATCH_MARKER, True)
+    source_jitter.SourceFeatureJitterConfig.__init__ = __init__
+
+
+def _patch_masking_dataclass_init(source_masking: Any) -> None:
+    original_init = source_masking.SourceFeatureMaskingConfig.__init__
+    if getattr(original_init, _MASKING_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(self, "synthetic_per_class", _nonnegative_integer(self.synthetic_per_class, name="synthetic_per_class"))
+        object.__setattr__(self, "mask_fraction", _unit_interval_float(self.mask_fraction, name="mask_fraction"))
+        object.__setattr__(self, "mask_mode", source_masking.normalize_mask_mode(self.mask_mode))
+        object.__setattr__(self, "block_size", _positive_optional_integer(self.block_size, name="block_size"))
+        object.__setattr__(self, "fill_mode", source_masking.normalize_fill_mode(self.fill_mode))
+        object.__setattr__(self, "noise_std", _nonnegative_float(self.noise_std, name="noise_std"))
+        object.__setattr__(self, "preserve_original", _normalize_bool(self.preserve_original, name="preserve_original"))
+        object.__setattr__(self, "random_state", _nonnegative_optional_integer(self.random_state, name="random_state"))
+
+    setattr(__init__, _MASKING_DATACLASS_INIT_PATCH_MARKER, True)
+    source_masking.SourceFeatureMaskingConfig.__init__ = __init__
+
+
 def _install_source_jitter_patch() -> None:
     source_jitter = importlib.import_module("neureptrace.decoding.source_jitter")
+    _patch_jitter_dataclass_init(source_jitter)
 
     original_config = source_jitter.source_feature_jitter_config
     if not getattr(original_config, _PATCH_MARKER, False):
@@ -250,6 +293,7 @@ def _install_source_jitter_patch() -> None:
 
 def _install_source_masking_patch() -> None:
     source_masking = importlib.import_module("neureptrace.decoding.source_masking")
+    _patch_masking_dataclass_init(source_masking)
 
     original_config = source_masking.source_feature_masking_config
     if not getattr(original_config, _MASKING_INT_PATCH_MARKER, False):
