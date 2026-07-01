@@ -23,6 +23,14 @@ class SourceBalanceConfig:
     normalize_weights: bool = True
     random_state: int | None = 13
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "strategy", normalize_balance_strategy(self.strategy))
+        object.__setattr__(self, "target", normalize_balance_target(self.target))
+        object.__setattr__(self, "normalize_weights", _bool_config(self.normalize_weights, name="normalize_weights"))
+        object.__setattr__(self, "random_state", _optional_nonnegative_int(self.random_state, name="random_state"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceBalanceResult:
@@ -146,6 +154,12 @@ def normalize_balance_target(value: str | None) -> str:
 
 
 def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, str):
