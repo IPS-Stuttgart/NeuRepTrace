@@ -28,6 +28,14 @@ class SourceFeatureScaleConfig:
     scale: bool = True
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "method", normalize_source_scale_method(self.method))
+        object.__setattr__(self, "center", _bool_value(self.center, name="center"))
+        object.__setattr__(self, "scale", _bool_value(self.scale, name="scale"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceFeatureScaleStats:
@@ -178,22 +186,35 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_, np.ndarray)):
-        raise ValueError(f"{name} must be positive and finite.")
+    message = f"{name} must be positive and finite."
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(message)
+        value = value.item()
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive and finite.") from exc
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
 def _bool_value(value: bool | str | int, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
         return bool(value)
+    if isinstance(value, (float, np.floating)):
+        parsed_float = float(value)
+        if np.isfinite(parsed_float) and parsed_float in {0.0, 1.0}:
+            return bool(parsed_float)
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"1", "true", "yes", "on"}:
