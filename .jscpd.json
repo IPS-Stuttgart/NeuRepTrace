@@ -11,6 +11,7 @@
     "**/configs/bush_meg/source_loso_pseudotrial_decoding.yml",
     "**/configs/bush_meg/source_loso_ensemble_*.yml",
     "**/src/neureptrace/decoding/hyperalignment.py",
-    "**/src/neureptrace/decoding/mcca.py"
+    "**/src/neureptrace/decoding/mcca.py",
+    "**/src/neureptrace/decoding/source_confidence_weighting/__init__.py"
   ]
 }
