@@ -154,11 +154,14 @@ def _object_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, 
             else:
                 items = array.tolist()
         else:
-            rows = array.reshape(array.shape[0], -1)
-            if rows.shape[1] == 1:
-                items = rows[:, 0].tolist()
+            if array.shape[0] == 1 and array.size == expected_length and expected_length > 1:
+                items = array.reshape(-1).tolist()
             else:
-                items = [tuple(row.tolist()) for row in rows]
+                rows = array.reshape(array.shape[0], -1)
+                if rows.shape[1] == 1:
+                    items = rows[:, 0].tolist()
+                else:
+                    items = [tuple(row.tolist()) for row in rows]
     elif isinstance(values, (str, bytes)):
         items = [values]
     else:
