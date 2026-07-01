@@ -45,8 +45,8 @@ def test_load_reaction_time_csv_rejects_boolean_trial_index_base(tmp_path: Path,
         load_reaction_time_csv(csv_path, ReactionTimeCsvConfig(trial_index_base=trial_index_base))
 
 
-@pytest.mark.parametrize("reaction_time_scale", [False, True, math.nan, math.inf])
-def test_reaction_time_helpers_reject_invalid_scale(tmp_path: Path, reaction_time_scale: float | bool):
+@pytest.mark.parametrize("reaction_time_scale", [False, True, math.nan, math.inf, 0.0, -1.0, "-2"])
+def test_reaction_time_helpers_reject_invalid_scale(tmp_path: Path, reaction_time_scale: object):
     csv_path = tmp_path / "rt.csv"
     csv_path.write_text(
         "participant,dataset,trial,rt\n"
