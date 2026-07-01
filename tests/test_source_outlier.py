@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_outlier import (
     SOURCE_OUTLIER_CATEGORY,
+    SourceOutlierConfig,
     compute_source_outlier_weights,
     normalize_threshold_mode,
     normalize_weight_mode,
@@ -95,6 +96,29 @@ def test_source_outlier_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="quantile"):
         source_outlier_config(quantile=1.5)
+
+
+def test_source_outlier_boolean_config_parses_string_values() -> None:
+    cfg = source_outlier_config(use_diagonal_scale="false")
+    assert cfg.use_diagonal_scale is False
+    cfg = source_outlier_config(use_diagonal_scale="ON")
+    assert cfg.use_diagonal_scale is True
+
+
+def test_source_outlier_revalidates_dataclass_config_instances() -> None:
+    features = np.asarray([[0.0], [1.0], [2.0], [8.0], [10.0], [11.0]], dtype=float)
+    labels = np.asarray(["x", "x", "x", "y", "y", "y"], dtype=object)
+    config = SourceOutlierConfig(use_diagonal_scale="false")  # type: ignore[arg-type]
+
+    result = compute_source_outlier_weights(features, labels, config=config)
+
+    assert np.all(result.feature_scale == 1.0)
+
+
+def test_source_outlier_rejects_boolean_numeric_config_values() -> None:
+    for name in ("quantile", "mad_multiplier", "temperature", "epsilon"):
+        with pytest.raises(ValueError, match=name):
+            source_outlier_config(**{name: True})
 
 
 def test_source_outlier_requires_matching_label_rows() -> None:
