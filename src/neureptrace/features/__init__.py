@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from . import _oscillatory_composite_labels_patch
+
+_oscillatory_composite_labels_patch.install()
+
 from neureptrace.features.oscillatory import (
     BandFeatureWindow,
     compute_alpha_features,
