@@ -24,6 +24,14 @@ class SourceConfidenceWeightConfig:
     normalize_weights: bool = True
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "mode", normalize_confidence_weight_mode(self.mode))
+        object.__setattr__(self, "min_weight", _unit_interval_float(self.min_weight, name="min_weight"))
+        object.__setattr__(self, "normalize_weights", _bool_value(self.normalize_weights, name="normalize_weights"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceConfidenceWeightResult:
@@ -204,6 +212,12 @@ def _numeric_scalar(value: Any, *, message: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(message)
     if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
         raise ValueError(message)
     try:
         return float(value)
@@ -228,10 +242,20 @@ def _positive_float(value: float | str, *, name: str) -> float:
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
         return bool(value)
+    if isinstance(value, (float, np.floating)):
+        parsed = float(value)
+        if np.isfinite(parsed) and parsed in {0.0, 1.0}:
+            return bool(parsed)
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"1", "true", "yes", "on"}:
