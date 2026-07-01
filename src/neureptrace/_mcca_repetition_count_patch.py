@@ -1,9 +1,15 @@
-"""Runtime guardrails for M-CCA configuration parsing.
+"""Runtime guardrails for M-CCA configuration parsing and label matching.
 
 Boolean scalars are integer-like in Python and NumPy.  Without an explicit
 check, values such as ``n_repetitions_per_class=True`` are silently treated as
 ``1`` by the M-CCA class-repetition alignment helpers.  That can turn a YAML or
 programmatic type error into a valid but unintended alignment/calibration run.
+
+M-CCA also compares class-anchor labels while building source and target
+alignment rows.  NumPy array-valued object labels make ``left == right`` return
+an array, and coercing that array to ``bool`` raises ``ValueError``.  Use the
+shared object-label equality helper so array-valued anchors behave like other
+composite labels.
 
 The source-alignment and category-2 config builders also expose
 ``mcca_subject_pca_components`` as an optional nested dimensionality-reduction
@@ -21,6 +27,8 @@ from types import ModuleType
 from typing import Any
 
 import numpy as np
+
+from neureptrace._object_label_utils import values_equal
 
 _TARGET_MODULES = {
     "neureptrace.decoding.mcca",
@@ -66,6 +74,7 @@ def _patch_optional_component_config(module: ModuleType, function_name: str) -> 
 
 
 def _patch_mcca(module: ModuleType) -> None:
+    module._labels_equal = values_equal
     original_class_alignment_matrices = module.class_alignment_matrices
     original_fit_class_mcca = module.fit_class_mcca
 
@@ -147,7 +156,7 @@ class _MCCARepetitionCountPatchFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Install validation and normalization for public M-CCA config values."""
+    """Install validation, normalization, and object-safe matching for public M-CCA helpers."""
 
     for module_name in _TARGET_MODULES:
         loaded = sys.modules.get(module_name)
