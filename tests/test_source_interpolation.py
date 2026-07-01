@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_interpolation import (
     SOURCE_INTERPOLATION_CATEGORY,
+    SourceInterpolationConfig,
     augment_source_with_interpolation,
     interpolate_rows,
     normalize_pair_mode,
@@ -57,6 +58,40 @@ def test_interpolate_rows_and_config_validation() -> None:
         interpolate_rows([0.0], [1.0], 1.5)
 
 
+def test_source_interpolation_config_normalizes_direct_dataclass_values() -> None:
+    cfg = SourceInterpolationConfig(
+        synthetic_per_class="2",  # type: ignore[arg-type]
+        pair_mode="cross-domain",
+        alpha=np.asarray("0.5"),  # type: ignore[arg-type]
+        preserve_original="false",  # type: ignore[arg-type]
+        random_state=np.asarray("none"),  # type: ignore[arg-type]
+    )
+
+    assert cfg.synthetic_per_class == 2
+    assert isinstance(cfg.synthetic_per_class, int)
+    assert cfg.pair_mode == "same_class_cross_domain"
+    assert cfg.alpha == pytest.approx(0.5)
+    assert cfg.preserve_original is False
+    assert cfg.random_state is None
+    assert cfg.enabled is True
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"synthetic_per_class": True}, "synthetic_per_class must be a non-negative integer"),
+        ({"synthetic_per_class": np.asarray([1])}, "synthetic_per_class must be a non-negative integer"),
+        ({"alpha": False}, "alpha must be positive and finite"),
+        ({"preserve_original": np.asarray([True])}, "preserve_original must be a boolean value"),
+        ({"random_state": True}, "random_state must be a non-negative integer"),
+        ({"random_state": np.asarray([7])}, "random_state must be a non-negative integer"),
+    ],
+)
+def test_source_interpolation_config_rejects_invalid_direct_dataclass_values(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        SourceInterpolationConfig(**kwargs)  # type: ignore[arg-type]
+
+
 def test_source_interpolation_accepts_null_random_state_strings() -> None:
     cfg = source_interpolation_config(random_state="NULL")
     assert cfg.random_state is None
@@ -73,6 +108,12 @@ def test_source_interpolation_accepts_null_random_state_strings() -> None:
 def test_source_interpolation_rejects_invalid_random_state_values(bad_seed: object) -> None:
     with pytest.raises(ValueError, match="random_state"):
         source_interpolation_config(random_state=bad_seed)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("bad_value", [True, np.bool_(False), np.asarray([1])])
+def test_source_interpolation_rejects_invalid_synthetic_counts(bad_value: object) -> None:
+    with pytest.raises(ValueError, match="synthetic_per_class"):
+        source_interpolation_config(synthetic_per_class=bad_value)  # type: ignore[arg-type]
 
 
 def test_disabled_interpolation_returns_original_rows() -> None:
