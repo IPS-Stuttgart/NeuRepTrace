@@ -5,9 +5,11 @@ import pytest
 
 from neureptrace.decoding.row_normalization import (
     ROW_NORMALIZATION_CATEGORY,
+    RowNormalizationConfig,
     normalize_norm_mode,
     normalize_rows,
     normalize_source_and_test_rows,
+    row_normalization_config,
     row_norms,
 )
 
@@ -55,6 +57,28 @@ def test_zero_rows_remain_finite() -> None:
 
     assert np.allclose(normalized, 0.0)
     assert np.allclose(norms, 0.0)
+
+
+def test_direct_config_normalizes_aliases_and_boolean_strings() -> None:
+    cfg = RowNormalizationConfig(norm="euclidean", center_rows="false", epsilon="1e-6")  # type: ignore[arg-type]
+
+    assert cfg.norm == "l2"
+    assert cfg.center_rows is False
+    assert cfg.epsilon == pytest.approx(1e-6)
+
+    normalized, norms = normalize_rows([[1.0, 2.0, 3.0]], config=cfg)
+
+    assert np.allclose(normalized, np.asarray([[1.0, 2.0, 3.0]]) / np.sqrt(14.0))
+    assert np.allclose(norms, [np.sqrt(14.0)])
+
+
+def test_boolean_epsilon_is_rejected() -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        row_normalization_config(epsilon=True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="epsilon"):
+        RowNormalizationConfig(epsilon=True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="epsilon"):
+        normalize_rows([[0.0, 0.0]], config={"epsilon": True})
 
 
 def test_aliases_and_validation() -> None:
