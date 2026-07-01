@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 _PATCH_MARKER = '_neureptrace_mixstyle_composite_ids_patch_installed'
 
 
@@ -60,13 +62,13 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: 
 
 
 def _equal_mask(values: np.ndarray, value: Any) -> np.ndarray:
-    return np.asarray([candidate == value for candidate in values.tolist()], dtype=bool)
+    return np.asarray([values_equal(candidate, value) for candidate in values.tolist()], dtype=bool)
 
 
 def _unique_values(values: np.ndarray) -> tuple[Any, ...]:
     unique: list[Any] = []
     for value in values.tolist():
-        if not any(existing == value for existing in unique):
+        if not any(values_equal(existing, value) for existing in unique):
             unique.append(value)
     return tuple(unique)
 
