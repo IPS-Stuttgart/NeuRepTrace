@@ -121,6 +121,46 @@ def test_source_knn_normalizes_dataclass_config_values() -> None:
     assert np.allclose(reference.scale, [1.0])
 
 
+def test_source_knn_accepts_scalar_numpy_standardize_config() -> None:
+    cfg = source_knn_config(
+        k=np.asarray(1),
+        standardize=np.asarray(False),
+        epsilon=np.asarray(1e-8),
+    )
+
+    assert cfg.k == 1
+    assert cfg.standardize is False
+    assert cfg.epsilon == pytest.approx(1e-8)
+
+    reference = fit_source_knn_reference(
+        source_features=[[0.0], [10.0]],
+        source_labels=[0, 1],
+        config=SourceKNNConfig(
+            k=np.asarray(1),
+            weights="equal",
+            standardize=np.asarray(False),
+            epsilon=np.asarray(1e-8),
+        ),
+    )
+
+    assert reference.config.weights == "uniform"
+    assert reference.config.standardize is False
+    assert np.allclose(reference.mean, [0.0])
+    assert np.allclose(reference.scale, [1.0])
+
+
+def test_source_knn_rejects_vector_numpy_standardize_config() -> None:
+    with pytest.raises(ValueError, match="standardize"):
+        source_knn_config(standardize=np.asarray([False]))
+
+    with pytest.raises(ValueError, match="standardize"):
+        fit_source_knn_reference(
+            source_features=[[0.0], [1.0]],
+            source_labels=[0, 1],
+            config=SourceKNNConfig(standardize=np.asarray([False])),
+        )
+
+
 def test_source_knn_rejects_invalid_dataclass_config_values() -> None:
     with pytest.raises(ValueError, match="weight mode"):
         fit_source_knn_reference(
