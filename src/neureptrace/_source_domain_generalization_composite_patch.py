@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from . import _source_ensemble_tuple_domains_patch
+from ._object_label_utils import values_equal as _values_equal
 
 _PATCH_MARKER = "_neureptrace_source_domain_generalization_composite_patch_installed"
 
@@ -35,17 +36,6 @@ def _atomic_vector(values: Sequence[Any] | np.ndarray, *, name: str, reject_matr
         return array.reshape(-1)
     rows = [tuple(row.tolist()) for row in array.reshape(array.shape[0], -1)]
     return _object_value_vector(rows)
-
-
-def _values_equal(left: object, right: object) -> bool:
-    try:
-        equal = left == right
-    except (TypeError, ValueError):
-        return False
-    try:
-        return bool(equal)
-    except (TypeError, ValueError):
-        return False
 
 
 def _is_missing_domain_value(value: Any) -> bool:
