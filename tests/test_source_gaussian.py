@@ -79,6 +79,34 @@ def test_aliases_and_config_validation() -> None:
         normalize_covariance_type("full")
 
 
+def test_source_gaussian_normalizes_direct_dataclass_config() -> None:
+    cfg = SourceGaussianConfig(
+        covariance_type="diag",
+        prior="flat",
+        variance_floor="1e-5",
+        temperature="2.0",
+    )  # type: ignore[arg-type]
+
+    assert cfg.covariance_type == "diagonal"
+    assert cfg.prior == "uniform"
+    assert cfg.variance_floor == pytest.approx(1e-5)
+    assert cfg.temperature == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"covariance_type": "full"}, "covariance_type"),
+        ({"prior": "weighted"}, "prior mode"),
+        ({"variance_floor": 0.0}, "variance_floor"),
+        ({"temperature": np.asarray(1.0)}, "temperature"),
+    ],
+)
+def test_source_gaussian_rejects_invalid_direct_dataclass_config(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        SourceGaussianConfig(**kwargs)  # type: ignore[arg-type]
+
+
 def test_source_gaussian_revalidates_direct_dataclass_config() -> None:
     source = np.asarray([[0.0], [0.2], [3.0], [3.2]], dtype=float)
     test = np.asarray([[0.1], [3.1]], dtype=float)
