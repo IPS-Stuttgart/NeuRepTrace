@@ -142,8 +142,8 @@ def source_bagging_config(
 
     return SourceBaggingConfig(
         n_estimators=_positive_int(n_estimators, name="n_estimators"),
-        sample_fraction=_positive_float(sample_fraction, name="sample_fraction"),
-        feature_fraction=_positive_float(feature_fraction, name="feature_fraction"),
+        sample_fraction=_positive_fraction(sample_fraction, name="sample_fraction"),
+        feature_fraction=_positive_fraction(feature_fraction, name="feature_fraction"),
         bootstrap_rows=_boolean(bootstrap_rows, name="bootstrap_rows"),
         bootstrap_features=_boolean(bootstrap_features, name="bootstrap_features"),
         class_balanced=_boolean(class_balanced, name="class_balanced"),
@@ -154,7 +154,16 @@ def source_bagging_config(
 
 def _coerce_config(config: SourceBaggingConfig | Mapping[str, Any]) -> SourceBaggingConfig:
     if isinstance(config, SourceBaggingConfig):
-        return config
+        return source_bagging_config(
+            n_estimators=config.n_estimators,
+            sample_fraction=config.sample_fraction,
+            feature_fraction=config.feature_fraction,
+            bootstrap_rows=config.bootstrap_rows,
+            bootstrap_features=config.bootstrap_features,
+            class_balanced=config.class_balanced,
+            random_state=config.random_state,
+            epsilon=config.epsilon,
+        )
     return source_bagging_config(**dict(config))
 
 
@@ -356,7 +365,15 @@ def _labels_equal(left: Any, right: Any) -> bool:
 
 
 def _boolean(value: bool | str, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
         return bool(value)
     if isinstance(value, str):
         normalized = value.strip().lower()
@@ -382,7 +399,11 @@ def _nonnegative_int(value: int | str, *, name: str) -> int:
 
 
 def _integer(value: int | str, *, name: str) -> int:
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be an integer.")
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
         raise ValueError(f"{name} must be an integer.")
     try:
         parsed = float(value)
@@ -393,8 +414,21 @@ def _integer(value: int | str, *, name: str) -> int:
     return int(parsed)
 
 
+def _positive_fraction(value: float | str, *, name: str) -> float:
+    parsed = _positive_float(value, name=name)
+    if parsed > 1.0:
+        raise ValueError(f"{name} must be in (0, 1].")
+    return parsed
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
         raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
