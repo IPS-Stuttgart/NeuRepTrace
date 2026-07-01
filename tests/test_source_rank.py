@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_rank import (
     SOURCE_RANK_CATEGORY,
+    SourceRankReference,
     fit_source_rank_reference,
     fit_source_rank_transform,
     normalize_rank_output,
@@ -54,6 +55,21 @@ def test_clip_extremes_string_false_keeps_unclipped_rank_extremes() -> None:
     assert result.reference.clip_extremes is False
     assert result.metadata["source_rank_clip_extremes"] is False
     assert np.allclose(result.eval_features, np.asarray([[0.0], [1.0]], dtype=np.float32))
+
+
+def test_direct_source_rank_reference_normalizes_clip_extremes() -> None:
+    reference = SourceRankReference(sorted_values=np.asarray([[0.0], [1.0]], dtype=float), clip_extremes="false")  # type: ignore[arg-type]
+
+    transformed = transform_source_rank_features([[-1.0], [2.0]], reference)
+
+    assert np.allclose(transformed, np.asarray([[0.0], [1.0]], dtype=np.float32))
+
+
+def test_direct_source_rank_reference_rejects_ambiguous_clip_extremes() -> None:
+    reference = SourceRankReference(sorted_values=np.asarray([[0.0], [1.0]], dtype=float), clip_extremes="disabled")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="clip_extremes"):
+        transform_source_rank_features([[0.5]], reference)
 
 
 def test_clip_extremes_rejects_ambiguous_config_values() -> None:

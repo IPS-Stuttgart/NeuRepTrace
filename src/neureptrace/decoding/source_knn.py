@@ -150,15 +150,13 @@ def source_knn_config(
     *,
     k: int | str = DEFAULT_K,
     weights: str | None = "distance",
-    standardize: bool | int | str = True,
+    standardize: Any = True,
     epsilon: float | str = DEFAULT_EPSILON,
 ) -> SourceKNNConfig:
     """Normalize source-kNN options."""
 
-    if isinstance(k, (bool, np.bool_)):
-        raise ValueError(_K_ERROR)
     return SourceKNNConfig(
-        k=k,
+        k=_normalize_k_request(k),
         weights=normalize_weight_mode(weights),
         standardize=_bool_value(standardize, name="standardize"),
         epsilon=_positive_float(epsilon, name="epsilon"),
@@ -177,10 +175,8 @@ def normalize_weight_mode(value: str | None) -> str:
 
 def _coerce_config(config: SourceKNNConfig | Mapping[str, Any]) -> SourceKNNConfig:
     if isinstance(config, SourceKNNConfig):
-        if isinstance(config.k, (bool, np.bool_)):
-            raise ValueError(_K_ERROR)
         return SourceKNNConfig(
-            k=config.k,
+            k=_normalize_k_request(config.k),
             weights=normalize_weight_mode(config.weights),
             standardize=_bool_value(config.standardize, name="standardize"),
             epsilon=_positive_float(config.epsilon, name="epsilon"),
@@ -211,24 +207,34 @@ def _metadata(reference: SourceKNNReference, *, n_test_rows: int) -> dict[str, A
 
 
 def _resolve_k(value: int | str, *, n_source: int) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(_K_ERROR)
+    requested = _normalize_k_request(value)
+    if isinstance(requested, str):
+        return int(n_source)
+    return min(int(requested), int(n_source))
+
+
+def _normalize_k_request(value: Any) -> int | str:
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"all", "full"}:
-            return int(n_source)
-        try:
-            parsed = float(text)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(_K_ERROR) from exc
+            return text
+        value = text
     else:
-        try:
-            parsed = float(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(_K_ERROR) from exc
+        if isinstance(value, np.ndarray):
+            if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+                raise ValueError(_K_ERROR)
+            value = value.item()
+        if isinstance(value, np.generic):
+            value = value.item()
+        if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+            raise ValueError(_K_ERROR)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_K_ERROR) from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(_K_ERROR)
-    return min(int(parsed), int(n_source))
+    return int(parsed)
 
 
 def _squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
@@ -307,12 +313,14 @@ def _label_index(classes: np.ndarray, label: Any) -> int | None:
 
 def _positive_float(value: float | str, *, name: str) -> float:
     message = f"{name} must be positive and finite."
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(message)
+        value = value.item()
     if isinstance(value, np.generic):
         value = value.item()
-        if isinstance(value, (bool, np.bool_)):
-            raise ValueError(message)
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(message)
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
@@ -322,7 +330,13 @@ def _positive_float(value: float | str, *, name: str) -> float:
     return parsed
 
 
-def _bool_value(value: bool | int | str, *, name: str) -> bool:
+def _bool_value(value: Any, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
