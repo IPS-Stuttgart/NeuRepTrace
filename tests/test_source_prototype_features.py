@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_prototype_features import (
     SOURCE_PROTOTYPE_FEATURES_CATEGORY,
+    SourcePrototypeFeatureConfig,
     class_prototypes,
     fit_source_prototype_features,
     normalize_prototype_metric,
@@ -36,6 +37,56 @@ def test_prototype_distance_features_use_source_classes_only() -> None:
     assert result.metadata["source_prototype_features_uses_test_features_for_fitting"] is False
     assert result.metadata["source_prototype_features_uses_test_labels"] is False
     assert result.metadata["source_prototype_features_valid_for_strict_source_only"] is True
+
+
+def test_direct_prototype_config_normalizes_like_mapping_config() -> None:
+    source = np.asarray([[0.0, 0.0], [0.0, 2.0], [3.0, 0.0], [3.0, 2.0]], dtype=float)
+    labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+    test = np.asarray([[0.0, 1.0], [3.0, 1.0]], dtype=float)
+    direct_config = SourcePrototypeFeatureConfig(
+        metric="l2",
+        output="rbf",
+        use_diagonal_scale="false",
+        temperature=np.asarray(2.0),
+        epsilon=np.float64(1e-6),
+    )
+
+    direct = fit_source_prototype_features(
+        source_features=source,
+        source_labels=labels,
+        test_features=test,
+        config=direct_config,
+    )
+    mapping = fit_source_prototype_features(
+        source_features=source,
+        source_labels=labels,
+        test_features=test,
+        config={"metric": "l2", "output": "rbf", "use_diagonal_scale": "false", "temperature": np.asarray(2.0), "epsilon": np.float64(1e-6)},
+    )
+
+    assert direct_config.metric == "euclidean"
+    assert direct_config.output == "rbf_similarity"
+    assert direct_config.use_diagonal_scale is False
+    assert direct_config.temperature == 2.0
+    assert direct_config.epsilon == pytest.approx(1e-6)
+    assert np.allclose(direct.feature_scale, np.ones(source.shape[1]))
+    assert np.allclose(direct.train_features, mapping.train_features)
+    assert np.allclose(direct.test_features, mapping.test_features)
+    assert direct.metadata["source_prototype_features_metric"] == "euclidean"
+    assert direct.metadata["source_prototype_features_output"] == "rbf_similarity"
+    assert direct.metadata["source_prototype_features_use_diagonal_scale"] is False
+
+
+@pytest.mark.parametrize("field", ["temperature", "epsilon"])
+def test_direct_prototype_config_rejects_boolean_numeric_controls(field: str) -> None:
+    with pytest.raises(ValueError, match="positive and finite"):
+        SourcePrototypeFeatureConfig(**{field: True})
+
+
+@pytest.mark.parametrize("field", ["temperature", "epsilon"])
+def test_prototype_config_rejects_vector_numeric_controls(field: str) -> None:
+    with pytest.raises(ValueError, match="positive and finite"):
+        SourcePrototypeFeatureConfig(**{field: np.asarray([1.0, 2.0])})
 
 
 def test_prototype_similarity_output_is_positive() -> None:
