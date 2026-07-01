@@ -11,6 +11,7 @@ import numpy as np
 
 _INSTALLED = False
 _PATCH_MARKER = "_neureptrace_random_state_config_patch_installed"
+_SOURCE_INTERPOLATION_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_interpolation_dataclass_init_patch_installed"
 
 
 def _random_state_error(name: str) -> ValueError:
@@ -49,6 +50,48 @@ def _normalize_optional_nonnegative_int(
     if isinstance(scalar_value, (bool, np.bool_)):
         raise _random_state_error(name)
     return normalizer(scalar_value, name=name)
+
+
+def _scalar_config_value(value: Any, *, message: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return value.item()
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(message)
+    return value
+
+
+def _normalize_nonnegative_int(value: Any, *, normalizer: Any, name: str) -> int:
+    message = f"{name} must be a non-negative integer."
+    scalar_value = _scalar_config_value(value, message=message)
+    if isinstance(scalar_value, (bool, np.bool_)):
+        raise ValueError(message)
+    return normalizer(scalar_value, name=name)
+
+
+def _normalize_positive_float(value: Any, *, normalizer: Any, name: str) -> float:
+    message = f"{name} must be positive and finite."
+    scalar_value = _scalar_config_value(value, message=message)
+    if isinstance(scalar_value, (bool, np.bool_)):
+        raise ValueError(message)
+    return normalizer(scalar_value, name=name)
+
+
+def _normalize_bool(value: Any, *, name: str) -> bool:
+    message = f"{name} must be a boolean value."
+    scalar_value = _scalar_config_value(value, message=message)
+    if isinstance(scalar_value, (bool, np.bool_)):
+        return bool(scalar_value)
+    if isinstance(scalar_value, (int, np.integer)) and int(scalar_value) in {0, 1}:
+        return bool(scalar_value)
+    if isinstance(scalar_value, str):
+        text = scalar_value.strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(message)
 
 
 def _patch_feature_mixstyle() -> None:
@@ -214,8 +257,51 @@ def _patch_source_domain_mask() -> None:
     source_domain_mask_module.source_domain_mask = source_domain_mask
 
 
+def _patch_source_interpolation_dataclass(source_interpolation: Any) -> None:
+    original_init = source_interpolation.SourceInterpolationConfig.__init__
+    if getattr(original_init, _SOURCE_INTERPOLATION_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(
+            self,
+            "synthetic_per_class",
+            _normalize_nonnegative_int(
+                self.synthetic_per_class,
+                normalizer=source_interpolation._nonnegative_int,
+                name="synthetic_per_class",
+            ),
+        )
+        object.__setattr__(self, "pair_mode", source_interpolation.normalize_pair_mode(self.pair_mode))
+        object.__setattr__(
+            self,
+            "alpha",
+            _normalize_positive_float(
+                self.alpha,
+                normalizer=source_interpolation._positive_float,
+                name="alpha",
+            ),
+        )
+        object.__setattr__(self, "preserve_original", _normalize_bool(self.preserve_original, name="preserve_original"))
+        object.__setattr__(
+            self,
+            "random_state",
+            _normalize_optional_nonnegative_int(
+                self.random_state,
+                normalizer=source_interpolation._nonnegative_int,
+                name="random_state",
+            ),
+        )
+
+    setattr(__init__, _SOURCE_INTERPOLATION_DATACLASS_INIT_PATCH_MARKER, True)
+    source_interpolation.SourceInterpolationConfig.__init__ = __init__
+
+
 def _patch_source_interpolation() -> None:
     source_interpolation = importlib.import_module("neureptrace.decoding.source_interpolation")
+    _patch_source_interpolation_dataclass(source_interpolation)
 
     original_config = source_interpolation.source_interpolation_config
     if getattr(original_config, _PATCH_MARKER, False):
@@ -236,10 +322,14 @@ def _patch_source_interpolation() -> None:
             name="random_state",
         )
         return original_config(
-            synthetic_per_class=synthetic_per_class,
+            synthetic_per_class=_normalize_nonnegative_int(
+                synthetic_per_class,
+                normalizer=source_interpolation._nonnegative_int,
+                name="synthetic_per_class",
+            ),
             pair_mode=pair_mode,
-            alpha=alpha,
-            preserve_original=preserve_original,
+            alpha=_normalize_positive_float(alpha, normalizer=source_interpolation._positive_float, name="alpha"),
+            preserve_original=_normalize_bool(preserve_original, name="preserve_original"),
             random_state=seed,
         )
 
@@ -258,6 +348,3 @@ def install() -> None:
     _patch_source_domain_mask()
     _patch_source_interpolation()
     _INSTALLED = True
-
-
-__all__ = ["install"]
