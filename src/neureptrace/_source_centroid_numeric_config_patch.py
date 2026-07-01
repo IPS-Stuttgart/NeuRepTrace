@@ -1,28 +1,59 @@
-"""Runtime patch for source-centroid numeric scalar configuration validation."""
+"""Runtime patches for source-decoder numeric scalar configuration validation."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import wraps
 from typing import Any
 
 import numpy as np
 
 _ORIGINAL_COERCE_CONFIG = None
 _INSTALLED = False
+_SOURCE_KNN_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_knn_dataclass_init_patch_installed"
 
 
 def install() -> None:
-    """Reject array-valued numeric source-centroid config controls."""
-    global _INSTALLED, _ORIGINAL_COERCE_CONFIG
+    """Install source-decoder numeric config validation patches."""
+    global _INSTALLED
     if _INSTALLED:
         return
+
+    _install_source_centroid_patch()
+    _install_source_knn_patch()
+    _INSTALLED = True
+
+
+def _install_source_centroid_patch() -> None:
+    """Reject array-valued numeric source-centroid config controls."""
+    global _ORIGINAL_COERCE_CONFIG
 
     from neureptrace.decoding import source_centroid as module
 
     _ORIGINAL_COERCE_CONFIG = module._coerce_config
     module.source_centroid_config = _patched_source_centroid_config
     module._coerce_config = _patched_coerce_config
-    _INSTALLED = True
+
+
+def _install_source_knn_patch() -> None:
+    """Normalize direct SourceKNNConfig construction like source_knn_config(...)."""
+
+    from neureptrace.decoding import source_knn as module
+
+    original_init = module.SourceKNNConfig.__init__
+    if getattr(original_init, _SOURCE_KNN_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(self, "k", module._normalize_k_request(self.k))
+        object.__setattr__(self, "weights", module.normalize_weight_mode(self.weights))
+        object.__setattr__(self, "standardize", module._bool_value(self.standardize, name="standardize"))
+        object.__setattr__(self, "epsilon", module._positive_float(self.epsilon, name="epsilon"))
+
+    setattr(__init__, _SOURCE_KNN_DATACLASS_INIT_PATCH_MARKER, True)
+    module.SourceKNNConfig.__init__ = __init__
 
 
 def _patched_source_centroid_config(
