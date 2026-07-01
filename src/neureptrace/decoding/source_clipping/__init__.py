@@ -123,15 +123,30 @@ def _matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.
 
 
 def _quantile(value: float | str, *, name: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(f"{name} must be a numeric scalar quantile, not boolean.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a numeric quantile, not boolean.")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be in [0, 1].") from exc
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
