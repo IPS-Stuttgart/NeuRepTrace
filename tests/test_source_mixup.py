@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_mixup import (
     SOURCE_MIXUP_CATEGORY,
+    SourceMixUpConfig,
     augment_source_with_mixup,
     mixup_rows,
     normalize_hard_label_policy,
@@ -123,6 +124,48 @@ def test_source_mixup_is_reproducible_with_fixed_random_state() -> None:
     assert first.content_indices.tolist() == second.content_indices.tolist()
     assert first.partner_indices.tolist() == second.partner_indices.tolist()
     assert np.allclose(first.lambdas, second.lambdas)
+
+
+def test_source_mixup_accepts_scalar_numpy_numeric_config_controls() -> None:
+    cfg = source_mixup_config(synthetic_per_class=np.asarray(2), alpha=np.asarray(0.5))
+
+    assert cfg.synthetic_per_class == 2
+    assert cfg.alpha == 0.5
+
+    features = np.asarray([[0.0], [1.0], [10.0], [11.0]], dtype=float)
+    labels = np.asarray(["a", "a", "b", "b"], dtype=object)
+    direct_cfg = SourceMixUpConfig(synthetic_per_class=np.asarray(1), alpha=np.asarray(0.5), random_state=3)
+
+    result = augment_source_with_mixup(features, labels, config=direct_cfg)
+
+    assert result.n_synthetic == 2
+    assert result.metadata["source_mixup_synthetic_per_class"] == 1
+    assert result.metadata["source_mixup_alpha"] == 0.5
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"synthetic_per_class": np.asarray(True)}, "synthetic_per_class"),
+        ({"synthetic_per_class": np.asarray([1])}, "synthetic_per_class"),
+        ({"alpha": np.asarray(True)}, "alpha"),
+        ({"alpha": np.asarray([0.4])}, "alpha"),
+    ],
+)
+def test_source_mixup_rejects_ambiguous_numeric_config_controls(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        source_mixup_config(**kwargs)
+
+
+def test_source_mixup_rejects_ambiguous_numeric_direct_config_controls() -> None:
+    features = np.asarray([[0.0], [1.0]], dtype=float)
+    labels = np.asarray(["a", "a"], dtype=object)
+
+    with pytest.raises(ValueError, match="synthetic_per_class"):
+        augment_source_with_mixup(features, labels, config=SourceMixUpConfig(synthetic_per_class=np.asarray([1])))
+
+    with pytest.raises(ValueError, match="alpha"):
+        augment_source_with_mixup(features, labels, config=SourceMixUpConfig(alpha=np.asarray(True)))
 
 
 def test_disabled_source_mixup_returns_original_rows_only() -> None:
