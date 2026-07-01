@@ -23,11 +23,20 @@ DEFAULT_MAX_INTERACTIONS = "all"
 class SourcePolynomialConfig:
     """Configuration for a deterministic source-only polynomial feature map."""
 
-    include_bias: bool = False
-    include_original: bool = True
-    include_squares: bool = True
-    include_interactions: bool = True
+    include_bias: bool | int | str = False
+    include_original: bool | int | str = True
+    include_squares: bool | int | str = True
+    include_interactions: bool | int | str = True
     max_interactions: int | str = DEFAULT_MAX_INTERACTIONS
+
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "include_bias", _bool_value(self.include_bias, name="include_bias"))
+        object.__setattr__(self, "include_original", _bool_value(self.include_original, name="include_original"))
+        object.__setattr__(self, "include_squares", _bool_value(self.include_squares, name="include_squares"))
+        object.__setattr__(self, "include_interactions", _bool_value(self.include_interactions, name="include_interactions"))
+        object.__setattr__(self, "max_interactions", _max_interactions_value(self.max_interactions))
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +78,14 @@ def fit_source_polynomial_transform(
     reference = fit_source_polynomial_reference(source.shape[1], config=cfg)
     train = apply_source_polynomial_transform(source, reference)
     test_out = apply_source_polynomial_transform(test, reference)
-    metadata = _metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], feature_dim=source.shape[1], output_dim=train.shape[1], n_interactions=len(reference.interaction_pairs))
+    metadata = _metadata(
+        cfg,
+        n_source_rows=source.shape[0],
+        n_test_rows=test.shape[0],
+        feature_dim=source.shape[1],
+        output_dim=train.shape[1],
+        n_interactions=len(reference.interaction_pairs),
+    )
     return SourcePolynomialResult(
         train_features=train.astype(np.float32, copy=False),
         test_features=test_out.astype(np.float32, copy=False),
@@ -127,10 +143,10 @@ def source_polynomial_config(
     """Normalize polynomial feature-map options."""
 
     return SourcePolynomialConfig(
-        include_bias=_bool_value(include_bias, name="include_bias"),
-        include_original=_bool_value(include_original, name="include_original"),
-        include_squares=_bool_value(include_squares, name="include_squares"),
-        include_interactions=_bool_value(include_interactions, name="include_interactions"),
+        include_bias=include_bias,
+        include_original=include_original,
+        include_squares=include_squares,
+        include_interactions=include_interactions,
         max_interactions=max_interactions,
     )
 
@@ -149,15 +165,18 @@ def _coerce_config(config: SourcePolynomialConfig | Mapping[str, Any]) -> Source
 
 def _interaction_pairs(n_features: int, *, max_interactions: int | str) -> tuple[tuple[int, int], ...]:
     pairs = [(left, right) for left in range(n_features) for right in range(left + 1, n_features)]
-    if isinstance(max_interactions, str):
-        text = max_interactions.strip().lower()
-        if text in {"all", "full"}:
-            limit = len(pairs)
-        else:
-            limit = _nonnegative_int(text, name="max_interactions")
-    else:
-        limit = _nonnegative_int(max_interactions, name="max_interactions")
+    limit_or_all = _max_interactions_value(max_interactions)
+    limit = len(pairs) if limit_or_all == DEFAULT_MAX_INTERACTIONS else int(limit_or_all)
     return tuple(pairs[: min(limit, len(pairs))])
+
+
+def _max_interactions_value(value: int | str) -> int | str:
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"all", "full"}:
+            return DEFAULT_MAX_INTERACTIONS
+        return _nonnegative_int(text, name="max_interactions")
+    return _nonnegative_int(value, name="max_interactions")
 
 
 def _output_names(n_features: int, *, cfg: SourcePolynomialConfig, square_indices: np.ndarray, interaction_pairs: tuple[tuple[int, int], ...]) -> tuple[str, ...]:
@@ -231,10 +250,18 @@ def _nonnegative_int(value: int | str, *, name: str) -> int:
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
         return bool(value)
+    if isinstance(value, (float, np.floating)):
+        parsed = float(value)
+        if np.isfinite(parsed) and parsed in {0.0, 1.0}:
+            return bool(parsed)
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"1", "true", "yes", "on"}:

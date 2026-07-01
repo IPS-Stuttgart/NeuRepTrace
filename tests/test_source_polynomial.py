@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_polynomial import (
     SOURCE_POLYNOMIAL_CATEGORY,
+    SourcePolynomialConfig,
     apply_source_polynomial_transform,
     fit_source_polynomial_reference,
     fit_source_polynomial_transform,
@@ -66,6 +67,54 @@ def test_polynomial_config_validation() -> None:
 
     with pytest.raises(ValueError, match="max_interactions"):
         fit_source_polynomial_reference(3, config={"max_interactions": -1})
+
+
+def test_direct_polynomial_config_normalizes_boolean_strings() -> None:
+    cfg = SourcePolynomialConfig(include_bias="true", include_original="false", include_squares="false", include_interactions="false")
+
+    assert cfg.include_bias is True
+    assert cfg.include_original is False
+    assert cfg.include_squares is False
+    assert cfg.include_interactions is False
+    assert fit_source_polynomial_reference(2, config=cfg).output_names == ("bias",)
+
+
+def test_direct_polynomial_config_normalizes_numpy_scalars() -> None:
+    cfg = SourcePolynomialConfig(
+        include_bias=np.asarray(True),
+        include_original=np.bool_(False),
+        include_squares=np.asarray(False),
+        include_interactions=np.asarray(False),
+        max_interactions=np.asarray(0),
+    )
+
+    assert cfg.include_bias is True
+    assert cfg.include_original is False
+    assert cfg.include_squares is False
+    assert cfg.include_interactions is False
+    assert cfg.max_interactions == 0
+    assert fit_source_polynomial_reference(2, config=cfg).output_names == ("bias",)
+
+
+def test_direct_polynomial_config_normalizes_max_interaction_alias() -> None:
+    cfg = SourcePolynomialConfig(max_interactions="full")
+
+    assert cfg.max_interactions == "all"
+    assert len(fit_source_polynomial_reference(3, config=cfg).interaction_pairs) == 3
+
+
+@pytest.mark.parametrize(
+    ("field", "kwargs"),
+    [
+        ("include_bias", {"include_bias": np.asarray([True])}),
+        ("include_original", {"include_original": np.asarray([False])}),
+        ("include_squares", {"include_squares": np.asarray([False])}),
+        ("include_interactions", {"include_interactions": np.asarray([False])}),
+    ],
+)
+def test_direct_polynomial_config_rejects_vector_boolean_controls(field: str, kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match=field):
+        SourcePolynomialConfig(**kwargs)
 
 
 @pytest.mark.parametrize("n_features", [True, np.bool_(True)])
