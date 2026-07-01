@@ -20,6 +20,8 @@ SOURCE_DOMAIN_SELECTION_CATEGORY = "2_unlabeled_target_adaptive"
 SOURCE_DOMAIN_SELECTION_METRICS = ("mean", "covariance", "mean_covariance", "mmd")
 DEFAULT_SOURCE_SELECTION_METRIC = "mean_covariance"
 DEFAULT_SOURCE_SELECTION_TEMPERATURE = "auto"
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 _MIN_SCALE = 1e-12
 
 
@@ -47,7 +49,7 @@ def select_source_domains_by_target_similarity(
     min_selected_domains: int | str = 1,
     softmax_temperature: float | str = DEFAULT_SOURCE_SELECTION_TEMPERATURE,
     source_labels: Sequence[Any] | np.ndarray | None = None,
-    class_balance: bool = False,
+    class_balance: bool | int | str = False,
 ) -> SourceDomainSelectionResult:
     """Select or weight source domains by similarity to unlabeled target features."""
 
@@ -73,6 +75,7 @@ def select_source_domains_by_target_similarity(
 
     resolved_max_distance = _normalize_optional_nonnegative_float(max_distance, name="max_distance")
     normalized_metric = normalize_source_selection_metric(metric)
+    balance_classes = _normalize_bool(class_balance, name="class_balance")
     distances = {
         domain: _domain_distance(source_matrix[_object_equal_mask(domain_vector, domain)], target_matrix, metric=normalized_metric)
         for domain in domains
@@ -91,7 +94,7 @@ def select_source_domains_by_target_similarity(
     sample_weights = np.zeros(source_matrix.shape[0], dtype=float)
     for domain in selected:
         sample_weights[_object_equal_mask(domain_vector, domain)] = scores[domain]
-    if class_balance:
+    if balance_classes:
         if source_labels is None:
             raise ValueError("source_labels are required when class_balance=True.")
         sample_weights = _class_balanced_weights(sample_weights, source_labels, selected_mask)
@@ -108,7 +111,7 @@ def select_source_domains_by_target_similarity(
         max_distance=resolved_max_distance,
         min_selected_domains=selected_min,
         softmax_temperature=softmax_temperature,
-        class_balance=class_balance,
+        class_balance=balance_classes,
         distances=distances,
         scores=scores,
     )
@@ -429,6 +432,31 @@ def _normalize_positive_int(value: int | str, *, name: str) -> int:
     if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(numeric)
+
+
+def _normalize_bool(value: Any, *, name: str) -> bool:
+    message = f"{name} must be a boolean value."
+    scalar = _scalar_config_value(value, name=name, message=message)
+    if isinstance(scalar, (bool, np.bool_)):
+        return bool(scalar)
+    if isinstance(scalar, str):
+        normalized = scalar.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise ValueError(message)
+    if isinstance(scalar, (int, np.integer)):
+        integer = int(scalar)
+        if integer in {0, 1}:
+            return bool(integer)
+        raise ValueError(message)
+    if isinstance(scalar, (float, np.floating)):
+        parsed = float(scalar)
+        if np.isfinite(parsed) and parsed in {0.0, 1.0}:
+            return bool(parsed)
+        raise ValueError(message)
+    raise ValueError(message)
 
 
 def _scalar_config_value(value: Any, *, name: str, message: str) -> Any:
