@@ -26,9 +26,17 @@ class SourceRandomProjectionConfig:
     """Configuration for a source-only random projection."""
 
     n_components: int | str = DEFAULT_COMPONENTS
-    distribution: str = "gaussian"
-    random_state: int | None = DEFAULT_RANDOM_STATE
+    distribution: str | None = "gaussian"
+    random_state: int | str | None = DEFAULT_RANDOM_STATE
     density: float | str = "auto"
+
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "n_components", _normalize_components_option(self.n_components))
+        object.__setattr__(self, "distribution", normalize_projection_distribution(self.distribution))
+        object.__setattr__(self, "random_state", _optional_random_state(self.random_state))
+        object.__setattr__(self, "density", _normalize_density_option(self.density))
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +236,11 @@ def _numeric_scalar(value: Any, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a numeric scalar, not a boolean.")
     if isinstance(value, np.ndarray):
-        raise ValueError(f"{name} must be a numeric scalar, not a NumPy array.")
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a numeric scalar, not a NumPy array.")
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(f"{name} must be a numeric scalar, not a boolean.")
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
