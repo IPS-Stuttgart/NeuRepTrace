@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from typing import cast
+
 from neureptrace.decoding.source_polynomial import SourcePolynomialConfig, fit_source_polynomial_reference
 
 
 def test_polynomial_revalidates_direct_dataclass_config() -> None:
-    disabled = str(False).lower()
-    enabled = str(True).lower()
+    disabled = cast(bool, str(False).lower())
+    enabled = cast(bool, str(True).lower())
     cfg = SourcePolynomialConfig(
         include_bias=disabled,
         include_original=disabled,
