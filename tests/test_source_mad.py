@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_mad import (
     SOURCE_MAD_CATEGORY,
+    SourceMADConfig,
     apply_source_mad_transform,
     fit_source_mad_reference,
     fit_source_mad_transform,
@@ -73,6 +74,47 @@ def test_source_mad_config_validation() -> None:
 
     with pytest.raises(ValueError, match="epsilon"):
         source_mad_config(epsilon=0.0)
+
+
+def test_source_mad_config_accepts_numpy_scalar_controls() -> None:
+    cfg = source_mad_config(
+        center=np.asarray(True),
+        scale=np.asarray(0),
+        normal_consistency=np.asarray(1.0),
+        epsilon=np.asarray(1e-5),
+    )
+
+    assert cfg.center is True
+    assert cfg.scale is False
+    assert cfg.normal_consistency is True
+    assert np.isclose(cfg.epsilon, 1e-5)
+
+    direct = SourceMADConfig(
+        center=np.asarray(False),
+        scale=np.asarray(True),
+        normal_consistency=np.asarray(False),
+        epsilon=np.asarray(1e-4),
+    )
+
+    assert direct.center is False
+    assert direct.scale is True
+    assert direct.normal_consistency is False
+    assert np.isclose(direct.epsilon, 1e-4)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"center": np.asarray([True])}, "center"),
+        ({"scale": np.asarray([False])}, "scale"),
+        ({"normal_consistency": np.asarray([True])}, "normal_consistency"),
+        ({"epsilon": np.asarray([1e-5])}, "epsilon"),
+        ({"epsilon": np.asarray(True)}, "epsilon"),
+    ],
+)
+def test_source_mad_config_rejects_vector_or_boolean_numeric_arrays(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        source_mad_config(**kwargs)
 
 
 def test_source_mad_rejects_width_mismatch() -> None:
