@@ -105,6 +105,44 @@ def test_source_outlier_boolean_config_parses_string_values() -> None:
     assert cfg.use_diagonal_scale is True
 
 
+def test_source_outlier_config_direct_construction_normalizes_values() -> None:
+    cfg = SourceOutlierConfig(
+        threshold_mode="percentile",
+        quantile="0.5",  # type: ignore[arg-type]
+        mad_multiplier=np.float64(2.0),
+        weight_mode="hard",
+        temperature="3.0",  # type: ignore[arg-type]
+        use_diagonal_scale="false",  # type: ignore[arg-type]
+        epsilon=np.float64(1e-4),
+    )
+
+    assert cfg.threshold_mode == "quantile"
+    assert cfg.quantile == 0.5
+    assert cfg.mad_multiplier == 2.0
+    assert cfg.weight_mode == "binary"
+    assert cfg.temperature == 3.0
+    assert cfg.use_diagonal_scale is False
+    assert cfg.epsilon == 1e-4
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"threshold_mode": "bad"}, "threshold_mode"),
+        ({"weight_mode": "bad"}, "weight_mode"),
+        ({"quantile": True}, "quantile"),
+        ({"quantile": 2.0}, "quantile"),
+        ({"mad_multiplier": False}, "mad_multiplier"),
+        ({"temperature": 0.0}, "temperature"),
+        ({"epsilon": np.inf}, "epsilon"),
+        ({"use_diagonal_scale": "maybe"}, "use_diagonal_scale"),
+    ],
+)
+def test_source_outlier_config_direct_construction_rejects_invalid_values(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        SourceOutlierConfig(**kwargs)
+
+
 def test_source_outlier_revalidates_dataclass_config_instances() -> None:
     features = np.asarray([[0.0], [1.0], [2.0], [8.0], [10.0], [11.0]], dtype=float)
     labels = np.asarray(["x", "x", "x", "y", "y", "y"], dtype=object)
