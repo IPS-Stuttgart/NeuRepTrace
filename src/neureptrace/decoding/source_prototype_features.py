@@ -262,6 +262,8 @@ def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, n
             vector = array.reshape(-1)
         elif array.ndim == 1 and expected_length == 1:
             vector = _object_vector([tuple(array.tolist())])
+        elif array.shape[0] == 0:
+            vector = _object_vector([])
         else:
             rows = array.reshape(array.shape[0], -1)
             vector = rows[:, 0].reshape(-1) if rows.shape[1] == 1 else _object_vector(tuple(row.tolist()) for row in rows)
