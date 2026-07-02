@@ -82,12 +82,15 @@ class CorrelationPrototypeClassifier(ClassifierMixin, BaseEstimator):
                 raise ValueError("sample_weight must contain one weight per feature row.")
             if not np.all(np.isfinite(sample_weight)) or np.any(sample_weight < 0.0):
                 raise ValueError("sample_weight must contain finite non-negative values.")
-            self.prototypes_ = np.vstack(
-                [
-                    np.average(features[labels == class_label], axis=0, weights=sample_weight[labels == class_label])
-                    for class_label in self.classes_
-                ]
-            )
+            prototypes = []
+            for class_label in self.classes_:
+                class_mask = labels == class_label
+                class_weights = sample_weight[class_mask]
+                if float(np.sum(class_weights)) <= 0.0:
+                    prototypes.append(np.mean(features[class_mask], axis=0))
+                else:
+                    prototypes.append(np.average(features[class_mask], axis=0, weights=class_weights))
+            self.prototypes_ = np.vstack(prototypes)
         self.normalized_prototypes_ = self._row_center_normalize(self.prototypes_)
         return self
 
@@ -271,8 +274,14 @@ def _build_gradient_boosting(_features: np.ndarray, _labels: np.ndarray, classif
     return GradientBoostingClassifier(n_estimators=int(classifier_param), random_state=random_state)
 
 
-def _build_knn(_features: np.ndarray, _labels: np.ndarray, classifier_param: Any, _random_state: int | None):
-    return KNeighborsClassifier(n_neighbors=int(classifier_param))
+def _build_knn(features: np.ndarray, _labels: np.ndarray, classifier_param: Any, _random_state: int | None):
+    requested_neighbors = int(classifier_param)
+    if requested_neighbors < 1:
+        raise ValueError("knn classifier_param must request at least one neighbor.")
+    n_train = int(np.asarray(features).shape[0])
+    if n_train < 1:
+        raise ValueError("knn requires at least one training row.")
+    return KNeighborsClassifier(n_neighbors=min(requested_neighbors, n_train))
 
 
 def _build_most_frequent_dummy(_features: np.ndarray, _labels: np.ndarray, _classifier_param: Any, _random_state: int | None):
