@@ -10,11 +10,36 @@ from typing import Any
 
 _BOOL_PATCH_MARKER = "_neureptrace_config_workflow_float_bool_patch_installed"
 _FLOAT_PAIR_PATCH_MARKER = "_neureptrace_config_workflow_string_pair_patch_installed"
+_BENCHMARK_BOOL_PATCH_MARKER = "_neureptrace_benchmark_manifest_bool_patch_installed"
+_TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
+_FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
 
 def _install_domain_importance_bool_config_patch() -> None:
     domain_patch = importlib.import_module("neureptrace._domain_importance_bool_config_patch")
     domain_patch.install()
+
+
+def _install_benchmark_manifest_bool_patch() -> None:
+    benchmark = importlib.import_module("neureptrace.benchmark")
+    original_bool_value = benchmark._bool_value
+    if getattr(original_bool_value, _BENCHMARK_BOOL_PATCH_MARKER, False):
+        return
+
+    @wraps(original_bool_value)
+    def _bool_value(row, column: str, default: bool = False) -> bool:
+        value = benchmark._string_value(row, column)
+        if value is None:
+            return default
+        text = value.strip().lower()
+        if text in _TRUE_STRINGS:
+            return True
+        if text in _FALSE_STRINGS:
+            return False
+        raise ValueError(f"Manifest column '{column}' must be a boolean value, got {value!r}.")
+
+    setattr(_bool_value, _BENCHMARK_BOOL_PATCH_MARKER, True)
+    benchmark._bool_value = _bool_value
 
 
 def _string_pair_values(value: str) -> list[str] | None:
@@ -30,6 +55,7 @@ def install() -> None:
     """Install tolerant parsing for generated dataset workflow configs."""
 
     _install_domain_importance_bool_config_patch()
+    _install_benchmark_manifest_bool_patch()
     config_workflow = importlib.import_module("neureptrace.config_workflow")
 
     original_bool = config_workflow._as_bool
