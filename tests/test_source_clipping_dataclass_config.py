@@ -26,6 +26,18 @@ def test_source_clipping_revalidates_direct_dataclass_config() -> None:
     assert result.test_features[1, 0] == 2.0
 
 
+def test_source_clipping_normalizes_direct_dataclass_config() -> None:
+    cfg = SourceFeatureClippingConfig(
+        lower_quantile=cast(float, np.asarray(0.0)),
+        upper_quantile=np.float64(1.0),
+        copy=cast(bool, np.asarray(False)),
+    )
+
+    assert cfg.lower_quantile == 0.0
+    assert cfg.upper_quantile == 1.0
+    assert cfg.copy is False
+
+
 def test_source_clipping_accepts_scalar_numpy_config_values() -> None:
     cfg = source_feature_clipping_config(
         lower_quantile=np.asarray(0.0),
