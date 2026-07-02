@@ -1,18 +1,16 @@
-# Source PCA projection
+# Source PCA
 
-`neureptrace.decoding.source_pca` implements strict source-only PCA projection for feature matrices.
+`neureptrace.decoding.source_pca` fits a PCA projection from source rows only and applies the frozen projection to source and held-out rows.
 
-The protocol is **Category 1 / strict source-only**. PCA mean, scale, and components are fitted from source rows only. Held-out rows are transformed with the fixed source-fitted projection but are not used for fitting.
-
-Supported options include centering, optional feature scaling, optional whitening, and capped component selection.
+The protocol is **Category 1 / strict source-only** because held-out rows are transformed but never used to estimate centering, scaling, components, or whitening factors.
 
 ::: neureptrace.decoding.source_pca
     options:
       members:
         - SourcePCAConfig
-        - SourcePCAReference
-        - SourcePCATransformResult
-        - fit_source_pca_transform
-        - fit_source_pca_reference
-        - apply_source_pca_transform
+        - SourcePCAProjection
+        - SourcePCAResult
+        - fit_source_pca
+        - fit_source_pca_projection
+        - apply_source_pca
         - source_pca_config
