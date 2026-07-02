@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_smote import (
     SOURCE_SMOTE_CATEGORY,
+    SourceSmoteConfig,
     augment_source_with_smote,
     interpolate_rows,
     source_smote_config,
@@ -117,6 +118,37 @@ def test_smote_reproducible_with_fixed_seed() -> None:
     assert np.allclose(first.lambdas, second.lambdas)
 
 
+def test_source_smote_direct_config_normalizes_public_options() -> None:
+    config = SourceSmoteConfig(
+        synthetic_per_class="2",
+        cross_domain_partner="off",
+        preserve_original=0,
+        random_state="none",
+        jitter_std="0.25",
+    )
+
+    assert config.synthetic_per_class == 2
+    assert config.cross_domain_partner is False
+    assert config.preserve_original is False
+    assert config.random_state is None
+    assert config.jitter_std == pytest.approx(0.25)
+    assert config.enabled is True
+
+
+def test_augment_source_smote_accepts_direct_string_config() -> None:
+    features = np.asarray([[0.0], [1.0], [3.0], [4.0]], dtype=float)
+    labels = np.asarray(["a", "a", "b", "b"], dtype=object)
+    config = SourceSmoteConfig(synthetic_per_class="1", cross_domain_partner="false", random_state=np.asarray(5))
+
+    result = augment_source_with_smote(features, labels, config=config)
+
+    assert result.n_synthetic == 2
+    assert result.features.shape == (6, 1)
+    assert result.metadata["source_smote_synthetic_per_class"] == 1
+    assert result.metadata["source_smote_cross_domain_partner"] is False
+    assert result.metadata["source_smote_random_state"] == 5
+
+
 def test_invalid_interpolation_weight_is_rejected() -> None:
     with pytest.raises(ValueError, match="lam"):
         interpolate_rows([0.0], [1.0], 1.5)
@@ -137,3 +169,15 @@ def test_source_smote_numeric_options_reject_boolean_scalar_arrays() -> None:
     for kwargs, option_name in invalid_options:
         with pytest.raises(ValueError, match=option_name):
             source_smote_config(**kwargs)
+
+
+def test_source_smote_direct_config_rejects_boolean_scalar_arrays() -> None:
+    invalid_options = [
+        ({"synthetic_per_class": np.asarray(True)}, "synthetic_per_class"),
+        ({"jitter_std": np.asarray(True)}, "jitter_std"),
+        ({"random_state": np.asarray(True)}, "random_state"),
+    ]
+
+    for kwargs, option_name in invalid_options:
+        with pytest.raises(ValueError, match=option_name):
+            SourceSmoteConfig(**kwargs)
