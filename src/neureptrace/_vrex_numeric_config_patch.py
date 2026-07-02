@@ -1,4 +1,4 @@
-"""Validate VREx numeric hyperparameters and finite fit features."""
+"""Validate VREx numeric hyperparameters, fit features, and batch sampling."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import numpy as np
 
 _PATCH_MARKER = "_neureptrace_vrex_numeric_config_patch_installed"
 _SOURCE_VREX_FEATURE_PATCH_MARKER = "_neureptrace_source_vrex_finite_fit_feature_patch_installed"
+_SOURCE_VREX_DOMAIN_BATCH_PATCH_MARKER = "_neureptrace_source_vrex_domain_batch_patch_installed"
 
 
 def _positive_int(value: Any, *, name: str) -> int:
@@ -59,6 +60,29 @@ def _validate_finite_source_features(source_features: Any) -> None:
         raise ValueError("vrex source_features must contain finite values.")
 
 
+def _domain_balanced_batch(train_idx: np.ndarray, domains: np.ndarray, *, batch_size: int, rng: np.random.Generator) -> np.ndarray:
+    """Sample a batch across domains present in the training split."""
+
+    train_idx = np.asarray(train_idx, dtype=int).reshape(-1)
+    domains = np.asarray(domains).reshape(-1)
+    if train_idx.size == 0:
+        raise ValueError("train_idx must contain at least one row for VREx domain-balanced batching.")
+    if np.any(train_idx < 0) or np.any(train_idx >= domains.shape[0]):
+        raise ValueError("train_idx contains indices outside source_domains.")
+    if int(batch_size) < 1:
+        raise ValueError("batch_size must be positive for VREx domain-balanced batching.")
+
+    domain_values = np.unique(domains[train_idx])
+    per_domain = max(1, int(np.ceil(int(batch_size) / domain_values.shape[0])))
+    chunks = []
+    for domain in domain_values:
+        candidates = train_idx[domains[train_idx] == domain]
+        chunks.append(rng.choice(candidates, size=min(per_domain, int(batch_size)), replace=candidates.shape[0] < per_domain))
+    batch = np.concatenate(chunks)
+    rng.shuffle(batch)
+    return batch[: int(batch_size)]
+
+
 def _install_linear_vrex_numeric_validators() -> None:
     vrex = importlib.import_module("neureptrace.decoding.vrex")
     if getattr(vrex._positive_int, _PATCH_MARKER, False):
@@ -87,11 +111,21 @@ def _install_source_vrex_fit_feature_validator() -> None:
     source_vrex.TorchVRExClassifier.fit = fit
 
 
+def _install_source_vrex_domain_balanced_batch() -> None:
+    source_vrex = importlib.import_module("neureptrace.decoding.source_vrex")
+    if getattr(source_vrex._domain_balanced_batch, _SOURCE_VREX_DOMAIN_BATCH_PATCH_MARKER, False):
+        return
+
+    setattr(_domain_balanced_batch, _SOURCE_VREX_DOMAIN_BATCH_PATCH_MARKER, True)
+    source_vrex._domain_balanced_batch = _domain_balanced_batch
+
+
 def install() -> None:
-    """Install VREx hyperparameter and fit-feature validators."""
+    """Install VREx hyperparameter, fit-feature, and batch-sampling validators."""
 
     _install_linear_vrex_numeric_validators()
     _install_source_vrex_fit_feature_validator()
+    _install_source_vrex_domain_balanced_batch()
 
 
 __all__ = ["install"]
