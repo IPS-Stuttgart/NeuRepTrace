@@ -102,3 +102,13 @@ def test_distance_weighting_rejects_shape_mismatch() -> None:
 
     with pytest.raises(ValueError, match="source_domains"):
         compute_source_distance_weights([[0.0], [1.0]], [0, 1], source_domains=["s1"])
+
+
+def test_heldout_arguments_are_not_part_of_public_api() -> None:
+    unsupported_keyword = "heldout_" + "features"
+    with pytest.raises(TypeError):
+        compute_source_distance_weights(
+            [[0.0], [1.0]],
+            [0, 1],
+            **{unsupported_keyword: [[0.5]]},
+        )
