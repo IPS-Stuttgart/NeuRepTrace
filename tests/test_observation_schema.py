@@ -89,6 +89,26 @@ def test_probability_sum_deviation_can_be_required_as_error() -> None:
     assert any(issue.code == "probability_sum_error" for issue in report.errors)
 
 
+def test_partial_missing_probability_row_sum_is_warning_by_default() -> None:
+    frame = _valid_observations()
+    frame.loc[0, "prob_class_1"] = pd.NA
+
+    report = validate_probability_observations(frame, probability_tolerance=1e-6)
+
+    assert report.is_valid
+    assert any(issue.code == "probability_sum_warning" and issue.row == 0 for issue in report.warnings)
+
+
+def test_partial_missing_probability_row_sum_can_be_required_as_error() -> None:
+    frame = _valid_observations()
+    frame.loc[0, "prob_class_1"] = pd.NA
+
+    report = validate_probability_observations(frame, probability_tolerance=1e-6, require_normalized=True)
+
+    assert not report.is_valid
+    assert any(issue.code == "probability_sum_error" and issue.row == 0 for issue in report.errors)
+
+
 def test_probability_above_one_is_validation_error() -> None:
     frame = _valid_observations()
     frame.loc[0, "prob_class_0"] = 1.2
