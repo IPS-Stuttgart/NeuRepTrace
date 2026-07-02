@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 _MARKER = "_neureptrace_io_fieldtrip_config_participant_installed"
+_TARGET = "_neureptrace_io_fieldtrip_config_participant_target"
 
 
 def install() -> None:
@@ -29,9 +30,15 @@ def install() -> None:
             participant = config_dict["participant"]
             if participant is not None:
                 metadata["participant"] = str(participant)
-        return original(path, config_dict, extra_metadata=metadata)
+
+        current = fieldtrip_mat.load_fieldtrip_mat_epochs
+        target = getattr(load_fieldtrip_mat_epochs, _TARGET)
+        if current is not load_fieldtrip_mat_epochs:
+            target = current
+        return target(path, config_dict, extra_metadata=metadata)
 
     setattr(load_fieldtrip_mat_epochs, _MARKER, True)
+    setattr(load_fieldtrip_mat_epochs, _TARGET, original)
     fieldtrip_mat.load_fieldtrip_mat_epochs = load_fieldtrip_mat_epochs
 
 
