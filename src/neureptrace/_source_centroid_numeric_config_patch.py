@@ -11,6 +11,7 @@ import numpy as np
 _ORIGINAL_COERCE_CONFIG = None
 _INSTALLED = False
 _SOURCE_KNN_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_knn_dataclass_init_patch_installed"
+_SOURCE_TEMPERATURE_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_temperature_dataclass_init_patch_installed"
 
 
 def install() -> None:
@@ -21,6 +22,7 @@ def install() -> None:
 
     _install_source_centroid_patch()
     _install_source_knn_patch()
+    _install_source_temperature_patch()
     _INSTALLED = True
 
 
@@ -56,6 +58,25 @@ def _install_source_knn_patch() -> None:
     module.SourceKNNConfig.__init__ = __init__
 
 
+def _install_source_temperature_patch() -> None:
+    """Normalize direct SourceTemperatureConfig construction like source_temperature_config(...)."""
+
+    from neureptrace.decoding import source_temperature as module
+
+    original_init = module.SourceTemperatureConfig.__init__
+    if getattr(original_init, _SOURCE_TEMPERATURE_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(self, "temperatures", _source_temperature_grid(module, self.temperatures))
+        object.__setattr__(self, "epsilon", module._probability_epsilon(self.epsilon))
+
+    setattr(__init__, _SOURCE_TEMPERATURE_DATACLASS_INIT_PATCH_MARKER, True)
+    module.SourceTemperatureConfig.__init__ = __init__
+
+
 def _patched_source_centroid_config(
     *,
     temperature: float | str = 1.0,
@@ -86,6 +107,20 @@ def _patched_coerce_config(config: Any):
     if isinstance(config, Mapping):
         return module.source_centroid_config(**dict(config))
     return _ORIGINAL_COERCE_CONFIG(config)
+
+
+def _source_temperature_grid(module: Any, temperatures: Any) -> tuple[float, ...]:
+    if isinstance(temperatures, str):
+        raw_values = tuple(part.strip() for part in temperatures.replace(";", ",").split(",") if part.strip())
+    else:
+        try:
+            raw_values = tuple(temperatures)
+        except TypeError as exc:
+            raise ValueError("temperatures must contain positive finite values.") from exc
+    values = tuple(module._positive_float(value, name="temperatures") for value in raw_values)
+    if not values:
+        raise ValueError("temperatures must contain at least one value.")
+    return values
 
 
 def _numeric_scalar(value: Any, *, message: str) -> float:

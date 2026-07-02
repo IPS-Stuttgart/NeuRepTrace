@@ -156,13 +156,22 @@ def test_source_temperature_rejects_invalid_probability_floor(bad_epsilon) -> No
         negative_log_likelihood([[0.5, 0.5]], [0], epsilon=bad_epsilon)
 
 
+def _raw_source_temperature_config(*, temperatures=(1.0,), epsilon=1e-12) -> SourceTemperatureConfig:
+    """Construct an intentionally unvalidated config to exercise fit-time guards."""
+
+    config = object.__new__(SourceTemperatureConfig)
+    object.__setattr__(config, "temperatures", temperatures)
+    object.__setattr__(config, "epsilon", epsilon)
+    return config
+
+
 @pytest.mark.parametrize(
     "bad_config",
     [
-        SourceTemperatureConfig(temperatures=(True,)),  # type: ignore[arg-type]
-        SourceTemperatureConfig(temperatures=(np.asarray([1.0]),)),  # type: ignore[arg-type]
-        SourceTemperatureConfig(temperatures=(1.0,), epsilon=np.asarray([1e-9])),  # type: ignore[arg-type]
-        SourceTemperatureConfig(temperatures=(1.0,), epsilon=1.0),
+        _raw_source_temperature_config(temperatures=(True,)),  # type: ignore[arg-type]
+        _raw_source_temperature_config(temperatures=(np.asarray([1.0]),)),  # type: ignore[arg-type]
+        _raw_source_temperature_config(temperatures=(1.0,), epsilon=np.asarray([1e-9])),  # type: ignore[arg-type]
+        _raw_source_temperature_config(temperatures=(1.0,), epsilon=1.0),
     ],
 )
 def test_fit_source_temperature_scaling_revalidates_direct_config_objects(bad_config) -> None:
