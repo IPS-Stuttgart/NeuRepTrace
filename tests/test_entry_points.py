@@ -1,3 +1,4 @@
+import sys
 from importlib import import_module
 from pathlib import Path
 import runpy
@@ -62,6 +63,24 @@ def test_observation_ensemble_package_module_entrypoint_delegates(monkeypatch):
 
     assert exc_info.value.code == 13
     assert calls == [True]
+
+
+def test_fieldtrip_module_entrypoint_exposes_path_options(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["python -m neureptrace.fieldtrip_mat", "--help"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_module("neureptrace.fieldtrip_mat", run_name="__main__")
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    for option in (
+        "--trial-path",
+        "--time-path",
+        "--label-path",
+        "--trialinfo-path",
+        "--sampleinfo-path",
+    ):
+        assert option in help_text
 
 
 def test_mne_time_decode_scripts_use_safe_wrappers():
