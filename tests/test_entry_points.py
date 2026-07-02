@@ -46,6 +46,24 @@ def test_package_module_entrypoint_delegates_to_grouped_cli(monkeypatch):
     assert calls == [True]
 
 
+def test_observation_ensemble_package_module_entrypoint_delegates(monkeypatch):
+    import neureptrace.observation_ensemble as observation_ensemble_module
+
+    calls = []
+
+    def fake_main():
+        calls.append(True)
+        return 13
+
+    monkeypatch.setattr(observation_ensemble_module, "main", fake_main)
+
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_module("neureptrace.observation_ensemble", run_name="__main__")
+
+    assert exc_info.value.code == 13
+    assert calls == [True]
+
+
 def test_mne_time_decode_scripts_use_safe_wrappers():
     scripts = _poetry_scripts()
 
