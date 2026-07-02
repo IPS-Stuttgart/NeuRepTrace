@@ -121,6 +121,15 @@ def test_class_prototypes_preserve_composite_label_groups() -> None:
     assert np.allclose(prototypes.ravel(), np.asarray([1.0, 11.0]))
 
 
+def test_prototype_features_reject_empty_source_labels_with_stable_message() -> None:
+    with pytest.raises(ValueError, match="source_labels must contain one value per source row"):
+        fit_source_prototype_features(
+            source_features=[[0.0], [1.0]],
+            source_labels=[],
+            test_features=[[0.5]],
+        )
+
+
 def test_aliases_and_validation() -> None:
     assert normalize_prototype_metric("l2") == "euclidean"
     assert normalize_prototype_output("similarity") == "rbf_similarity"
