@@ -11,6 +11,8 @@ import numpy as np
 
 _INSTALLED = False
 _PATCH_MARKER = "_neureptrace_random_state_config_patch_installed"
+_FEATURE_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_feature_mixstyle_random_state_dataclass_init_patch_installed"
+_DOMAIN_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_domain_mixstyle_random_state_dataclass_init_patch_installed"
 _SOURCE_INTERPOLATION_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_interpolation_dataclass_init_patch_installed"
 
 
@@ -94,8 +96,53 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise ValueError(message)
 
 
+def _patch_feature_mixstyle_dataclass(mixstyle: Any) -> None:
+    original_init = mixstyle.SourceMixStyleConfig.__init__
+    if getattr(original_init, _FEATURE_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(
+            self,
+            "random_state",
+            _normalize_optional_nonnegative_int(
+                self.random_state,
+                normalizer=mixstyle._normalize_nonnegative_int,
+                name="random_state",
+            ),
+        )
+
+    setattr(__init__, _FEATURE_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER, True)
+    mixstyle.SourceMixStyleConfig.__init__ = __init__
+
+
+def _patch_domain_mixstyle_dataclass(source_mixstyle: Any) -> None:
+    original_init = source_mixstyle.SourceMixStyleConfig.__init__
+    if getattr(original_init, _DOMAIN_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(
+            self,
+            "random_state",
+            _normalize_optional_nonnegative_int(
+                self.random_state,
+                normalizer=source_mixstyle._normalize_nonnegative_int,
+                name="random_state",
+            ),
+        )
+
+    setattr(__init__, _DOMAIN_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER, True)
+    source_mixstyle.SourceMixStyleConfig.__init__ = __init__
+
+
 def _patch_feature_mixstyle() -> None:
     mixstyle = importlib.import_module("neureptrace.decoding.mixstyle")
+    _patch_feature_mixstyle_dataclass(mixstyle)
 
     original_config = mixstyle.source_mixstyle_config
     if not getattr(original_config, _PATCH_MARKER, False):
@@ -170,6 +217,7 @@ def _patch_feature_mixstyle() -> None:
 
 def _patch_domain_mixstyle() -> None:
     source_mixstyle = importlib.import_module("neureptrace.decoding.source_mixstyle")
+    _patch_domain_mixstyle_dataclass(source_mixstyle)
 
     original_config = source_mixstyle.source_mixstyle_config
     if not getattr(original_config, _PATCH_MARKER, False):

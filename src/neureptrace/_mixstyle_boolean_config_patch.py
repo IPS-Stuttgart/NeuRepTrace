@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_mixstyle_boolean_config_patch_installed"
+_FEATURE_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_feature_mixstyle_boolean_dataclass_init_patch_installed"
+_DOMAIN_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_domain_mixstyle_boolean_dataclass_init_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
@@ -45,8 +47,39 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise _bool_error(name)
 
 
+def _patch_feature_mixstyle_dataclass(mixstyle: Any) -> None:
+    original_init = mixstyle.SourceMixStyleConfig.__init__
+    if getattr(original_init, _FEATURE_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(self, "preserve_domain_mean", _normalize_bool(self.preserve_domain_mean, name="preserve_domain_mean"))
+        object.__setattr__(self, "class_conditional", _normalize_bool(self.class_conditional, name="class_conditional"))
+        object.__setattr__(self, "include_original", _normalize_bool(self.include_original, name="include_original"))
+
+    setattr(__init__, _FEATURE_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER, True)
+    mixstyle.SourceMixStyleConfig.__init__ = __init__
+
+
+def _patch_domain_mixstyle_dataclass(source_mixstyle: Any) -> None:
+    original_init = source_mixstyle.SourceMixStyleConfig.__init__
+    if getattr(original_init, _DOMAIN_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(self, "include_original", _normalize_bool(self.include_original, name="include_original"))
+
+    setattr(__init__, _DOMAIN_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER, True)
+    source_mixstyle.SourceMixStyleConfig.__init__ = __init__
+
+
 def _patch_feature_mixstyle() -> None:
     mixstyle = importlib.import_module("neureptrace.decoding.mixstyle")
+    _patch_feature_mixstyle_dataclass(mixstyle)
 
     original_config = mixstyle.source_mixstyle_config
     if not getattr(original_config, _PATCH_MARKER, False):
@@ -111,6 +144,7 @@ def _patch_feature_mixstyle() -> None:
 
 def _patch_domain_mixstyle() -> None:
     source_mixstyle = importlib.import_module("neureptrace.decoding.source_mixstyle")
+    _patch_domain_mixstyle_dataclass(source_mixstyle)
 
     original_config = source_mixstyle.source_mixstyle_config
     if not getattr(original_config, _PATCH_MARKER, False):
