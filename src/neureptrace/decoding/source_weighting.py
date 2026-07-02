@@ -42,6 +42,27 @@ class SourceGroupWeightingConfig:
     blend: float = DEFAULT_SOURCE_GROUP_WEIGHTING_BLEND
     hybrid_target_similarity_weight: float = DEFAULT_HYBRID_TARGET_SIMILARITY_WEIGHT
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "mode", normalize_source_group_weighting_mode(self.mode))
+        object.__setattr__(self, "metric", _normalize_metric(self.metric))
+        object.__setattr__(
+            self,
+            "temperature",
+            _positive_float(self.temperature, name="source_group_weighting.temperature"),
+        )
+        object.__setattr__(self, "top_k", _optional_positive_int(self.top_k, name="source_group_weighting.top_k"))
+        object.__setattr__(self, "blend", _unit_interval_float(self.blend, name="source_group_weighting.blend"))
+        object.__setattr__(
+            self,
+            "hybrid_target_similarity_weight",
+            _unit_interval_float(
+                self.hybrid_target_similarity_weight,
+                name="source_group_weighting.hybrid_target_similarity_weight",
+            ),
+        )
+
     @property
     def enabled(self) -> bool:
         return self.mode != "none"
@@ -87,10 +108,19 @@ def normalize_source_group_weighting_mode(value: Any) -> str:
     normalized = "none" if value is None else str(value).strip().lower().replace("-", "_")
     aliases = {
         "": "none",
+        "0": "none",
         "false": "none",
         "off": "none",
         "no": "none",
+        "disable": "none",
+        "disabled": "none",
         "uniform": "none",
+        "1": "source_reliability",
+        "true": "source_reliability",
+        "on": "source_reliability",
+        "yes": "source_reliability",
+        "enable": "source_reliability",
+        "enabled": "source_reliability",
         "reliability": "source_reliability",
         "source_score": "source_reliability",
         "source_scores": "source_reliability",
@@ -110,14 +140,17 @@ def normalize_source_group_weighting_mode(value: Any) -> str:
     return normalized
 
 
-def source_group_weighting_config(value: Mapping[str, Any] | str | bool | None = None, **overrides: Any) -> SourceGroupWeightingConfig:
+def source_group_weighting_config(value: SourceGroupWeightingConfig | Mapping[str, Any] | str | bool | None = None, **overrides: Any) -> SourceGroupWeightingConfig:
     """Build a normalized :class:`SourceGroupWeightingConfig`.
 
-    ``value`` can be a config mapping, a mode string, a boolean flag, or ``None``.
-    Explicit keyword overrides are applied after the mapping/string value.
+    ``value`` can be a config instance, a config mapping, a mode string, a
+    boolean flag, or ``None``. Explicit keyword overrides are applied after the
+    instance/mapping/string value.
     """
 
-    if isinstance(value, Mapping):
+    if isinstance(value, SourceGroupWeightingConfig):
+        raw = _direct_config_mapping(value)
+    elif isinstance(value, Mapping):
         raw = dict(value)
     elif isinstance(value, bool):
         raw = {"mode": "source_reliability" if value else "none"}
@@ -129,7 +162,7 @@ def source_group_weighting_config(value: Mapping[str, Any] | str | bool | None =
     mode = normalize_source_group_weighting_mode(raw.get("mode", raw.get("enabled")))
     return SourceGroupWeightingConfig(
         mode=mode,
-        metric=str(raw.get("metric", "balanced_accuracy")).strip().lower().replace("-", "_"),
+        metric=_normalize_metric(raw.get("metric", "balanced_accuracy")),
         temperature=_positive_float(raw.get("temperature", DEFAULT_SOURCE_GROUP_WEIGHTING_TEMPERATURE), name="source_group_weighting.temperature"),
         top_k=_optional_positive_int(raw.get("top_k"), name="source_group_weighting.top_k"),
         blend=_unit_interval_float(raw.get("blend", DEFAULT_SOURCE_GROUP_WEIGHTING_BLEND), name="source_group_weighting.blend"),
@@ -264,7 +297,10 @@ def combine_source_reliability_and_similarity(
     if missing_similarity:
         raise ValueError(f"Missing target-similarity scores for source groups: {missing_similarity}.")
     source_utility = np.asarray([_score_to_utility(source_scores[group], metric=metric) for group in group_list], dtype=np.float64)
-    target_utility = np.asarray([float(target_similarity[group]) for group in group_list], dtype=np.float64)
+    target_utility = np.asarray(
+        [_numeric_scalar(target_similarity[group], message="target-similarity scores must be numeric scalars.") for group in group_list],
+        dtype=np.float64,
+    )
     source_utility = _zscore(_replace_nonfinite_with_minimum(source_utility))
     target_utility = _zscore(_replace_nonfinite_with_minimum(target_utility))
     target_similarity_weight = _unit_interval_float(target_similarity_weight, name="source_group_weighting.hybrid_target_similarity_weight")
@@ -296,7 +332,7 @@ def selected_source_groups(group_weights: Mapping[Hashable, float], *, min_weigh
     """Return source groups whose weight is strictly above ``min_weight``."""
 
     min_weight = _nonnegative_float(min_weight, name="min_weight")
-    return tuple(group for group, weight in group_weights.items() if float(weight) > min_weight)
+    return tuple(group for group, weight in group_weights.items() if _nonnegative_float(weight, name="source_group_weight") > min_weight)
 
 
 def _group_list(
@@ -314,14 +350,50 @@ def _group_list(
     return []
 
 
+def _direct_config_mapping(config: SourceGroupWeightingConfig) -> dict[str, Any]:
+    return {
+        "mode": config.mode,
+        "metric": config.metric,
+        "temperature": config.temperature,
+        "top_k": config.top_k,
+        "blend": config.blend,
+        "hybrid_target_similarity_weight": config.hybrid_target_similarity_weight,
+    }
+
+
+def _normalize_metric(value: Any) -> str:
+    return str(value).strip().lower().replace("-", "_")
+
+
+def _numeric_scalar(value: Any, *, message: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        raise ValueError(message) from None
+    if array.dtype.kind == "b" or array.ndim > 0:
+        raise ValueError(message)
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        return float(scalar)
+    except (TypeError, ValueError):
+        raise ValueError(message) from None
+
+
 def _score_to_utility(score: Any, *, metric: str) -> float:
-    value = float(score)
-    metric = str(metric).strip().lower().replace("-", "_")
+    value = _numeric_scalar(score, message="source-group scores must be numeric scalars.")
+    metric = _normalize_metric(metric)
     return -value if metric in SOURCE_GROUP_MINIMIZE_METRICS else value
 
 
 def _feature_centroid(features: Sequence[Sequence[float]] | Sequence[float] | np.ndarray) -> np.ndarray:
-    matrix = np.asarray(features, dtype=np.float64)
+    try:
+        matrix = np.asarray(features, dtype=np.float64)
+    except (TypeError, ValueError):
+        raise ValueError("Source/target features must be numeric.") from None
     if matrix.ndim == 1:
         centroid = matrix
     elif matrix.ndim == 2:
@@ -330,9 +402,12 @@ def _feature_centroid(features: Sequence[Sequence[float]] | Sequence[float] | np
         centroid = matrix.mean(axis=0)
     else:
         raise ValueError("Source/target features must be a one- or two-dimensional array.")
+    centroid = np.asarray(centroid, dtype=np.float64).reshape(-1)
     if centroid.size == 0:
         raise ValueError("Feature centroid must contain at least one value.")
-    return np.nan_to_num(np.asarray(centroid, dtype=np.float64).reshape(-1), nan=0.0, posinf=0.0, neginf=0.0)
+    if not np.all(np.isfinite(centroid)):
+        raise ValueError("Source/target features must contain only finite values.")
+    return centroid
 
 
 def _unit_centered_vector(vector: np.ndarray, *, epsilon: float = 1e-12) -> np.ndarray:
@@ -373,20 +448,18 @@ def _mean_one(weights: np.ndarray, *, epsilon: float = 1e-12) -> np.ndarray:
 
 
 def _positive_float(value: Any, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be positive and finite.")
-    number = float(value)
+    message = f"{name} must be positive and finite."
+    number = _numeric_scalar(value, message=message)
     if not np.isfinite(number) or number <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return number
 
 
 def _nonnegative_float(value: Any, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be finite and non-negative.")
-    number = float(value)
+    message = f"{name} must be finite and non-negative."
+    number = _numeric_scalar(value, message=message)
     if not np.isfinite(number) or number < 0.0:
-        raise ValueError(f"{name} must be finite and non-negative.")
+        raise ValueError(message)
     return number
 
 
@@ -402,9 +475,8 @@ def _optional_positive_int(value: Any, *, name: str) -> int | None:
         return None
     if isinstance(value, str) and value.strip().lower() in {"", "none", "null", "all", "full"}:
         return None
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a positive integer or null.")
-    number = float(value)
+    message = f"{name} must be a positive integer or null."
+    number = _numeric_scalar(value, message=message)
     if not np.isfinite(number) or number % 1.0 != 0.0 or number < 1:
-        raise ValueError(f"{name} must be a positive integer or null.")
+        raise ValueError(message)
     return int(number)
