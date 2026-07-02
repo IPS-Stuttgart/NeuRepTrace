@@ -1,10 +1,4 @@
-"""Strict source-only feature clipping.
-
-This module estimates feature-wise clipping bounds from source rows only and then
-applies those bounds to train/test matrices.  It is a lightweight preprocessing
-baseline for cross-subject decoding when extreme feature values can destabilize
-fold-local classifiers.
-"""
+"""Strict source-only feature clipping."""
 
 from __future__ import annotations
 
@@ -23,8 +17,6 @@ DEFAULT_UPPER_QUANTILE = 0.99
 
 @dataclass(frozen=True, slots=True)
 class SourceClipConfig:
-    """Configuration for source-fitted clipping."""
-
     lower_quantile: float = DEFAULT_LOWER_QUANTILE
     upper_quantile: float = DEFAULT_UPPER_QUANTILE
     symmetric: bool = False
@@ -33,8 +25,6 @@ class SourceClipConfig:
 
 @dataclass(frozen=True, slots=True)
 class SourceClipBounds:
-    """Feature-wise clipping bounds fitted from source rows."""
-
     lower: np.ndarray
     upper: np.ndarray
     center: np.ndarray
@@ -43,8 +33,6 @@ class SourceClipBounds:
 
 @dataclass(frozen=True, slots=True)
 class SourceClipResult:
-    """Clipped train/test features and provenance metadata."""
-
     train_features: np.ndarray
     test_features: np.ndarray
     bounds: SourceClipBounds
@@ -53,24 +41,17 @@ class SourceClipResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-# pylint: disable-next=too-many-arguments
-
 def fit_source_clip(
     *,
     source_features: Sequence[Sequence[float]] | np.ndarray,
     test_features: Sequence[Sequence[float]] | np.ndarray,
     config: SourceClipConfig | Mapping[str, Any] | None = None,
 ) -> SourceClipResult:
-    """Fit clipping bounds on source rows and transform source/test rows."""
-
     cfg = source_clip_config() if config is None else _coerce_config(config)
     source = _feature_matrix(source_features, name="source_features")
     test = _feature_matrix(test_features, name="test_features")
     if source.shape[1] != test.shape[1]:
-        raise ValueError(
-            "source_features and test_features must have the same feature width: "
-            f"{source.shape[1]} != {test.shape[1]}."
-        )
+        raise ValueError(f"source_features and test_features must have the same feature width: {source.shape[1]} != {test.shape[1]}.")
     bounds = fit_source_clip_bounds(source, config=cfg)
     train_clipped, train_mask = apply_source_clip(source, bounds)
     test_clipped, test_mask = apply_source_clip(test, bounds)
@@ -80,14 +61,7 @@ def fit_source_clip(
         bounds=bounds,
         train_clipped_mask=train_mask,
         test_clipped_mask=test_mask,
-        metadata=_metadata(
-            cfg,
-            n_source_rows=source.shape[0],
-            n_test_rows=test.shape[0],
-            feature_dim=source.shape[1],
-            train_mask=train_mask,
-            test_mask=test_mask,
-        ),
+        metadata=_metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], feature_dim=source.shape[1], train_mask=train_mask, test_mask=test_mask),
     )
 
 
@@ -98,23 +72,14 @@ def source_clip_config(
     symmetric: bool | str | int | float = False,
     center: str | None = "median",
 ) -> SourceClipConfig:
-    """Normalize public clipping options."""
-
     lower = _unit_interval_float(lower_quantile, name="lower_quantile")
     upper = _unit_interval_float(upper_quantile, name="upper_quantile")
     if lower >= upper:
         raise ValueError("lower_quantile must be smaller than upper_quantile.")
-    return SourceClipConfig(
-        lower_quantile=lower,
-        upper_quantile=upper,
-        symmetric=_bool_config(symmetric, name="symmetric"),
-        center=normalize_center_mode(center),
-    )
+    return SourceClipConfig(lower_quantile=lower, upper_quantile=upper, symmetric=_bool_config(symmetric, name="symmetric"), center=normalize_center_mode(center))
 
 
 def normalize_center_mode(value: str | None) -> str:
-    """Normalize center aliases for symmetric clipping."""
-
     normalized = "median" if value is None else str(value).strip().lower().replace("-", "_")
     normalized = {"med": "median", "avg": "mean", "average": "mean", "none": "zero"}.get(normalized, normalized)
     if normalized not in CENTER_MODES:
@@ -127,30 +92,21 @@ def fit_source_clip_bounds(
     *,
     config: SourceClipConfig | Mapping[str, Any] | None = None,
 ) -> SourceClipBounds:
-    """Estimate feature-wise clipping bounds from source rows only."""
-
     cfg = source_clip_config() if config is None else _coerce_config(config)
     source = _feature_matrix(source_features, name="source_features")
     center = _center_vector(source, mode=cfg.center)
     if cfg.symmetric:
-        radius = np.quantile(np.abs(source - center), cfg.upper_quantile, axis=0)
+        radius = _upper_sample_quantile(np.abs(source - center), cfg.upper_quantile)
         lower = center - radius
         upper = center + radius
     else:
-        lower = np.quantile(source, cfg.lower_quantile, axis=0)
-        upper = np.quantile(source, cfg.upper_quantile, axis=0)
+        lower = _lower_sample_quantile(source, cfg.lower_quantile)
+        upper = _upper_sample_quantile(source, cfg.upper_quantile)
     lower, upper = _repair_bounds(lower, upper)
-    return SourceClipBounds(
-        lower=lower.astype(float, copy=False),
-        upper=upper.astype(float, copy=False),
-        center=center.astype(float, copy=False),
-        n_source_rows=int(source.shape[0]),
-    )
+    return SourceClipBounds(lower=lower.astype(float, copy=False), upper=upper.astype(float, copy=False), center=center.astype(float, copy=False), n_source_rows=int(source.shape[0]))
 
 
 def apply_source_clip(features: Sequence[Sequence[float]] | np.ndarray, bounds: SourceClipBounds) -> tuple[np.ndarray, np.ndarray]:
-    """Apply source-fitted clipping bounds and return a changed-value mask."""
-
     matrix = _feature_matrix(features, name="features")
     if matrix.shape[1] != bounds.lower.shape[0] or matrix.shape[1] != bounds.upper.shape[0]:
         raise ValueError("features width must match clipping bounds.")
@@ -162,6 +118,14 @@ def _coerce_config(config: SourceClipConfig | Mapping[str, Any]) -> SourceClipCo
     if isinstance(config, SourceClipConfig):
         return config
     return source_clip_config(**dict(config))
+
+
+def _lower_sample_quantile(values: np.ndarray, quantile: float) -> np.ndarray:
+    return np.quantile(values, quantile, axis=0, method="lower")
+
+
+def _upper_sample_quantile(values: np.ndarray, quantile: float) -> np.ndarray:
+    return np.quantile(values, quantile, axis=0, method="higher")
 
 
 def _center_vector(source: np.ndarray, *, mode: str) -> np.ndarray:
@@ -184,15 +148,7 @@ def _repair_bounds(lower: np.ndarray, upper: np.ndarray) -> tuple[np.ndarray, np
     return fixed_lower, fixed_upper
 
 
-def _metadata(
-    cfg: SourceClipConfig,
-    *,
-    n_source_rows: int,
-    n_test_rows: int,
-    feature_dim: int,
-    train_mask: np.ndarray,
-    test_mask: np.ndarray,
-) -> dict[str, Any]:
+def _metadata(cfg: SourceClipConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int, train_mask: np.ndarray, test_mask: np.ndarray) -> dict[str, Any]:
     return {
         "source_clip": True,
         "source_clip_protocol": SOURCE_CLIP_PROTOCOL,
