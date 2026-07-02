@@ -1,10 +1,15 @@
-"""Accept single string column arguments in observation validation.
+"""Patch observation-schema column arguments and temporal sequence keys.
 
 The public observation validator accepts optional grouping and stream-column
 arguments.  Because strings are sequences, passing a single column name such as
 ``group_columns="subject"`` used to be interpreted as the characters
 ``"s"``, ``"u"``, ... and reported as missing columns.  Normalize these API
 arguments before the validator checks them.
+
+The temporal profile should also use the same provenance-aware sequence identity
+as the temporal model reader.  Reused ``sequence_id``/``sample_index`` values in
+different source files, sessions, or runs must not be concatenated during schema
+validation.
 """
 
 from __future__ import annotations
@@ -17,6 +22,26 @@ from typing import Any
 _PATCH_MARKER = "_neureptrace_observation_schema_string_columns_patch_installed"
 
 
+_SEQUENCE_ID_KEY_CANDIDATES = (
+    "source_path",
+    "source_file",
+    "subject",
+    "session",
+    "run",
+    "fold",
+    "sequence_id",
+)
+_SAMPLE_INDEX_KEY_CANDIDATES = (
+    "source_path",
+    "source_file",
+    "subject",
+    "session",
+    "run",
+    "fold",
+    "sample_index",
+)
+
+
 def _normalize_column_argument(columns: Sequence[str] | str | None) -> list[str] | None:
     if columns is None:
         return None
@@ -25,8 +50,16 @@ def _normalize_column_argument(columns: Sequence[str] | str | None) -> list[str]
     return list(dict.fromkeys(columns))
 
 
+def _temporal_sequence_key_columns(frame: Any) -> list[str]:
+    if "sequence_id" in frame.columns:
+        return [column for column in _SEQUENCE_ID_KEY_CANDIDATES if column in frame.columns]
+    if "sample_index" in frame.columns:
+        return [column for column in _SAMPLE_INDEX_KEY_CANDIDATES if column in frame.columns]
+    return []
+
+
 def install() -> None:
-    """Patch observation validation so one string means one column name."""
+    """Patch observation validation string handling and temporal keys."""
 
     observation_schema = importlib.import_module("neureptrace.observation_schema")
 
@@ -63,6 +96,11 @@ def install() -> None:
 
         setattr(_validate_stimulus_profile, _PATCH_MARKER, True)
         observation_schema._validate_stimulus_profile = _validate_stimulus_profile
+
+    original_sequence_key_columns = observation_schema._sequence_key_columns
+    if not getattr(original_sequence_key_columns, _PATCH_MARKER, False):
+        setattr(_temporal_sequence_key_columns, _PATCH_MARKER, True)
+        observation_schema._sequence_key_columns = _temporal_sequence_key_columns
 
 
 __all__ = ["install"]
