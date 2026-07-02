@@ -3,7 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from neureptrace.decoding.mixstyle import SourceMixStyleConfig as FeatureMixStyleConfig
 from neureptrace.decoding.mixstyle import augment_source_mixstyle, source_mixstyle_config as feature_mixstyle_config
+from neureptrace.decoding.source_mixstyle import SourceMixStyleConfig as DomainMixStyleConfig
 from neureptrace.decoding.source_mixstyle import augment_source_domains_mixstyle, source_mixstyle_config as domain_mixstyle_config
 
 
@@ -73,6 +75,38 @@ def test_domain_mixstyle_string_false_include_original_is_false() -> None:
     assert result.n_synthetic == features.shape[0]
     assert np.all(result.synthetic_mask)
     assert result.metadata["source_mixstyle_include_original"] is False
+
+
+def test_mixstyle_direct_dataclass_boolean_values_are_normalized() -> None:
+    feature_config = FeatureMixStyleConfig(
+        include_original="false",  # type: ignore[arg-type]
+        preserve_domain_mean=np.asarray("yes"),  # type: ignore[arg-type]
+        class_conditional=0,  # type: ignore[arg-type]
+    )
+    domain_config = DomainMixStyleConfig(include_original=np.asarray("off"))  # type: ignore[arg-type]
+
+    assert feature_config.include_original is False
+    assert feature_config.preserve_domain_mean is True
+    assert feature_config.class_conditional is False
+    assert domain_config.include_original is False
+
+
+def test_mixstyle_direct_dataclass_accepts_none_like_random_states() -> None:
+    for value in [None, "", " none ", "NULL", np.asarray("null")]:
+        assert FeatureMixStyleConfig(random_state=value).random_state is None  # type: ignore[arg-type]
+        assert DomainMixStyleConfig(random_state=value).random_state is None  # type: ignore[arg-type]
+
+    assert FeatureMixStyleConfig(random_state=np.asarray(7)).random_state == 7  # type: ignore[arg-type]
+    assert DomainMixStyleConfig(random_state=np.asarray(8)).random_state == 8  # type: ignore[arg-type]
+
+
+def test_mixstyle_direct_dataclass_rejects_invalid_scalar_controls() -> None:
+    with pytest.raises(ValueError, match="include_original"):
+        FeatureMixStyleConfig(include_original="maybe")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="class_conditional"):
+        FeatureMixStyleConfig(class_conditional=np.asarray([True, False]))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="random_state"):
+        DomainMixStyleConfig(random_state=[1])  # type: ignore[arg-type]
 
 
 def test_mixstyle_boolean_options_reject_ambiguous_strings() -> None:
