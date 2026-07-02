@@ -227,8 +227,14 @@ def _find_duplicate_class_label(class_order: np.ndarray):
 
 
 def _class_labels_equal(left, right) -> bool:
-    left = _as_comparable_label(left)
-    right = _as_comparable_label(right)
+    return _labels_equal(_as_comparable_label(left), _as_comparable_label(right))
+
+
+def _labels_equal(left, right) -> bool:
+    if isinstance(left, tuple) and isinstance(right, tuple):
+        if len(left) != len(right):
+            return False
+        return all(_labels_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
     try:
         comparison = left == right
     except (TypeError, ValueError):
