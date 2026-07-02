@@ -9,6 +9,10 @@ import pandas as pd
 
 _INSTALLED = False
 _ORIGINAL_SUMMARIZE_STACKED_METRICS = None
+_EXTENDED_STACKING_METADATA_COLUMNS = (
+    "source_oof_temperature",
+    "source_oof_alignment_columns",
+)
 
 
 def _stable_top_k_positions(probabilities: np.ndarray, *, k: int) -> np.ndarray:
@@ -99,6 +103,15 @@ def _summarize_global_metrics(ps, observations: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame([row])
 
 
+def _install_extended_metadata_columns(ps) -> None:
+    """Include all source-OOF provenance columns in metric summaries."""
+
+    existing = tuple(ps._STACKING_METADATA_COLUMNS)
+    extended = tuple(column for column in _EXTENDED_STACKING_METADATA_COLUMNS if column not in existing)
+    if extended:
+        ps._STACKING_METADATA_COLUMNS = (*existing, *extended)
+
+
 def _install_bool_validation_patch() -> None:
     """Install boolean validators after the final metric-summary wrapper."""
 
@@ -115,6 +128,7 @@ def install() -> None:
 
     from neureptrace import probability_stacking as ps
 
+    _install_extended_metadata_columns(ps)
     ps._top_k_accuracy = _top_k_accuracy
     ps._top_k_accuracy_from_label_values = _top_k_accuracy_from_label_values
     _ORIGINAL_SUMMARIZE_STACKED_METRICS = ps.summarize_stacked_metrics
