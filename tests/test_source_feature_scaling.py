@@ -97,6 +97,27 @@ def test_preserve_original_string_false_returns_only_generated_rows() -> None:
     assert result.metadata["source_feature_scaling_preserve_original"] is False
 
 
+def test_source_feature_scaling_direct_config_normalizes_values() -> None:
+    cfg = SourceFeatureScalingConfig(
+        synthetic_per_class="2",  # type: ignore[arg-type]
+        scale_std=np.asarray(0.25),  # type: ignore[arg-type]
+        scaling_mode="column",
+        distribution="gaussian",
+        preserve_original="false",  # type: ignore[arg-type]
+        random_state=np.asarray("none"),  # type: ignore[arg-type]
+        epsilon=np.asarray(1e-6),  # type: ignore[arg-type]
+    )
+
+    assert cfg.synthetic_per_class == 2
+    assert cfg.scale_std == 0.25
+    assert cfg.scaling_mode == "feature"
+    assert cfg.distribution == "normal"
+    assert cfg.preserve_original is False
+    assert cfg.random_state is None
+    assert cfg.epsilon == 1e-6
+    assert cfg.enabled is True
+
+
 def test_source_feature_scaling_revalidates_direct_config_objects() -> None:
     features = np.asarray([[1.0, 1.0], [2.0, 2.0]], dtype=float)
     labels = np.asarray(["x", "x"], dtype=object)
@@ -118,21 +139,25 @@ def test_source_feature_scaling_revalidates_direct_config_objects() -> None:
 
 
 @pytest.mark.parametrize(
-    "bad_config",
+    "bad_kwargs",
     [
-        SourceFeatureScalingConfig(synthetic_per_class=True),  # type: ignore[arg-type]
-        SourceFeatureScalingConfig(scale_std=True),  # type: ignore[arg-type]
-        SourceFeatureScalingConfig(preserve_original="maybe"),  # type: ignore[arg-type]
-        SourceFeatureScalingConfig(random_state=True),  # type: ignore[arg-type]
-        SourceFeatureScalingConfig(epsilon=True),  # type: ignore[arg-type]
+        {"synthetic_per_class": True},
+        {"synthetic_per_class": np.asarray(True)},
+        {"scale_std": True},
+        {"scale_std": np.asarray(True)},
+        {"scale_std": np.asarray([0.1])},
+        {"preserve_original": "maybe"},
+        {"preserve_original": np.asarray([True, False])},
+        {"random_state": True},
+        {"random_state": np.asarray(True)},
+        {"epsilon": True},
+        {"epsilon": np.asarray(True)},
+        {"epsilon": np.asarray([1e-8])},
     ],
 )
-def test_source_feature_scaling_rejects_invalid_direct_config_objects(bad_config: SourceFeatureScalingConfig) -> None:
-    features = np.asarray([[1.0, 1.0], [2.0, 2.0]], dtype=float)
-    labels = np.asarray(["x", "x"], dtype=object)
-
+def test_source_feature_scaling_rejects_invalid_direct_config_objects(bad_kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
-        augment_source_with_feature_scaling(features, labels, config=bad_config)
+        SourceFeatureScalingConfig(**bad_kwargs)  # type: ignore[arg-type]
 
 
 def test_preserve_original_rejects_invalid_string() -> None:
@@ -180,10 +205,24 @@ def test_random_state_config_accepts_integer_values(value: object) -> None:
     assert config.random_state == 3
 
 
-@pytest.mark.parametrize("value", [True, -1, 0.5, "1.5", [1], {"seed": 1}, np.asarray([1, 2])])
+@pytest.mark.parametrize("value", [True, -1, 0.5, "1.5", [1], np.asarray(True), np.asarray([1, 2])])
 def test_source_feature_scaling_rejects_invalid_random_state(value: object) -> None:
     with pytest.raises(ValueError, match="random_state"):
         source_feature_scaling_config(random_state=value)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"scale_std": np.asarray(True)},
+        {"scale_std": np.asarray([0.1])},
+        {"epsilon": np.asarray(True)},
+        {"epsilon": np.asarray([1e-8])},
+    ],
+)
+def test_source_feature_scaling_rejects_invalid_numpy_numeric_controls(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        source_feature_scaling_config(**kwargs)  # type: ignore[arg-type]
 
 
 def test_aliases_and_invalid_options() -> None:
