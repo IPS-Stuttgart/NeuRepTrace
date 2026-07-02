@@ -29,6 +29,12 @@ class SourceFeatureSelectionConfig:
     min_score: float | None = None
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "method", normalize_score_method(self.method))
+        object.__setattr__(self, "k", _validate_k_option(self.k))
+        object.__setattr__(self, "min_score", None if _is_missing_min_score(self.min_score) else _finite_float(self.min_score, name="min_score"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceFeatureSelectionResult:
@@ -268,10 +274,17 @@ def _positive_float(value: float | str, *, name: str) -> float:
 
 
 def _numeric_scalar(value: Any, *, message: str) -> float:
-    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        raise ValueError(message) from None
+    if array.shape != ():
+        raise ValueError(message)
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
         raise ValueError(message)
     try:
-        parsed = float(value)
+        parsed = float(scalar)
     except (TypeError, ValueError):
         raise ValueError(message) from None
     if not np.isfinite(parsed):
