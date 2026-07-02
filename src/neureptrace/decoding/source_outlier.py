@@ -255,7 +255,9 @@ def _normalize_float(value: Any, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be finite.")
     if isinstance(value, np.ndarray):
-        raise ValueError(f"{name} must be finite.")
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be finite.")
+        return _normalize_float(value.item(), name=name)
     if isinstance(value, (list, tuple, dict, set)):
         raise ValueError(f"{name} must be finite.")
     try:
