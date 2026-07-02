@@ -38,6 +38,17 @@ class SourceFeatureScalingConfig:
     random_state: int | None = 13
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "synthetic_per_class", _nonnegative_int(self.synthetic_per_class, name="synthetic_per_class"))
+        object.__setattr__(self, "scale_std", _nonnegative_float(self.scale_std, name="scale_std"))
+        object.__setattr__(self, "scaling_mode", normalize_scaling_mode(self.scaling_mode))
+        object.__setattr__(self, "distribution", normalize_scaling_distribution(self.distribution))
+        object.__setattr__(self, "preserve_original", _bool_value(self.preserve_original, name="preserve_original"))
+        object.__setattr__(self, "random_state", _optional_nonnegative_int(self.random_state, name="random_state"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
     @property
     def enabled(self) -> bool:
         """Whether synthetic rows should be generated."""
@@ -381,12 +392,14 @@ def _nonnegative_int(value: int | str, *, name: str) -> int:
 
 
 def _integer(value: int | str, *, name: str) -> int:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be an integer.")
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
             raise ValueError(f"{name} must be an integer.")
         value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
@@ -411,15 +424,30 @@ def _nonnegative_float(value: float | str, *, name: str) -> float:
 
 
 def _float_value(value: float | str, *, name: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be finite.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be finite.")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite.") from exc
     if not np.isfinite(parsed):
         raise ValueError(f"{name} must be finite.")
     return parsed
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)):
