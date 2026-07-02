@@ -46,6 +46,15 @@ class SourceResampleResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class SourceGroupCountsResult:
+    """Source-only group counts and provenance metadata."""
+
+    group_keys: tuple[Hashable, ...]
+    group_counts: Mapping[Hashable, int]
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 def source_balance_config(
     *,
     strategy: str | None = "class_domain",
@@ -90,6 +99,40 @@ def compute_source_balance_weights(
         group_target_count=float(target_count),
         metadata=_metadata(cfg, n_source_rows=labels.shape[0], n_groups=len(counts), group_counts=counts, group_target_count=target_count, n_output_rows=""),
     )
+
+
+def summarize_source_groups(
+    source_labels: Sequence[Any] | np.ndarray,
+    *,
+    source_domains: Sequence[Hashable] | np.ndarray | None = None,
+    strategy: str | None = "class_domain",
+) -> SourceGroupCountsResult:
+    """Count source-only class/domain groups without computing weights.
+
+    This helper is useful for audit tables and pre-flight checks.  It uses source
+    labels and optional source-domain ids only.
+    """
+
+    resolved_strategy = normalize_balance_strategy(strategy)
+    labels = _vector(source_labels, name="source_labels")
+    domains = _domain_vector(source_domains, expected_length=labels.shape[0])
+    keys = _group_keys(labels, domains, strategy=resolved_strategy)
+    counts = _count_groups(keys)
+    metadata = {
+        "source_group_counts": True,
+        "source_group_counts_protocol": SOURCE_BALANCE_PROTOCOL,
+        "source_group_counts_protocol_category": SOURCE_BALANCE_CATEGORY,
+        "source_group_counts_strategy": resolved_strategy,
+        "source_group_counts_uses_source_labels": True,
+        "source_group_counts_uses_source_domains": resolved_strategy in {"domain", "class_domain"},
+        "source_group_counts_uses_heldout_features": False,
+        "source_group_counts_uses_heldout_labels": False,
+        "source_group_counts_valid_for_strict_source_only": True,
+        "source_group_counts_n_source_rows": int(labels.shape[0]),
+        "source_group_counts_n_groups": int(len(counts)),
+        "source_group_counts_group_counts": "|".join(f"{key}:{int(count)}" for key, count in counts.items()),
+    }
+    return SourceGroupCountsResult(group_keys=tuple(keys), group_counts=counts, metadata=metadata)
 
 
 def resample_source_rows_balanced(
