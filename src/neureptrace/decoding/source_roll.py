@@ -1,10 +1,4 @@
-"""Strict source-only feature roll augmentation.
-
-This module creates shifted copies of labeled source feature rows.  It is useful as
-a small domain-generalization baseline when feature columns represent ordered
-samples, time bins, or frequency bins.  Synthetic rows inherit the sampled source
-label and are generated without using held-out data.
-"""
+"""Strict source-only feature roll augmentation."""
 
 from __future__ import annotations
 
@@ -35,8 +29,6 @@ class SourceFeatureRollConfig:
 
     @property
     def enabled(self) -> bool:
-        """Whether synthetic rows should be generated."""
-
         return self.synthetic_per_class > 0 and self.max_shift > 0
 
 
@@ -53,8 +45,6 @@ class SourceFeatureRollResult:
 
     @property
     def n_synthetic(self) -> int:
-        """Number of generated rows in the returned matrix."""
-
         return int(np.sum(self.synthetic_mask))
 
 
@@ -67,26 +57,23 @@ def augment_source_with_feature_roll(
     source_domains: Sequence[Hashable] | np.ndarray | None = None,
     config: SourceFeatureRollConfig | Mapping[str, Any] | None = None,
 ) -> SourceFeatureRollResult:
-    """Append shifted source-row copies.
-
-    The API intentionally has no held-out feature or held-out label arguments.
-    """
+    """Append shifted source-row copies without using held-out data."""
 
     cfg = source_feature_roll_config() if config is None else _coerce_config(config)
     features = _feature_matrix(source_features, name="source_features")
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
+    n_source_domains = _count_unique_hashable(domains)
     classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=labels.dtype if labels.dtype != object else object)
 
     if not cfg.enabled:
-        metadata = _metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=0, n_classes=classes.shape[0], n_source_domains=np.unique(domains).shape[0], feature_dim=features.shape[1])
         return SourceFeatureRollResult(
             features=features.astype(np.float32, copy=False),
             labels=labels.copy(),
             synthetic_mask=np.zeros(features.shape[0], dtype=bool),
             content_indices=np.empty(0, dtype=int),
             shifts=np.empty(0, dtype=int),
-            metadata=metadata,
+            metadata=_metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=0, n_classes=classes.shape[0], n_source_domains=n_source_domains, feature_dim=features.shape[1]),
         )
 
     rng = np.random.default_rng(cfg.random_state)
@@ -96,8 +83,6 @@ def augment_source_with_feature_roll(
     shifts: list[int] = []
     for class_label in classes.tolist():
         class_indices = np.flatnonzero(labels == class_label)
-        if class_indices.size == 0:
-            continue
         for _ in range(cfg.synthetic_per_class):
             content_index = int(rng.choice(class_indices))
             shift = sample_roll_shift(cfg.max_shift, include_zero_shift=cfg.include_zero_shift, rng=rng)
@@ -117,35 +102,33 @@ def augment_source_with_feature_roll(
         output_labels = synthetic_labels_array
         synthetic_mask = np.ones(synthetic_features.shape[0], dtype=bool)
 
-    metadata = _metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=synthetic_features.shape[0], n_classes=classes.shape[0], n_source_domains=np.unique(domains).shape[0], feature_dim=features.shape[1])
     return SourceFeatureRollResult(
         features=output_features,
         labels=output_labels,
         synthetic_mask=synthetic_mask,
         content_indices=np.asarray(content_indices, dtype=int),
         shifts=np.asarray(shifts, dtype=int),
-        metadata=metadata,
+        metadata=_metadata(
+            cfg,
+            n_source_rows=features.shape[0],
+            n_synthetic_rows=synthetic_features.shape[0],
+            n_classes=classes.shape[0],
+            n_source_domains=n_source_domains,
+            feature_dim=features.shape[1],
+        ),
     )
 
 
-def roll_feature_row(
-    row: Sequence[float] | np.ndarray,
-    *,
-    shift: int | str,
-    mode: str = "circular",
-    fill_value: float | str = 0.0,
-) -> np.ndarray:
+def roll_feature_row(row: Sequence[float] | np.ndarray, *, shift: int | str, mode: str = "circular", fill_value: float | str = 0.0) -> np.ndarray:
     """Roll one feature row by ``shift`` columns."""
 
     vector = np.asarray(row, dtype=float).reshape(-1)
     if vector.shape[0] < 1:
         raise ValueError("row must contain at least one feature.")
     shift_value = _integer(shift, name="shift")
-    normalized_mode = normalize_roll_mode(mode)
-    if normalized_mode == "circular":
+    if normalize_roll_mode(mode) == "circular":
         return np.roll(vector, shift_value).astype(np.float32, copy=False)
-    fill = float(fill_value)
-    output = np.full(vector.shape[0], fill, dtype=float)
+    output = np.full(vector.shape[0], float(fill_value), dtype=float)
     if shift_value == 0:
         output[:] = vector
     elif abs(shift_value) < vector.shape[0]:
@@ -157,8 +140,6 @@ def roll_feature_row(
 
 
 def sample_roll_shift(max_shift: int | str, *, include_zero_shift: bool = False, rng: np.random.Generator | None = None) -> int:
-    """Sample an integer shift in ``[-max_shift, max_shift]``."""
-
     maximum = _positive_int(max_shift, name="max_shift")
     generator = np.random.default_rng() if rng is None else rng
     candidates = np.arange(-maximum, maximum + 1, dtype=int)
@@ -177,8 +158,6 @@ def source_feature_roll_config(
     preserve_original: bool | str | int | float = True,
     random_state: int | str | None = 13,
 ) -> SourceFeatureRollConfig:
-    """Normalize public feature-roll options."""
-
     return SourceFeatureRollConfig(
         synthetic_per_class=_nonnegative_int(synthetic_per_class, name="synthetic_per_class"),
         max_shift=_positive_int(max_shift, name="max_shift"),
@@ -191,8 +170,6 @@ def source_feature_roll_config(
 
 
 def normalize_roll_mode(value: str | None) -> str:
-    """Normalize roll-mode aliases."""
-
     normalized = "circular" if value is None else str(value).strip().lower().replace("-", "_")
     normalized = {"roll": "circular", "wrap": "circular", "zero": "constant", "pad": "constant", "zero_pad": "constant"}.get(normalized, normalized)
     if normalized not in ROLL_MODES:
@@ -263,6 +240,10 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_l
         except TypeError as exc:
             raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
     return vector
+
+
+def _count_unique_hashable(values: np.ndarray) -> int:
+    return len(dict.fromkeys(values.tolist()))
 
 
 def _integer(value: int | str, *, name: str) -> int:
