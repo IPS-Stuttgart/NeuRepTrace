@@ -166,11 +166,15 @@ def test_source_feature_quantiles_validate_bounds() -> None:
 def test_source_quantile_rank_validates_epsilon() -> None:
     with pytest.raises(ValueError, match="epsilon"):
         source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=0.5)
+    with pytest.raises(ValueError, match="boolean"):
+        source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=np.asarray(True))
 
 
 def test_source_quantile_bins_validate_n_bins() -> None:
     with pytest.raises(ValueError, match="n_bins"):
         source_quantile_bins(source_features=[[0.0], [1.0]], test_features=[[0.5]], n_bins=0)
+    with pytest.raises(ValueError, match="n_bins"):
+        source_quantile_bins(source_features=[[0.0], [1.0]], test_features=[[0.5]], n_bins=np.asarray(True))
     with pytest.raises(ValueError, match="bin_edges"):
         apply_source_quantile_bins([[0.5]], bin_edges=[0.0, 1.0])
 
@@ -179,18 +183,41 @@ def test_source_feature_quantiles_reject_boolean_bounds() -> None:
     with pytest.raises(ValueError, match="not boolean"):
         source_feature_quantiles([[0.0], [1.0]], lower=False, upper=True)
     with pytest.raises(ValueError, match="not boolean"):
+        source_feature_quantiles([[0.0], [1.0]], lower=np.asarray(False), upper=0.75)
+    with pytest.raises(ValueError, match="not boolean"):
         source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], lower=0.0, upper=np.bool_(True))
+    with pytest.raises(ValueError, match="not boolean"):
+        source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], lower=0.0, upper=np.asarray(True))
+
+
+def test_source_quantile_helpers_accept_zero_dim_numpy_numeric_controls() -> None:
+    features = np.asarray([[0.0], [1.0], [2.0], [3.0]], dtype=float)
+    lower, upper = source_feature_quantiles(features, lower=np.asarray(0.25), upper=np.asarray("0.75"))
+
+    assert np.allclose(lower, np.quantile(features, 0.25, axis=0))
+    assert np.allclose(upper, np.quantile(features, 0.75, axis=0))
+
+    clipped = source_quantile_clip(source_features=features, test_features=[[0.5]], lower=np.asarray(0.0), upper=np.asarray(0.75))
+    assert clipped.metadata["source_quantile_clip_upper"] == pytest.approx(0.75)
+
+    ranked = source_quantile_rank(source_features=features, test_features=[[0.5]], epsilon=np.asarray("0.01"))
+    assert ranked.metadata["source_quantile_rank_epsilon"] == pytest.approx(0.01)
+
+    direct_rank = apply_source_quantile_rank([[0.5]], sorted_values=features, epsilon=np.asarray(0.01))
+    assert np.all(direct_rank >= 0.01)
+
+    bins = source_quantile_bins(source_features=features, test_features=[[0.5]], n_bins=np.asarray(4))
+    assert bins.metadata["source_quantile_bins_n_bins"] == 4
 
 
 @pytest.mark.parametrize(
     "call",
     [
         lambda: source_feature_quantiles([[0.0], [1.0]], lower=np.asarray([0.25]), upper=0.75),
-        lambda: source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], lower=0.0, upper=np.asarray(0.75)),
+        lambda: source_quantile_clip(source_features=[[0.0], [1.0]], test_features=[[0.5]], lower=0.0, upper=np.asarray([0.75])),
         lambda: source_quantile_rank(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=np.asarray([0.01])),
-        lambda: apply_source_quantile_rank([[0.5]], sorted_values=[[0.0], [1.0]], epsilon=np.asarray(0.01)),
+        lambda: apply_source_quantile_rank([[0.5]], sorted_values=[[0.0], [1.0]], epsilon=np.asarray([0.01])),
         lambda: source_quantile_bins(source_features=[[0.0], [1.0]], test_features=[[0.5]], n_bins=np.asarray([4])),
-        lambda: source_quantile_bins(source_features=[[0.0], [1.0]], test_features=[[0.5]], n_bins=np.asarray(True)),
     ],
 )
 def test_source_quantile_helpers_reject_array_valued_scalar_controls(call) -> None:
