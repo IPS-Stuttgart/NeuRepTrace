@@ -68,6 +68,22 @@ def test_dataclass_config_is_revalidated_when_used() -> None:
     assert np.allclose(norms, [np.sqrt(14.0)])
 
 
+def test_row_normalization_accepts_scalar_numpy_bool_array_for_center_rows() -> None:
+    config = row_normalization_config(center_rows=np.array(True))  # type: ignore[arg-type]
+
+    normalized, norms = normalize_rows([[1.0, 3.0], [2.0, 6.0]], config=config)
+
+    assert config.center_rows is True
+    assert np.allclose(norms, [np.sqrt(2.0), np.sqrt(8.0)])
+    assert np.allclose(normalized.mean(axis=1), [0.0, 0.0])
+
+
+@pytest.mark.parametrize("value", [np.array([True]), np.array([[False]])])
+def test_row_normalization_rejects_non_scalar_numpy_bool_arrays(value: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="center_rows"):
+        row_normalization_config(center_rows=value)  # type: ignore[arg-type]
+
+
 def test_boolean_epsilon_is_rejected() -> None:
     with pytest.raises(ValueError, match="epsilon"):
         row_normalization_config(epsilon=True)  # type: ignore[arg-type]
