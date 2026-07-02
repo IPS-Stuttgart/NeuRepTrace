@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import _source_numpy_string_alias_config_patch
+
 _PATCH_ATTR = "_neureptrace_rejects_boolean_source_selection_temperature"
 
 
 def install() -> None:
-    """Reject boolean softmax temperatures before numeric coercion."""
+    """Reject boolean softmax temperatures and install source config alias guards."""
+
+    _source_numpy_string_alias_config_patch.install()
 
     from neureptrace.decoding import source_selection
 
