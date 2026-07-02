@@ -137,6 +137,7 @@ def _metadata(cfg: SourceMADConfig, *, n_source_rows: int, n_test_rows: int, fea
         "source_mad_protocol": SOURCE_MAD_PROTOCOL,
         "source_mad_protocol_category": SOURCE_MAD_CATEGORY,
         "source_mad_uses_source_features": True,
+        "source_mad_uses_source_labels": False,
         "source_mad_uses_test_features_for_fitting": False,
         "source_mad_uses_test_labels": False,
         "source_mad_valid_for_strict_source_only": True,
