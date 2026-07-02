@@ -20,6 +20,7 @@ DEFAULT_LABEL_PATH: tuple[PathToken, ...] = ("label",)
 DEFAULT_TRIALINFO_PATH: tuple[PathToken, ...] = ("trialinfo",)
 DEFAULT_SAMPLEINFO_PATH: tuple[PathToken, ...] = ("sampleinfo",)
 INPUT_FORMAT_CHOICES = ("mne-epochs", "fieldtrip-mat")
+_NO_PATH_SENTINELS = {"", "none", "null", "false", "off", "-"}
 
 
 @dataclass(frozen=True)
@@ -409,25 +410,104 @@ def write_fieldtrip_raw_mat_epochs(
     return epochs_out, metadata_path
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Convert FieldTrip-like MATLAB raw/trial data to MNE Epochs FIF plus metadata CSV.")
+def _format_path_default(tokens: Sequence[Any] | None) -> str:
+    if tokens is None:
+        return "none"
+    return ",".join(str(token) for token in tokens)
+
+
+def _parse_optional_path_tokens(value: str | Sequence[Any] | None, default: Sequence[PathToken] | None) -> tuple[PathToken, ...] | None:
+    if value is None:
+        return tuple(default) if default is not None else None
+    if isinstance(value, str) and value.strip().lower() in _NO_PATH_SENTINELS:
+        return None
+    return parse_path_tokens(value, () if default is None else default)
+
+
+def _parse_label_base(value: str | int | float | None) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.lower() in {"", "none", "null"}:
+            return None
+        value = text
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("label-base must be numeric or 'none'.") from exc
+
+
+def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="Convert FieldTrip-like MATLAB raw/trial data to MNE Epochs FIF plus metadata CSV.",
+    )
     parser.add_argument("mat", type=Path)
     parser.add_argument("--epochs-out", type=Path, required=True)
     parser.add_argument("--metadata-out", type=Path)
-    parser.add_argument("--root-path", default="data,0")
+    parser.add_argument(
+        "--root-path",
+        default=_format_path_default(DEFAULT_ROOT_PATH),
+        help="Comma-separated field/index path to the FieldTrip root struct.",
+    )
+    parser.add_argument(
+        "--trial-path",
+        default=_format_path_default(DEFAULT_TRIAL_PATH),
+        help="Comma-separated field/index path from root to the trial cell array.",
+    )
+    parser.add_argument(
+        "--time-path",
+        default=_format_path_default(DEFAULT_TIME_PATH),
+        help="Comma-separated field/index path from root to the time cell array.",
+    )
+    parser.add_argument(
+        "--label-path",
+        default=_format_path_default(DEFAULT_LABEL_PATH),
+        help="Comma-separated field/index path from root to channel labels.",
+    )
+    parser.add_argument(
+        "--trialinfo-path",
+        default=_format_path_default(DEFAULT_TRIALINFO_PATH),
+        help="Comma-separated field/index path from root to trialinfo; use 'none' to disable trialinfo metadata.",
+    )
+    parser.add_argument(
+        "--sampleinfo-path",
+        default=_format_path_default(DEFAULT_SAMPLEINFO_PATH),
+        help="Comma-separated field/index path from root to sampleinfo; use 'none' to disable sampleinfo metadata.",
+    )
     parser.add_argument("--label-column", default="condition")
-    parser.add_argument("--label-base", type=float, default=1.0)
+    parser.add_argument(
+        "--label-base",
+        type=_parse_label_base,
+        default=1.0,
+        help="Numeric offset subtracted from trialinfo labels; use 'none' for string/already-normalized labels.",
+    )
     parser.add_argument("--trialinfo-column", type=int, default=0)
     parser.add_argument("--ch-type", default="grad")
-    parser.add_argument("--trial-axis-order", choices=("channel_time", "time_channel"), default="channel_time")
+    parser.add_argument(
+        "--trial-axis-order",
+        choices=("channel_time", "time_channel"),
+        default="channel_time",
+    )
     parser.add_argument("--no-trim-overlong-labels", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
     epochs_out, metadata_out = write_fieldtrip_raw_mat_epochs(
         args.mat,
         epochs_out=args.epochs_out,
         metadata_out=args.metadata_out,
         root_path=parse_path_tokens(args.root_path, DEFAULT_ROOT_PATH),
+        trial_path=parse_path_tokens(args.trial_path, DEFAULT_TRIAL_PATH),
+        time_path=parse_path_tokens(args.time_path, DEFAULT_TIME_PATH),
+        label_path=parse_path_tokens(args.label_path, DEFAULT_LABEL_PATH),
+        trialinfo_path=_parse_optional_path_tokens(args.trialinfo_path, DEFAULT_TRIALINFO_PATH),
+        sampleinfo_path=_parse_optional_path_tokens(args.sampleinfo_path, DEFAULT_SAMPLEINFO_PATH),
         label_column=args.label_column,
         label_base=args.label_base,
         trialinfo_column=args.trialinfo_column,
@@ -438,7 +518,8 @@ def main() -> None:
     )
     print(f"Wrote epochs: {epochs_out}")
     print(f"Wrote metadata: {metadata_out}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
