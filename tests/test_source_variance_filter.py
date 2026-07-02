@@ -58,6 +58,18 @@ def test_source_variance_filter_config_validation() -> None:
         source_variance_filter_config(top_k=0)
 
 
+def test_source_variance_filter_direct_config_normalizes_values() -> None:
+    cfg = SourceVarianceFilterConfig(
+        variance_threshold=np.asarray("0.25", dtype=object),
+        top_k=np.asarray(" none ", dtype=object),
+        ddof=np.asarray("0", dtype=object),
+    )
+
+    assert cfg.variance_threshold == 0.25
+    assert cfg.top_k is None
+    assert cfg.ddof == 0
+
+
 def test_source_variance_filter_config_normalizes_none_like_top_k() -> None:
     for value in ("", "none", " None ", "null", np.asarray("none", dtype=object)):
         assert source_variance_filter_config(top_k=value).top_k is None
@@ -67,6 +79,10 @@ def test_source_variance_filter_dataclass_config_is_revalidated_before_use() -> 
     source = np.asarray([[1.0, 0.0, 0.0, 5.0], [1.0, 1.0, 0.0, 7.0], [1.0, 2.0, 0.0, 9.0]])
     test = np.asarray([[99.0, 3.0, 4.0, 11.0]])
     config = SourceVarianceFilterConfig(variance_threshold="0.0", top_k=" none ", ddof="0")
+
+    assert config.variance_threshold == 0.0
+    assert config.top_k is None
+    assert config.ddof == 0
 
     result = fit_source_variance_filter(source_features=source, test_features=test, config=config)
 
@@ -89,6 +105,20 @@ def test_source_variance_filter_dataclass_config_is_revalidated_before_use() -> 
 def test_source_variance_filter_config_rejects_boolean_numeric_values(kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         source_variance_filter_config(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"variance_threshold": True},
+        {"variance_threshold": np.asarray([0.0])},
+        {"top_k": np.asarray([1])},
+        {"ddof": np.asarray([0])},
+    ],
+)
+def test_source_variance_filter_direct_config_rejects_invalid_values(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        SourceVarianceFilterConfig(**kwargs)
 
 
 def test_source_variance_filter_rejects_width_mismatch() -> None:

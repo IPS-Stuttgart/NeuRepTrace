@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_prior import (
     SOURCE_PRIOR_CATEGORY,
+    SourcePriorConfig,
     adjust_probabilities_to_source_prior,
     estimate_source_class_prior,
     normalize_target_prior,
@@ -86,6 +87,31 @@ def test_source_prior_smoothing_and_aliases() -> None:
     assert np.allclose(prior, np.asarray([0.6, 0.4]))
 
 
+def test_direct_source_prior_config_normalizes_like_mapping_config() -> None:
+    direct_config = SourcePriorConfig(target_prior="source-prior", smoothing=np.asarray(1.0), epsilon=np.float64(1e-6))
+
+    direct = adjust_probabilities_to_source_prior(
+        [[0.2, 0.8], [0.7, 0.3]],
+        source_labels=[0, 0, 1],
+        classes=[0, 1],
+        config=direct_config,
+    )
+    mapping = adjust_probabilities_to_source_prior(
+        [[0.2, 0.8], [0.7, 0.3]],
+        source_labels=[0, 0, 1],
+        classes=[0, 1],
+        config={"target_prior": "source-prior", "smoothing": np.asarray(1.0), "epsilon": np.float64(1e-6)},
+    )
+
+    assert direct_config.target_prior == "source"
+    assert direct_config.smoothing == 1.0
+    assert direct_config.epsilon == pytest.approx(1e-6)
+    assert np.allclose(direct.probabilities, mapping.probabilities)
+    assert np.allclose(direct.source_prior, mapping.source_prior)
+    assert np.allclose(direct.target_prior, mapping.target_prior)
+    assert direct.metadata["source_prior_target_prior"] == "source"
+
+
 @pytest.mark.parametrize("smoothing", [True, False, np.bool_(True), np.bool_(False), np.asarray(True), np.asarray(False)])
 def test_source_prior_rejects_boolean_smoothing(smoothing) -> None:
     with pytest.raises(ValueError, match="smoothing must be non-negative and finite"):
@@ -96,6 +122,18 @@ def test_source_prior_rejects_boolean_smoothing(smoothing) -> None:
 def test_source_prior_rejects_boolean_epsilon(epsilon) -> None:
     with pytest.raises(ValueError, match="epsilon must be positive and finite"):
         source_prior_config(epsilon=epsilon)
+
+
+@pytest.mark.parametrize("field", ["smoothing", "epsilon"])
+def test_direct_source_prior_config_rejects_boolean_numeric_controls(field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        SourcePriorConfig(**{field: True})
+
+
+@pytest.mark.parametrize("field", ["smoothing", "epsilon"])
+def test_direct_source_prior_config_rejects_vector_numeric_controls(field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        SourcePriorConfig(**{field: np.asarray([1.0, 2.0])})
 
 
 def test_source_prior_rejects_bad_inputs() -> None:

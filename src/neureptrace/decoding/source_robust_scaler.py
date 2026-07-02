@@ -212,8 +212,14 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _scalar_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+    if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a scalar finite number.")
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a scalar finite number.")
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(f"{name} must be a scalar finite number.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:

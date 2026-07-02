@@ -79,6 +79,50 @@ def test_aliases_and_config_validation() -> None:
         normalize_covariance_type("full")
 
 
+def test_source_gaussian_normalizes_direct_dataclass_config() -> None:
+    cfg = SourceGaussianConfig(
+        covariance_type="diag",
+        prior="flat",
+        variance_floor="1e-5",
+        temperature="2.0",
+    )  # type: ignore[arg-type]
+
+    assert cfg.covariance_type == "diagonal"
+    assert cfg.prior == "uniform"
+    assert cfg.variance_floor == pytest.approx(1e-5)
+    assert cfg.temperature == pytest.approx(2.0)
+
+
+def test_source_gaussian_accepts_numpy_scalar_numeric_config() -> None:
+    cfg = source_gaussian_config(
+        variance_floor=np.asarray(1e-5),
+        temperature=np.asarray(2.0),
+    )
+    assert cfg.variance_floor == pytest.approx(1e-5)
+    assert cfg.temperature == pytest.approx(2.0)
+
+    direct = SourceGaussianConfig(
+        variance_floor=np.asarray(1e-4),
+        temperature=np.asarray(3.0),
+    )  # type: ignore[arg-type]
+    assert direct.variance_floor == pytest.approx(1e-4)
+    assert direct.temperature == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"covariance_type": "full"}, "covariance_type"),
+        ({"prior": "weighted"}, "prior mode"),
+        ({"variance_floor": 0.0}, "variance_floor"),
+        ({"temperature": np.asarray([1.0])}, "temperature"),
+    ],
+)
+def test_source_gaussian_rejects_invalid_direct_dataclass_config(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        SourceGaussianConfig(**kwargs)  # type: ignore[arg-type]
+
+
 def test_source_gaussian_revalidates_direct_dataclass_config() -> None:
     source = np.asarray([[0.0], [0.2], [3.0], [3.2]], dtype=float)
     test = np.asarray([[0.1], [3.1]], dtype=float)
@@ -105,13 +149,13 @@ def test_source_gaussian_revalidates_direct_dataclass_config() -> None:
         )
 
 
-@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"variance_floor": 1}, np.asarray(1.0), np.asarray([1.0])])
+@pytest.mark.parametrize("value", [True, np.bool_(True), np.asarray(True), [], {"variance_floor": 1}, np.asarray([1.0])])
 def test_source_gaussian_rejects_invalid_variance_floor_values(value: object) -> None:
     with pytest.raises(ValueError, match="variance_floor"):
         source_gaussian_config(variance_floor=value)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"temperature": 1}, np.asarray(1.0), np.asarray([1.0])])
+@pytest.mark.parametrize("value", [True, np.bool_(True), np.asarray(True), [], {"temperature": 1}, np.asarray([1.0])])
 def test_source_gaussian_rejects_invalid_temperature_values(value: object) -> None:
     with pytest.raises(ValueError, match="temperature"):
         source_gaussian_config(temperature=value)  # type: ignore[arg-type]
@@ -185,13 +229,29 @@ def test_source_mahalanobis_revalidates_direct_dataclass_config() -> None:
         )
 
 
-@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"regularization": 1}, np.asarray(0.1), np.asarray([0.1])])
+def test_source_mahalanobis_accepts_numpy_scalar_numeric_config() -> None:
+    cfg = source_mahalanobis_config(
+        regularization=np.asarray(0.01),
+        temperature=np.asarray(1.5),
+    )
+    assert cfg.regularization == pytest.approx(0.01)
+    assert cfg.temperature == pytest.approx(1.5)
+
+    direct = SourceMahalanobisConfig(
+        regularization=np.asarray(0.02),
+        temperature=np.asarray(2.0),
+    )  # type: ignore[arg-type]
+    assert direct.regularization == pytest.approx(0.02)
+    assert direct.temperature == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(True), np.asarray(True), [], {"regularization": 1}, np.asarray([0.1])])
 def test_source_mahalanobis_rejects_invalid_regularization_values(value: object) -> None:
     with pytest.raises(ValueError, match="regularization"):
         source_mahalanobis_config(regularization=value)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"temperature": 1}, np.asarray(1.0), np.asarray([1.0])])
+@pytest.mark.parametrize("value", [True, np.bool_(True), np.asarray(True), [], {"temperature": 1}, np.asarray([1.0])])
 def test_source_mahalanobis_rejects_invalid_temperature_values(value: object) -> None:
     with pytest.raises(ValueError, match="temperature"):
         source_mahalanobis_config(temperature=value)  # type: ignore[arg-type]

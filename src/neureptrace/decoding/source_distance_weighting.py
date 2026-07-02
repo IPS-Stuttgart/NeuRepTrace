@@ -353,9 +353,13 @@ def _sequence_values_equal(left: Any, right: Any) -> bool:
 
 
 def _numeric_scalar(value: Any, *, message: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(message)
     if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
         raise ValueError(message)
     try:
         return float(value)
@@ -379,7 +383,13 @@ def _unit_interval_float(value: float | str, *, name: str) -> float:
     return parsed
 
 
-def _bool_value(value: bool | int | str, *, name: str) -> bool:
+def _bool_value(value: Any, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:

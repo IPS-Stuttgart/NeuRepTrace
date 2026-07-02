@@ -105,6 +105,80 @@ def test_source_outlier_boolean_config_parses_string_values() -> None:
     assert cfg.use_diagonal_scale is True
 
 
+def test_source_outlier_config_accepts_zero_dimensional_numpy_controls() -> None:
+    cfg = source_outlier_config(
+        quantile=np.asarray(0.75),
+        mad_multiplier=np.asarray("2.5"),
+        temperature=np.asarray(np.float64(0.5)),
+        use_diagonal_scale=np.asarray(False),
+        epsilon=np.asarray("1e-5"),
+    )
+
+    assert cfg.quantile == 0.75
+    assert cfg.mad_multiplier == 2.5
+    assert cfg.temperature == 0.5
+    assert cfg.use_diagonal_scale is False
+    assert cfg.epsilon == 1e-5
+
+
+def test_source_outlier_config_direct_construction_normalizes_values() -> None:
+    cfg = SourceOutlierConfig(
+        threshold_mode="percentile",
+        quantile="0.5",  # type: ignore[arg-type]
+        mad_multiplier=np.float64(2.0),
+        weight_mode="hard",
+        temperature="3.0",  # type: ignore[arg-type]
+        use_diagonal_scale="false",  # type: ignore[arg-type]
+        epsilon=np.float64(1e-4),
+    )
+
+    assert cfg.threshold_mode == "quantile"
+    assert cfg.quantile == 0.5
+    assert cfg.mad_multiplier == 2.0
+    assert cfg.weight_mode == "binary"
+    assert cfg.temperature == 3.0
+    assert cfg.use_diagonal_scale is False
+    assert cfg.epsilon == 1e-4
+
+
+def test_source_outlier_config_direct_construction_accepts_zero_dimensional_numpy_controls() -> None:
+    cfg = SourceOutlierConfig(
+        quantile=np.asarray("0.5"),  # type: ignore[arg-type]
+        mad_multiplier=np.asarray(2.0),  # type: ignore[arg-type]
+        temperature=np.asarray(3.0),  # type: ignore[arg-type]
+        use_diagonal_scale=np.asarray(False),  # type: ignore[arg-type]
+        epsilon=np.asarray(np.float64(1e-4)),  # type: ignore[arg-type]
+    )
+
+    assert cfg.quantile == 0.5
+    assert cfg.mad_multiplier == 2.0
+    assert cfg.temperature == 3.0
+    assert cfg.use_diagonal_scale is False
+    assert cfg.epsilon == 1e-4
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"threshold_mode": "bad"}, "threshold_mode"),
+        ({"weight_mode": "bad"}, "weight_mode"),
+        ({"quantile": True}, "quantile"),
+        ({"quantile": 2.0}, "quantile"),
+        ({"quantile": np.asarray([0.5])}, "quantile"),
+        ({"mad_multiplier": False}, "mad_multiplier"),
+        ({"mad_multiplier": np.asarray([2.0])}, "mad_multiplier"),
+        ({"temperature": 0.0}, "temperature"),
+        ({"temperature": np.asarray([1.0])}, "temperature"),
+        ({"epsilon": np.inf}, "epsilon"),
+        ({"epsilon": np.asarray([1e-8])}, "epsilon"),
+        ({"use_diagonal_scale": "maybe"}, "use_diagonal_scale"),
+    ],
+)
+def test_source_outlier_config_direct_construction_rejects_invalid_values(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        SourceOutlierConfig(**kwargs)
+
+
 def test_source_outlier_revalidates_dataclass_config_instances() -> None:
     features = np.asarray([[0.0], [1.0], [2.0], [8.0], [10.0], [11.0]], dtype=float)
     labels = np.asarray(["x", "x", "x", "y", "y", "y"], dtype=object)
@@ -119,6 +193,8 @@ def test_source_outlier_rejects_boolean_numeric_config_values() -> None:
     for name in ("quantile", "mad_multiplier", "temperature", "epsilon"):
         with pytest.raises(ValueError, match=name):
             source_outlier_config(**{name: True})
+        with pytest.raises(ValueError, match=name):
+            source_outlier_config(**{name: np.asarray(True)})
 
 
 def test_source_outlier_requires_matching_label_rows() -> None:

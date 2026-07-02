@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -46,6 +46,15 @@ class SourceResampleResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class SourceGroupCountsResult:
+    """Source-only group counts and provenance metadata."""
+
+    group_keys: tuple[Hashable, ...]
+    group_counts: Mapping[Hashable, int]
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 def source_balance_config(
     *,
     strategy: str | None = "class_domain",
@@ -64,9 +73,9 @@ def source_balance_config(
 
 
 def compute_source_balance_weights(
-    source_labels: Sequence[Any] | np.ndarray,
+    source_labels: Iterable[Any] | np.ndarray,
     *,
-    source_domains: Sequence[Hashable] | np.ndarray | None = None,
+    source_domains: Iterable[Hashable] | np.ndarray | None = None,
     config: SourceBalanceConfig | Mapping[str, Any] | None = None,
 ) -> SourceBalanceResult:
     """Compute Protocol-1 source sample weights by class/domain groups."""
@@ -92,11 +101,45 @@ def compute_source_balance_weights(
     )
 
 
-def resample_source_rows_balanced(
-    source_features: Sequence[Sequence[float]] | np.ndarray,
+def summarize_source_groups(
     source_labels: Sequence[Any] | np.ndarray,
     *,
     source_domains: Sequence[Hashable] | np.ndarray | None = None,
+    strategy: str | None = "class_domain",
+) -> SourceGroupCountsResult:
+    """Count source-only class/domain groups without computing weights.
+
+    This helper is useful for audit tables and pre-flight checks.  It uses source
+    labels and optional source-domain ids only.
+    """
+
+    resolved_strategy = normalize_balance_strategy(strategy)
+    labels = _vector(source_labels, name="source_labels")
+    domains = _domain_vector(source_domains, expected_length=labels.shape[0])
+    keys = _group_keys(labels, domains, strategy=resolved_strategy)
+    counts = _count_groups(keys)
+    metadata = {
+        "source_group_counts": True,
+        "source_group_counts_protocol": SOURCE_BALANCE_PROTOCOL,
+        "source_group_counts_protocol_category": SOURCE_BALANCE_CATEGORY,
+        "source_group_counts_strategy": resolved_strategy,
+        "source_group_counts_uses_source_labels": True,
+        "source_group_counts_uses_source_domains": resolved_strategy in {"domain", "class_domain"},
+        "source_group_counts_uses_heldout_features": False,
+        "source_group_counts_uses_heldout_labels": False,
+        "source_group_counts_valid_for_strict_source_only": True,
+        "source_group_counts_n_source_rows": int(labels.shape[0]),
+        "source_group_counts_n_groups": int(len(counts)),
+        "source_group_counts_group_counts": "|".join(f"{key}:{int(count)}" for key, count in counts.items()),
+    }
+    return SourceGroupCountsResult(group_keys=tuple(keys), group_counts=counts, metadata=metadata)
+
+
+def resample_source_rows_balanced(
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    source_labels: Iterable[Any] | np.ndarray,
+    *,
+    source_domains: Iterable[Hashable] | np.ndarray | None = None,
     config: SourceBalanceConfig | Mapping[str, Any] | None = None,
 ) -> SourceResampleResult:
     """Resample source rows to equalize class/domain groups."""
@@ -248,8 +291,19 @@ def _metadata(cfg: SourceBalanceConfig, *, n_source_rows: int, n_groups: int, gr
     }
 
 
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _materialize_array(values: object, *, dtype: type | str | None = None) -> np.ndarray:
+    if isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
+        return np.asarray(values, dtype=dtype)
+    if isinstance(values, Iterable):
+        return np.asarray(list(values), dtype=dtype)
+    return np.asarray(values, dtype=dtype)
+
+
+def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    try:
+        matrix = _materialize_array(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -257,24 +311,24 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _vector(values: Sequence[Any] | np.ndarray, *, name: str, expected_length: int | None = None) -> np.ndarray:
+def _vector(values: Iterable[Any] | np.ndarray, *, name: str, expected_length: int | None = None) -> np.ndarray:
     vector = _atomic_value_vector(values, expected_length=expected_length, name=name)
     if vector.shape[0] < 1:
         raise ValueError(f"{name} must contain at least one value.")
     return vector
 
 
-def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
+def _domain_vector(values: Iterable[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
     return _atomic_value_vector(values, expected_length=expected_length, name="source_domains")
 
 
-def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int | None, name: str) -> np.ndarray:
+def _atomic_value_vector(values: Iterable[Any] | np.ndarray, *, expected_length: int | None, name: str) -> np.ndarray:
     if isinstance(values, (str, bytes)):
         vector = _object_value_vector([values])
     else:
-        array = np.asarray(values, dtype=object)
+        array = _materialize_array(values, dtype=object)
         if array.ndim == 0:
             vector = _object_value_vector([array.item()])
         elif array.ndim == 1:
@@ -293,7 +347,7 @@ def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length:
     return vector
 
 
-def _object_value_vector(values: Sequence[Any]) -> np.ndarray:
+def _object_value_vector(values: Iterable[Any]) -> np.ndarray:
     items = list(values)
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):

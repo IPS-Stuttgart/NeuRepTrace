@@ -25,6 +25,7 @@ def test_source_mad_transform_shapes_and_metadata() -> None:
     assert result.reference.scale.shape == (2,)
     assert result.metadata["source_mad_protocol_category"] == SOURCE_MAD_CATEGORY
     assert result.metadata["source_mad_uses_source_features"] is True
+    assert result.metadata["source_mad_uses_source_labels"] is False
     assert result.metadata["source_mad_uses_test_features_for_fitting"] is False
     assert result.metadata["source_mad_uses_test_labels"] is False
     assert result.metadata["source_mad_valid_for_strict_source_only"] is True

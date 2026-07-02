@@ -478,16 +478,30 @@ def _load_matlab_fieldtrip(resolved: ResolvedSplit, split: SplitSpec, labels: La
     )
 
 
+def _csv_metadata_columns(resolved: ResolvedSplit, frame: pd.DataFrame) -> list[str]:
+    columns: list[str] = []
+    for column in (resolved.label_column, resolved.group_column):
+        if column is not None and column in frame.columns and column not in columns:
+            columns.append(column)
+    return columns
+
+
 def _load_csv_feature_matrix(resolved: ResolvedSplit) -> TrialDataset:
     if not resolved.data_path.is_file():
         raise FileNotFoundError(f"Feature CSV not found: {resolved.data_path}")
     frame = pd.read_csv(resolved.data_path)
-    metadata = pd.read_csv(resolved.metadata_path) if resolved.metadata_path is not None and resolved.metadata_path.is_file() else None
+    inline_metadata_columns = _csv_metadata_columns(resolved, frame)
+    if resolved.metadata_path is not None and resolved.metadata_path.is_file():
+        metadata = pd.read_csv(resolved.metadata_path)
+    elif inline_metadata_columns:
+        metadata = frame.loc[:, inline_metadata_columns].copy()
+    else:
+        metadata = None
+
     labels = None
-    feature_frame = frame
     if resolved.label_column is not None and resolved.label_column in frame.columns:
         labels = frame[resolved.label_column].to_numpy()
-        feature_frame = frame.drop(columns=[resolved.label_column])
+    feature_frame = frame.drop(columns=inline_metadata_columns)
     numeric = feature_frame.select_dtypes(include=[np.number])
     data = numeric.to_numpy(dtype=float)[:, :, np.newaxis]
     return TrialDataset(

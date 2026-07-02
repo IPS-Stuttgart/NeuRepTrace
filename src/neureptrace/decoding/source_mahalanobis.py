@@ -31,6 +31,13 @@ class SourceMahalanobisConfig:
     prior: str = "empirical"
     temperature: float = DEFAULT_TEMPERATURE
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "regularization", _nonnegative_float(self.regularization, name="regularization"))
+        object.__setattr__(self, "prior", normalize_prior_mode(self.prior))
+        object.__setattr__(self, "temperature", _positive_float(self.temperature, name="temperature"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceMahalanobisResult:

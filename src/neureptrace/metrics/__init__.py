@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+
 import numpy as np
 
 from neureptrace.metrics.confusion import confusion_category_enrichment, confusion_category_matrix, confusion_counts, confusion_pair_summary, per_class_accuracy
@@ -13,6 +15,8 @@ from neureptrace.metrics.weighted import (
     weighted_reliability_bins,
     weighted_top_k_accuracy,
 )
+
+importlib.import_module("neureptrace._weighted_probability_roundoff_patch").install()
 
 __all__ = [
     "brier_score_multiclass",

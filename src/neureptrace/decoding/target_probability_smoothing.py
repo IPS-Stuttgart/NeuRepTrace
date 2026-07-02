@@ -171,7 +171,15 @@ def _iterate(transition: np.ndarray, initial: np.ndarray, *, alpha: float, max_i
 
 def _coerce_config(config: TargetProbabilitySmoothingConfig | Mapping[str, Any]) -> TargetProbabilitySmoothingConfig:
     if isinstance(config, TargetProbabilitySmoothingConfig):
-        return config
+        return target_probability_smoothing_config(
+            alpha=config.alpha,
+            gamma=config.gamma,
+            n_neighbors=config.n_neighbors,
+            max_iter=config.max_iter,
+            tol=config.tol,
+            standardize=config.standardize,
+            epsilon=config.epsilon,
+        )
     return target_probability_smoothing_config(**dict(config))
 
 

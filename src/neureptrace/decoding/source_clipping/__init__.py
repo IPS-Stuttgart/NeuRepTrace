@@ -18,6 +18,15 @@ class SourceFeatureClippingConfig:
     upper_quantile: float = DEFAULT_UPPER_QUANTILE
     copy: bool = True
 
+    def __post_init__(self) -> None:
+        lower = _quantile(self.lower_quantile, name="lower_quantile")
+        upper = _quantile(self.upper_quantile, name="upper_quantile")
+        if lower >= upper:
+            raise ValueError("lower_quantile must be smaller than upper_quantile.")
+        object.__setattr__(self, "lower_quantile", lower)
+        object.__setattr__(self, "upper_quantile", upper)
+        object.__setattr__(self, "copy", _bool_value(self.copy, name="copy"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceFeatureClippingResult:

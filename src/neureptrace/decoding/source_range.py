@@ -52,6 +52,8 @@ def source_range_clip(*, source_features, test_features):
         "source_range_uses_source_features": True,
         "source_range_uses_test_features_for_fitting": False,
         "source_range_uses_test_labels": False,
+        "source_range_valid_for_strict_source_only": True,
+        "source_range_valid_for_benchmark": True,
         "source_range_n_source_rows": int(source.shape[0]),
         "source_range_n_test_rows": int(test.shape[0]),
         "source_range_feature_dim": int(source.shape[1]),

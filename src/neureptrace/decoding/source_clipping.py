@@ -149,7 +149,11 @@ def apply_feature_clipping(
 
 def _coerce_config(config: SourceFeatureClippingConfig | Mapping[str, Any]) -> SourceFeatureClippingConfig:
     if isinstance(config, SourceFeatureClippingConfig):
-        return config
+        return source_feature_clipping_config(
+            lower_quantile=config.lower_quantile,
+            upper_quantile=config.upper_quantile,
+            copy=config.copy,
+        )
     return source_feature_clipping_config(**dict(config))
 
 
@@ -166,6 +170,8 @@ def _scalar_array_value(value: object, *, name: str) -> object:
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
             raise ValueError(f"{name} must be a scalar value.")
+        return value.item()
+    if isinstance(value, np.generic):
         return value.item()
     return value
 

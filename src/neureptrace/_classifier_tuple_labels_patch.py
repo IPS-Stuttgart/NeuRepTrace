@@ -57,22 +57,28 @@ def _label_mask(labels: np.ndarray, target: object) -> np.ndarray:
     return np.asarray([_labels_equal(label, target) for label in labels], dtype=bool)
 
 
+def _stable_unique_labels_and_inverse(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    classes: list[object] = []
+    encoded = np.empty(labels.shape[0], dtype=int)
+    for row_index, label in enumerate(labels):
+        for class_index, class_label in enumerate(classes):
+            if _labels_equal(label, class_label):
+                encoded[row_index] = class_index
+                break
+        else:
+            encoded[row_index] = len(classes)
+            classes.append(label)
+    return _object_vector(classes), encoded
+
+
 def _unique_labels_and_inverse(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    if labels.dtype == object:
+        return _stable_unique_labels_and_inverse(labels)
     try:
         classes, inverse = np.unique(labels, return_inverse=True)
         return classes, inverse.astype(int, copy=False)
     except (TypeError, ValueError):
-        classes: list[object] = []
-        encoded = np.empty(labels.shape[0], dtype=int)
-        for row_index, label in enumerate(labels):
-            for class_index, class_label in enumerate(classes):
-                if _labels_equal(label, class_label):
-                    encoded[row_index] = class_index
-                    break
-            else:
-                encoded[row_index] = len(classes)
-                classes.append(label)
-        return _object_vector(classes), encoded
+        return _stable_unique_labels_and_inverse(labels)
 
 
 def _as_python_scalar(value: object) -> object:

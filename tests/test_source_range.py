@@ -36,6 +36,8 @@ def test_source_range_clip_clips_test_rows_with_source_bounds() -> None:
     assert metadata["source_range_protocol_category"] == SOURCE_RANGE_CATEGORY
     assert metadata["source_range_uses_test_features_for_fitting"] is False
     assert metadata["source_range_uses_test_labels"] is False
+    assert metadata["source_range_valid_for_strict_source_only"] is True
+    assert metadata["source_range_valid_for_benchmark"] is True
 
 
 def test_apply_source_range_clip_validates_width() -> None:

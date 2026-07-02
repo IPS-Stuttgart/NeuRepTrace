@@ -41,6 +41,17 @@ def test_class_domain_balance_groups_labels_and_domains() -> None:
     assert result.metadata["source_balance_uses_source_domains"] is True
 
 
+def test_class_domain_balance_accepts_one_pass_label_and_domain_iterables() -> None:
+    labels = (label for label in ["a", "a", "b", "b"])
+    domains = (domain for domain in ["s1", "s2", "s1", "s1"])
+
+    result = compute_source_balance_weights(labels, source_domains=domains)
+
+    assert result.group_counts == {("a", "s1"): 1, ("a", "s2"): 1, ("b", "s1"): 2}
+    assert result.group_keys == (("a", "s1"), ("a", "s2"), ("b", "s1"), ("b", "s1"))
+    assert result.sample_weights.shape == (4,)
+
+
 def test_balanced_resampling_oversamples_to_largest_group() -> None:
     features = np.asarray([[0.0], [1.0], [2.0], [10.0]], dtype=float)
     labels = np.asarray(["a", "a", "a", "b"], dtype=object)
@@ -52,6 +63,25 @@ def test_balanced_resampling_oversamples_to_largest_group() -> None:
     assert result.labels.tolist().count("b") == 3
     assert result.metadata["source_balance_resampled"] is True
     assert result.metadata["source_balance_n_output_rows"] == 6
+
+
+def test_balanced_resampling_accepts_one_pass_feature_label_and_domain_iterables() -> None:
+    features = (row for row in [[0.0], [1.0], [10.0]])
+    labels = (label for label in ["a", "a", "b"])
+    domains = (domain for domain in ["s1", "s1", "s2"])
+
+    result = resample_source_rows_balanced(
+        features,
+        labels,
+        source_domains=domains,
+        config={"strategy": "class_domain", "target": "max", "random_state": 1},
+    )
+
+    assert result.features.shape == (4, 1)
+    assert Counter(zip(result.labels.tolist(), result.domains.tolist(), strict=True)) == {
+        ("a", "s1"): 2,
+        ("b", "s2"): 2,
+    }
 
 
 def test_balanced_resampling_can_undersample_to_smallest_group() -> None:

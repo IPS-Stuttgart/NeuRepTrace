@@ -13,6 +13,7 @@ _MODE_ALIAS_PATCH_ATTR = "_enabled_alias_patch"
 _SCALAR_VALIDATION_PATCH_ATTR = "_source_weighting_scalar_validation_patch"
 _FINITE_FEATURE_PATCH_ATTR = "_source_weighting_finite_feature_patch"
 _CONFIG_NORMALIZATION_PATCH_ATTR = "_source_weighting_direct_config_normalization_patch"
+_CONFIG_FACTORY_PATCH_ATTR = "_source_weighting_config_factory_patch"
 
 
 def _normalized_alias(value: Any) -> str:
@@ -109,21 +110,35 @@ def selected_source_groups(group_weights: Any, *, min_weight: float = 0.0) -> tu
     return tuple(group for group, weight in group_weights.items() if _nonnegative_float(weight, name="source_group_weight") > threshold)
 
 
+def _direct_config_mapping(config: Any) -> dict[str, Any]:
+    return {
+        "mode": config.mode,
+        "metric": config.metric,
+        "temperature": config.temperature,
+        "top_k": config.top_k,
+        "blend": config.blend,
+        "hybrid_target_similarity_weight": config.hybrid_target_similarity_weight,
+    }
+
+
 def _normalize_direct_config(config: Any) -> Any:
     import neureptrace.decoding.source_weighting as source_weighting
 
     if isinstance(config, source_weighting.SourceGroupWeightingConfig):
-        return source_weighting.source_group_weighting_config(
-            {
-                "mode": config.mode,
-                "metric": config.metric,
-                "temperature": config.temperature,
-                "top_k": config.top_k,
-                "blend": config.blend,
-                "hybrid_target_similarity_weight": config.hybrid_target_similarity_weight,
-            }
-        )
+        return source_weighting.source_group_weighting_config(_direct_config_mapping(config))
     return source_weighting.source_group_weighting_config(config)
+
+
+def _make_source_group_weighting_config(source_weighting: Any, original_source_group_weighting_config: Any) -> Any:
+    @wraps(original_source_group_weighting_config)
+    def source_group_weighting_config(value: Any = None, **overrides: Any) -> Any:
+        if isinstance(value, source_weighting.SourceGroupWeightingConfig):
+            raw = _direct_config_mapping(value)
+            raw.update(overrides)
+            return original_source_group_weighting_config(raw)
+        return original_source_group_weighting_config(value, **overrides)
+
+    return source_group_weighting_config
 
 
 def _make_dynamic_source_group_weights(original_dynamic_source_group_weights: Any) -> Any:
@@ -211,6 +226,15 @@ def install() -> None:
             original_combine_source_reliability_and_similarity,
         )
         setattr(source_weighting, _SCALAR_VALIDATION_PATCH_ATTR, True)
+
+    original_source_group_weighting_config = source_weighting.source_group_weighting_config
+    if not getattr(original_source_group_weighting_config, _CONFIG_FACTORY_PATCH_ATTR, False):
+        patched_source_group_weighting_config = _make_source_group_weighting_config(
+            source_weighting,
+            original_source_group_weighting_config,
+        )
+        setattr(patched_source_group_weighting_config, _CONFIG_FACTORY_PATCH_ATTR, True)
+        source_weighting.source_group_weighting_config = patched_source_group_weighting_config
 
     original_dynamic_source_group_weights = source_weighting.dynamic_source_group_weights
     if not getattr(original_dynamic_source_group_weights, _CONFIG_NORMALIZATION_PATCH_ATTR, False):

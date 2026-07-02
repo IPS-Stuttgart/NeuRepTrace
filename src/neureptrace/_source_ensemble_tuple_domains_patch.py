@@ -11,6 +11,22 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_source_ensemble_tuple_domains_patch_installed"
 
 
+def _canonical_domain_value(value: Any) -> Hashable:
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, np.ndarray):
+        return tuple(_canonical_domain_value(item) for item in value.reshape(-1).tolist())
+    if isinstance(value, list):
+        return tuple(_canonical_domain_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_canonical_domain_value(item) for item in value)
+    try:
+        hash(value)
+    except TypeError as exc:
+        raise ValueError(f"source_domains must be hashable or list/tuple-like composite values; got {value!r}.") from exc
+    return value
+
+
 def _unique_domain_values(domains: np.ndarray, label_key) -> tuple[Hashable, ...]:
     unique: list[Hashable] = []
     seen: set[tuple[Any, ...]] = set()
@@ -31,6 +47,14 @@ def install() -> None:
     source_ensemble = importlib.import_module("neureptrace.decoding.source_ensemble")
     if getattr(source_ensemble, _PATCH_MARKER, False):
         return
+
+    def domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int) -> np.ndarray:
+        vector = source_ensemble._label_vector(values, name="source_domains")
+        if vector.shape[0] != expected_length:
+            raise ValueError(f"source_domains must contain one value per source row: {vector.shape[0]} != {expected_length}.")
+        domains = np.empty(vector.shape[0], dtype=object)
+        domains[:] = [_canonical_domain_value(value) for value in vector.tolist()]
+        return domains
 
     def domain_mask(domains: np.ndarray, domain: Hashable) -> np.ndarray:
         return _domain_mask(domains, domain, source_ensemble._label_key)
@@ -89,7 +113,7 @@ def install() -> None:
         labels = source_ensemble._label_vector(source_labels, name="source_labels")
         if labels.shape[0] != source.shape[0]:
             raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {source.shape[0]}.")
-        domains = source_ensemble._domain_vector(source_domains, expected_length=source.shape[0])
+        domains = domain_vector(source_domains, expected_length=source.shape[0])
         domain_ids = unique_domain_values(domains)
         classes = source_ensemble._unique_label_vector(labels)
         if classes.shape[0] < 2:
@@ -145,6 +169,7 @@ def install() -> None:
             ),
         )
 
+    source_ensemble._domain_vector = domain_vector
     source_ensemble._unique_domain_values = unique_domain_values
     source_ensemble._domain_mask = domain_mask
     source_ensemble._domain_weights = _domain_weights

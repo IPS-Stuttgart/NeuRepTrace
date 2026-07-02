@@ -45,6 +45,61 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def _object_label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
+    return vector
+
+
+def _is_composite_label(value: object) -> bool:
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.ndarray):
+        return value.ndim != 0
+    return isinstance(value, (tuple, list, dict))
+
+
+def _has_composite_labels(values: Sequence[Any] | np.ndarray) -> bool:
+    return any(_is_composite_label(value) for value in values)
+
+
+def _label_is_missing(value: object) -> bool:
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _label_is_missing(value.item())
+        return any(_label_is_missing(item) for item in np.asarray(value, dtype=object).reshape(-1))
+    if isinstance(value, (tuple, list)):
+        return any(_label_is_missing(item) for item in value)
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+class _StableObjectLabelEncoder:
+    """Minimal LabelEncoder-compatible encoder for non-sortable object labels."""
+
+    def fit(self, values: Sequence[Any] | np.ndarray) -> _StableObjectLabelEncoder:
+        self.classes_, _ = label_counts(_object_label_vector(values))
+        return self
+
+    def transform(self, values: Sequence[Any] | np.ndarray) -> np.ndarray:
+        encoded = np.empty(len(values), dtype=int)
+        for row_index, value in enumerate(values):
+            for class_index, class_value in enumerate(self.classes_):
+                if values_equal(value, class_value):
+                    encoded[row_index] = class_index
+                    break
+            else:
+                raise ValueError(f"transfer.label_column contains a label not seen during encoding: {value!r}")
+        return encoded
+
+
 def _filter_mask(metadata: pd.DataFrame, filter_spec: Mapping[str, Any] | None, *, name: str) -> np.ndarray:
     if not filter_spec:
         raise ValueError(f"transfer.{name}_filter is required.")
@@ -112,7 +167,15 @@ def _format_label_preview(labels: Sequence[Any], *, limit: int = 10) -> str:
     return preview
 
 
-def _encode_transfer_labels(raw_labels: Sequence[Any], train_mask: np.ndarray, test_mask: np.ndarray) -> tuple[LabelEncoder, np.ndarray, np.ndarray]:
+def _make_transfer_label_encoder(raw_labels: np.ndarray):
+    if _has_composite_labels(raw_labels):
+        return _StableObjectLabelEncoder().fit(raw_labels)
+    encoder = LabelEncoder()
+    encoder.fit(raw_labels)
+    return encoder
+
+
+def _encode_transfer_labels(raw_labels: Sequence[Any], train_mask: np.ndarray, test_mask: np.ndarray) -> tuple[Any, np.ndarray, np.ndarray]:
     """Encode only labels selected by the configured transfer split.
 
     Dataset configs often contain auxiliary or unlabeled rows that are outside the
@@ -125,13 +188,13 @@ def _encode_transfer_labels(raw_labels: Sequence[Any], train_mask: np.ndarray, t
     probabilities to the evaluation-only class.
     """
 
-    raw_labels = np.asarray(raw_labels, dtype=object)
+    raw_labels = _object_label_vector(raw_labels)
     train_mask = np.asarray(train_mask, dtype=bool)
     test_mask = np.asarray(test_mask, dtype=bool)
+    if train_mask.shape != raw_labels.shape or test_mask.shape != raw_labels.shape:
+        raise ValueError("transfer train_filter/test_filter masks must match transfer.label_column length.")
     active_mask = train_mask | test_mask
-    labeled_mask = pd.notna(raw_labels)
-    if labeled_mask.ndim != 1:
-        raise ValueError("transfer.label_column must contain one scalar label per trial.")
+    labeled_mask = np.asarray([not _label_is_missing(label) for label in raw_labels], dtype=bool)
     if np.any(active_mask & ~labeled_mask):
         raise ValueError("transfer train_filter/test_filter selected unlabeled trials.")
     fit_mask = active_mask & labeled_mask
@@ -146,8 +209,7 @@ def _encode_transfer_labels(raw_labels: Sequence[Any], train_mask: np.ndarray, t
             "Every evaluation class must have at least one training row."
         )
 
-    encoder = LabelEncoder()
-    encoder.fit(raw_labels[fit_mask])
+    encoder = _make_transfer_label_encoder(raw_labels[fit_mask])
     labels = np.full(raw_labels.shape[0], -1, dtype=int)
     labels[fit_mask] = encoder.transform(raw_labels[fit_mask])
     classes = np.arange(len(encoder.classes_))

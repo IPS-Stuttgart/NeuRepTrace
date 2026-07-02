@@ -11,6 +11,8 @@ from collections.abc import Iterable
 
 import numpy as np
 
+_PROBABILITY_NORMALIZATION_ATOL = 1e-6
+
 
 def _coerce_numeric_scalar(value: object, message: str) -> float:
     if isinstance(value, (bool, np.bool_)):
@@ -91,22 +93,25 @@ def _labels_contain_boolean(labels: np.ndarray) -> bool:
     return False
 
 
-def _probabilities_contain_boolean(probabilities: object) -> bool:
-    if isinstance(probabilities, (bool, np.bool_)):
-        return True
-    if isinstance(probabilities, np.ndarray):
-        if np.issubdtype(probabilities.dtype, np.bool_):
-            return True
-        if probabilities.dtype != object:
-            return False
-        return any(_probabilities_contain_boolean(value) for value in probabilities.ravel())
-    if isinstance(probabilities, (str, bytes)):
-        return False
+def _probability_input_array(probabilities: object) -> np.ndarray:
+    """Return an object array without exhausting one-pass probability iterables."""
+
+    if isinstance(probabilities, np.ndarray) or isinstance(probabilities, (str, bytes)):
+        return np.asarray(probabilities, dtype=object)
     try:
-        iterator = iter(probabilities)
+        return np.asarray(list(probabilities), dtype=object)
     except TypeError:
-        return False
-    return any(_probabilities_contain_boolean(value) for value in iterator)
+        return np.asarray(probabilities, dtype=object)
+    except ValueError as exc:
+        raise ValueError("probabilities must have shape (n_samples, n_classes)") from exc
+
+
+def _probabilities_contain_boolean(probabilities: np.ndarray) -> bool:
+    if np.issubdtype(probabilities.dtype, np.bool_):
+        return True
+    if probabilities.dtype == object:
+        return any(isinstance(value, (bool, np.bool_)) for value in probabilities.ravel())
+    return False
 
 
 def _coerce_label_indices(labels: np.ndarray) -> np.ndarray:
@@ -127,9 +132,10 @@ def _coerce_label_indices(labels: np.ndarray) -> np.ndarray:
 
 
 def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    if _probabilities_contain_boolean(probabilities):
+    raw_probabilities = _probability_input_array(probabilities)
+    if _probabilities_contain_boolean(raw_probabilities):
         raise ValueError("probabilities must contain numeric probability values, not boolean flags")
-    probabilities = np.asarray(probabilities, dtype=float)
+    probabilities = raw_probabilities.astype(float, copy=False)
     labels = np.asarray(labels)
     if probabilities.ndim != 2:
         raise ValueError("probabilities must have shape (n_samples, n_classes)")
@@ -143,10 +149,14 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
         raise ValueError("probabilities and labels must contain the same samples")
     if not np.all(np.isfinite(probabilities)):
         raise ValueError("probabilities must contain only finite values")
-    if np.any(probabilities < 0.0):
+    if np.any(probabilities < -_PROBABILITY_NORMALIZATION_ATOL):
         raise ValueError("probabilities must be non-negative")
-    if not np.allclose(probabilities.sum(axis=1), 1.0, atol=1e-6, rtol=0.0):
+    if np.any(probabilities < 0.0):
+        probabilities = np.maximum(probabilities, 0.0)
+    row_sums = probabilities.sum(axis=1)
+    if not np.allclose(row_sums, 1.0, atol=_PROBABILITY_NORMALIZATION_ATOL, rtol=0.0):
         raise ValueError("probability rows must sum to one")
+    probabilities = probabilities / row_sums[:, None]
     labels = _coerce_label_indices(labels)
     if np.any(labels < 0) or np.any(labels >= probabilities.shape[1]):
         raise ValueError("labels must be valid column indices for probabilities")

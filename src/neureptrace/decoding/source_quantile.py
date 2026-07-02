@@ -232,14 +232,17 @@ def _matrix(values, *, name: str):
     return matrix
 
 
-def _reject_array_scalar(value: Any, *, name: str) -> None:
+def _scalar_config_value(value: Any, *, name: str) -> Any:
     if isinstance(value, np.ndarray):
-        raise ValueError(f"{name} must be a scalar value, not an array.")
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a scalar value, not an array.")
+        return value.item()
+    return value
 
 
 def _bounds(lower, upper) -> tuple[float, float]:
-    _reject_array_scalar(lower, name="lower")
-    _reject_array_scalar(upper, name="upper")
+    lower = _scalar_config_value(lower, name="lower")
+    upper = _scalar_config_value(upper, name="upper")
     if isinstance(lower, (bool, np.bool_)) or isinstance(upper, (bool, np.bool_)):
         raise ValueError("lower and upper must be numeric quantiles, not boolean.")
     try:
@@ -279,7 +282,7 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
 
 
 def _epsilon(epsilon) -> float:
-    _reject_array_scalar(epsilon, name="epsilon")
+    epsilon = _scalar_config_value(epsilon, name="epsilon")
     if isinstance(epsilon, (bool, np.bool_)):
         raise ValueError("epsilon must be numeric, not boolean.")
     try:
@@ -292,7 +295,7 @@ def _epsilon(epsilon) -> float:
 
 
 def _positive_int(value, *, name: str) -> int:
-    _reject_array_scalar(value, name=name)
+    value = _scalar_config_value(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a positive integer.")
     try:

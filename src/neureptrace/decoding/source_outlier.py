@@ -33,6 +33,17 @@ class SourceOutlierConfig:
     use_diagonal_scale: bool = True
     epsilon: float = 1e-8
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "threshold_mode", normalize_threshold_mode(self.threshold_mode))
+        object.__setattr__(self, "quantile", _unit_interval_float(self.quantile, name="quantile"))
+        object.__setattr__(self, "mad_multiplier", _positive_float(self.mad_multiplier, name="mad_multiplier"))
+        object.__setattr__(self, "weight_mode", normalize_weight_mode(self.weight_mode))
+        object.__setattr__(self, "temperature", _positive_float(self.temperature, name="temperature"))
+        object.__setattr__(self, "use_diagonal_scale", _normalize_bool(self.use_diagonal_scale, name="use_diagonal_scale"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceOutlierResult:
@@ -244,7 +255,9 @@ def _normalize_float(value: Any, *, name: str) -> float:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be finite.")
     if isinstance(value, np.ndarray):
-        raise ValueError(f"{name} must be finite.")
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be finite.")
+        return _normalize_float(value.item(), name=name)
     if isinstance(value, (list, tuple, dict, set)):
         raise ValueError(f"{name} must be finite.")
     try:
