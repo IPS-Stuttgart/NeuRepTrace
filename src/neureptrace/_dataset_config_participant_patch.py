@@ -8,6 +8,11 @@ silently interpreted as participant tokens.  This patch keeps the public parser
 API stable while rejecting those ambiguous inputs before path templates are
 expanded.
 
+Programmatic dataset specs may also pass NumPy/Pandas integral scalar values
+for ``participants.ids``.  Those values should behave like plain Python integer
+IDs, while NumPy boolean scalars should still be rejected as booleans rather
+than being treated as participant identifiers.
+
 It also keeps single FieldTrip participant templates aligned with the documented
 multi-template and MNE template formatting vocabulary.  Paths such as
 ``Part{participant02d}Data.mat`` should resolve the same way whether they are
@@ -19,13 +24,22 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from functools import wraps
+from numbers import Integral
 from typing import Any
 
 _PATCH_MARKER = "_neureptrace_participant_id_patch_installed"
 
 
+def _is_boolean_scalar(value: Any) -> bool:
+    return isinstance(value, bool) or (type(value).__module__ == "numpy" and type(value).__name__ in {"bool", "bool_"})
+
+
+def _is_integral_identifier(value: Any) -> bool:
+    return isinstance(value, Integral) and not _is_boolean_scalar(value)
+
+
 def _validate_participant_token(token: Any) -> None:
-    if isinstance(token, bool):
+    if _is_boolean_scalar(token):
         raise ValueError("participants.ids entries must be participant identifiers, not booleans.")
     if isinstance(token, Mapping):
         raise ValueError("participants.ids entries must be scalars, not mappings.")
@@ -34,8 +48,10 @@ def _validate_participant_token(token: Any) -> None:
 
 
 def _validate_participant_ids_input(value: Any) -> None:
-    if isinstance(value, bool):
+    if _is_boolean_scalar(value):
         raise ValueError("participants.ids must be an int, string, or list, not a boolean.")
+    if _is_integral_identifier(value):
+        return
     if isinstance(value, Mapping):
         raise ValueError("participants.ids must be an int, string, or list, not a mapping.")
     if isinstance(value, str):
@@ -80,6 +96,8 @@ def install() -> None:
 
     @wraps(original_parse_participant_ids)
     def parse_participant_ids(value: Any) -> list[int | str]:
+        if _is_integral_identifier(value):
+            return [int(value)]
         _validate_participant_ids_input(value)
         parsed = original_parse_participant_ids(value)
         for token in parsed:
