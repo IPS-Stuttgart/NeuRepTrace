@@ -240,5 +240,21 @@ def install() -> None:
         setattr(augment_source_with_smote, _PATCH_MARKER, True)
         source_smote.augment_source_with_smote = augment_source_with_smote
 
+    source_rff = importlib.import_module("neureptrace.decoding.source_rff")
+    original_rff_optional_random_state = source_rff._optional_random_state
+    if not getattr(original_rff_optional_random_state, _PATCH_MARKER, False):
+
+        @wraps(original_rff_optional_random_state)
+        def _optional_random_state(value: Any) -> int | None:
+            if _is_none_like_random_state(value):
+                return None
+            if isinstance(value, np.ndarray):
+                if value.ndim == 0 and _is_none_like_random_state(value.item()):
+                    return None
+            return original_rff_optional_random_state(value)
+
+        setattr(_optional_random_state, _PATCH_MARKER, True)
+        source_rff._optional_random_state = _optional_random_state
+
 
 __all__ = ["install"]
