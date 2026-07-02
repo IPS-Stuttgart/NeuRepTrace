@@ -12,20 +12,30 @@ _PATCH_MARKER = "_neureptrace_source_selection_class_balance_patch_installed"
 
 
 def _normalize_bool(value: Any, *, name: str) -> bool:
+    message = f"{name} must be a boolean value."
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return _normalize_bool(value.item(), name=name)
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
         integer = int(value)
         if integer in {0, 1}:
             return bool(integer)
-        raise ValueError(f"{name} must be a boolean value.")
+        raise ValueError(message)
+    if isinstance(value, (float, np.floating)):
+        parsed = float(value)
+        if np.isfinite(parsed) and parsed in {0.0, 1.0}:
+            return bool(parsed)
+        raise ValueError(message)
     if isinstance(value, str):
         normalized = value.strip().lower()
         if normalized in {"1", "true", "t", "yes", "y", "on"}:
             return True
         if normalized in {"0", "false", "f", "no", "n", "off"}:
             return False
-    raise ValueError(f"{name} must be a boolean value.")
+    raise ValueError(message)
 
 
 def install() -> None:
