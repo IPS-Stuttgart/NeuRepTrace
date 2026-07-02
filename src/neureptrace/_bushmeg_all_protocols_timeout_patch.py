@@ -77,6 +77,10 @@ def _patch_pre_runner_status_timeout(all_protocols: Any) -> None:
     setattr(progress_cls, _ORIGINAL_UPDATE_ATTR, original_update)
 
     def update(self: Any, stage: str, **fields: Any) -> None:
+        if stage == "fold_done":
+            self._raise_if_timeout_elapsed()
+            return original_update(self, stage, **fields)
+
         method_deadline = getattr(self, "_method_deadline", None)
         if (
             stage != "loading_subjects"
