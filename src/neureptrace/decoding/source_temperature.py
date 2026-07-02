@@ -265,11 +265,22 @@ def _contains_boolean(value: Any) -> bool:
     return any(_contains_boolean(item) for item in iterator)
 
 
+def _materialize_one_pass_iterable(value: Any) -> Any:
+    if isinstance(value, (np.ndarray, str, bytes, Mapping, Sequence)):
+        return value
+    try:
+        iterator = iter(value)
+    except TypeError:
+        return value
+    return list(iterator)
+
+
 def _label_index_vector(labels: Sequence[int] | np.ndarray, *, n_rows: int, n_classes: int) -> np.ndarray:
-    if _contains_boolean(labels):
+    materialized = _materialize_one_pass_iterable(labels)
+    if _contains_boolean(materialized):
         raise ValueError("labels must contain finite integer class indices.")
     try:
-        raw = np.asarray(labels)
+        raw = np.asarray(materialized)
     except (TypeError, ValueError) as exc:
         raise ValueError("labels must contain finite integer class indices.") from exc
     if raw.ndim == 2 and raw.shape[1] == 1:
@@ -290,9 +301,13 @@ def _label_index_vector(labels: Sequence[int] | np.ndarray, *, n_rows: int, n_cl
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
     eps = _probability_epsilon(epsilon)
-    if _contains_boolean(values):
+    materialized = _materialize_one_pass_iterable(values)
+    if _contains_boolean(materialized):
         raise ValueError(f"{name} must contain numeric probabilities, not boolean values.")
-    matrix = np.asarray(values, dtype=float)
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric probabilities.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix with at least two columns.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
