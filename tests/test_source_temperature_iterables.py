@@ -1,0 +1,14 @@
+from __future__ import annotations
+
+import numpy as np
+
+from neureptrace.decoding.source_temperature import apply_temperature
+
+
+def test_apply_temperature_accepts_one_pass_probability_rows() -> None:
+    rows = (row for row in ([0.75, 0.25], [0.20, 0.80]))
+
+    scaled = apply_temperature(rows, temperature=1.0)
+
+    assert scaled.shape == (2, 2)
+    assert np.allclose(scaled.sum(axis=1), 1.0)
