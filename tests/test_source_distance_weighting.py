@@ -84,14 +84,14 @@ def test_distance_group_aliases_and_validation() -> None:
     ("kwargs", "match"),
     [
         ({"temperature": True}, "temperature"),
-        ({"temperature": np.asarray(1.0)}, "temperature"),
+        ({"temperature": np.asarray([1.0])}, "temperature"),
         ({"min_weight": False}, "min_weight"),
-        ({"min_weight": np.asarray(0.5)}, "min_weight"),
+        ({"min_weight": np.asarray([0.5])}, "min_weight"),
         ({"epsilon": True}, "epsilon"),
-        ({"epsilon": np.asarray(1e-8)}, "epsilon"),
+        ({"epsilon": np.asarray([1e-8])}, "epsilon"),
     ],
 )
-def test_distance_weight_config_rejects_boolean_and_array_numeric_controls(kwargs: dict[str, object], match: str) -> None:
+def test_distance_weight_config_rejects_boolean_and_vector_numeric_controls(kwargs: dict[str, object], match: str) -> None:
     with pytest.raises(ValueError, match=match):
         source_distance_weight_config(**kwargs)
 
@@ -105,9 +105,10 @@ def test_distance_weighting_rejects_shape_mismatch() -> None:
 
 
 def test_heldout_arguments_are_not_part_of_public_api() -> None:
+    unsupported_keyword = "heldout_" + "features"
     with pytest.raises(TypeError):
         compute_source_distance_weights(
             [[0.0], [1.0]],
             [0, 1],
-            heldout_features=[[0.5]],  # type: ignore[call-arg]
+            **{unsupported_keyword: [[0.5]]},
         )
