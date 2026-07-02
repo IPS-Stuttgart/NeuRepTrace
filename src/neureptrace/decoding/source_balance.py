@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -64,9 +64,9 @@ def source_balance_config(
 
 
 def compute_source_balance_weights(
-    source_labels: Sequence[Any] | np.ndarray,
+    source_labels: Iterable[Any] | np.ndarray,
     *,
-    source_domains: Sequence[Hashable] | np.ndarray | None = None,
+    source_domains: Iterable[Hashable] | np.ndarray | None = None,
     config: SourceBalanceConfig | Mapping[str, Any] | None = None,
 ) -> SourceBalanceResult:
     """Compute Protocol-1 source sample weights by class/domain groups."""
@@ -93,10 +93,10 @@ def compute_source_balance_weights(
 
 
 def resample_source_rows_balanced(
-    source_features: Sequence[Sequence[float]] | np.ndarray,
-    source_labels: Sequence[Any] | np.ndarray,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    source_labels: Iterable[Any] | np.ndarray,
     *,
-    source_domains: Sequence[Hashable] | np.ndarray | None = None,
+    source_domains: Iterable[Hashable] | np.ndarray | None = None,
     config: SourceBalanceConfig | Mapping[str, Any] | None = None,
 ) -> SourceResampleResult:
     """Resample source rows to equalize class/domain groups."""
@@ -248,8 +248,19 @@ def _metadata(cfg: SourceBalanceConfig, *, n_source_rows: int, n_groups: int, gr
     }
 
 
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _materialize_array(values: object, *, dtype: type | str | None = None) -> np.ndarray:
+    if isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
+        return np.asarray(values, dtype=dtype)
+    if isinstance(values, Iterable):
+        return np.asarray(list(values), dtype=dtype)
+    return np.asarray(values, dtype=dtype)
+
+
+def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    try:
+        matrix = _materialize_array(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -257,24 +268,24 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _vector(values: Sequence[Any] | np.ndarray, *, name: str, expected_length: int | None = None) -> np.ndarray:
+def _vector(values: Iterable[Any] | np.ndarray, *, name: str, expected_length: int | None = None) -> np.ndarray:
     vector = _atomic_value_vector(values, expected_length=expected_length, name=name)
     if vector.shape[0] < 1:
         raise ValueError(f"{name} must contain at least one value.")
     return vector
 
 
-def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
+def _domain_vector(values: Iterable[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
     return _atomic_value_vector(values, expected_length=expected_length, name="source_domains")
 
 
-def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int | None, name: str) -> np.ndarray:
+def _atomic_value_vector(values: Iterable[Any] | np.ndarray, *, expected_length: int | None, name: str) -> np.ndarray:
     if isinstance(values, (str, bytes)):
         vector = _object_value_vector([values])
     else:
-        array = np.asarray(values, dtype=object)
+        array = _materialize_array(values, dtype=object)
         if array.ndim == 0:
             vector = _object_value_vector([array.item()])
         elif array.ndim == 1:
@@ -293,7 +304,7 @@ def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length:
     return vector
 
 
-def _object_value_vector(values: Sequence[Any]) -> np.ndarray:
+def _object_value_vector(values: Iterable[Any]) -> np.ndarray:
     items = list(values)
     vector = np.empty(len(items), dtype=object)
     for index, value in enumerate(items):
