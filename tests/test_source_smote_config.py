@@ -13,6 +13,16 @@ def test_source_smote_config_parses_string_boolean_tokens() -> None:
     assert cfg.preserve_original is False
 
 
+def test_source_smote_config_accepts_numpy_scalar_boolean_arrays() -> None:
+    cfg = source_smote_config(
+        cross_domain_partner=np.asarray(False),
+        preserve_original=np.asarray(True),
+    )
+
+    assert cfg.cross_domain_partner is False
+    assert cfg.preserve_original is True
+
+
 def test_source_smote_config_rejects_invalid_boolean_tokens() -> None:
     with pytest.raises(ValueError, match="cross_domain_partner must be a boolean"):
         source_smote_config(cross_domain_partner="maybe")
