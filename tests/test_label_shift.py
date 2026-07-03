@@ -164,6 +164,33 @@ def test_mapping_source_prior_and_method_aliases() -> None:
     assert np.allclose(result.source_prior, (0.25, 0.75))
 
 
+def test_label_shift_rejects_duplicate_explicit_classes() -> None:
+    with pytest.raises(ValueError, match="classes must be unique"):
+        adapt_label_shift_probabilities(
+            [[0.8, 0.2], [0.2, 0.8]],
+            source_prior=[0.5, 0.5],
+            classes=["a", "a"],
+        )
+
+
+def test_label_shift_rejects_source_labels_outside_classes() -> None:
+    with pytest.raises(ValueError, match="source labels contain labels absent from classes"):
+        adapt_label_shift_probabilities(
+            [[0.8, 0.2], [0.2, 0.8]],
+            source_labels=["a", "b", "ghost"],
+            classes=["a", "b"],
+        )
+
+
+def test_soft_confusion_matrix_rejects_validation_labels_outside_classes() -> None:
+    with pytest.raises(ValueError, match="source_validation_labels contain labels absent from classes"):
+        soft_confusion_matrix(
+            [[0.9, 0.1], [0.1, 0.9], [0.5, 0.5]],
+            ["a", "b", "ghost"],
+            classes=["a", "b"],
+        )
+
+
 def test_target_labels_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
         adapt_label_shift_probabilities(
