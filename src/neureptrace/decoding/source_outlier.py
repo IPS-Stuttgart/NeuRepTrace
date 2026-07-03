@@ -70,15 +70,15 @@ def compute_source_outlier_weights(
     cfg = source_outlier_config() if config is None else _coerce_config(config)
     features = _feature_matrix(source_features, name="source_features")
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=object)
+    classes = _unique_label_vector(labels)
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
 
-    centroids = {label: np.mean(features[labels == label], axis=0) for label in classes.tolist()}
+    centroids = {label: np.mean(features[_label_equal_mask(labels, label)], axis=0) for label in classes.tolist()}
     scale = _feature_scale(features, enabled=cfg.use_diagonal_scale, epsilon=cfg.epsilon)
     centroid_rows = np.vstack([centroids[label] for label in labels.tolist()])
     distances = _scaled_l2(features, centroid_rows, scale=scale)
-    thresholds = {label: _class_threshold(distances[labels == label], cfg=cfg) for label in classes.tolist()}
+    thresholds = {label: _class_threshold(distances[_label_equal_mask(labels, label)], cfg=cfg) for label in classes.tolist()}
     threshold_rows = np.asarray([thresholds[label] for label in labels.tolist()], dtype=float)
     inlier_mask = distances <= threshold_rows
     weights = _weights(distances, threshold_rows, cfg=cfg)
@@ -172,8 +172,17 @@ def _scaled_l2(left: np.ndarray, right: np.ndarray, *, scale: np.ndarray) -> np.
     return np.sqrt(np.sum(diff * diff, axis=1))
 
 
-def _metadata(cfg: SourceOutlierConfig, *, labels: np.ndarray, classes: np.ndarray, distances: np.ndarray, inlier_mask: np.ndarray, thresholds: Mapping[Any, float]) -> dict[str, Any]:
-    unique, counts = np.unique(labels.astype(str), return_counts=True)
+def _metadata(
+    cfg: SourceOutlierConfig,
+    *,
+    labels: np.ndarray,
+    classes: np.ndarray,
+    distances: np.ndarray,
+    inlier_mask: np.ndarray,
+    thresholds: Mapping[Any, float],
+) -> dict[str, Any]:
+    label_strings = np.asarray([str(label) for label in labels.tolist()], dtype=object)
+    unique, counts = np.unique(label_strings, return_counts=True)
     return {
         "source_outlier_weighting": True,
         "source_outlier_protocol": SOURCE_OUTLIER_PROTOCOL,
@@ -219,11 +228,50 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _object_vector_from_items(items: Sequence[Any]) -> np.ndarray:
+    vector = np.empty(len(items), dtype=object)
+    for index, item in enumerate(items):
+        vector[index] = item
+    return vector
+
+
+def _row_tuple(row: Any) -> tuple[Any, ...]:
+    return tuple(np.asarray(row, dtype=object).reshape(-1).tolist())
+
+
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    object_array = np.asarray(values, dtype=object)
+    try:
+        scalar_array = np.asarray(values)
+    except ValueError:
+        scalar_array = object_array
+
+    if object_array.ndim == 0:
+        vector = _object_vector_from_items([object_array.item()])
+    elif scalar_array.ndim == 1:
+        vector = _object_vector_from_items(scalar_array.reshape(-1).tolist())
+    elif object_array.ndim == 1:
+        vector = _object_vector_from_items(object_array.tolist())
+    elif scalar_array.ndim == 2 and 1 in scalar_array.shape:
+        vector = _object_vector_from_items(scalar_array.reshape(-1).tolist())
+    elif object_array.ndim == 2 and 1 in object_array.shape:
+        vector = _object_vector_from_items(object_array.reshape(-1).tolist())
+    elif object_array.shape[0] == expected_length:
+        vector = _object_vector_from_items([_row_tuple(object_array[index]) for index in range(object_array.shape[0])])
+    else:
+        vector = object_array.reshape(-1)
+
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _unique_label_vector(labels: np.ndarray) -> np.ndarray:
+    return _object_vector_from_items(tuple(dict.fromkeys(labels.tolist())))
+
+
+def _label_equal_mask(labels: np.ndarray, label: Any) -> np.ndarray:
+    return np.asarray([candidate == label for candidate in labels.tolist()], dtype=bool)
 
 
 def _normalize_bool(value: Any, *, name: str) -> bool:
