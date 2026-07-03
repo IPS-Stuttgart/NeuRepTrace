@@ -301,7 +301,10 @@ def _labels_equal(left: Any, right: Any) -> bool:
         return False
     if isinstance(equal, np.ndarray):
         return bool(np.array_equal(left, right))
-    return bool(equal)
+    try:
+        return bool(equal)
+    except (TypeError, ValueError):
+        return False
 
 
 def _unique_labels_in_order(labels: np.ndarray) -> list[Any]:
