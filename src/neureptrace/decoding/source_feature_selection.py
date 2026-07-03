@@ -198,8 +198,22 @@ def _validate_k_option(value: int | str) -> int | str:
     return int(numeric)
 
 
+def _materialize_array_input(values: Any) -> Any:
+    if isinstance(values, np.ndarray):
+        return values
+    if isinstance(values, (str, bytes)):
+        return [values]
+    try:
+        return list(values)
+    except TypeError:
+        return [values]
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    try:
+        matrix = np.asarray(_materialize_array_input(values), dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain finite numeric feature values.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -210,7 +224,7 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 def _label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
     """Return one source label object per sample, preserving composite row labels."""
 
-    array = np.asarray(values, dtype=object)
+    array = np.asarray(_materialize_array_input(values), dtype=object)
     if array.ndim == 0:
         items = [array.item()]
     elif array.ndim == 1:
