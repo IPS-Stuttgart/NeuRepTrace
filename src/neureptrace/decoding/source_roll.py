@@ -19,6 +19,7 @@ SOURCE_ROLL_PROTOCOL = "strict_source_only_feature_roll_augmentation"
 SOURCE_ROLL_CATEGORY = "1_strict_source_only"
 ROLL_MODES = ("circular", "constant")
 DEFAULT_MAX_SHIFT = 3
+_NONE_STRINGS = {"", "none", "null"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,29 @@ class SourceFeatureRollConfig:
     include_zero_shift: bool = False
     preserve_original: bool = True
     random_state: int | None = 13
+
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(
+            self,
+            "synthetic_per_class",
+            _nonnegative_int(self.synthetic_per_class, name="synthetic_per_class"),
+        )
+        object.__setattr__(self, "max_shift", _positive_int(self.max_shift, name="max_shift"))
+        object.__setattr__(self, "roll_mode", normalize_roll_mode(self.roll_mode))
+        object.__setattr__(self, "fill_value", _finite_float(self.fill_value, name="fill_value"))
+        object.__setattr__(
+            self,
+            "include_zero_shift",
+            _bool_config(self.include_zero_shift, name="include_zero_shift"),
+        )
+        object.__setattr__(
+            self,
+            "preserve_original",
+            _bool_config(self.preserve_original, name="preserve_original"),
+        )
+        object.__setattr__(self, "random_state", _optional_random_state(self.random_state))
 
     @property
     def enabled(self) -> bool:
@@ -59,7 +83,6 @@ class SourceFeatureRollResult:
 
 
 # pylint: disable-next=too-many-locals
-
 def augment_source_with_feature_roll(
     source_features: Sequence[Sequence[float]] | np.ndarray,
     source_labels: Sequence[Any] | np.ndarray,
@@ -79,7 +102,14 @@ def augment_source_with_feature_roll(
     classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=labels.dtype if labels.dtype != object else object)
 
     if not cfg.enabled:
-        metadata = _metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=0, n_classes=classes.shape[0], n_source_domains=np.unique(domains).shape[0], feature_dim=features.shape[1])
+        metadata = _metadata(
+            cfg,
+            n_source_rows=features.shape[0],
+            n_synthetic_rows=0,
+            n_classes=classes.shape[0],
+            n_source_domains=np.unique(domains).shape[0],
+            feature_dim=features.shape[1],
+        )
         return SourceFeatureRollResult(
             features=features.astype(np.float32, copy=False),
             labels=labels.copy(),
@@ -117,7 +147,14 @@ def augment_source_with_feature_roll(
         output_labels = synthetic_labels_array
         synthetic_mask = np.ones(synthetic_features.shape[0], dtype=bool)
 
-    metadata = _metadata(cfg, n_source_rows=features.shape[0], n_synthetic_rows=synthetic_features.shape[0], n_classes=classes.shape[0], n_source_domains=np.unique(domains).shape[0], feature_dim=features.shape[1])
+    metadata = _metadata(
+        cfg,
+        n_source_rows=features.shape[0],
+        n_synthetic_rows=synthetic_features.shape[0],
+        n_classes=classes.shape[0],
+        n_source_domains=np.unique(domains).shape[0],
+        feature_dim=features.shape[1],
+    )
     return SourceFeatureRollResult(
         features=output_features,
         labels=output_labels,
@@ -144,7 +181,7 @@ def roll_feature_row(
     normalized_mode = normalize_roll_mode(mode)
     if normalized_mode == "circular":
         return np.roll(vector, shift_value).astype(np.float32, copy=False)
-    fill = float(fill_value)
+    fill = _finite_float(fill_value, name="fill_value")
     output = np.full(vector.shape[0], fill, dtype=float)
     if shift_value == 0:
         output[:] = vector
@@ -180,19 +217,20 @@ def source_feature_roll_config(
     """Normalize public feature-roll options."""
 
     return SourceFeatureRollConfig(
-        synthetic_per_class=_nonnegative_int(synthetic_per_class, name="synthetic_per_class"),
-        max_shift=_positive_int(max_shift, name="max_shift"),
-        roll_mode=normalize_roll_mode(roll_mode),
-        fill_value=float(fill_value),
-        include_zero_shift=_bool_config(include_zero_shift, name="include_zero_shift"),
-        preserve_original=_bool_config(preserve_original, name="preserve_original"),
-        random_state=None if random_state in {None, "", "none", "None"} else _nonnegative_int(random_state, name="random_state"),
+        synthetic_per_class=synthetic_per_class,
+        max_shift=max_shift,
+        roll_mode=roll_mode,
+        fill_value=fill_value,
+        include_zero_shift=include_zero_shift,
+        preserve_original=preserve_original,
+        random_state=random_state,
     )
 
 
-def normalize_roll_mode(value: str | None) -> str:
+def normalize_roll_mode(value: Any) -> str:
     """Normalize roll-mode aliases."""
 
+    value = _scalar_value(value, name="roll_mode")
     normalized = "circular" if value is None else str(value).strip().lower().replace("-", "_")
     normalized = {"roll": "circular", "wrap": "circular", "zero": "constant", "pad": "constant", "zero_pad": "constant"}.get(normalized, normalized)
     if normalized not in ROLL_MODES:
@@ -265,10 +303,22 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_l
     return vector
 
 
+def _scalar_value(value: Any, *, name: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a scalar value.")
+        return value.item()
+    return value
+
+
 def _integer(value: int | str, *, name: str) -> int:
+    value = _scalar_value(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be an integer.")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
         raise ValueError(f"{name} must be an integer.")
     return int(parsed)
@@ -288,7 +338,30 @@ def _nonnegative_int(value: int | str, *, name: str) -> int:
     return parsed
 
 
+def _finite_float(value: Any, *, name: str) -> float:
+    value = _scalar_value(value, name=name)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite.") from exc
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be finite.")
+    return parsed
+
+
+def _optional_random_state(value: Any) -> int | None:
+    value = _scalar_value(value, name="random_state")
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in _NONE_STRINGS:
+        return None
+    return _nonnegative_int(value, name="random_state")
+
+
 def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
+    value = _scalar_value(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, str):
