@@ -29,6 +29,12 @@ class SourceStandardizeConfig:
     clip: float | None = None
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "location", normalize_location_mode(self.location))
+        object.__setattr__(self, "scale", normalize_scale_mode(self.scale))
+        object.__setattr__(self, "clip", _optional_positive_float(self.clip, name="clip"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceStandardizeStats:
@@ -98,7 +104,8 @@ def source_standardize_config(
 def normalize_location_mode(value: str | None) -> str:
     """Normalize location-mode aliases."""
 
-    normalized = "mean" if value is None else str(value).strip().lower().replace("-", "_")
+    scalar = _scalar_value(value, name="location mode")
+    normalized = "mean" if scalar is None else str(scalar).strip().lower().replace("-", "_")
     normalized = {"avg": "mean", "average": "mean", "med": "median", "none": "zero", "off": "zero"}.get(normalized, normalized)
     if normalized not in LOCATION_MODES:
         raise ValueError(f"Unknown location mode {value!r}. Available values: {', '.join(LOCATION_MODES)}.")
@@ -108,7 +115,8 @@ def normalize_location_mode(value: str | None) -> str:
 def normalize_scale_mode(value: str | None) -> str:
     """Normalize scale-mode aliases."""
 
-    normalized = "std" if value is None else str(value).strip().lower().replace("-", "_")
+    scalar = _scalar_value(value, name="scale mode")
+    normalized = "std" if scalar is None else str(scalar).strip().lower().replace("-", "_")
     normalized = {"standard": "std", "sd": "std", "iqr_scale": "iqr", "median_abs_deviation": "mad", "off": "none", "unit": "none"}.get(normalized, normalized)
     if normalized not in SCALE_MODES:
         raise ValueError(f"Unknown scale mode {value!r}. Available values: {', '.join(SCALE_MODES)}.")
@@ -206,9 +214,22 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _scalar_value(value: Any, *, name: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a scalar.")
+        return value.item()
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
+    scalar = _scalar_value(value, name=name)
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
     try:
-        parsed = float(value)
+        parsed = float(scalar)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be positive and finite.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
@@ -217,6 +238,9 @@ def _positive_float(value: float | str, *, name: str) -> float:
 
 
 def _optional_positive_float(value: float | str | None, *, name: str) -> float | None:
-    if value in {None, "", "none", "None", "null"}:
+    scalar = _scalar_value(value, name=name)
+    if scalar is None:
         return None
-    return _positive_float(value, name=name)
+    if isinstance(scalar, str) and scalar.strip().lower() in {"", "none", "null"}:
+        return None
+    return _positive_float(scalar, name=name)
