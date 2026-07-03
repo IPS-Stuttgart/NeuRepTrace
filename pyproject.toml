@@ -53,6 +53,7 @@ neureptrace-openneuro-diagnostics = "neureptrace.openneuro_decode_diagnostics:ma
 neureptrace-openneuro-real-vs-shuffle = "neureptrace.openneuro_real_shuffle_report:main"
 neureptrace-openneuro-resilient = "neureptrace.openneuro_resilient:main"
 neureptrace-plot-time-decode = "neureptrace.plot_time_decode:main"
+neureptrace-plot-calibration = "neureptrace.plot_calibration:main"
 neureptrace-pymegdec-bushmeg-spec = "neureptrace.datasets.pymegdec:main"
 neureptrace-probability-stacking = "neureptrace.probability_stacking:main"
 neureptrace-source-oof-stacking = "neureptrace.probability_stacking:main"
