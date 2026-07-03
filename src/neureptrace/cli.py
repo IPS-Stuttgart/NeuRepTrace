@@ -58,6 +58,7 @@ COMMAND_MODULES = {
     "openneuro-diagnostics": "neureptrace.openneuro_decode_diagnostics",
     "openneuro-real-vs-shuffle": "neureptrace.openneuro_real_shuffle_report",
     "openneuro-resilient": "neureptrace.openneuro_resilient",
+    "plot-calibration": "neureptrace.plot_calibration",
     "plot-time-decode": "neureptrace.plot_time_decode",
     "pymegdec-bushmeg-spec": "neureptrace.datasets.pymegdec",
     "probability-stacking": "neureptrace.probability_stacking",
