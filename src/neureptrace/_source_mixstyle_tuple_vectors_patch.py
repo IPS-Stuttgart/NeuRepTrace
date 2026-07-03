@@ -239,4 +239,5 @@ def install() -> None:
     module._domain_vector = _hashable_domain_vector
     module._domain_stats = _domain_stats
     module.augment_source_domains_mixstyle = augment_source_domains_mixstyle
+    importlib.import_module("neureptrace._source_mixstyle_direct_config_patch").install()
     _INSTALLED = True
