@@ -17,3 +17,9 @@ def test_plot_calibration_console_script_target_imports() -> None:
     from neureptrace.plot_calibration import main
 
     assert callable(main)
+
+
+def test_plot_calibration_is_available_from_grouped_cli() -> None:
+    from neureptrace.cli import COMMAND_MODULES
+
+    assert COMMAND_MODULES["plot-calibration"] == "neureptrace.plot_calibration"
