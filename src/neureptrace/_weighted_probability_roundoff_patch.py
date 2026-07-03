@@ -11,13 +11,26 @@ _PATCH_MARKER = "_neureptrace_weighted_probability_roundoff_patch_installed"
 _PROBABILITY_NORMALIZATION_ATOL = 1e-6
 
 
+def _label_input_array(labels: Any) -> np.ndarray:
+    """Return labels as an array without exhausting one-pass iterables implicitly."""
+
+    if isinstance(labels, np.ndarray) or isinstance(labels, (str, bytes)):
+        return np.asarray(labels)
+    try:
+        return np.asarray(list(labels))
+    except TypeError:
+        return np.asarray(labels)
+    except ValueError as exc:
+        raise ValueError("labels must have shape (n_samples,)") from exc
+
+
 def _validate_probability_inputs(probabilities: Any, labels: Any) -> tuple[np.ndarray, np.ndarray]:
     weighted = importlib.import_module("neureptrace.metrics.weighted")
     raw_probabilities = weighted._probability_input_array(probabilities)
     if weighted._probabilities_contain_boolean(raw_probabilities):
         raise ValueError("probabilities must contain numeric probability values, not boolean flags")
     probabilities = raw_probabilities.astype(float, copy=False)
-    labels = np.asarray(labels)
+    labels = _label_input_array(labels)
     if probabilities.ndim != 2:
         raise ValueError("probabilities must have shape (n_samples, n_classes)")
     if probabilities.shape[0] == 0 or probabilities.shape[1] == 0:
