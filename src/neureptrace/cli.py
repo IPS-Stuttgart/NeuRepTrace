@@ -63,6 +63,7 @@ COMMAND_MODULES = {
     "pymegdec-bushmeg-spec": "neureptrace.datasets.pymegdec",
     "probability-stacking": "neureptrace.probability_stacking",
     "results": "neureptrace.results",
+    "response-window-ensemble": "neureptrace.response_window_ensemble",
     "source-oof-stacking": "neureptrace.probability_stacking",
     "stimulus-detect": "neureptrace.stimulus_detection",
     "stimulus-detection": "neureptrace.stimulus_detection",

@@ -106,6 +106,13 @@ def test_emission_compare_entry_points_are_exposed():
     assert COMMAND_MODULES["emission-compare"] == "neureptrace.emission_compare"
 
 
+def test_response_window_ensemble_entry_points_are_exposed():
+    scripts = _poetry_scripts()
+
+    assert scripts["neureptrace-response-window-ensemble"] == "neureptrace.response_window_ensemble:main"
+    assert COMMAND_MODULES["response-window-ensemble"] == "neureptrace.response_window_ensemble"
+
+
 def test_bushmeg_category2_autoencoder_entry_points_are_exposed():
     scripts = _poetry_scripts()
 
