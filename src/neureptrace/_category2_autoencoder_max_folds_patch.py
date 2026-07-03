@@ -9,6 +9,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 _RUNNER_MODULE = "neureptrace.bushmeg_category2_autoencoder_loso"
@@ -55,11 +56,36 @@ def _resolve_predictions_path(
     )
 
 
+def _category2_top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int) -> float:
+    """Compute top-k accuracy with exact-k, stable class-index tie handling."""
+
+    probability_matrix = np.asarray(probabilities, dtype=float)
+    if probability_matrix.size == 0:
+        return float("nan")
+    if probability_matrix.ndim != 2:
+        raise ValueError("probabilities must be a two-dimensional matrix.")
+    if probability_matrix.shape[1] == 0:
+        return float("nan")
+
+    label_indices = np.asarray(labels).reshape(-1)
+    if label_indices.shape[0] != probability_matrix.shape[0]:
+        raise ValueError("labels must have one entry per probability row.")
+
+    k_value = min(int(k), probability_matrix.shape[1])
+    if k_value >= probability_matrix.shape[1]:
+        valid_labels = (0 <= label_indices) & (label_indices < probability_matrix.shape[1])
+        return float(np.mean(valid_labels))
+
+    top_k = np.argsort(-probability_matrix, axis=1, kind="mergesort")[:, :k_value]
+    return float(np.mean(np.any(top_k == label_indices[:, None], axis=1)))
+
+
 def _patch_runner_module(module: Any) -> None:
     if getattr(module, _RUNNER_MARKER, False):
         return
 
     original_run = module.run_bushmeg_category2_autoencoder_loso
+    module._top_k_accuracy = _category2_top_k_accuracy
 
     @wraps(original_run)
     def run_bushmeg_category2_autoencoder_loso(
@@ -261,7 +287,7 @@ def _patch_all_protocols_patch_module(module: Any) -> None:
 
 
 def install() -> None:
-    """Install Category-2 autoencoder fold-limit support."""
+    """Install Category-2 autoencoder fold-limit and deterministic top-k support."""
 
     _patch_all_protocols_patch_module(importlib.import_module(_ALL_PROTOCOLS_PATCH_MODULE))
     _patch_runner_module(importlib.import_module(_RUNNER_MODULE))
