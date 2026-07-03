@@ -124,6 +124,20 @@ def test_source_prior_rejects_boolean_epsilon(epsilon) -> None:
         source_prior_config(epsilon=epsilon)
 
 
+@pytest.mark.parametrize(
+    "probabilities",
+    [
+        [[True, False]],
+        np.asarray([[True, False]], dtype=bool),
+        np.asarray([[True, 0.0]], dtype=object),
+        [[np.bool_(True), np.bool_(False)]],
+    ],
+)
+def test_source_prior_rejects_boolean_probability_rows(probabilities) -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        adjust_probabilities_to_source_prior(probabilities, source_labels=[0, 1], classes=[0, 1])
+
+
 @pytest.mark.parametrize("field", ["smoothing", "epsilon"])
 def test_direct_source_prior_config_rejects_boolean_numeric_controls(field: str) -> None:
     with pytest.raises(ValueError, match=field):
