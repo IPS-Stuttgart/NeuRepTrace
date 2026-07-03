@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.kernel_mean_matching import (
     KMM_PROTOCOL_CATEGORY,
+    KernelMeanMatchingConfig,
     kernel_mean_matching_weights,
     kernel_mean_matching_weights_from_config,
     kmm_config,
@@ -129,6 +130,42 @@ def test_kmm_config_normalizes_values() -> None:
     assert config.max_iter == 25
     assert normalize_kmm_kernel("dot") == "linear"
     assert normalize_kmm_epsilon("auto", n_source=4) == pytest.approx(0.5)
+
+
+def test_kmm_config_parses_boolean_control_strings() -> None:
+    disabled = kmm_config(normalize="false", class_balance="off")
+    enabled = kmm_config(normalize="yes", class_balance="1")
+
+    assert disabled.normalize is False
+    assert disabled.class_balance is False
+    assert enabled.normalize is True
+    assert enabled.class_balance is True
+
+
+def test_kmm_from_direct_config_does_not_treat_false_strings_as_true() -> None:
+    source = np.asarray([[0.0], [1.0], [3.0]], dtype=float)
+    target = np.asarray([[0.1], [0.2]], dtype=float)
+    config = KernelMeanMatchingConfig(epsilon=None, normalize="false", class_balance="false")
+
+    result = kernel_mean_matching_weights_from_config(source, target, config)
+
+    assert result.metadata["kmm_normalize"] is False
+    assert result.metadata["kmm_class_balance"] is False
+    assert result.metadata["kmm_uses_source_labels"] is False
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"normalize": "sometimes"},
+        {"class_balance": "maybe"},
+        {"normalize": np.asarray([False])},
+        {"class_balance": 2},
+    ],
+)
+def test_kmm_rejects_invalid_boolean_control_values(kwargs) -> None:
+    with pytest.raises(ValueError, match="KMM .* must be a boolean value"):
+        kernel_mean_matching_weights([[0.0], [1.0]], [[0.0]], epsilon=None, **kwargs)
 
 
 def test_kmm_gamma_median_and_scale() -> None:
