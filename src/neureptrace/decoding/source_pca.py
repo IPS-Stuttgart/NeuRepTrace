@@ -217,15 +217,17 @@ def _whitening_scale(reference: SourcePCAReference) -> float:
 
 
 def _component_request(value: Any) -> int | str:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError("n_components must be a positive integer, 'all', or 'full'.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"all", "full"}:
             return text
         return _positive_integer(text, name="n_components")
-    if isinstance(value, np.ndarray):
-        if value.ndim != 0:
-            raise ValueError("n_components must be a positive integer, 'all', or 'full'.")
-        value = value.item()
     if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
         raise ValueError("n_components must be a positive integer, 'all', or 'full'.")
     return _positive_integer(value, name="n_components")
