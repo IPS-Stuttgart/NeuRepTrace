@@ -34,7 +34,11 @@ def test_source_clip_config_factory_matches_direct_validation() -> None:
         ({"upper_quantile": 1.1}, "upper_quantile"),
         ({"lower_quantile": 0.9, "upper_quantile": 0.1}, "lower_quantile must be smaller"),
         ({"lower_quantile": np.nan}, "lower_quantile"),
+        ({"lower_quantile": True}, "lower_quantile"),
+        ({"upper_quantile": np.bool_(False)}, "upper_quantile"),
+        ({"lower_quantile": np.asarray([0.05, 0.10])}, "lower_quantile must be a scalar value"),
         ({"symmetric": "sometimes"}, "symmetric"),
+        ({"symmetric": np.asarray([True])}, "symmetric must be a scalar value"),
         ({"center": "middle"}, "Unknown center mode"),
     ],
 )
