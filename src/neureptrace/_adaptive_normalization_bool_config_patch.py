@@ -36,6 +36,21 @@ def _bool_config(value: Any, *, name: str) -> bool:
     raise ValueError(f"{name} must be a boolean value.")
 
 
+def _optional_unit_interval_float(value: Any, *, name: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be in [0, 1] or omitted.")
+        return _optional_unit_interval_float(value.item(), name=name)
+    if isinstance(value, str):
+        text = value.strip()
+        if text == "" or text.lower() == "none":
+            return None
+        return _calibrated_prototypes._unit_interval_float(text, name=name)
+    return _calibrated_prototypes._unit_interval_float(value, name=name)
+
+
 def _patched_adaptive_normalization_config(
     *,
     mode: str | None = "domain_wise",
@@ -61,7 +76,7 @@ def _patched_calibrated_prototype_config(
     diagonal_scale: object = True,
     epsilon: float | str = _calibrated_prototypes.DEFAULT_EPSILON,
 ) -> _calibrated_prototypes.CalibratedPrototypeConfig:
-    fixed = None if fixed_calibration_weight in {None, "", "none", "None"} else _calibrated_prototypes._unit_interval_float(fixed_calibration_weight, name="fixed_calibration_weight")
+    fixed = _optional_unit_interval_float(fixed_calibration_weight, name="fixed_calibration_weight")
     return _calibrated_prototypes.CalibratedPrototypeConfig(
         prior_strength=_calibrated_prototypes._positive_float(prior_strength, name="prior_strength"),
         fixed_calibration_weight=fixed,
