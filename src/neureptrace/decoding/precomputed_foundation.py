@@ -118,7 +118,6 @@ class PrecomputedFoundationProbeResult:
 
 
 # pylint: disable-next=too-many-arguments,too-many-locals
-
 def load_precomputed_foundation_features(
     path: str | Path,
     *,
@@ -132,38 +131,7 @@ def load_precomputed_foundation_features(
     feature_fit_scope: str | None = "external_frozen",
     source_model: str = "external",
 ) -> PrecomputedFoundationFeatureTable:
-    """Load precomputed foundation features from ``.npy``, ``.npz``, or CSV/TSV.
-
-    Parameters
-    ----------
-    path:
-        Feature table path.  ``.npz`` files should contain a feature matrix and,
-        preferably, row ids.  ``.npy`` files contain only a matrix and receive
-        sequential integer row ids.  CSV/TSV files use ``row_id_column`` and
-        numeric feature columns.
-    features_key:
-        Key for the feature matrix in ``.npz`` files.
-    row_id_key:
-        Key for row ids in ``.npz`` files.  If absent, sequential row ids are used.
-    row_id_column:
-        Row-id column for CSV/TSV files.  If absent, sequential row ids are used.
-    feature_columns:
-        Explicit CSV/TSV feature columns.  A comma-separated string is accepted.
-    feature_prefix:
-        Optional CSV/TSV prefix used to select feature columns, for example
-        ``"feat_"``.  Ignored when ``feature_columns`` is provided.
-    allow_pickle:
-        Forwarded to NumPy loading for projects that intentionally store object
-        arrays.  The default is false.
-    delimiter:
-        Explicit delimiter for text tables.  Defaults to tab for ``.tsv`` and
-        comma otherwise.
-    feature_fit_scope:
-        Declaration of how the external feature extractor was fit.  This controls
-        protocol metadata but does not change the loaded matrix.
-    source_model:
-        Human-readable model/source name, for example ``"BENDR"`` or ``"LaBraM"``.
-    """
+    """Load precomputed foundation features from ``.npy``, ``.npz``, or CSV/TSV."""
 
     table_path = Path(path)
     suffix = table_path.suffix.lower()
@@ -237,7 +205,6 @@ def align_precomputed_foundation_features(
 
 
 # pylint: disable-next=too-many-arguments,too-many-locals
-
 def fit_precomputed_foundation_probe(
     *,
     feature_table: PrecomputedFoundationFeatureTable,
@@ -250,12 +217,7 @@ def fit_precomputed_foundation_probe(
     classifier_class_weight: str | Mapping[Any, float] | None = "balanced",
     sample_weight: Sequence[float] | np.ndarray | None = None,
 ) -> PrecomputedFoundationProbeResult:
-    """Train a source-label probe on precomputed foundation features.
-
-    The probe uses row ids to align source training rows and held-out target rows
-    to the precomputed feature table.  It trains only from ``train_labels`` and
-    intentionally has no ``target_labels`` argument.
-    """
+    """Train a source-label probe on precomputed foundation features."""
 
     train_ids = tuple(np.asarray(train_row_ids, dtype=object).reshape(-1).tolist())
     test_ids = tuple(np.asarray(test_row_ids, dtype=object).reshape(-1).tolist())
@@ -453,7 +415,11 @@ def _predict_probabilities_or_none(model: BaseEstimator, features: np.ndarray) -
     if hasattr(model, "decision_function"):
         scores = np.asarray(model.decision_function(features), dtype=float)
         if scores.ndim == 1:
-            scores = np.column_stack([-scores, scores])
+            # For sklearn-compatible binary margins, decision_function returns the
+            # logit for classes_[1] against classes_[0].  Softmaxing [-s, s]
+            # would produce sigmoid(2s), doubling the implied log-odds.  Use a
+            # zero baseline so the positive column is sigmoid(s).
+            scores = np.column_stack([np.zeros_like(scores), scores])
         shifted = scores - np.max(scores, axis=1, keepdims=True)
         exp_scores = np.exp(np.clip(shifted, -50.0, 50.0))
         return _normalize_probability_rows(exp_scores)
