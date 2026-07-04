@@ -68,6 +68,23 @@ def test_fit_window_model_applies_pca_and_predicts_validation_features():
     assert model_bundle.explained_variance_percent == pytest.approx(100.0)
 
 
+def test_score_windowed_decoding_accepts_one_pass_feature_iterables():
+    train_features = (row for row in [[-2.0], [-1.0], [1.0], [2.0]])
+    validation_features = (row for row in [[-1.5], [1.5]])
+
+    result = score_windowed_decoding(
+        train_features=train_features,
+        train_labels=np.array([0, 0, 1, 1]),
+        validation_features=validation_features,
+        validation_labels=np.array([0, 1]),
+        fit_model=_fit_sign_classifier,
+        components_pca=float("inf"),
+    )
+
+    assert result.accuracy == 1.0
+    assert result.predictions.tolist() == [0, 1]
+
+
 def test_fit_window_model_accepts_fractional_pca_variance_ratio():
     train_features = np.array(
         [
