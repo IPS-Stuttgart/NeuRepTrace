@@ -103,7 +103,18 @@ def test_source_scale_accepts_numpy_scalar_config_values() -> None:
     assert stats.method == "standard"
 
 
-@pytest.mark.parametrize("value", [True, np.bool_(True), [], {"epsilon": 1}, np.asarray(True), np.asarray([1e-8])])
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        np.bool_(True),
+        [],
+        {"epsilon": 1},
+        np.asarray(True),
+        np.asarray(True, dtype=object),
+        np.asarray([1e-8]),
+    ],
+)
 def test_source_scale_rejects_non_numeric_epsilon_values(value: object) -> None:
     with pytest.raises(ValueError, match="epsilon"):
         source_feature_scale_config(epsilon=value)  # type: ignore[arg-type]
