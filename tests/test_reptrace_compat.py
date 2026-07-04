@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pkgutil
+
 
 def test_reptrace_top_level_alias_exposes_neureptrace_version():
     import neureptrace
@@ -34,3 +36,11 @@ def test_reptrace_nested_modules_resolve_to_neureptrace_implementations():
 
     assert reptrace_fit_window_model is neureptrace_fit_window_model
     assert reptrace_confusion_counts is neureptrace_confusion_counts
+
+
+def test_reptrace_namespace_allows_package_discovery():
+    import reptrace
+
+    discovered = {module.name for module in pkgutil.iter_modules(reptrace.__path__)}
+
+    assert {"decoding", "metrics"}.issubset(discovered)
