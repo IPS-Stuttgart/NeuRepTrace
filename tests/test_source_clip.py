@@ -8,6 +8,7 @@ from neureptrace.decoding.source_clip import (
     apply_source_clip,
     fit_source_clip,
     fit_source_clip_bounds,
+    fit_source_clip_then_standardize,
     normalize_center_mode,
     source_clip_config,
 )
@@ -43,6 +44,28 @@ def test_apply_source_clip_returns_changed_value_mask() -> None:
 
     assert clipped.ravel().tolist() == [0.0, 1.0, 2.0]
     assert mask.ravel().tolist() == [True, False, True]
+
+
+def test_clip_then_standardize_fits_scale_on_clipped_source_only() -> None:
+    source = np.asarray([[0.0], [1.0], [2.0], [100.0]], dtype=float)
+    rows = np.asarray([[1.0], [200.0]], dtype=float)
+
+    result = fit_source_clip_then_standardize(
+        source_features=source,
+        test_features=rows,
+        config={"lower_quantile": 0.0, "upper_quantile": 0.75},
+    )
+
+    assert result.metadata["source_clip_standardize_protocol_category"] == SOURCE_CLIP_CATEGORY
+    assert result.metadata["source_clip_standardize_uses_test_features_for_fitting"] is False
+    assert result.metadata["source_clip_standardize_uses_test_labels"] is False
+    assert np.allclose(result.train_features.mean(axis=0), 0.0)
+    assert np.all(result.scale > 0.0)
+
+
+def test_clip_then_standardize_rejects_nonpositive_epsilon() -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        fit_source_clip_then_standardize(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=0.0)
 
 
 def test_source_clip_aliases_and_validation() -> None:
