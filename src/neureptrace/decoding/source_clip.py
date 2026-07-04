@@ -238,6 +238,10 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        return _bool_config(value.item(), name=name)
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"1", "true", "t", "yes", "y", "on"}:
