@@ -128,7 +128,8 @@ def _validate_optional_lookup_bounds(indices: np.ndarray, values: Sequence[objec
 
 def _empty_or_missing(series: pd.Series) -> pd.Series:
     missing = series.isna()
-    missing |= series.astype(object).astype(str).eq("")
+    text = series.astype(object).astype(str).str.strip()
+    missing |= text.eq("")
     return missing
 
 
