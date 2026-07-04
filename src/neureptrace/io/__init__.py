@@ -7,8 +7,12 @@ files or thin project repositories that call these adapters.
 
 from __future__ import annotations
 
-from neureptrace.io.dataset import EpochDataset
-from neureptrace.io.fieldtrip_mat import (
+from neureptrace.io import _fieldtrip_config_participant
+
+_fieldtrip_config_participant.install()
+
+from neureptrace.io.dataset import EpochDataset  # noqa: E402
+from neureptrace.io.fieldtrip_mat import (  # noqa: E402
     FieldTripMatSpec,
     MetadataColumnSpec,
     ParticipantMatFiles,
