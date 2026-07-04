@@ -63,6 +63,33 @@ def test_source_pca_reference_can_be_reused() -> None:
     assert np.allclose(direct, via_fit.test_features)
 
 
+def test_source_pca_accepts_one_pass_feature_iterables() -> None:
+    source_rows = ([float(index), float(index % 2), 1.0] for index in range(4))
+    test_rows = ([0.5, 0.5, 1.0], [2.0, 0.0, 1.0])
+
+    result = fit_source_pca_transform(
+        source_features=source_rows,
+        test_features=(row for row in test_rows),
+        config={"n_components": 2},
+    )
+
+    assert result.train_features.shape == (4, 2)
+    assert result.test_features.shape == (2, 2)
+    assert result.metadata["source_pca_n_source_rows"] == 4
+    assert result.metadata["source_pca_n_test_rows"] == 2
+
+
+def test_source_pca_reference_and_apply_accept_one_pass_feature_iterables() -> None:
+    reference = fit_source_pca_reference(
+        ([float(index), float(index + 1.0)] for index in range(3)),
+        config={"n_components": 1},
+    )
+
+    projected = apply_source_pca_transform(([1.0, 2.0] for _ in range(2)), reference)
+
+    assert projected.shape == (2, 1)
+
+
 def test_source_pca_whitening_changes_scale() -> None:
     source = np.asarray([[0.0, 0.0], [2.0, 0.0], [4.0, 0.0], [6.0, 0.0]], dtype=float)
     test = np.asarray([[3.0, 0.0]], dtype=float)
