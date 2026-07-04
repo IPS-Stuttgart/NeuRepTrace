@@ -95,6 +95,8 @@ def _reference_parts(reference) -> tuple[np.ndarray, np.ndarray, tuple[float, fl
         raise ValueError(_REFERENCE_ERROR)
     if not np.all(np.isfinite(minimum)) or not np.all(np.isfinite(maximum)):
         raise ValueError(_REFERENCE_ERROR)
+    if np.any(maximum < minimum):
+        raise ValueError(_REFERENCE_ERROR)
     feature_range = _range(reference.feature_range)
     return minimum, maximum, feature_range
 
