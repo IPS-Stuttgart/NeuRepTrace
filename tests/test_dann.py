@@ -34,6 +34,29 @@ def test_dann_helpers_reject_bool_numeric_parameters():
         _bounded_float(True, "dann_validation_fraction", lower=0.0, upper=1.0)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        np.asarray(True),
+        np.asarray([True], dtype=bool),
+        np.asarray(False, dtype=object),
+        np.asarray([False], dtype=object),
+    ],
+)
+def test_dann_helpers_reject_bool_array_numeric_parameters(value):
+    with pytest.raises(ValueError, match="dann_random_state must be an integer"):
+        _integer(value, "dann_random_state")
+
+    with pytest.raises(ValueError, match="dann_learning_rate"):
+        _positive_float(value, "dann_learning_rate")
+
+    with pytest.raises(ValueError, match="dann_weight_decay"):
+        _nonnegative_float(value, "dann_weight_decay")
+
+    with pytest.raises(ValueError, match="dann_validation_fraction"):
+        _bounded_float(value, "dann_validation_fraction", lower=0.0, upper=1.0)
+
+
 def test_fit_dann_predict_proba_marks_unlabeled_target_adaptation():
     pytest.importorskip("torch")
     rng = np.random.default_rng(13)
