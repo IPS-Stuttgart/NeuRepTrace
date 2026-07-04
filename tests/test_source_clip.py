@@ -28,6 +28,35 @@ def test_source_clip_uses_source_bounds_only() -> None:
     assert np.count_nonzero(result.test_clipped_mask) == 2
 
 
+def test_source_clip_accepts_one_pass_feature_iterables() -> None:
+    source_rows = ([float(index), float(index % 2)] for index in range(4))
+    test_rows = ([0.5, 0.5], [2.0, 0.0])
+
+    result = fit_source_clip(
+        source_features=source_rows,
+        test_features=(row for row in test_rows),
+        config={"lower_quantile": 0.0, "upper_quantile": 1.0},
+    )
+
+    assert result.train_features.shape == (4, 2)
+    assert result.test_features.shape == (2, 2)
+    assert result.metadata["source_clip_n_source_rows"] == 4
+    assert result.metadata["source_clip_n_test_rows"] == 2
+
+
+def test_source_clip_bounds_and_apply_accept_one_pass_feature_iterables() -> None:
+    bounds = fit_source_clip_bounds(
+        ([float(index), float(index + 1)] for index in range(3)),
+        config={"lower_quantile": 0.0, "upper_quantile": 1.0},
+    )
+    feature_rows = ([value, value + 1.0] for value in (2.5, -1.0))
+
+    clipped, mask = apply_source_clip(feature_rows, bounds)
+
+    assert clipped.shape == (2, 2)
+    assert mask.shape == (2, 2)
+
+
 def test_symmetric_bounds_are_centered_on_median() -> None:
     source = np.asarray([[-2.0], [0.0], [2.0], [100.0]], dtype=float)
 
