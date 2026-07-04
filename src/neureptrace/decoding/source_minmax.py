@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections import namedtuple
-from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -16,19 +15,31 @@ SourceMinMaxReference = namedtuple("SourceMinMaxReference", ("minimum", "maximum
 SourceMinMaxResult = namedtuple("SourceMinMaxResult", ("train_features", "test_features", "reference", "metadata"))
 
 
-def fit_source_minmax_transform(
-    *,
-    source_features: Iterable[Iterable[float]] | np.ndarray,
-    test_features: Iterable[Iterable[float]] | np.ndarray,
-    feature_range=(0.0, 1.0),
-):
+def fit_source_minmax_transform(*, source_features, test_features, feature_range=(0.0, 1.0), clip: bool | str | int | float = False):
+    """Fit source min-max bounds and transform source/test rows.
+
+    Parameters
+    ----------
+    source_features:
+        Source rows used to estimate feature-wise min/max bounds.
+    test_features:
+        Held-out/scored rows transformed with the fixed source bounds. These rows
+        are not used for fitting.
+    feature_range:
+        Output range for the affine transform.
+    clip:
+        If true, transformed values outside ``feature_range`` are clipped. The
+        default remains false for backward compatibility with the original helper.
+    """
+
+    clip_flag = _bool_config(clip, name="clip")
     source = _matrix(source_features, name="source_features")
     test = _matrix(test_features, name="test_features")
     if source.shape[1] != test.shape[1]:
         raise ValueError("source_features and test_features must have the same feature width.")
     reference = fit_source_minmax_reference(source, feature_range=feature_range)
-    train = apply_source_minmax_transform(source, reference)
-    test_out = apply_source_minmax_transform(test, reference)
+    train = apply_source_minmax_transform(source, reference, clip=clip_flag)
+    test_out = apply_source_minmax_transform(test, reference, clip=clip_flag)
     metadata = {
         "source_minmax": True,
         "source_minmax_protocol": SOURCE_MINMAX_PROTOCOL,
@@ -39,21 +50,29 @@ def fit_source_minmax_transform(
         "source_minmax_valid_for_strict_source_only": True,
         "source_minmax_valid_for_benchmark": True,
         "source_minmax_n_source_rows": int(source.shape[0]),
-        "source_minmax_n_test_rows": int(test.shape[0]),
+        "source_minmax_s_test_rows": int(test.shape[0]),
         "source_minmax_feature_dim": int(source.shape[1]),
         "source_minmax_range_low": float(reference.feature_range[0]),
         "source_minmax_range_high": float(reference.feature_range[1]),
+        "source_minmax_clip": bool(clip_flag),
     }
     return SourceMinMaxResult(train, test_out, reference, metadata)
 
 
-def fit_source_minmax_reference(source_features: Iterable[Iterable[float]] | np.ndarray, *, feature_range=(0.0, 1.0)):
+def fit_source_minmax_reference(source_features, *, feature_range=(0.0, 1.0)):
+    """Fit reusable source-only min/max reference bounds."""
+
     source = _matrix(source_features, name="source_features")
     low, high = _range(feature_range)
     return SourceMinMaxReference(minimum=np.min(source, axis=0), maximum=np.amax(source, axis=0), feature_range=(low, high), n_fit_rows=int(source.shape[0]))
 
 
-def apply_source_minmax_transform(features: Iterable[Iterable[float]] | np.ndarray, reference) -> np.ndarray:
+def apply_source_minmax_transform(features, reference, *, clip: bool | str | int | float = False) -> np.ndarray:
+    """Apply a reusable source-minmax reference to rows.
+
+    ``clip`` does not change the fitted reference bounds.
+    """
+
     matrix = _matrix(features, name="features")
     minimum, maximum, feature_range = _reference_parts(reference)
     if matrix.shape[1] != minimum.shape[0]:
@@ -62,25 +81,14 @@ def apply_source_minmax_transform(features: Iterable[Iterable[float]] | np.ndarr
     denom = np.where(data_range > 0.0, data_range, 1.0)
     low, high = feature_range
     scaled = (matrix - minimum) / denom
-    return (scaled * (high - low) + low).astype(np.float32, copy=False)
+    transformed = scaled * (high - low) + low
+    if _bool_config(clip, name="clip"):
+        transformed = np.clip(transformed, low, high)
+    return transformed.astype(np.float32, copy=False)
 
 
-def _materialize_one_pass_iterables(value: object) -> object:
-    """Materialize nested one-pass iterables before NumPy consumes them."""
-
-    if isinstance(value, np.ndarray):
-        if value.dtype != object:
-            return value
-        return _materialize_one_pass_iterables(value.tolist())
-    if isinstance(value, (str, bytes)):
-        return value
-    if not isinstance(value, Iterable):
-        return value
-    return [_materialize_one_pass_iterables(item) for item in value]
-
-
-def _matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
+def _matrix(values, *, name: str) -> np.ndarray:
+    matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -99,35 +107,37 @@ def _reference_parts(reference) -> tuple[np.ndarray, np.ndarray, tuple[float, fl
     return minimum, maximum, feature_range
 
 
-def _range(values) -> tuple[float, float]:
-    if isinstance(values, (str, bytes)):
+def _range(value) -> tuple[float, float]:
+    if isinstance(value, (str, bytes)) or isinstance(value, (bool, np.bool_)):
         raise ValueError(_RANGE_ERROR)
     try:
-        items = list(values)
-    except TypeError as exc:
-        raise ValueError(_RANGE_ERROR) from exc
-    if len(items) != 2:
-        raise ValueError(_RANGE_ERROR)
-    low = _range_endpoint(items[0])
-    high = _range_endpoint(items[1])
-    if low >= high:
-        raise ValueError(_RANGE_ERROR)
-    return low, high
-
-
-def _range_endpoint(value: Any) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(_RANGE_ERROR)
-    if isinstance(value, np.ndarray):
-        if value.ndim != 0:
-            raise ValueError(_RANGE_ERROR)
-        value = value.item()
-        if isinstance(value, (bool, np.bool_)):
-            raise ValueError(_RANGE_ERROR)
-    try:
-        parsed = float(value)
+        raw = np.asarray(value, dtype=object)
     except (TypeError, ValueError) as exc:
         raise ValueError(_RANGE_ERROR) from exc
-    if not np.isfinite(parsed):
+    if raw.shape != (2,):
         raise ValueError(_RANGE_ERROR)
-    return parsed
+    if any(isinstance(item, (bool, np.bool_)) for item in raw.tolist()):
+        raise ValueError(_RANGE_ERROR)
+    try:
+        numbers = raw.astype(float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_RANGE_ERROR) from exc
+    if not np.all(np.isfinite(numbers)) or float(numbers[0]) >= float(numbers[1]):
+        raise ValueError(_RANGE_ERROR)
+    return float(numbers[0]), float(numbers[1])
+
+
+def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
+        return bool(value)
+    if isinstance(value, (float, np.floating)) and np.isfinite(float(value)) and float(value) in {0.0, 1.0}:
+        return bool(value)
+    raise ValueError(f"{name} must be a boolean value.")
