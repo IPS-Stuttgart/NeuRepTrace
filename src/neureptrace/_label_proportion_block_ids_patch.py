@@ -18,6 +18,7 @@ _PROPORTION_VECTOR_PATCH_MARKER = "_neureptrace_label_proportion_vector_validati
 
 def _object_block_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int | None = None) -> np.ndarray:
     """Return one hashable block id per probability row without flattening composite ids."""
+
     if isinstance(values, np.ndarray):
         array = np.asarray(values, dtype=object)
         if array.ndim == 0:
@@ -43,6 +44,7 @@ def _object_block_vector(values: Sequence[Hashable] | np.ndarray, *, expected_le
             items = list(values)
         except TypeError:
             items = [values]
+
     vector = np.empty(len(items), dtype=object)
     for index, item in enumerate(items):
         try:
@@ -82,6 +84,7 @@ def _unique_blocks(block_vector: np.ndarray) -> tuple[Hashable, ...]:
 
 def _apply_class_bias(probabilities: np.ndarray, class_bias: np.ndarray, *, epsilon: float) -> np.ndarray:
     """Apply class-bias factors while preserving the epsilon support floor."""
+
     del epsilon
     weighted = probabilities * class_bias.reshape(1, -1)
     row_sums = np.sum(weighted, axis=1, keepdims=True)
@@ -116,6 +119,7 @@ def _normalize_nonnegative_float(value: float | str, *, name: str) -> float:
 
 def _proportion_values_to_float_array(values: Any) -> np.ndarray:
     """Return a numeric 1-D proportion vector without flattening matrices."""
+
     array = np.asarray(values, dtype=object)
     if array.ndim > 1:
         raise ValueError("target_proportions must be a one-dimensional sequence of class proportions.")
@@ -128,14 +132,26 @@ def _proportion_values_to_float_array(values: Any) -> np.ndarray:
         raise ValueError("target_proportions must be finite and non-negative.") from exc
 
 
-def _adjust_probability_blocks_to_label_proportions(probabilities: Sequence[Sequence[float]] | np.ndarray, block_ids: Sequence[Hashable] | np.ndarray, target_proportions_by_block: Mapping[Hashable, Mapping[Any, float] | Sequence[float] | np.ndarray], *, classes: Sequence[Any] | np.ndarray | None = None, default_proportions: Mapping[Any, float] | Sequence[float] | np.ndarray | None = None, max_iter: int = 1000, tol: float = 1e-9, epsilon: float = 1e-12) -> _label_proportions.WeakLabelProportionCalibrationResult:
+def _adjust_probability_blocks_to_label_proportions(
+    probabilities: Sequence[Sequence[float]] | np.ndarray,
+    block_ids: Sequence[Hashable] | np.ndarray,
+    target_proportions_by_block: Mapping[Hashable, Mapping[Any, float] | Sequence[float] | np.ndarray],
+    *,
+    classes: Sequence[Any] | np.ndarray | None = None,
+    default_proportions: Mapping[Any, float] | Sequence[float] | np.ndarray | None = None,
+    max_iter: int = 1000,
+    tol: float = 1e-9,
+    epsilon: float = 1e-12,
+) -> _label_proportions.WeakLabelProportionCalibrationResult:
     """Apply block-wise label-proportion calibration with atomic block ids."""
+
     matrix = _label_proportions._as_probability_matrix(probabilities, epsilon=epsilon)
     block_vector = _object_block_vector(block_ids, expected_length=matrix.shape[0])
     if block_vector.shape[0] != matrix.shape[0]:
         raise ValueError("block_ids must have the same row count as probabilities.")
     if not isinstance(target_proportions_by_block, Mapping):
         raise ValueError("target_proportions_by_block must be a mapping from block id to proportions.")
+
     adjusted = np.empty_like(matrix)
     block_rows: list[dict[str, Any]] = []
     block_classes: tuple[Any, ...] | None = None
@@ -145,10 +161,22 @@ def _adjust_probability_blocks_to_label_proportions(probabilities: Sequence[Sequ
     ordered_blocks = _unique_blocks(block_vector)
     if not ordered_blocks:
         raise ValueError("At least one block is required for block-wise label-proportion calibration.")
+
     for block in ordered_blocks:
         mask = _block_equal_mask(block_vector, block)
-        proportions = _label_proportions._lookup_block_proportions(target_proportions_by_block, block, default_proportions=default_proportions)
-        result = _label_proportions.adjust_probabilities_to_label_proportions(matrix[mask], proportions, classes=classes, max_iter=max_iter, tol=tol, epsilon=epsilon)
+        proportions = _label_proportions._lookup_block_proportions(
+            target_proportions_by_block,
+            block,
+            default_proportions=default_proportions,
+        )
+        result = _label_proportions.adjust_probabilities_to_label_proportions(
+            matrix[mask],
+            proportions,
+            classes=classes,
+            max_iter=max_iter,
+            tol=tol,
+            epsilon=epsilon,
+        )
         if block_classes is None:
             block_classes = result.classes
         elif block_classes != result.classes:
@@ -157,30 +185,68 @@ def _adjust_probability_blocks_to_label_proportions(probabilities: Sequence[Sequ
         max_error = max(max_error, result.max_mean_proportion_error)
         max_iterations = max(max_iterations, result.iterations)
         all_converged = bool(all_converged and result.converged)
-        block_rows.append({"block": str(block), "n_samples": int(np.sum(mask)), "iterations": int(result.iterations), "max_mean_proportion_error": float(result.max_mean_proportion_error), "converged": bool(result.converged), "target_proportions": "|".join(f"{value:.12g}" for value in result.target_proportions)})
-    metadata = _label_proportions._base_metadata(n_samples=matrix.shape[0], n_classes=matrix.shape[1], iterations=max_iterations, max_mean_proportion_error=max_error, converged=all_converged, blockwise=True)
-    metadata.update({"n_blocks": len(ordered_blocks), "min_block_samples": int(min(row["n_samples"] for row in block_rows)), "max_block_samples": int(max(row["n_samples"] for row in block_rows))})
-    return _label_proportions.WeakLabelProportionCalibrationResult(probabilities=adjusted, classes=tuple(range(matrix.shape[1])) if block_classes is None else block_classes, target_proportions=(), class_bias=(), iterations=max_iterations, max_mean_proportion_error=max_error, converged=all_converged, metadata=metadata, block_metadata=tuple(block_rows))
+        block_rows.append(
+            {
+                "block": str(block),
+                "n_samples": int(np.sum(mask)),
+                "iterations": int(result.iterations),
+                "max_mean_proportion_error": float(result.max_mean_proportion_error),
+                "converged": bool(result.converged),
+                "target_proportions": "|".join(f"{value:.12g}" for value in result.target_proportions),
+            }
+        )
+
+    metadata = _label_proportions._base_metadata(
+        n_samples=matrix.shape[0],
+        n_classes=matrix.shape[1],
+        iterations=max_iterations,
+        max_mean_proportion_error=max_error,
+        converged=all_converged,
+        blockwise=True,
+    )
+    metadata.update(
+        {
+            "n_blocks": len(ordered_blocks),
+            "min_block_samples": int(min(row["n_samples"] for row in block_rows)),
+            "max_block_samples": int(max(row["n_samples"] for row in block_rows)),
+        }
+    )
+    return _label_proportions.WeakLabelProportionCalibrationResult(
+        probabilities=adjusted,
+        classes=tuple(range(matrix.shape[1])) if block_classes is None else block_classes,
+        target_proportions=(),
+        class_bias=(),
+        iterations=max_iterations,
+        max_mean_proportion_error=max_error,
+        converged=all_converged,
+        metadata=metadata,
+        block_metadata=tuple(block_rows),
+    )
 
 
 def install() -> None:
     """Install robust weak label-proportion calibration helpers."""
+
     current_block = _label_proportions.adjust_probability_blocks_to_label_proportions
     if not getattr(current_block, _BLOCK_ID_PATCH_MARKER, False):
         setattr(_adjust_probability_blocks_to_label_proportions, _BLOCK_ID_PATCH_MARKER, True)
         _label_proportions.adjust_probability_blocks_to_label_proportions = _adjust_probability_blocks_to_label_proportions
+
     current_bias = _label_proportions._apply_class_bias
     if not getattr(current_bias, _ZERO_SUPPORT_PATCH_MARKER, False):
         setattr(_apply_class_bias, _ZERO_SUPPORT_PATCH_MARKER, True)
         _label_proportions._apply_class_bias = _apply_class_bias
+
     current_positive_float = _label_proportions._normalize_positive_float
     if not getattr(current_positive_float, _POSITIVE_FLOAT_PATCH_MARKER, False):
         setattr(_normalize_positive_float, _POSITIVE_FLOAT_PATCH_MARKER, True)
         _label_proportions._normalize_positive_float = _normalize_positive_float
+
     current_nonnegative_float = _label_proportions._normalize_nonnegative_float
     if not getattr(current_nonnegative_float, _NONNEGATIVE_FLOAT_PATCH_MARKER, False):
         setattr(_normalize_nonnegative_float, _NONNEGATIVE_FLOAT_PATCH_MARKER, True)
         _label_proportions._normalize_nonnegative_float = _normalize_nonnegative_float
+
     current_proportion_values = _label_proportions._proportion_values_to_float_array
     if not getattr(current_proportion_values, _PROPORTION_VECTOR_PATCH_MARKER, False):
         setattr(_proportion_values_to_float_array, _PROPORTION_VECTOR_PATCH_MARKER, True)
