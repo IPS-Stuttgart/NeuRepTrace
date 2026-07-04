@@ -63,6 +63,17 @@ def test_compare_temporal_summary_handles_unpaired_emission_modes(tmp_path: Path
     assert report is not None and "No decoder had both calibrated and uncalibrated" in report
 
 
+def test_compare_emission_modes_validates_unpaired_emission_modes():
+    summary = _temporal_summary()
+    summary = summary.loc[
+        (summary["emission_mode"] == "calibrated")
+        & ~summary["condition"].isin(["baseline_window", "shuffled_time", "shuffled_label"])
+    ].reset_index(drop=True)
+
+    with pytest.raises(ValueError, match="has no control condition rows"):
+        compare_emission_modes(summary)
+
+
 def test_compare_temporal_summary_writes_csv_and_report(tmp_path: Path):
     summary_csv = tmp_path / "temporal_model.csv"
     out_csv = tmp_path / "emission_compare.csv"
