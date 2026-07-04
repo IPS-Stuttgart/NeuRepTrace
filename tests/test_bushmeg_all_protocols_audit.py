@@ -141,6 +141,34 @@ def test_protocol3_audit_fails_for_bad_summary_predictions_and_counts(tmp_path) 
     assert "n_target_calibration_trials=5 but k*n_classes=6" in text
 
 
+def test_protocol3_overlap_audit_normalizes_numeric_group_keys(tmp_path) -> None:
+    summary = _valid_protocol3_summary()
+    summary.loc[0, "target_calibration_indices"] = "0|2|4|6|8|10"
+
+    predictions = _valid_protocol3_predictions()
+    predictions.loc[0, "target_row_index"] = 0
+    predictions.loc[0, "trial_index"] = 0
+
+    # Force pandas to round-trip the prediction grouping columns as floats while
+    # the summary table keeps integer columns. The audit must still compare the
+    # same method/subject/fold/k group instead of treating 1 and 1.0 as separate
+    # keys and missing the calibration/evaluation overlap.
+    extra_prediction = predictions.iloc[[1]].copy()
+    extra_prediction.loc[extra_prediction.index[0], "fold_index"] = pd.NA
+    extra_prediction.loc[extra_prediction.index[0], "target_calibration_per_class"] = pd.NA
+    extra_prediction.loc[extra_prediction.index[0], "target_row_index"] = 7
+    extra_prediction.loc[extra_prediction.index[0], "trial_index"] = 7
+    predictions = pd.concat([predictions.iloc[[0]], extra_prediction], ignore_index=True)
+
+    _write_artifacts(tmp_path, summary=summary, predictions=predictions)
+
+    audit_path = build_audit_markdown(results_dir=tmp_path, out_path=tmp_path / "audit.md", include_calibrated=True)
+    text = audit_path.read_text(encoding="utf-8")
+
+    assert "[FAIL] Protocol 3 prediction rows exclude calibration rows" in text
+    assert "prediction uses calibration row 0" in text
+
+
 def test_protocol3_audit_allows_explicitly_skipped_calibration_count(tmp_path) -> None:
     summary = _valid_protocol3_summary()
     summary.loc[0, "n_target_calibration_trials"] = 0
