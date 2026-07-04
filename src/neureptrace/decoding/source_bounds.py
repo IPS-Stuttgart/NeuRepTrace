@@ -24,10 +24,20 @@ DEFAULT_UPPER_QUANTILE = 0.99
 class SourceBoundsConfig:
     """Configuration for source-only feature bounds."""
 
-    lower_quantile: float = DEFAULT_LOWER_QUANTILE
-    upper_quantile: float = DEFAULT_UPPER_QUANTILE
-    symmetric: bool = False
-    center: str = "median"
+    lower_quantile: float | str = DEFAULT_LOWER_QUANTILE
+    upper_quantile: float | str = DEFAULT_UPPER_QUANTILE
+    symmetric: bool | int | str = False
+    center: str | None = "median"
+
+    def __post_init__(self) -> None:
+        lower = _unit_interval_float(self.lower_quantile, name="lower_quantile")
+        upper = _unit_interval_float(self.upper_quantile, name="upper_quantile")
+        if lower >= upper:
+            raise ValueError("lower_quantile must be smaller than upper_quantile.")
+        object.__setattr__(self, "lower_quantile", lower)
+        object.__setattr__(self, "upper_quantile", upper)
+        object.__setattr__(self, "symmetric", _bool_value(self.symmetric, name="symmetric"))
+        object.__setattr__(self, "center", normalize_bounds_center(self.center))
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +109,7 @@ def source_bounds_config(
     *,
     lower_quantile: float | str = DEFAULT_LOWER_QUANTILE,
     upper_quantile: float | str = DEFAULT_UPPER_QUANTILE,
-    symmetric: bool = False,
+    symmetric: bool | int | str = False,
     center: str | None = "median",
 ) -> SourceBoundsConfig:
     """Normalize public feature-bound options."""
@@ -111,7 +121,7 @@ def source_bounds_config(
     return SourceBoundsConfig(
         lower_quantile=lower,
         upper_quantile=upper,
-        symmetric=bool(symmetric),
+        symmetric=_bool_value(symmetric, name="symmetric"),
         center=normalize_bounds_center(center),
     )
 
@@ -165,7 +175,12 @@ def apply_source_feature_bounds(features: Sequence[Sequence[float]] | np.ndarray
 
 def _coerce_config(config: SourceBoundsConfig | Mapping[str, Any]) -> SourceBoundsConfig:
     if isinstance(config, SourceBoundsConfig):
-        return config
+        return source_bounds_config(
+            lower_quantile=config.lower_quantile,
+            upper_quantile=config.upper_quantile,
+            symmetric=config.symmetric,
+            center=config.center,
+        )
     return source_bounds_config(**dict(config))
 
 
@@ -228,7 +243,20 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _scalar_array_value(value: object, *, name: str) -> object:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a scalar value.")
+        return value.item()
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
 def _unit_interval_float(value: float | str, *, name: str) -> float:
+    value = _scalar_array_value(value, name=name)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a numeric quantile, not boolean.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
@@ -236,3 +264,19 @@ def _unit_interval_float(value: float | str, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
+
+
+def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    value = _scalar_array_value(value, name=name)
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)):
+        if int(value) in {0, 1}:
+            return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean.")
