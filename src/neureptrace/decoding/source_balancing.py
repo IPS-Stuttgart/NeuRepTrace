@@ -8,7 +8,7 @@ uses source features and source labels only, so it is a Protocol-1 helper.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -268,8 +268,23 @@ def _format_counts(counts: Mapping[Any, int]) -> str:
     return "|".join(f"{label}:{int(count)}" for label, count in counts.items())
 
 
+def _materialize_one_pass_iterables(value: Any) -> Any:
+    """Materialize nested generators before NumPy treats them as scalar objects."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = [_materialize_one_pass_iterables(item) for item in value.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(value.shape)
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -281,7 +296,7 @@ def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, n
     if isinstance(values, (str, bytes)):
         vector = _object_value_vector([values])
     else:
-        array = np.asarray(values, dtype=object)
+        array = np.asarray(_materialize_one_pass_iterables(values), dtype=object)
         if array.ndim == 0:
             vector = _object_value_vector([array.item()])
         elif array.ndim == 1:
