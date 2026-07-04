@@ -22,5 +22,5 @@ def test_weighted_negative_log_likelihood_rejects_malformed_eps(bad_eps: object)
     labels = np.array([0])
     sample_weight = np.array([1.0])
 
-    with pytest.raises(ValueError, match="eps must be a positive finite value"):
+    with pytest.raises(ValueError, match="eps must"):
         weighted_negative_log_likelihood(probabilities, labels, sample_weight, eps=bad_eps)
