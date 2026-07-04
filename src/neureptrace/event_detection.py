@@ -52,4 +52,4 @@ __all__ = [
 
 
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    raise SystemExit(main())
