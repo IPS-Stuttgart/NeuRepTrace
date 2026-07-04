@@ -67,10 +67,10 @@ def _is_missing_domain_value(value: Any) -> bool:
 
 
 def _is_missing_domain_array(values: Sequence[Any] | np.ndarray) -> np.ndarray:
-    """Vectorized missing-domain detector that also handles composite IDs."""
+    """Return one missing-domain flag per scalar or composite source-domain row."""
 
-    flattened = np.asarray(values, dtype=object).reshape(-1)
-    return np.asarray([_is_missing_domain_value(value) for value in flattened], dtype=bool)
+    vector = _atomic_vector(values, name="source_domains")
+    return np.asarray([_is_missing_domain_value(value) for value in vector], dtype=bool)
 
 
 def _ordered_unique(values: Sequence[Any] | np.ndarray) -> np.ndarray:
