@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import namedtuple
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -15,7 +16,12 @@ SourceMinMaxReference = namedtuple("SourceMinMaxReference", ("minimum", "maximum
 SourceMinMaxResult = namedtuple("SourceMinMaxResult", ("train_features", "test_features", "reference", "metadata"))
 
 
-def fit_source_minmax_transform(*, source_features, test_features, feature_range=(0.0, 1.0)):
+def fit_source_minmax_transform(
+    *,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    test_features: Iterable[Iterable[float]] | np.ndarray,
+    feature_range=(0.0, 1.0),
+):
     source = _matrix(source_features, name="source_features")
     test = _matrix(test_features, name="test_features")
     if source.shape[1] != test.shape[1]:
@@ -41,13 +47,13 @@ def fit_source_minmax_transform(*, source_features, test_features, feature_range
     return SourceMinMaxResult(train, test_out, reference, metadata)
 
 
-def fit_source_minmax_reference(source_features, *, feature_range=(0.0, 1.0)):
+def fit_source_minmax_reference(source_features: Iterable[Iterable[float]] | np.ndarray, *, feature_range=(0.0, 1.0)):
     source = _matrix(source_features, name="source_features")
     low, high = _range(feature_range)
     return SourceMinMaxReference(minimum=np.min(source, axis=0), maximum=np.amax(source, axis=0), feature_range=(low, high), n_fit_rows=int(source.shape[0]))
 
 
-def apply_source_minmax_transform(features, reference) -> np.ndarray:
+def apply_source_minmax_transform(features: Iterable[Iterable[float]] | np.ndarray, reference) -> np.ndarray:
     matrix = _matrix(features, name="features")
     minimum, maximum, feature_range = _reference_parts(reference)
     if matrix.shape[1] != minimum.shape[0]:
@@ -59,8 +65,22 @@ def apply_source_minmax_transform(features, reference) -> np.ndarray:
     return (scaled * (high - low) + low).astype(np.float32, copy=False)
 
 
-def _matrix(values, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
