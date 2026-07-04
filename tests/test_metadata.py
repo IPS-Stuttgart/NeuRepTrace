@@ -98,6 +98,35 @@ def test_add_binary_label_rejects_empty_patterns():
         )
 
 
+def test_add_binary_label_rejects_missing_text_parameters():
+    metadata = pd.DataFrame({"category": ["face", "chair"]})
+
+    with pytest.raises(ValueError, match="source_column must be a non-empty string"):
+        add_binary_label(
+            metadata,
+            source_column=None,  # type: ignore[arg-type]
+            positive_pattern="face",
+            label_column="condition",
+        )
+
+    with pytest.raises(ValueError, match="positive_pattern must be a non-empty string"):
+        add_binary_label(
+            metadata,
+            source_column="category",
+            positive_pattern=None,  # type: ignore[arg-type]
+            label_column="condition",
+        )
+
+    with pytest.raises(ValueError, match="positive_label must be a non-empty string"):
+        add_binary_label(
+            metadata,
+            source_column="category",
+            positive_pattern="face",
+            label_column="condition",
+            positive_label=None,  # type: ignore[arg-type]
+        )
+
+
 def test_add_binary_label_rejects_invalid_regex():
     metadata = pd.DataFrame({"category": ["face", "chair"]})
 
