@@ -155,6 +155,7 @@ from . import (  # noqa: E402
     _source_selection_temperature_patch,
     _source_selection_vector_shape_patch,
     _source_weighting_enabled_alias_patch,
+    _source_weighting_feature_width_patch,
     _source_weighting_tuple_row_groups_patch,
     _stimulus_detection_boolean_summary_patch,
     _subspace_bool_config_patch,
@@ -324,6 +325,7 @@ _source_selection_optional_bounds_patch.install()
 _source_selection_temperature_patch.install()
 _source_selection_vector_shape_patch.install()
 _source_weighting_enabled_alias_patch.install()
+_source_weighting_feature_width_patch.install()
 _source_weighting_tuple_row_groups_patch.install()
 _subspace_bool_config_patch.install()
 _subspace_adaptation_config_bool_patch.install()
