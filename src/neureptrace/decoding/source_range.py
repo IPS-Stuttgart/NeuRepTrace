@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import numpy as np
 
 SOURCE_RANGE_CATEGORY = "1_strict_source_only"
@@ -10,23 +12,15 @@ SOURCE_RANGE_PROTOCOL = "strict_source_only_feature_range"
 
 def source_feature_range(source_features):
     """Return feature-wise minimum and maximum from source rows only."""
-    matrix = np.asarray(source_features, dtype=float)
-    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
-        raise ValueError("source_features must be a non-empty two-dimensional matrix.")
-    if not np.all(np.isfinite(matrix)):
-        raise ValueError("source_features must contain finite values.")
+    matrix = _feature_matrix(source_features, name="source_features")
     return np.min(matrix, axis=0), np.max(matrix, axis=0)
 
 
 def apply_source_range_clip(features, lower, upper):
     """Clip rows with precomputed source-only feature ranges."""
-    matrix = np.asarray(features, dtype=float)
-    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
-        raise ValueError("features must be a non-empty two-dimensional matrix.")
-    if not np.all(np.isfinite(matrix)):
-        raise ValueError("features must contain finite values.")
-    lo = np.asarray(lower, dtype=float).reshape(-1)
-    hi = np.asarray(upper, dtype=float).reshape(-1)
+    matrix = _feature_matrix(features, name="features")
+    lo = _bound_vector(lower, name="lower")
+    hi = _bound_vector(upper, name="upper")
     if matrix.shape[1] != lo.shape[0] or matrix.shape[1] != hi.shape[0]:
         raise ValueError("features width must match lower and upper bounds.")
     if not np.all(np.isfinite(lo)) or not np.all(np.isfinite(hi)):
@@ -39,9 +33,9 @@ def apply_source_range_clip(features, lower, upper):
 
 def source_range_clip(*, source_features, test_features):
     """Fit source range bounds and clip source/test rows."""
-    source = np.asarray(source_features, dtype=float)
-    test = np.asarray(test_features, dtype=float)
-    if source.ndim != 2 or test.ndim != 2 or source.shape[1] != test.shape[1]:
+    source = _feature_matrix(source_features, name="source_features")
+    test = _feature_matrix(test_features, name="test_features")
+    if source.shape[1] != test.shape[1]:
         raise ValueError("source_features and test_features must be two-dimensional matrices with the same feature width.")
     lower, upper = source_feature_range(source)
     train, train_mask = apply_source_range_clip(source, lower, upper)
@@ -61,3 +55,31 @@ def source_range_clip(*, source_features, test_features):
         "source_range_test_values_clipped": int(np.count_nonzero(test_mask)),
     }
     return train, test_out, lower, upper, train_mask, test_mask, metadata
+
+
+def _materialize_one_pass_iterables(value):
+    """Materialize nested one-pass iterables before NumPy conversion."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = [_materialize_one_pass_iterables(item) for item in value.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(value.shape)
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _feature_matrix(values, *, name: str):
+    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
+    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
+        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(f"{name} must contain finite values.")
+    return matrix
+
+
+def _bound_vector(values, *, name: str):
+    return np.asarray(_materialize_one_pass_iterables(values), dtype=float).reshape(-1)
