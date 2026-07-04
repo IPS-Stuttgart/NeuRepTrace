@@ -238,11 +238,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 0
 
+    if args.list_format != "text":
+        parser.error("--list-format can only be used with --list-commands/--list.")
+
     if args.command not in COMMAND_MODULES:
-        parser.error(_format_unknown_command_error(args.command))
+        print(_format_unknown_command_error(args.command), file=sys.stderr)
+        raise SystemExit(2)
 
     return _run_module_main(args.command, remaining)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
