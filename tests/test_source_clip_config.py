@@ -18,6 +18,14 @@ def test_source_clip_config_direct_construction_normalizes_fields() -> None:
     assert default_center.center == "median"
 
 
+def test_source_clip_config_accepts_scalar_array_booleans() -> None:
+    yes_cfg = SourceClipConfig(symmetric=np.asarray("yes"))
+    no_cfg = source_clip_config(symmetric=np.asarray("off"))
+
+    assert yes_cfg.symmetric is True
+    assert no_cfg.symmetric is False
+
+
 def test_source_clip_config_factory_matches_direct_validation() -> None:
     direct = SourceClipConfig(lower_quantile="0.10", upper_quantile="0.90", symmetric=1, center="none")
     via_factory = source_clip_config(lower_quantile="0.10", upper_quantile="0.90", symmetric=1, center="none")
@@ -35,6 +43,7 @@ def test_source_clip_config_factory_matches_direct_validation() -> None:
         ({"lower_quantile": 0.9, "upper_quantile": 0.1}, "lower_quantile must be smaller"),
         ({"lower_quantile": np.nan}, "lower_quantile"),
         ({"symmetric": "sometimes"}, "symmetric"),
+        ({"symmetric": np.asarray([True, False])}, "symmetric"),
         ({"center": "middle"}, "Unknown center mode"),
     ],
 )
