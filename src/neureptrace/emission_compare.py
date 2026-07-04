@@ -17,6 +17,25 @@ REQUIRED_COLUMNS = {
 }
 REQUIRED_CONDITIONS = ("observed_effect",)
 PAIRED_EMISSION_MODES = ("calibrated", "uncalibrated")
+EMISSION_COMPARISON_COLUMNS = (
+    "decoder",
+    "calibrated_observed_gain",
+    "uncalibrated_observed_gain",
+    "delta_observed_gain",
+    "calibrated_control_margin",
+    "uncalibrated_control_margin",
+    "delta_control_margin",
+    "calibrated_effect_minus_baseline_gain",
+    "uncalibrated_effect_minus_baseline_gain",
+    "delta_effect_minus_baseline_gain",
+    "calibrated_shuffled_time_p",
+    "uncalibrated_shuffled_time_p",
+    "calibrated_shuffled_label_p",
+    "uncalibrated_shuffled_label_p",
+    "calibrated_best_stay_probability",
+    "uncalibrated_best_stay_probability",
+    "preferred_emission_mode",
+)
 
 
 def _contains_boolean_values(values: pd.Series) -> bool:
@@ -172,7 +191,10 @@ def compare_emission_modes(summary: pd.DataFrame) -> pd.DataFrame:
                 "preferred_emission_mode": preferred,
             }
         )
-    return pd.DataFrame(rows).sort_values("delta_control_margin", ascending=False).reset_index(drop=True)
+    comparison = pd.DataFrame(rows, columns=EMISSION_COMPARISON_COLUMNS)
+    if comparison.empty:
+        return comparison
+    return comparison.sort_values("delta_control_margin", ascending=False).reset_index(drop=True)
 
 
 def _format_float(value: float, digits: int = 4) -> str:
