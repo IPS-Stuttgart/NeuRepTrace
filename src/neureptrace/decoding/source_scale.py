@@ -207,6 +207,8 @@ def _positive_float(value: float | str, *, name: str) -> float:
         if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
             raise ValueError(message)
         value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
