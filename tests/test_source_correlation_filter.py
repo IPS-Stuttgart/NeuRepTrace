@@ -83,13 +83,17 @@ def test_source_correlation_filter_config_validation() -> None:
     [
         {"max_abs_correlation": True},
         {"max_abs_correlation": np.bool_(False)},
+        {"max_abs_correlation": np.asarray([0.5])},
         {"max_features": True},
         {"max_features": np.bool_(False)},
+        {"max_features": np.asarray([2])},
         {"min_features": False},
+        {"min_features": np.asarray(1)},
         {"epsilon": np.bool_(True)},
+        {"epsilon": np.asarray([1e-6])},
     ],
 )
-def test_source_correlation_filter_config_rejects_boolean_numeric_values(kwargs) -> None:
+def test_source_correlation_filter_config_rejects_non_scalar_numeric_values(kwargs) -> None:
     option = next(iter(kwargs))
     with pytest.raises(ValueError, match=option):
         source_correlation_filter_config(**kwargs)
