@@ -46,6 +46,23 @@ def test_compare_emission_modes_reports_control_margin_delta():
     assert row["preferred_emission_mode"] == "calibrated"
 
 
+def test_compare_temporal_summary_handles_unpaired_emission_modes(tmp_path: Path):
+    summary = _temporal_summary()
+    summary = summary.loc[summary["emission_mode"] == "calibrated"].reset_index(drop=True)
+    summary_csv = tmp_path / "temporal_model.csv"
+    out_csv = tmp_path / "emission_compare.csv"
+    out_report = tmp_path / "emission_compare.md"
+    summary.to_csv(summary_csv, index=False)
+
+    comparison, report = compare_temporal_summary(summary_csv, out_csv=out_csv, out_report=out_report)
+
+    assert comparison.empty
+    assert "delta_control_margin" in comparison.columns
+    assert "preferred_emission_mode" in comparison.columns
+    assert out_csv.read_text(encoding="utf-8").startswith("decoder,")
+    assert report is not None and "No decoder had both calibrated and uncalibrated" in report
+
+
 def test_compare_temporal_summary_writes_csv_and_report(tmp_path: Path):
     summary_csv = tmp_path / "temporal_model.csv"
     out_csv = tmp_path / "emission_compare.csv"

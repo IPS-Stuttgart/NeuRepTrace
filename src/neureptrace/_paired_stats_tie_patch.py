@@ -27,6 +27,10 @@ def _mark_exact_mean_ties(statistics: pd.DataFrame) -> pd.DataFrame:
 
 def install() -> None:
     """Install unbiased tie handling for paired decoder statistics."""
+    from . import _emission_compare_empty_pairs_patch
+
+    _emission_compare_empty_pairs_patch.install()
+
     import neureptrace.paired_stats as paired_stats
 
     if getattr(paired_stats.paired_decoder_statistics, "_paired_stats_tie_patched", False):
