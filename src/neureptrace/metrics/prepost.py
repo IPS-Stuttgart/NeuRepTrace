@@ -20,8 +20,9 @@ def summarize_window_metric(
     group_columns = _normalize_columns(group_columns)
     _require_columns(frame, [time_column, metric_column, *group_columns])
     window_start, window_stop = _validate_window(window)
+    time_values = _finite_numeric_series(frame[time_column], name=time_column)
 
-    window_frame = frame.loc[(frame[time_column] >= window_start) & (frame[time_column] <= window_stop)]
+    window_frame = frame.loc[(time_values >= window_start) & (time_values <= window_stop)]
     if window_frame.empty:
         raise ValueError(f"No rows fall inside window [{window_start}, {window_stop}].")
 
@@ -126,6 +127,21 @@ def _validate_window_endpoint(value: object, *, name: str) -> float:
     if not math.isfinite(numeric):
         raise ValueError(f"window {name} must be a finite numeric value")
     return numeric
+
+
+def _finite_numeric_series(values: object, *, name: str) -> pd.Series:
+    series = pd.Series(values)
+    if series.map(_is_boolean_scalar).any():
+        raise ValueError(f"{name} must contain only finite numeric values")
+    parsed = pd.to_numeric(series, errors="coerce")
+    numeric = parsed.to_numpy(dtype=float)
+    if not np.all(np.isfinite(numeric)):
+        raise ValueError(f"{name} must contain only finite numeric values")
+    return parsed
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    return isinstance(value, (bool, np.bool_))
 
 
 def _iter_groups(frame: pd.DataFrame, group_columns: Sequence[str]):
