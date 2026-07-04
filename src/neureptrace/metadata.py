@@ -9,6 +9,8 @@ import pandas as pd
 
 
 def _non_empty_text(value: str, *, name: str) -> str:
+    if pd.isna(value):
+        raise ValueError(f"{name} must be a non-empty string.")
     text = str(value)
     if text.strip() == "":
         raise ValueError(f"{name} must be a non-empty string.")
