@@ -22,6 +22,16 @@ class SourceClipConfig:
     symmetric: bool = False
     center: str = "median"
 
+    def __post_init__(self) -> None:
+        lower = _unit_interval_float(self.lower_quantile, name="lower_quantile")
+        upper = _unit_interval_float(self.upper_quantile, name="upper_quantile")
+        if lower >= upper:
+            raise ValueError("lower_quantile must be smaller than upper_quantile.")
+        object.__setattr__(self, "lower_quantile", lower)
+        object.__setattr__(self, "upper_quantile", upper)
+        object.__setattr__(self, "symmetric", _bool_config(self.symmetric, name="symmetric"))
+        object.__setattr__(self, "center", normalize_center_mode(self.center))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceClipBounds:
@@ -72,11 +82,12 @@ def source_clip_config(
     symmetric: bool | str | int | float = False,
     center: str | None = "median",
 ) -> SourceClipConfig:
-    lower = _unit_interval_float(lower_quantile, name="lower_quantile")
-    upper = _unit_interval_float(upper_quantile, name="upper_quantile")
-    if lower >= upper:
-        raise ValueError("lower_quantile must be smaller than upper_quantile.")
-    return SourceClipConfig(lower_quantile=lower, upper_quantile=upper, symmetric=_bool_config(symmetric, name="symmetric"), center=normalize_center_mode(center))
+    return SourceClipConfig(
+        lower_quantile=lower_quantile,
+        upper_quantile=upper_quantile,
+        symmetric=symmetric,
+        center=center,
+    )
 
 
 def normalize_center_mode(value: str | None) -> str:
