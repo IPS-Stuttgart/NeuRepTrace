@@ -28,7 +28,7 @@ def test_parse_participant_ids_supports_signed_integer_tokens():
     assert parse_participant_ids("-1") == [-1]
     assert parse_participant_ids("-1-1") == [-1, 0, 1]
     assert parse_participant_ids("1--1") == [1, 0, -1]
-    assert parse_participant_ids(["-2", "+3"] ) == [-2, 3]
+    assert parse_participant_ids(["-2", "+3"]) == [-2, 3]
 
 
 def test_parse_participant_ids_rejects_boolean_values():
