@@ -17,14 +17,17 @@ def _minimum_class_group_support(labels: np.ndarray, groups: np.ndarray) -> int:
     return int(min(supports)) if supports else 0
 
 
-def _all_training_folds_cover_classes(splits: list[tuple[np.ndarray, np.ndarray]], labels: np.ndarray, n_classes: int) -> bool:
-    """Check that every generated training fold can fit all classes."""
+def _all_folds_cover_classes(splits: list[tuple[np.ndarray, np.ndarray]], labels: np.ndarray, n_classes: int) -> bool:
+    """Check that every generated train and validation fold contains all classes."""
 
-    return all(len(np.unique(labels[train_indices])) == n_classes for train_indices, _val_indices in splits)
+    return all(
+        len(np.unique(labels[train_indices])) == n_classes and len(np.unique(labels[val_indices])) == n_classes
+        for train_indices, val_indices in splits
+    )
 
 
 def install() -> None:
-    """Make LOSO source-window selection reject class-isolated grouped CV splits."""
+    """Make LOSO source-window selection reject grouped CV splits without full class coverage."""
 
     module = importlib.import_module("neureptrace.loso_time_decode")
     original = module._feasible_source_cv_splits
@@ -65,12 +68,10 @@ def install() -> None:
         for n_splits in range(feasible_splits, 1, -1):
             splitter = StratifiedGroupKFold(n_splits=n_splits)
             splits = list(splitter.split(np.zeros((len(labels), 1)), labels, groups))
-            if _all_training_folds_cover_classes(splits, labels, n_classes):
+            if _all_folds_cover_classes(splits, labels, n_classes):
                 return iter(splits)
 
-        raise ValueError(
-            "Could not build grouped source-window selection folds where every training fold contains all classes."
-        )
+        raise ValueError("Could not build grouped source-window selection folds where every train and validation fold contains all classes.")
 
     setattr(_feasible_source_cv_splits, _PATCH_MARKER, True)
     module._feasible_source_cv_splits = _feasible_source_cv_splits
