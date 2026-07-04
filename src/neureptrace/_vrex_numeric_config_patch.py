@@ -9,12 +9,32 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_vrex_numeric_config_patch_installed"
+_DANN_NUMERIC_PATCH_MARKER = "_neureptrace_dann_bool_array_numeric_config_patch_installed"
 _SOURCE_VREX_FEATURE_PATCH_MARKER = "_neureptrace_source_vrex_finite_fit_feature_patch_installed"
 _SOURCE_VREX_DOMAIN_BATCH_PATCH_MARKER = "_neureptrace_source_vrex_domain_batch_patch_installed"
 
 
-def _positive_int(value: Any, *, name: str) -> int:
+def _is_boolean_scalar_like(value: Any) -> bool:
+    """Return true for scalar or single-item array boolean config values."""
+
     if isinstance(value, (bool, np.bool_)):
+        return True
+    if not isinstance(value, np.ndarray):
+        return False
+    try:
+        array = np.asarray(value, dtype=object)
+    except (TypeError, ValueError):
+        return False
+    if array.size != 1:
+        return False
+    item = array.reshape(-1)[0]
+    if isinstance(item, np.generic):
+        item = item.item()
+    return isinstance(item, (bool, np.bool_))
+
+
+def _positive_int(value: Any, *, name: str) -> int:
+    if _is_boolean_scalar_like(value):
         raise ValueError(f"{name} must be a positive integer.")
     try:
         parsed = float(value)
@@ -26,7 +46,7 @@ def _positive_int(value: Any, *, name: str) -> int:
 
 
 def _positive_float(value: Any, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if _is_boolean_scalar_like(value):
         raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
@@ -38,7 +58,7 @@ def _positive_float(value: Any, *, name: str) -> float:
 
 
 def _nonnegative_float(value: Any, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if _is_boolean_scalar_like(value):
         raise ValueError(f"{name} must be finite and non-negative.")
     try:
         parsed = float(value)
@@ -83,6 +103,45 @@ def _domain_balanced_batch(train_idx: np.ndarray, domains: np.ndarray, *, batch_
     return batch[: int(batch_size)]
 
 
+def _install_dann_numeric_validators() -> None:
+    dann = importlib.import_module("neureptrace.decoding.dann")
+    if getattr(dann._integer, _DANN_NUMERIC_PATCH_MARKER, False):
+        return
+
+    original_integer = dann._integer
+    original_positive_float = dann._positive_float
+    original_nonnegative_float = dann._nonnegative_float
+    original_bounded_float = dann._bounded_float
+
+    def _integer(value: Any, name: str) -> int:
+        if _is_boolean_scalar_like(value):
+            raise ValueError(f"{name} must be an integer.")
+        return original_integer(value, name)
+
+    def _positive_float_wrapper(value: Any, name: str) -> float:
+        if _is_boolean_scalar_like(value):
+            raise ValueError(f"{name} must be positive and finite.")
+        return original_positive_float(value, name)
+
+    def _nonnegative_float_wrapper(value: Any, name: str) -> float:
+        if _is_boolean_scalar_like(value):
+            raise ValueError(f"{name} must be non-negative and finite.")
+        return original_nonnegative_float(value, name)
+
+    def _bounded_float_wrapper(value: Any, name: str, *, lower: float, upper: float) -> float:
+        if _is_boolean_scalar_like(value):
+            raise ValueError(f"{name} must be finite in [{lower}, {upper}).")
+        return original_bounded_float(value, name, lower=lower, upper=upper)
+
+    for function in (_integer, _positive_float_wrapper, _nonnegative_float_wrapper, _bounded_float_wrapper):
+        setattr(function, _DANN_NUMERIC_PATCH_MARKER, True)
+
+    dann._integer = _integer
+    dann._positive_float = _positive_float_wrapper
+    dann._nonnegative_float = _nonnegative_float_wrapper
+    dann._bounded_float = _bounded_float_wrapper
+
+
 def _install_linear_vrex_numeric_validators() -> None:
     vrex = importlib.import_module("neureptrace.decoding.vrex")
     if getattr(vrex._positive_int, _PATCH_MARKER, False):
@@ -123,6 +182,7 @@ def _install_source_vrex_domain_balanced_batch() -> None:
 def install() -> None:
     """Install VREx hyperparameter, fit-feature, and batch-sampling validators."""
 
+    _install_dann_numeric_validators()
     _install_linear_vrex_numeric_validators()
     _install_source_vrex_fit_feature_validator()
     _install_source_vrex_domain_balanced_batch()
