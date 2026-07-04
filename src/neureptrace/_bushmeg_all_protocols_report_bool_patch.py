@@ -138,12 +138,17 @@ def _build_protocol3_kshot_leaderboard(report: Any, summary: pd.DataFrame) -> pd
         return pd.DataFrame(columns=columns)
     deltas = report._protocol3_delta_frame(enriched_summary)
     if deltas.empty:
-        return pd.DataFrame(columns=columns)
-    merged = deltas.copy()
+        merged = p3.copy()
+        for column in ("delta_vs_source_loso_logistic", "delta_vs_best_protocol1"):
+            merged[column] = np.nan
+    else:
+        merged = deltas.copy()
     if "method_base" not in merged.columns and "method" in merged.columns:
         merged["method_base"] = merged["method"].astype(str).str.replace(r"_k\d+$", "", regex=True)
     if "k_per_class" not in merged.columns:
         merged["k_per_class"] = np.nan
+    if "method_family" in merged.columns:
+        merged = merged.drop(columns=["method_family"])
     merged["method"] = merged["method"].astype(str)
     merged["method_base"] = merged["method_base"].astype(str)
     merged["k_per_class"] = pd.to_numeric(merged["k_per_class"], errors="coerce")
