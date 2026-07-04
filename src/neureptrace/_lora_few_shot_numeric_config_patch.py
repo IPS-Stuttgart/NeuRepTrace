@@ -31,7 +31,11 @@ _PROBABILITY_NORMALIZE_MARKER = "_neureptrace_lora_probability_rows_wrapped"
 
 
 def _is_boolean_scalar(value: Any) -> bool:
-    return isinstance(value, (bool, np.bool_))
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return bool(np.issubdtype(value.dtype, np.bool_))
+    return False
 
 
 def _boolean_float_error_message(validator_name: str, name: str, kwargs: dict[str, Any]) -> str:
