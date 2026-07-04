@@ -225,7 +225,10 @@ def _metadata(cfg: SourceRFFConfig, *, n_source_rows: int, n_test_rows: int, fea
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    if isinstance(values, np.ndarray):
+        matrix = values.astype(float, copy=False)
+    else:
+        matrix = np.asarray(list(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):

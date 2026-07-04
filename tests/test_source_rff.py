@@ -34,6 +34,26 @@ def test_source_rff_transform_shapes_and_metadata() -> None:
     assert result.metadata["source_rff_valid_for_strict_source_only"] is True
 
 
+def test_source_rff_accepts_one_pass_row_iterables() -> None:
+    source_rows = ([float(i), float(i + 1)] for i in range(4))
+    test_rows = ([float(i), float(i + 1)] for i in range(10, 12))
+
+    result = fit_source_rff_transform(
+        source_features=source_rows,
+        test_features=test_rows,
+        config={"n_components": 6, "gamma": "auto", "random_state": 5},
+    )
+
+    assert result.train_features.shape == (4, 6)
+    assert result.test_features.shape == (2, 6)
+    assert result.metadata["source_rff_n_source_rows"] == 4
+    assert result.metadata["source_rff_n_test_rows"] == 2
+
+    apply_rows = ([float(i), float(i + 1)] for i in range(20, 22))
+    transformed = apply_source_rff(apply_rows, result.reference)
+    assert transformed.shape == (2, 6)
+
+
 def test_source_rff_is_reproducible_with_fixed_seed() -> None:
     source = np.arange(12, dtype=float).reshape(3, 4)
     first = fit_source_rff_reference(source, config={"n_components": 8, "random_state": 42})
