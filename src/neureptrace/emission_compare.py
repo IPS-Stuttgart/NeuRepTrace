@@ -160,10 +160,10 @@ def compare_emission_modes(summary: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for decoder, decoder_frame in summary.groupby("decoder", sort=True):
         modes = {mode: frame for mode, frame in decoder_frame.groupby("emission_mode", sort=True)}
+        for emission_mode, mode_frame in modes.items():
+            _validate_emission_mode_frame(mode_frame, decoder=str(decoder), emission_mode=str(emission_mode))
         if not all(mode in modes for mode in PAIRED_EMISSION_MODES):
             continue
-        for emission_mode in PAIRED_EMISSION_MODES:
-            _validate_emission_mode_frame(modes[emission_mode], decoder=str(decoder), emission_mode=emission_mode)
         calibrated = summarize_emission_mode(modes["calibrated"])
         uncalibrated = summarize_emission_mode(modes["uncalibrated"])
         delta_control_margin = calibrated["control_margin"] - uncalibrated["control_margin"]
@@ -230,7 +230,7 @@ def build_emission_comparison_report(comparison: pd.DataFrame, *, summary_csv: P
     for row in comparison.itertuples(index=False):
         lines.append(
             f"| {row.decoder} | {row.preferred_emission_mode} | {_format_float(row.delta_control_margin)} | "
-            f"{_format_float(row.calibrated_control_margin)} | {_format_float(row.uncalibrated_control_margin)} | "
+            f"{_format_float(row.calibrated_control_margin)} | { _format_float(row.uncalibrated_control_margin)} | "
             f"{_format_float(row.delta_effect_minus_baseline_gain)} | {_format_float(row.calibrated_shuffled_time_p)} | "
             f"{_format_float(row.uncalibrated_shuffled_time_p)} |"
         )
