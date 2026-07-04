@@ -23,3 +23,20 @@ def test_lora_numeric_patch_is_installed_by_package_import() -> None:
         lora_few_shot._nonnegative_float(np.bool_(False), "entropy_loss_weight")
     with pytest.raises(ValueError, match="finite two-dimensional rows"):
         lora_few_shot._normalize_probability_rows(np.asarray([0.2, 0.8]))
+
+
+def test_lora_numeric_patch_rejects_zero_dimensional_boolean_arrays() -> None:
+    sys.modules.pop("neureptrace.decoding.lora_few_shot", None)
+    sys.modules.pop("neureptrace.decoding.semi_supervised_lora_few_shot", None)
+
+    import neureptrace  # noqa: F401
+
+    lora_few_shot = importlib.import_module("neureptrace.decoding.lora_few_shot")
+    semi_supervised_lora_few_shot = importlib.import_module("neureptrace.decoding.semi_supervised_lora_few_shot")
+
+    with pytest.raises(ValueError, match="positive finite"):
+        lora_few_shot._positive_float(np.asarray(True), "lora_alpha")
+    with pytest.raises(ValueError, match="non-negative finite"):
+        lora_few_shot._nonnegative_float(np.asarray(False), "entropy_loss_weight")
+    with pytest.raises(ValueError, match="\[0.0, 1.0\]"):
+        semi_supervised_lora_few_shot._bounded_float(np.asarray(True), name="dropout", lower=0.0, upper=1.0)
