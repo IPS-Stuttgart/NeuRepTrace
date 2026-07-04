@@ -42,6 +42,18 @@ def _temporal_config_scalar(value: object, message: str) -> object:
     return value
 
 
+def _fit_temporal_smoothing_sequences(temporal_smoothing, fit_frame: pd.DataFrame, prob_columns: list[str]) -> list[np.ndarray]:
+    """Return fit sequences, or an empty list when a group only has singleton rows."""
+
+    try:
+        return temporal_smoothing._sequences_from_frame(fit_frame, prob_columns)
+    except ValueError as exc:
+        message = str(exc)
+        if "Need at least one sequence with two or more time points" not in message:
+            raise
+        return []
+
+
 def install() -> None:
     """Patch temporal smoothing so valid one-row sequences are retained."""
 
@@ -151,7 +163,9 @@ def install() -> None:
         This mirrors ``neureptrace.temporal_smoothing.smooth_probability_observations``
         but keeps valid singleton sequences in the output.  Singleton sequences do
         not contribute temporal-transition evidence, yet dropping them changes the
-        evaluation set and can silently bias downstream metrics.
+        evaluation set and can silently bias downstream metrics.  If a whole
+        decoder group has no two-row sequence in the fitting window, the group is
+        retained unchanged instead of aborting the full smoothing run.
         """
 
         if mode not in temporal_smoothing.SMOOTHING_MODE_CHOICES:
@@ -171,16 +185,19 @@ def install() -> None:
 
         for _, decoder_frame in temporal_smoothing._iter_groups(observations, group_columns):
             fit_frame = temporal_smoothing._filter_time_window(decoder_frame, fit_window) if fit_window is not None else decoder_frame.copy()
-            fit_sequences = temporal_smoothing._sequences_from_frame(fit_frame, prob_columns)
-            fit = temporal_smoothing.fit_sticky_switching_model(fit_sequences, stay_grid_size=stay_grid_size)
-            stay_probability = float(fit["best_stay_probability"])
+            fit_sequences = _fit_temporal_smoothing_sequences(temporal_smoothing, fit_frame, prob_columns)
+            if fit_sequences:
+                fit = temporal_smoothing.fit_sticky_switching_model(fit_sequences, stay_grid_size=stay_grid_size)
+                stay_probability = float(fit["best_stay_probability"])
+            else:
+                stay_probability = float("nan")
             class_names = temporal_smoothing._class_names(decoder_frame, prob_columns)
             key_columns = temporal_smoothing.sequence_key_columns(decoder_frame)
             temporal_smoothing.validate_unique_sequence_times(decoder_frame, key_columns)
 
             for _, sequence_frame in decoder_frame.sort_values([*key_columns, "time"]).groupby(key_columns, sort=True, dropna=False):
                 probabilities = temporal_smoothing._normalize_probabilities(sequence_frame[prob_columns].to_numpy(dtype=float))
-                if len(probabilities) < 2:
+                if len(probabilities) < 2 or not np.isfinite(stay_probability):
                     posterior = probabilities
                 else:
                     posterior = temporal_smoothing._smooth_sequence_posteriors(
