@@ -109,6 +109,28 @@ def test_source_scale_rejects_non_numeric_epsilon_values(value: object) -> None:
         source_feature_scale_config(epsilon=value)  # type: ignore[arg-type]
 
 
+def test_source_scale_accepts_one_pass_feature_iterables() -> None:
+    source = (iter(row) for row in ([1.0, 10.0], [3.0, 12.0], [5.0, 14.0]))
+    test = (iter(row) for row in ([7.0, 16.0],))
+
+    result = fit_source_feature_scale(source_features=source, test_features=test, config={"method": "minmax"})
+
+    assert np.allclose(result.train_features[:, 0], np.asarray([0.0, 0.5, 1.0]))
+    assert result.test_features.shape == (1, 2)
+    assert result.metadata["source_feature_scale_n_source_rows"] == 3
+    assert result.metadata["source_feature_scale_n_test_rows"] == 1
+
+
+def test_source_scale_accepts_object_arrays_containing_generator_rows() -> None:
+    source = np.asarray([iter([0.0, 2.0]), iter([2.0, 4.0])], dtype=object)
+    stats = fit_source_feature_scale_stats(source, config={"method": "standard"})
+
+    transformed = apply_source_feature_scale(np.asarray([iter([4.0, 6.0])], dtype=object), stats)
+
+    assert transformed.shape == (1, 2)
+    assert np.all(np.isfinite(transformed))
+
+
 def test_source_scale_rejects_width_mismatch_and_extra_labels() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_feature_scale(source_features=[[0.0, 1.0]], test_features=[[0.0]])

@@ -7,7 +7,7 @@ small Protocol-1 preprocessing helper for fold-local decoding pipelines.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,8 +59,8 @@ class SourceFeatureScaleResult:
 
 def fit_source_feature_scale(
     *,
-    source_features: Sequence[Sequence[float]] | np.ndarray,
-    test_features: Sequence[Sequence[float]] | np.ndarray,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    test_features: Iterable[Iterable[float]] | np.ndarray,
     config: SourceFeatureScaleConfig | Mapping[str, Any] | None = None,
 ) -> SourceFeatureScaleResult:
     """Fit source-only scaling statistics and transform source/test rows."""
@@ -82,7 +82,7 @@ def fit_source_feature_scale(
 
 
 def fit_source_feature_scale_stats(
-    source_features: Sequence[Sequence[float]] | np.ndarray,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
     *,
     config: SourceFeatureScaleConfig | Mapping[str, Any] | None = None,
 ) -> SourceFeatureScaleStats:
@@ -109,7 +109,7 @@ def fit_source_feature_scale_stats(
     return SourceFeatureScaleStats(offset=np.asarray(offset, dtype=float), scale=scale, method=cfg.method, n_fit_rows=int(source.shape[0]))
 
 
-def apply_source_feature_scale(features: Sequence[Sequence[float]] | np.ndarray, stats: SourceFeatureScaleStats) -> np.ndarray:
+def apply_source_feature_scale(features: Iterable[Iterable[float]] | np.ndarray, stats: SourceFeatureScaleStats) -> np.ndarray:
     """Apply fitted source-only scaling statistics."""
 
     matrix = _feature_matrix(features, name="features")
@@ -176,8 +176,22 @@ def _metadata(cfg: SourceFeatureScaleConfig, *, n_source_rows: int, n_test_rows:
     }
 
 
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
