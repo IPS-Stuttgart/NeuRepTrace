@@ -46,7 +46,8 @@ def select_source_variance_features(
         raise ValueError("source_features and test_features must have the same feature width.")
     scores = np.var(source - np.mean(source, axis=0), axis=0, ddof=1 if source.shape[0] > 1 else 0)
     parsed_k = None if k is None else _positive_int(k, name="k")
-    selected = source_variance_feature_indices(scores=scores, k=parsed_k, min_variance=min_variance)
+    parsed_min_variance = None if min_variance is None else _nonnegative_float(min_variance, name="min_variance")
+    selected = source_variance_feature_indices(scores=scores, k=parsed_k, min_variance=parsed_min_variance)
     metadata = {
         "source_feature_select": True,
         "source_feature_select_protocol": SOURCE_FEATURE_SELECT_PROTOCOL,
@@ -61,7 +62,7 @@ def select_source_variance_features(
         "source_feature_select_feature_dim": int(source.shape[1]),
         "source_feature_select_n_selected_features": int(selected.shape[0]),
         "source_feature_select_k": "" if parsed_k is None else parsed_k,
-        "source_feature_select_min_variance": "" if min_variance is None else float(min_variance),
+        "source_feature_select_min_variance": "" if parsed_min_variance is None else parsed_min_variance,
     }
     return SourceFeatureSelectResult(
         train_features=source[:, selected].astype(np.float32, copy=False),
@@ -80,9 +81,7 @@ def source_variance_feature_indices(*, scores, k: int | str | None = None, min_v
         raise ValueError("scores must contain finite non-negative values.")
     mask = np.ones(values.shape[0], dtype=bool)
     if min_variance is not None:
-        threshold = float(min_variance)
-        if not np.isfinite(threshold) or threshold < 0.0:
-            raise ValueError("min_variance must be finite and non-negative.")
+        threshold = _nonnegative_float(min_variance, name="min_variance")
         mask &= values >= threshold
     candidate = np.flatnonzero(mask)
     if candidate.size == 0:
@@ -106,8 +105,34 @@ def _matrix(values, *, name: str) -> np.ndarray:
     return matrix
 
 
+def _finite_scalar_float(value, *, name: str) -> float:
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite scalar.") from exc
+    if array.shape != ():
+        raise ValueError(f"{name} must be a finite scalar.")
+    scalar = array.item()
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a finite scalar.")
+    try:
+        parsed = float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite scalar.") from exc
+    if not np.isfinite(parsed):
+        raise ValueError(f"{name} must be a finite scalar.")
+    return parsed
+
+
+def _nonnegative_float(value, *, name: str) -> float:
+    parsed = _finite_scalar_float(value, name=name)
+    if parsed < 0.0:
+        raise ValueError(f"{name} must be non-negative.")
+    return parsed
+
+
 def _positive_int(value, *, name: str) -> int:
-    parsed = float(value)
-    if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
+    parsed = _finite_scalar_float(value, name=name)
+    if parsed < 1.0 or not parsed.is_integer():
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)
