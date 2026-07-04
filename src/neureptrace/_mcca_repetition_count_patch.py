@@ -4,6 +4,8 @@ Boolean scalars are integer-like in Python and NumPy.  Without an explicit
 check, values such as ``n_repetitions_per_class=True`` are silently treated as
 ``1`` by the M-CCA class-repetition alignment helpers.  That can turn a YAML or
 programmatic type error into a valid but unintended alignment/calibration run.
+Likewise, fractional numeric values such as ``1.5`` should not be truncated to
+``1``.
 
 M-CCA also compares class-anchor labels while building source and target
 alignment rows.  NumPy array-valued object labels make ``left == right`` return
@@ -45,9 +47,17 @@ def _is_boolean_scalar(value: Any) -> bool:
     return isinstance(value, (bool, np.bool_))
 
 
-def _reject_boolean_repetition_count(value: Any) -> None:
+def _validate_optional_repetition_count(value: Any) -> None:
+    if value is None:
+        return
     if _is_boolean_scalar(value):
         raise ValueError("n_repetitions_per_class must be a positive integer or None, not a boolean value.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_repetitions_per_class must be a positive integer or None.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError("n_repetitions_per_class must be a positive integer or None.")
 
 
 def _normalize_optional_component_value(value: Any) -> Any:
@@ -80,12 +90,12 @@ def _patch_mcca(module: ModuleType) -> None:
 
     @wraps(original_class_alignment_matrices)
     def class_alignment_matrices(*args: Any, **kwargs: Any) -> Any:
-        _reject_boolean_repetition_count(kwargs.get("n_repetitions_per_class"))
+        _validate_optional_repetition_count(kwargs.get("n_repetitions_per_class"))
         return original_class_alignment_matrices(*args, **kwargs)
 
     @wraps(original_fit_class_mcca)
     def fit_class_mcca(*args: Any, **kwargs: Any) -> Any:
-        _reject_boolean_repetition_count(kwargs.get("n_repetitions_per_class"))
+        _validate_optional_repetition_count(kwargs.get("n_repetitions_per_class"))
         return original_fit_class_mcca(*args, **kwargs)
 
     module.class_alignment_matrices = class_alignment_matrices
@@ -97,7 +107,7 @@ def _patch_mcca_target(module: ModuleType) -> None:
 
     @wraps(original_class_alignment_matrix)
     def class_alignment_matrix(*args: Any, **kwargs: Any) -> Any:
-        _reject_boolean_repetition_count(kwargs.get("n_repetitions_per_class"))
+        _validate_optional_repetition_count(kwargs.get("n_repetitions_per_class"))
         return original_class_alignment_matrix(*args, **kwargs)
 
     module.class_alignment_matrix = class_alignment_matrix
