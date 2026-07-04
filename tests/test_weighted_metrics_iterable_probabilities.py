@@ -18,6 +18,11 @@ def _probability_rows():
     yield [0.8, 0.2]
 
 
+def _probability_row_generators():
+    for row in ([0.9, 0.1], [0.4, 0.6], [0.8, 0.2]):
+        yield (value for value in row)
+
+
 def _label_indices():
     yield 0
     yield 1
@@ -36,6 +41,22 @@ def test_weighted_probability_metrics_accept_one_pass_probability_iterables() ->
     assert weighted_expected_calibration_error(_probability_rows(), labels, weights, n_bins=2) == pytest.approx(0.25)
 
     rows = weighted_reliability_bins(_probability_rows(), labels, weights, n_bins=2)
+    assert rows[1]["sample_weight"] == pytest.approx(6.0)
+    assert rows[1]["accuracy"] == pytest.approx(0.5)
+
+
+def test_weighted_probability_metrics_accept_nested_one_pass_probability_rows() -> None:
+    labels = np.asarray([0, 1, 1])
+    weights = np.asarray([1.0, 2.0, 3.0])
+
+    assert weighted_brier_score_multiclass(_probability_row_generators(), labels, weights) == pytest.approx(0.75)
+    assert weighted_negative_log_likelihood(_probability_row_generators(), labels, weights) == pytest.approx(
+        -np.average(np.log([0.9, 0.6, 0.2]), weights=weights)
+    )
+    assert weighted_top_k_accuracy(_probability_row_generators(), labels, weights, k=1) == pytest.approx(0.5)
+    assert weighted_expected_calibration_error(_probability_row_generators(), labels, weights, n_bins=2) == pytest.approx(0.25)
+
+    rows = weighted_reliability_bins(_probability_row_generators(), labels, weights, n_bins=2)
     assert rows[1]["sample_weight"] == pytest.approx(6.0)
     assert rows[1]["accuracy"] == pytest.approx(0.5)
 

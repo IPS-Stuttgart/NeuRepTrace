@@ -106,13 +106,26 @@ def _label_input_array(labels: object) -> np.ndarray:
         raise ValueError("labels must have shape (n_samples,)") from exc
 
 
+def _materialize_nested_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy coercion."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = [_materialize_nested_iterables(item) for item in value.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(value.shape)
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_nested_iterables(item) for item in value]
+
+
 def _probability_input_array(probabilities: object) -> np.ndarray:
     """Return an object array without exhausting one-pass probability iterables."""
 
-    if isinstance(probabilities, np.ndarray) or isinstance(probabilities, (str, bytes)):
-        return np.asarray(probabilities, dtype=object)
     try:
-        return np.asarray(list(probabilities), dtype=object)
+        return np.asarray(_materialize_nested_iterables(probabilities), dtype=object)
     except TypeError:
         return np.asarray(probabilities, dtype=object)
     except ValueError as exc:
