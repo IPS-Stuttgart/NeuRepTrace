@@ -68,6 +68,11 @@ def test_clip_then_standardize_rejects_nonpositive_epsilon() -> None:
         fit_source_clip_then_standardize(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=0.0)
 
 
+def test_clip_then_standardize_rejects_boolean_epsilon() -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        fit_source_clip_then_standardize(source_features=[[0.0], [1.0]], test_features=[[0.5]], epsilon=True)
+
+
 def test_source_clip_aliases_and_validation() -> None:
     assert normalize_center_mode("med") == "median"
     assert normalize_center_mode("none") == "zero"
