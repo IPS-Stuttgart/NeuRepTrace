@@ -235,7 +235,18 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _scalar_array_value(value: object, *, name: str) -> object:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a scalar value.")
+        return value.item()
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
 def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
+    value = _scalar_array_value(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, str):
@@ -252,6 +263,9 @@ def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
 
 
 def _unit_interval_float(value: float | str, *, name: str) -> float:
+    value = _scalar_array_value(value, name=name)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a numeric value, not boolean.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
@@ -262,6 +276,9 @@ def _unit_interval_float(value: float | str, *, name: str) -> float:
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
+    value = _scalar_array_value(value, name=name)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive numeric value, not boolean.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
