@@ -116,6 +116,7 @@ def test_source_minmax_rejects_malformed_or_boolean_ranges(feature_range: object
     [
         SourceMinMaxReference(minimum=[0.0], maximum=[np.inf], feature_range=(0.0, 1.0), n_fit_rows=2),
         SourceMinMaxReference(minimum=[0.0, 1.0], maximum=[1.0], feature_range=(0.0, 1.0), n_fit_rows=2),
+        SourceMinMaxReference(minimum=[1.0], maximum=[0.0], feature_range=(0.0, 1.0), n_fit_rows=2),
     ],
 )
 def test_source_minmax_rejects_invalid_reused_reference(reference: SourceMinMaxReference) -> None:
