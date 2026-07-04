@@ -40,6 +40,38 @@ def test_source_range_clip_clips_test_rows_with_source_bounds() -> None:
     assert metadata["source_range_valid_for_benchmark"] is True
 
 
+def test_source_range_helpers_accept_one_pass_feature_iterables() -> None:
+    source_rows = (iter(row) for row in ([0.0, 10.0], [2.0, 12.0], [1.0, 11.0]))
+
+    lower, upper = source_feature_range(source_rows)
+
+    np.testing.assert_allclose(lower, [0.0, 10.0])
+    np.testing.assert_allclose(upper, [2.0, 12.0])
+
+    train, test_out, _lower, _upper, train_mask, test_mask, metadata = source_range_clip(
+        source_features=(iter(row) for row in ([0.0, 10.0], [2.0, 12.0])),
+        test_features=(iter(row) for row in ([-5.0, 11.0], [5.0, 20.0])),
+    )
+
+    np.testing.assert_allclose(train, [[0.0, 10.0], [2.0, 12.0]])
+    np.testing.assert_allclose(test_out, [[0.0, 11.0], [2.0, 12.0]])
+    assert not np.any(train_mask)
+    assert test_mask.tolist() == [[True, False], [True, True]]
+    assert metadata["source_range_n_source_rows"] == 2
+    assert metadata["source_range_n_test_rows"] == 2
+
+
+def test_apply_source_range_clip_accepts_one_pass_bounds() -> None:
+    clipped, mask = apply_source_range_clip(
+        (iter(row) for row in ([-5.0, 11.0], [5.0, 20.0])),
+        lower=(value for value in [0.0, 10.0]),
+        upper=(value for value in [2.0, 12.0]),
+    )
+
+    np.testing.assert_allclose(clipped, [[0.0, 11.0], [2.0, 12.0]])
+    assert mask.tolist() == [[True, False], [True, True]]
+
+
 def test_apply_source_range_clip_validates_width() -> None:
     with pytest.raises(ValueError, match="width"):
         apply_source_range_clip([[0.0, 1.0]], lower=[0.0], upper=[1.0])
