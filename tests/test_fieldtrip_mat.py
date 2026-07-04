@@ -117,6 +117,35 @@ def test_write_fieldtrip_mat_refuses_existing_metadata_without_overwrite(tmp_pat
     assert metadata_out.read_text(encoding="utf-8") == "old\n"
 
 
+def test_write_fieldtrip_mat_accepts_string_output_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    class DummyEpochs:
+        def __init__(self) -> None:
+            self.saved_paths: list[tuple[Path, bool]] = []
+
+        def save(self, path: Path, *, overwrite: bool) -> None:
+            self.saved_paths.append((path, overwrite))
+
+    epochs = DummyEpochs()
+    metadata = pd.DataFrame({"trial": [0], "condition": [1]})
+
+    def fake_loader(mat_path: Path | str, **kwargs):
+        return epochs, metadata
+
+    monkeypatch.setattr("neureptrace.fieldtrip_mat.load_fieldtrip_raw_mat_epochs", fake_loader)
+    epochs_out = tmp_path / "converted-epo.fif"
+
+    written_epochs, written_metadata = write_fieldtrip_raw_mat_epochs(
+        str(tmp_path / "dummy.mat"),
+        epochs_out=str(epochs_out),
+        overwrite=True,
+    )
+
+    assert written_epochs == epochs_out
+    assert written_metadata == tmp_path / "converted-epo_metadata.csv"
+    assert epochs.saved_paths == [(epochs_out, True)]
+    assert written_metadata.read_text(encoding="utf-8") == "trial,condition\n0,1\n"
+
+
 def test_fieldtrip_cli_forwards_custom_path_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     seen: dict[str, object] = {}
 
