@@ -26,11 +26,31 @@ def test_source_ecdf_transform_uses_source_quantiles_only() -> None:
     assert np.allclose(result.train_features.ravel(), np.asarray([1e-6, 1.0 / 3.0, 2.0 / 3.0, 1.0 - 1e-6], dtype=np.float32), atol=1e-6)
 
 
+def test_source_ecdf_accepts_one_pass_feature_iterables() -> None:
+    source_rows = ([float(value)] for value in range(4))
+    test_rows = ([1.5], [4.0])
+
+    result = fit_source_ecdf_transform(source_features=source_rows, test_features=(row for row in test_rows), config={"n_quantiles": 4})
+
+    assert result.train_features.shape == (4, 1)
+    assert result.test_features.shape == (2, 1)
+    assert np.allclose(result.test_features.ravel(), [0.5, 1.0 - 1e-6])
+
+
 def test_source_ecdf_constant_feature_maps_to_half() -> None:
     ecdf_map = fit_source_ecdf_map([[2.0], [2.0], [2.0]])
     transformed = apply_source_ecdf_transform([[1.0], [2.0], [3.0]], ecdf_map)
 
     assert np.allclose(transformed, 0.5)
+
+
+def test_source_ecdf_apply_accepts_one_pass_iterables() -> None:
+    ecdf_map = fit_source_ecdf_map(([float(value)] for value in range(4)), config={"n_quantiles": 4})
+
+    transformed = apply_source_ecdf_transform(([1.5], [4.0]), ecdf_map)
+
+    assert transformed.shape == (2, 1)
+    assert np.allclose(transformed.ravel(), [0.5, 1.0 - 1e-6])
 
 
 def test_source_ecdf_rejects_width_mismatch() -> None:
