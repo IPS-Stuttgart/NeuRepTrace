@@ -4,6 +4,25 @@ import pytest
 from neureptrace.decoding.label_proportions import adjust_probability_blocks_to_label_proportions
 
 
+class _AmbiguousBool:
+    def __bool__(self) -> bool:
+        raise TypeError("boolean value is ambiguous")
+
+
+class _IndeterminateBlock:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __eq__(self, other):  # noqa: ANN001
+        return _AmbiguousBool()
+
+    def __hash__(self) -> int:
+        return hash(self.name)
+
+    def __str__(self) -> str:
+        return self.name
+
+
 def _probabilities() -> np.ndarray:
     return np.asarray(
         [
@@ -49,6 +68,26 @@ def test_label_proportion_blocks_preserve_tuple_block_ids():
 
     assert result.metadata["n_blocks"] == 2
     assert tuple(row["block"] for row in result.block_metadata) == ("('s01', 'run1')", "('s02', 'run2')")
+
+
+def test_label_proportion_blocks_keep_identity_groups_for_indeterminate_equality():
+    run1 = _IndeterminateBlock("run1")
+    run2 = _IndeterminateBlock("run2")
+
+    result = adjust_probability_blocks_to_label_proportions(
+        _probabilities(),
+        [run1, run1, run2, run2],
+        {
+            run1: [0.75, 0.25],
+            run2: [0.25, 0.75],
+        },
+        tol=1e-10,
+    )
+
+    assert result.metadata["n_blocks"] == 2
+    assert tuple(row["n_samples"] for row in result.block_metadata) == (2, 2)
+    assert np.allclose(result.probabilities[:2].mean(axis=0), [0.75, 0.25], atol=1e-8)
+    assert np.allclose(result.probabilities[2:].mean(axis=0), [0.25, 0.75], atol=1e-8)
 
 
 def test_label_proportion_blocks_reject_matrix_shaped_block_ids():
