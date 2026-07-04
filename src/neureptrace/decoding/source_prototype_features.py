@@ -60,9 +60,9 @@ class SourcePrototypeFeatureResult:
 # pylint: disable-next=too-many-arguments,too-many-locals
 def fit_source_prototype_features(
     *,
-    source_features: Sequence[Sequence[float]] | np.ndarray,
-    source_labels: Sequence[Any] | np.ndarray,
-    test_features: Sequence[Sequence[float]] | np.ndarray,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    source_labels: Iterable[Any] | np.ndarray,
+    test_features: Iterable[Iterable[float]] | np.ndarray,
     config: SourcePrototypeFeatureConfig | Mapping[str, Any] | None = None,
 ) -> SourcePrototypeFeatureResult:
     """Fit source class prototypes and transform source/test rows.
@@ -102,12 +102,17 @@ def fit_source_prototype_features(
     )
 
 
-def class_prototypes(source_features: Sequence[Sequence[float]] | np.ndarray, source_labels: Sequence[Any] | np.ndarray, *, classes: Sequence[Any] | np.ndarray | None = None) -> np.ndarray:
+def class_prototypes(
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    source_labels: Iterable[Any] | np.ndarray,
+    *,
+    classes: Iterable[Any] | np.ndarray | None = None,
+) -> np.ndarray:
     """Return class means from source rows only."""
 
     features = _feature_matrix(source_features, name="source_features")
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
-    class_values = label_counts(labels)[0] if classes is None else _object_vector(np.asarray(classes, dtype=object).reshape(-1).tolist())
+    class_values = label_counts(labels)[0] if classes is None else _as_label_vector(classes, name="classes")
     if class_values.shape[0] < 1:
         raise ValueError("classes must not be empty.")
     prototypes = np.empty((class_values.shape[0], features.shape[1]), dtype=float)
@@ -120,8 +125,8 @@ def class_prototypes(source_features: Sequence[Sequence[float]] | np.ndarray, so
 
 
 def prototype_distance_features(
-    features: Sequence[Sequence[float]] | np.ndarray,
-    prototypes: Sequence[Sequence[float]] | np.ndarray,
+    features: Iterable[Iterable[float]] | np.ndarray,
+    prototypes: Iterable[Iterable[float]] | np.ndarray,
     *,
     metric: str = "squared_euclidean",
     output: str = "distance",
@@ -242,8 +247,34 @@ def _feature_scale(features: np.ndarray, *, enabled: bool, epsilon: float) -> np
     return np.maximum(scale, float(epsilon))
 
 
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass feature iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _materialize_label_sequence(value: object) -> object:
+    """Materialize one-pass label/class containers without altering label tuples."""
+
+    if isinstance(value, np.ndarray) or isinstance(value, (str, bytes)):
+        return value
+    if isinstance(value, Sequence):
+        return value
+    if isinstance(value, Iterable):
+        return list(value)
+    return value
+
+
+def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -251,25 +282,27 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    if isinstance(values, (str, bytes)):
-        vector = _object_vector([values])
-    else:
-        array = np.asarray(values, dtype=object)
-        if array.ndim == 0:
-            vector = _object_vector([array.item()])
-        elif array.ndim == 1 and array.shape[0] == expected_length:
-            vector = array.reshape(-1)
-        elif array.ndim == 1 and expected_length == 1:
-            vector = _object_vector([tuple(array.tolist())])
-        elif array.shape[0] == 0:
-            vector = _object_vector([])
-        else:
-            rows = array.reshape(array.shape[0], -1)
-            vector = rows[:, 0].reshape(-1) if rows.shape[1] == 1 else _object_vector(tuple(row.tolist()) for row in rows)
+def _label_vector(values: Iterable[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    vector = _as_label_vector(values, expected_length=expected_length, name=name)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per source row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _as_label_vector(values: Iterable[Any] | np.ndarray, *, name: str, expected_length: int | None = None) -> np.ndarray:
+    if isinstance(values, (str, bytes)):
+        return _object_vector([values])
+    array = np.asarray(_materialize_label_sequence(values), dtype=object)
+    if array.ndim == 0:
+        return _object_vector([array.item()])
+    if array.ndim == 1:
+        if expected_length == 1 and array.shape[0] != 1:
+            return _object_vector([tuple(array.tolist())])
+        return array.reshape(-1)
+    if array.shape[0] == 0:
+        return _object_vector([])
+    rows = array.reshape(array.shape[0], -1)
+    return rows[:, 0].reshape(-1) if rows.shape[1] == 1 else _object_vector(tuple(row.tolist()) for row in rows)
 
 
 def _object_vector(values: Iterable[Any]) -> np.ndarray:
