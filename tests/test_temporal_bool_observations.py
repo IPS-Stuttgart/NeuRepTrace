@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from neureptrace.temporal_model import fit_sticky_switching_model, fit_temporal_models, read_probability_observations
-from neureptrace.temporal_smoothing import metrics_from_probability_observations
+from neureptrace.temporal_smoothing import metrics_from_probability_observations, smooth_probability_observations
 
 
 def _valid_probability_observations() -> pd.DataFrame:
@@ -96,3 +96,17 @@ def test_temporal_smoothing_metrics_reject_boolean_probability_values() -> None:
 
     with pytest.raises(ValueError, match="prob_class_0 values must be numeric probabilities, not boolean"):
         metrics_from_probability_observations(observations)
+
+
+def test_temporal_smoothing_retains_singleton_only_fit_groups(tmp_path: Path) -> None:
+    observations = _valid_probability_observations()
+    observations["sequence_id"] = [0, 1]
+    csv_path = tmp_path / "singleton_only_probability_observations.csv"
+    observations.to_csv(csv_path, index=False)
+
+    smoothed, metrics = smooth_probability_observations([csv_path], stay_grid_size=10)
+
+    assert len(smoothed) == len(observations)
+    assert len(metrics) > 0
+    assert np.allclose(smoothed[["prob_class_0", "prob_class_1"]].to_numpy(), observations[["prob_class_0", "prob_class_1"]].to_numpy())
+    assert smoothed["temporal_smoothing_stay_probability"].isna().all()
