@@ -22,12 +22,15 @@ through ``dataset.file_templates``.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from functools import wraps
 from numbers import Integral
 from typing import Any
 
 _PATCH_MARKER = "_neureptrace_participant_id_patch_installed"
+_SIGNED_INT_RANGE_RE = re.compile(r"^([+-]?\d+)-([+-]?\d+)$")
+_BOOLEAN_PARTICIPANT_TEXT = {"true", "false", "yes", "no"}
 
 
 def _is_boolean_scalar(value: Any) -> bool:
@@ -43,7 +46,7 @@ def _validate_participant_token(token: Any) -> None:
         raise ValueError("participants.ids entries must be participant identifiers, not booleans.")
     if isinstance(token, Mapping):
         raise ValueError("participants.ids entries must be scalars, not mappings.")
-    if isinstance(token, str) and token.strip().lower() in {"true", "false", "yes", "no"}:
+    if isinstance(token, str) and token.strip().lower() in _BOOLEAN_PARTICIPANT_TEXT:
         raise ValueError("participants.ids entries must be participant identifiers, not booleans.")
 
 
@@ -59,6 +62,55 @@ def _validate_participant_ids_input(value: Any) -> None:
     if isinstance(value, Iterable):
         for token in value:
             _validate_participant_token(token)
+
+
+def _expand_participant_token(token: Any) -> list[int | str]:
+    """Expand one participant token with signed integer/range support."""
+
+    _validate_participant_token(token)
+    if _is_integral_identifier(token):
+        return [int(token)]
+
+    text = str(token).strip()
+    if not text:
+        return []
+    if "," in text:
+        expanded: list[int | str] = []
+        for part in text.split(","):
+            expanded.extend(_expand_participant_token(part))
+        return expanded
+    if text.lower() in _BOOLEAN_PARTICIPANT_TEXT:
+        raise ValueError("participants.ids entries must be participant identifiers, not booleans.")
+
+    range_match = _SIGNED_INT_RANGE_RE.fullmatch(text)
+    if range_match:
+        start = int(range_match.group(1))
+        stop = int(range_match.group(2))
+        step = 1 if stop >= start else -1
+        return list(range(start, stop + step, step))
+
+    try:
+        return [int(text)]
+    except ValueError:
+        return [text]
+
+
+def _parse_participant_ids(value: Any) -> list[int | str]:
+    """Parse compact participant specifications without confusing signs for ranges."""
+
+    if value is None:
+        return []
+    if _is_integral_identifier(value):
+        return [int(value)]
+    _validate_participant_ids_input(value)
+    if isinstance(value, str):
+        return _expand_participant_token(value)
+    if isinstance(value, Iterable):
+        parsed: list[int | str] = []
+        for token in value:
+            parsed.extend(_expand_participant_token(token))
+        return parsed
+    raise ValueError("participants.ids must be an int, string, or list.")
 
 
 def _single_fieldtrip_template_context(dataset_config: Any, config: Mapping[str, Any]):
@@ -96,10 +148,7 @@ def install() -> None:
 
     @wraps(original_parse_participant_ids)
     def parse_participant_ids(value: Any) -> list[int | str]:
-        if _is_integral_identifier(value):
-            return [int(value)]
-        _validate_participant_ids_input(value)
-        parsed = original_parse_participant_ids(value)
+        parsed = _parse_participant_ids(value)
         for token in parsed:
             _validate_participant_token(token)
         return parsed
