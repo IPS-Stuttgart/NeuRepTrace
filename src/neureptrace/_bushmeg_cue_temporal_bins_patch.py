@@ -9,6 +9,7 @@ silently carrying degenerate bins.
 
 from __future__ import annotations
 
+import importlib
 from types import ModuleType
 from typing import Any
 
@@ -50,6 +51,8 @@ def _patch_module(module: ModuleType) -> None:
 
 def install() -> None:
     """Install empty-response-bin validation for cue-source feature helpers."""
+
+    importlib.import_module("neureptrace._bushmeg_loso_max_folds_patch").install()
 
     from neureptrace import bushmeg_cue_source_weights
 
