@@ -48,13 +48,6 @@ def _effective_null_label(labels: np.ndarray, null_label: object) -> object:
     return _UnusedObjectNullLabel()
 
 
-def _raise_ambiguous_null_label() -> None:
-    raise ValueError(
-        "null_label must not overlap observed labels when null_features are provided; "
-        "pass a null_label outside the stimulus label space."
-    )
-
-
 def install() -> None:
     """Install transfer wrappers that keep stimulus and artificial-null labels disjoint."""
 
@@ -76,13 +69,12 @@ def install() -> None:
     ) -> tuple[np.ndarray, np.ndarray]:
         stimulus_features_array = transfer._feature_matrix(stimulus_features, name="stimulus_features")
         label_vector = transfer._label_vector(labels, expected_length=stimulus_features_array.shape[0], name="labels")
-        if null_features is not None and _contains_label(label_vector, null_label):
-            _raise_ambiguous_null_label()
+        effective_null_label = _effective_null_label(label_vector, null_label) if null_features is not None else null_label
         return _ORIGINAL_APPEND_NULL_CLASS_FEATURES(
             stimulus_features_array,
             label_vector,
             null_features,
-            null_label=null_label,
+            null_label=effective_null_label,
         )
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
@@ -102,9 +94,7 @@ def install() -> None:
     ) -> transfer.CrossValidationResult:
         stimulus_features_array = transfer._feature_matrix(stimulus_features, name="stimulus_features")
         label_vector = transfer._label_vector(labels, expected_length=stimulus_features_array.shape[0], name="labels")
-        if null_features is not None and _contains_label(label_vector, null_label):
-            _raise_ambiguous_null_label()
-        effective_null_label = null_label if null_features is not None else _effective_null_label(label_vector, null_label)
+        effective_null_label = _effective_null_label(label_vector, null_label)
         return _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING(
             stimulus_features_array,
             label_vector,
