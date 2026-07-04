@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -105,6 +106,21 @@ def _probabilities_contain_boolean(probabilities: object) -> bool:
     return any(_probabilities_contain_boolean(value) for value in iterator)
 
 
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before validation walks them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = [_materialize_one_pass_iterables(item) for item in value.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(value.shape)
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
 def _coerce_label_indices(labels: np.ndarray) -> np.ndarray:
     if _labels_contain_boolean(labels):
         raise ValueError("labels must contain integer class indices")
@@ -131,6 +147,7 @@ def validate_probability_inputs(
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """Validate and coerce probability-matrix inputs used by scoring metrics."""
     normalization_atol = _validate_non_negative_finite_float(normalization_atol, "normalization_atol")
+    probabilities = _materialize_one_pass_iterables(probabilities)
     if _probabilities_contain_boolean(probabilities):
         raise ValueError("probabilities must contain numeric probability values, not boolean flags")
     probabilities = np.asarray(probabilities, dtype=float)
@@ -154,7 +171,7 @@ def validate_probability_inputs(
     if labels is None:
         return probabilities, None
 
-    labels = np.asarray(labels)
+    labels = np.asarray(_materialize_one_pass_iterables(labels))
     if labels.ndim == 2 and labels.shape[1] == 1:
         labels = labels.reshape(-1)
     if labels.ndim != 1:
