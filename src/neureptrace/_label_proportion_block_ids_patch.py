@@ -56,15 +56,17 @@ def _object_block_vector(values: Sequence[Hashable] | np.ndarray, *, expected_le
 
 
 def _values_equal(left: Any, right: Any) -> bool:
+    if left is right:
+        return True
     try:
         result = left == right
-    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
+    except Exception:
         return False
     if isinstance(result, (bool, np.bool_)):
         return bool(result)
     try:
         return bool(np.all(result))
-    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
+    except Exception:
         return False
 
 
