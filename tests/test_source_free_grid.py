@@ -35,6 +35,42 @@ def test_source_free_grid_selects_unlabeled_prior_strength_for_biased_prediction
     assert np.allclose(result.probabilities.sum(axis=1), 1.0)
 
 
+def test_source_free_grid_accepts_scalar_grid_options_without_splitting_strings():
+    target_features = np.vstack([np.full((4, 2), -1.0), np.full((4, 2), 1.0)])
+
+    result = fit_source_free_grid_predict_proba(
+        source_model=_BiasedSourceModel(),
+        target_features=target_features,
+        max_iterations=0,
+        prototype_weights=np.float64(0.0),
+        confidence_thresholds=0.75,
+        prior_strengths=np.asarray(0.0),
+        pseudo_label_selections="confidence",
+        balanced_topk_per_class_values=None,
+    )
+
+    assert result.metadata["source_free_grid_selection"] is True
+    assert result.metadata["source_free_grid_candidate_count"] == 1
+    assert result.ranked[0]["selection"] == "confidence"
+    assert result.ranked[0]["topk"] is None
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+
+
+def test_source_free_grid_rejects_empty_grid_options():
+    target_features = np.vstack([np.full((2, 2), -1.0), np.full((2, 2), 1.0)])
+
+    with pytest.raises(ValueError, match="confidence_thresholds"):
+        fit_source_free_grid_predict_proba(
+            source_model=_BiasedSourceModel(),
+            target_features=target_features,
+            max_iterations=0,
+            confidence_thresholds=(),
+            prototype_weights=(0.0,),
+            prior_strengths=(0.0,),
+            pseudo_label_selections=("confidence",),
+        )
+
+
 def test_source_free_grid_can_rank_balanced_topk_variants():
     target_features = np.vstack([np.full((5, 2), -1.0), np.full((3, 2), 1.0)])
 
