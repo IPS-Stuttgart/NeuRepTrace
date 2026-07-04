@@ -9,6 +9,7 @@ from typing import Any
 
 _NO_PATH_SENTINELS = {"", "none", "null", "false", "off", "-"}
 _PATCH_MARKER = "_neureptrace_fieldtrip_cli_path_options_patched"
+_WRITER_PATCH_MARKER = "_neureptrace_fieldtrip_output_paths_patched"
 
 
 def _format_path_default(tokens: Sequence[Any] | None) -> str:
@@ -104,10 +105,41 @@ def _build_parser(fieldtrip_mat: Any, prog: str | None = None) -> argparse.Argum
     return parser
 
 
+def _install_writer_path_patch(fieldtrip_mat: Any) -> None:
+    """Normalize public writer output paths before the original writer touches them."""
+
+    if getattr(fieldtrip_mat.write_fieldtrip_raw_mat_epochs, _WRITER_PATCH_MARKER, False):
+        return
+
+    original_writer = fieldtrip_mat.write_fieldtrip_raw_mat_epochs
+
+    def write_fieldtrip_raw_mat_epochs(
+        mat_path: Path | str,
+        *,
+        epochs_out: Path | str,
+        metadata_out: Path | str | None = None,
+        overwrite: bool = False,
+        **kwargs: Any,
+    ):
+        metadata_path = None if metadata_out is None else Path(metadata_out)
+        return original_writer(
+            mat_path,
+            epochs_out=Path(epochs_out),
+            metadata_out=metadata_path,
+            overwrite=overwrite,
+            **kwargs,
+        )
+
+    setattr(write_fieldtrip_raw_mat_epochs, _WRITER_PATCH_MARKER, True)
+    fieldtrip_mat.write_fieldtrip_raw_mat_epochs = write_fieldtrip_raw_mat_epochs
+
+
 def install() -> None:
     """Install a CLI patch that exposes all loader path options."""
 
     import neureptrace.fieldtrip_mat as fieldtrip_mat
+
+    _install_writer_path_patch(fieldtrip_mat)
 
     if getattr(fieldtrip_mat.main, _PATCH_MARKER, False):
         return
