@@ -9,13 +9,23 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_temporal_smoothing_topk_tie_patch_installed"
 
 
+def _validate_positive_integer(value: int, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return int(numeric)
+
+
 def _stable_top_columns(probabilities: np.ndarray, *, k: int) -> np.ndarray:
     probability_matrix = np.asarray(probabilities, dtype=float)
     if probability_matrix.ndim != 2:
         raise ValueError("probabilities must be a two-dimensional matrix.")
-    effective_k = min(max(int(k), 0), probability_matrix.shape[1])
-    if effective_k == 0:
-        return np.empty((probability_matrix.shape[0], 0), dtype=int)
+    effective_k = min(_validate_positive_integer(k, name="k"), probability_matrix.shape[1])
     return np.argsort(-probability_matrix, axis=1, kind="mergesort")[:, :effective_k]
 
 
