@@ -51,6 +51,23 @@ def test_select_source_variance_features_accepts_integral_string_k_in_metadata()
     assert result.metadata["source_feature_select_k"] == 2
 
 
+def test_select_source_variance_features_normalizes_min_variance_metadata() -> None:
+    source = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 3.0],
+            [0.0, 2.0, 6.0],
+        ],
+        dtype=float,
+    )
+    test = np.asarray([[10.0, 11.0, 12.0]], dtype=float)
+
+    result = select_source_variance_features(source_features=source, test_features=test, min_variance="1.0")
+
+    assert result.selected_indices.tolist() == [1, 2]
+    assert result.metadata["source_feature_select_min_variance"] == 1.0
+
+
 def test_source_variance_feature_indices_respects_min_variance() -> None:
     selected = source_variance_feature_indices(scores=[0.0, 0.5, 2.0, 1.0], min_variance=0.75)
 
@@ -61,6 +78,28 @@ def test_source_variance_feature_indices_falls_back_to_best_feature() -> None:
     selected = source_variance_feature_indices(scores=[0.0, 0.5, 0.2], min_variance=2.0)
 
     assert selected.tolist() == [1]
+
+
+@pytest.mark.parametrize("k", [True, False, np.bool_(True), np.bool_(False), np.asarray(True), np.asarray(False)])
+def test_source_variance_feature_indices_rejects_boolean_k(k) -> None:
+    with pytest.raises(ValueError, match="k"):
+        source_variance_feature_indices(scores=[0.0, 1.0], k=k)
+
+
+@pytest.mark.parametrize("min_variance", [True, False, np.bool_(True), np.bool_(False), np.asarray(True), np.asarray(False)])
+def test_source_variance_feature_indices_rejects_boolean_min_variance(min_variance) -> None:
+    with pytest.raises(ValueError, match="min_variance"):
+        source_variance_feature_indices(scores=[0.0, 1.0], min_variance=min_variance)
+
+
+@pytest.mark.parametrize("field", ["k", "min_variance"])
+def test_select_source_variance_features_rejects_boolean_controls(field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        select_source_variance_features(
+            source_features=[[0.0, 1.0], [0.0, 2.0]],
+            test_features=[[0.0, 1.5]],
+            **{field: True},
+        )
 
 
 def test_source_variance_feature_indices_validates_inputs() -> None:
