@@ -93,6 +93,19 @@ def _labels_contain_boolean(labels: np.ndarray) -> bool:
     return False
 
 
+def _label_input_array(labels: object) -> np.ndarray:
+    """Return labels as an object array without exhausting one-pass iterables."""
+
+    if isinstance(labels, np.ndarray) or isinstance(labels, (str, bytes)):
+        return np.asarray(labels, dtype=object)
+    try:
+        return np.asarray(list(labels), dtype=object)
+    except TypeError:
+        return np.asarray(labels, dtype=object)
+    except ValueError as exc:
+        raise ValueError("labels must have shape (n_samples,)") from exc
+
+
 def _probability_input_array(probabilities: object) -> np.ndarray:
     """Return an object array without exhausting one-pass probability iterables."""
 
@@ -136,7 +149,7 @@ def _validate_probability_inputs(probabilities: np.ndarray, labels: np.ndarray) 
     if _probabilities_contain_boolean(raw_probabilities):
         raise ValueError("probabilities must contain numeric probability values, not boolean flags")
     probabilities = raw_probabilities.astype(float, copy=False)
-    labels = np.asarray(labels)
+    labels = _label_input_array(labels)
     if probabilities.ndim != 2:
         raise ValueError("probabilities must have shape (n_samples, n_classes)")
     if probabilities.shape[0] == 0 or probabilities.shape[1] == 0:
