@@ -181,12 +181,36 @@ def _metadata(cfg: SourceAsinhConfig, *, n_source_rows: int, n_test_rows: int, f
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    try:
+        matrix = np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        matrix = np.asarray(_materialize_feature_rows(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain only finite values.")
     return matrix
+
+
+def _materialize_feature_rows(values: Sequence[Sequence[float]] | np.ndarray) -> list[Any]:
+    if isinstance(values, np.ndarray):
+        return values.tolist()
+    try:
+        rows = list(values)
+    except TypeError as exc:
+        raise ValueError("feature values must be a two-dimensional matrix-like object.") from exc
+    return [_materialize_feature_row(row) for row in rows]
+
+
+def _materialize_feature_row(row: Any) -> Any:
+    if isinstance(row, np.ndarray):
+        return row.tolist()
+    if isinstance(row, (str, bytes)):
+        return row
+    try:
+        return list(row)
+    except TypeError:
+        return row
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
