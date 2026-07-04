@@ -10,6 +10,7 @@ import numpy as np
 
 _SAMPLEINFO_ERROR = "sampleinfo must contain finite integer sample bounds."
 _PATCH_MARKER = "_neureptrace_fieldtrip_sampleinfo_validation_patched"
+_TOPLEVEL_SHARED_TIME_VECTOR_PATCH_MARKER = "_neureptrace_fieldtrip_shared_time_vector_patched"
 _IO_BOOL_PATCH_MARKER = "_neureptrace_io_fieldtrip_bool_config_patched"
 _IO_TRIAL_STACK_PATCH_MARKER = "_neureptrace_io_fieldtrip_trial_stack_patched"
 _IO_SHARED_TIME_VECTOR_PATCH_MARKER = "_neureptrace_io_fieldtrip_shared_time_vector_patched"
@@ -122,6 +123,25 @@ def _install_sampleinfo_patch() -> None:
 
     setattr(_sampleinfo_array, _PATCH_MARKER, True)
     fieldtrip_mat._sampleinfo_array = _sampleinfo_array
+
+
+def _install_top_level_shared_time_vector_patch() -> None:
+    import neureptrace.fieldtrip_mat as fieldtrip_mat
+
+    if getattr(fieldtrip_mat._times_to_array, _TOPLEVEL_SHARED_TIME_VECTOR_PATCH_MARKER, False):
+        return
+
+    original_times_to_array = fieldtrip_mat._times_to_array
+
+    def _times_to_array(cells: list[Any], *, n_trials: int, n_times: int) -> np.ndarray:
+        if len(cells) == 1 and n_trials > 1:
+            vector = np.asarray(fieldtrip_mat._unwrap_scalar_object(cells[0]), dtype=float).ravel()
+            if vector.size == n_times:
+                cells = [vector.copy() for _ in range(n_trials)]
+        return original_times_to_array(cells, n_trials=n_trials, n_times=n_times)
+
+    setattr(_times_to_array, _TOPLEVEL_SHARED_TIME_VECTOR_PATCH_MARKER, True)
+    fieldtrip_mat._times_to_array = _times_to_array
 
 
 def _candidate_time_lengths(io_fieldtrip_mat: Any, value: Any) -> set[int]:
@@ -331,6 +351,7 @@ def install() -> None:
     """Install strict FieldTrip validation patches."""
 
     _install_sampleinfo_patch()
+    _install_top_level_shared_time_vector_patch()
     _install_io_shared_time_vector_patch()
     _install_io_trial_stack_patch()
     _install_io_bool_config_patch()
