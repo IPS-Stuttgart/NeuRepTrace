@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,10 +40,11 @@ class WindowedDecodingResult:
 
 
 FitModel = Callable[[np.ndarray, np.ndarray], Any]
+FeatureRows = Iterable[Sequence[float]] | np.ndarray
 
 
 def fit_window_model(
-    train_features: Sequence[Sequence[float]] | np.ndarray,
+    train_features: FeatureRows,
     train_labels: Sequence | np.ndarray,
     *,
     fit_model: FitModel,
@@ -79,7 +80,7 @@ def fit_window_model(
 
 def transform_window_features(
     model_bundle: WindowedModelBundle,
-    features: Sequence[Sequence[float]] | np.ndarray,
+    features: FeatureRows,
 ) -> np.ndarray:
     """Apply the fitted PCA transform from a windowed model bundle."""
 
@@ -93,7 +94,7 @@ def transform_window_features(
 
 def predict_window_model(
     model_bundle: WindowedModelBundle,
-    features: Sequence[Sequence[float]] | np.ndarray,
+    features: FeatureRows,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Predict labels and confidence-like scores for a precomputed feature window."""
 
@@ -104,9 +105,9 @@ def predict_window_model(
 
 
 def score_windowed_decoding(
-    train_features: Sequence[Sequence[float]] | np.ndarray,
+    train_features: FeatureRows,
     train_labels: Sequence | np.ndarray,
-    validation_features: Sequence[Sequence[float]] | np.ndarray,
+    validation_features: FeatureRows,
     validation_labels: Sequence | np.ndarray,
     *,
     fit_model: FitModel,
@@ -176,9 +177,9 @@ def score_windowed_decoding(
 
 
 def permutation_accuracy_curve(
-    train_features: Sequence[Sequence[float]] | np.ndarray,
+    train_features: FeatureRows,
     *,
-    validation_features: Sequence[Sequence[float]] | np.ndarray,
+    validation_features: FeatureRows,
     validation_labels: Sequence | np.ndarray,
     train_labels: Sequence | np.ndarray,
     fit_model: FitModel,
@@ -200,9 +201,9 @@ def permutation_accuracy_curve(
 
 
 def permutation_score_curves(
-    train_features: Sequence[Sequence[float]] | np.ndarray,
+    train_features: FeatureRows,
     *,
-    validation_features: Sequence[Sequence[float]] | np.ndarray,
+    validation_features: FeatureRows,
     validation_labels: Sequence | np.ndarray,
     train_labels: Sequence | np.ndarray,
     fit_model: FitModel,
@@ -338,8 +339,18 @@ def _pca_components_error_message() -> str:
     return "components_pca must be a positive integer count, a float in (0, 1) explained-variance ratio, or None/infinity to disable PCA."
 
 
-def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(features, dtype=float)
+def _feature_matrix(features: FeatureRows, *, name: str) -> np.ndarray:
+    if isinstance(features, np.ndarray):
+        matrix = np.asarray(features, dtype=float)
+    else:
+        try:
+            rows = list(features)
+        except TypeError as exc:
+            raise ValueError(f"{name} must be a two-dimensional feature matrix.") from exc
+        try:
+            matrix = np.asarray(rows, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a two-dimensional numeric feature matrix.") from exc
     if matrix.ndim != 2:
         raise ValueError(f"{name} must be a two-dimensional feature matrix.")
     if matrix.shape[0] == 0:
