@@ -230,7 +230,7 @@ def build_emission_comparison_report(comparison: pd.DataFrame, *, summary_csv: P
     for row in comparison.itertuples(index=False):
         lines.append(
             f"| {row.decoder} | {row.preferred_emission_mode} | {_format_float(row.delta_control_margin)} | "
-            f"{_format_float(row.calibrated_control_margin)} | { _format_float(row.uncalibrated_control_margin)} | "
+            f"{_format_float(row.calibrated_control_margin)} | {_format_float(row.uncalibrated_control_margin)} | "
             f"{_format_float(row.delta_effect_minus_baseline_gain)} | {_format_float(row.calibrated_shuffled_time_p)} | "
             f"{_format_float(row.uncalibrated_shuffled_time_p)} |"
         )
