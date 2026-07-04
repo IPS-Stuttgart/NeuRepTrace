@@ -1,4 +1,4 @@
-"""Normalize optional random-state values for generative augmentation configs."""
+"""Normalize generative augmentation config values and feature matrices."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from typing import Any
 import numpy as np
 
 _INSTALLED = False
-_PATCH_MARKER = "_neureptrace_generative_augmentation_random_state_patch_installed"
+_CONFIG_PATCH_MARKER = "_neureptrace_generative_augmentation_random_state_patch_installed"
+_FEATURE_PATCH_MARKER = "_neureptrace_generative_augmentation_finite_feature_patch_installed"
 
 
 def _random_state_error(name: str) -> ValueError:
@@ -50,7 +51,7 @@ def _normalize_optional_nonnegative_int(value: Any, *, name: str = "random_state
 
 
 def install() -> None:
-    """Patch generative augmentation config random-state normalization."""
+    """Patch generative augmentation config and feature-matrix normalization."""
 
     global _INSTALLED
     if _INSTALLED:
@@ -58,19 +59,31 @@ def install() -> None:
 
     module = importlib.import_module("neureptrace.decoding.generative_augmentation")
     original_config = module.generative_augmentation_config
-    if getattr(original_config, _PATCH_MARKER, False):
-        _INSTALLED = True
-        return
+    if not getattr(original_config, _CONFIG_PATCH_MARKER, False):
 
-    @wraps(original_config)
-    def generative_augmentation_config(*args: Any, **kwargs: Any):
-        if "random_state" in kwargs:
-            kwargs = dict(kwargs)
-            kwargs["random_state"] = _normalize_optional_nonnegative_int(kwargs["random_state"], name="random_state")
-        return original_config(*args, **kwargs)
+        @wraps(original_config)
+        def generative_augmentation_config(*args: Any, **kwargs: Any):
+            if "random_state" in kwargs:
+                kwargs = dict(kwargs)
+                kwargs["random_state"] = _normalize_optional_nonnegative_int(kwargs["random_state"], name="random_state")
+            return original_config(*args, **kwargs)
 
-    setattr(generative_augmentation_config, _PATCH_MARKER, True)
-    module.generative_augmentation_config = generative_augmentation_config
+        setattr(generative_augmentation_config, _CONFIG_PATCH_MARKER, True)
+        module.generative_augmentation_config = generative_augmentation_config
+
+    original_feature_matrix = module._feature_matrix
+    if not getattr(original_feature_matrix, _FEATURE_PATCH_MARKER, False):
+
+        @wraps(original_feature_matrix)
+        def _feature_matrix(features: Any, *, name: str):
+            matrix = original_feature_matrix(features, name=name)
+            if not np.all(np.isfinite(matrix)):
+                raise ValueError(f"{name} must contain only finite values.")
+            return matrix
+
+        setattr(_feature_matrix, _FEATURE_PATCH_MARKER, True)
+        module._feature_matrix = _feature_matrix
+
     _INSTALLED = True
 
 
