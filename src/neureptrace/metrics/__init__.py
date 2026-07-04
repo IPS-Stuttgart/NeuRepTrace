@@ -73,6 +73,13 @@ def _validate_positive_finite_float(value: object, name: str) -> float:
     return numeric
 
 
+def _validate_probability_floor(value: object, name: str) -> float:
+    numeric = _coerce_numeric_scalar(value, name, "a finite probability floor in (0, 1]")
+    if not np.isfinite(numeric) or numeric <= 0.0 or numeric > 1.0:
+        raise ValueError(f"{name} must be a finite probability floor in (0, 1]")
+    return numeric
+
+
 def _validate_positive_integer(value: object, name: str) -> int:
     numeric = _coerce_numeric_scalar(value, name, "a positive integer")
     if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
@@ -262,7 +269,7 @@ def negative_log_likelihood(probabilities: np.ndarray, labels: np.ndarray, *, ep
     """Compute mean categorical negative log-likelihood from probabilities."""
     probabilities, labels = validate_probability_inputs(probabilities, labels)
     assert labels is not None
-    eps = _validate_positive_finite_float(eps, "eps")
+    eps = _validate_probability_floor(eps, "eps")
 
     true_probabilities = probabilities[np.arange(labels.shape[0]), labels]
     return float(-np.mean(np.log(np.clip(true_probabilities, eps, 1.0))))
