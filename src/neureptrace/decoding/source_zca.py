@@ -8,7 +8,7 @@ covariance, or whitening matrix.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,8 +59,8 @@ class SourceZCAResult:
 
 def fit_source_zca_transform(
     *,
-    source_features: Sequence[Sequence[float]] | np.ndarray,
-    test_features: Sequence[Sequence[float]] | np.ndarray,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    test_features: Iterable[Iterable[float]] | np.ndarray,
     config: SourceZCAConfig | Mapping[str, Any] | None = None,
 ) -> SourceZCAResult:
     """Fit source-only ZCA whitening and transform source/test rows."""
@@ -77,7 +77,7 @@ def fit_source_zca_transform(
     return SourceZCAResult(train_features=train.astype(np.float32, copy=False), test_features=test_out.astype(np.float32, copy=False), reference=reference, metadata=metadata)
 
 
-def fit_source_zca_reference(source_features: Sequence[Sequence[float]] | np.ndarray, *, config: SourceZCAConfig | Mapping[str, Any] | None = None) -> SourceZCAReference:
+def fit_source_zca_reference(source_features: Iterable[Iterable[float]] | np.ndarray, *, config: SourceZCAConfig | Mapping[str, Any] | None = None) -> SourceZCAReference:
     """Fit a ZCA reference from source rows only."""
 
     cfg = source_zca_config() if config is None else _coerce_config(config)
@@ -92,7 +92,7 @@ def fit_source_zca_reference(source_features: Sequence[Sequence[float]] | np.nda
     return SourceZCAReference(mean=mean.astype(float, copy=False), whitening=whitening.astype(np.float32, copy=False), coloring=coloring.astype(np.float32, copy=False), eigenvalues=values.astype(float, copy=False), config=cfg, n_fit_rows=int(source.shape[0]))
 
 
-def apply_source_zca_transform(features: Sequence[Sequence[float]] | np.ndarray, reference: SourceZCAReference) -> np.ndarray:
+def apply_source_zca_transform(features: Iterable[Iterable[float]] | np.ndarray, reference: SourceZCAReference) -> np.ndarray:
     """Apply a fitted source-only ZCA transform."""
 
     matrix = _feature_matrix(features, name="features")
@@ -146,8 +146,22 @@ def _metadata(cfg: SourceZCAConfig, *, n_source_rows: int, n_test_rows: int, fea
     }
 
 
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):

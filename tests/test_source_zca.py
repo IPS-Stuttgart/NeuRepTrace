@@ -40,6 +40,33 @@ def test_source_zca_reference_can_be_reused() -> None:
     assert np.allclose(direct, via_fit.test_features)
 
 
+def test_source_zca_accepts_one_pass_feature_iterables() -> None:
+    source_rows = ([0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0])
+    test_rows = ([0.5, 0.5], [2.0, 0.0])
+
+    result = fit_source_zca_transform(
+        source_features=(iter(row) for row in source_rows),
+        test_features=(iter(row) for row in test_rows),
+    )
+    reapplied = apply_source_zca_transform((iter(row) for row in test_rows), result.reference)
+
+    assert result.train_features.shape == (4, 2)
+    assert result.test_features.shape == (2, 2)
+    assert np.allclose(reapplied, result.test_features)
+
+
+def test_source_zca_accepts_object_arrays_with_one_pass_rows() -> None:
+    source = np.empty(4, dtype=object)
+    source[:] = [iter([0.0, 0.0]), iter([1.0, 0.0]), iter([0.0, 1.0]), iter([1.0, 1.0])]
+    test = np.empty(1, dtype=object)
+    test[:] = [iter([0.5, 0.5])]
+
+    result = fit_source_zca_transform(source_features=source, test_features=test)
+
+    assert result.train_features.shape == (4, 2)
+    assert result.test_features.shape == (1, 2)
+
+
 def test_source_zca_recolor_approximately_restores_centered_source() -> None:
     source = np.asarray([[0.0, 0.0], [1.0, 0.2], [0.2, 1.0], [1.0, 1.0]], dtype=float)
     result = fit_source_zca_transform(source_features=source, test_features=source, config={"recolor": True})
