@@ -45,3 +45,12 @@ def test_row_l1_config_validation() -> None:
 
     with pytest.raises(ValueError, match="epsilon"):
         row_l1_config(epsilon=0.0)
+
+
+@pytest.mark.parametrize("epsilon", [True, np.bool_(True), np.asarray(True), np.asarray(True, dtype=object)])
+def test_row_l1_rejects_boolean_epsilon_values(epsilon: object) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        row_l1_config(epsilon=epsilon)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="epsilon"):
+        normalize_rows_l1([[1.0, 2.0]], epsilon=epsilon)  # type: ignore[arg-type]
