@@ -7,7 +7,7 @@ scored by nearest-source labels and are never used for fitting or adaptation.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -67,9 +67,9 @@ class SourceKNNResult:
 # pylint: disable-next=too-many-arguments
 def fit_source_knn_decoder(
     *,
-    source_features: Sequence[Sequence[float]] | np.ndarray,
-    source_labels: Sequence[Any] | np.ndarray,
-    test_features: Sequence[Sequence[float]] | np.ndarray,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    source_labels: Iterable[Any] | np.ndarray,
+    test_features: Iterable[Iterable[float]] | np.ndarray,
     config: SourceKNNConfig | Mapping[str, Any] | None = None,
 ) -> SourceKNNResult:
     """Fit source-only kNN reference and score held-out rows."""
@@ -92,8 +92,8 @@ def fit_source_knn_decoder(
 
 def fit_source_knn_reference(
     *,
-    source_features: Sequence[Sequence[float]] | np.ndarray,
-    source_labels: Sequence[Any] | np.ndarray,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    source_labels: Iterable[Any] | np.ndarray,
     config: SourceKNNConfig | Mapping[str, Any] | None = None,
 ) -> SourceKNNReference:
     """Store standardized source rows and labels for kNN scoring."""
@@ -122,7 +122,7 @@ def fit_source_knn_reference(
 
 
 def predict_source_knn_probabilities(
-    test_features: Sequence[Sequence[float]] | np.ndarray,
+    test_features: Iterable[Iterable[float]] | np.ndarray,
     reference: SourceKNNReference,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Predict class probabilities from a fitted source-only kNN reference."""
@@ -250,8 +250,22 @@ def _squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     return np.maximum(left_norm + right_norm - 2.0 * (left @ right.T), 0.0)
 
 
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -259,14 +273,14 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int) -> np.ndarray:
+def _label_vector(values: Iterable[Any] | np.ndarray, *, expected_length: int) -> np.ndarray:
     labels = _as_label_vector(values, name="source_labels")
     if labels.shape[0] != expected_length:
         raise ValueError(f"source_labels must contain one value per source row: {labels.shape[0]} != {expected_length}.")
     return labels
 
 
-def _as_label_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
+def _as_label_vector(values: Iterable[Any] | np.ndarray, *, name: str) -> np.ndarray:
     """Return a one-dimensional object vector without expanding composite labels."""
 
     if isinstance(values, np.ndarray):

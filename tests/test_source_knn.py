@@ -83,6 +83,34 @@ def test_knn_reference_can_be_reused() -> None:
     assert np.allclose(probabilities.sum(axis=1), 1.0)
 
 
+def test_source_knn_accepts_one_pass_feature_iterables() -> None:
+    result = fit_source_knn_decoder(
+        source_features=(iter(row) for row in ([-2.0, 0.0], [-1.5, 0.1], [1.5, 0.0], [2.0, 0.1])),
+        source_labels=(label for label in ("left", "left", "right", "right")),
+        test_features=(iter(row) for row in ([-1.8, 0.0], [1.8, 0.0])),
+        config={"k": 1, "standardize": False},
+    )
+
+    assert result.predictions.tolist() == ["left", "right"]
+    np.testing.assert_allclose(result.probabilities, [[1.0, 0.0], [0.0, 1.0]])
+    assert result.metadata["source_knn_n_source_rows"] == 4
+    assert result.metadata["source_knn_n_test_rows"] == 2
+
+    reference = fit_source_knn_reference(
+        source_features=(iter(row) for row in ([-2.0], [-1.5], [1.5], [2.0])),
+        source_labels=["left", "left", "right", "right"],
+        config={"k": 1, "standardize": False},
+    )
+    probabilities, indices, distances = predict_source_knn_probabilities(
+        (iter(row) for row in ([-1.8], [1.8])),
+        reference,
+    )
+
+    np.testing.assert_allclose(probabilities, [[1.0, 0.0], [0.0, 1.0]])
+    assert indices.shape == (2, 1)
+    assert distances.shape == (2, 1)
+
+
 def test_k_all_uses_all_source_rows() -> None:
     result = fit_source_knn_decoder(
         source_features=[[0.0], [1.0], [2.0], [3.0]],
