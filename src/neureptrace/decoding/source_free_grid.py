@@ -35,11 +35,21 @@ def fit_source_free_grid_predict_proba(
 ) -> SourceFreeGridResult:
     """Pick a source-free variant with an unlabeled probability-shape score."""
 
+    confidence_threshold_grid = _candidate_values(confidence_thresholds, name="confidence_thresholds")
+    prototype_weight_grid = _candidate_values(prototype_weights, name="prototype_weights")
+    prior_strength_grid = _candidate_values(prior_strengths, name="prior_strengths")
+    selection_grid = _candidate_values(pseudo_label_selections, name="pseudo_label_selections")
+    topk_grid = _candidate_values(balanced_topk_per_class_values, name="balanced_topk_per_class_values", allow_none=True)
+
     rows: list[dict[str, Any]] = []
     best_probabilities: np.ndarray | None = None
     best_metadata: dict[str, Any] | None = None
     for threshold, prototype_weight, prior_strength, selection, topk in product(
-        tuple(confidence_thresholds), tuple(prototype_weights), tuple(prior_strengths), tuple(pseudo_label_selections), tuple(balanced_topk_per_class_values)
+        confidence_threshold_grid,
+        prototype_weight_grid,
+        prior_strength_grid,
+        selection_grid,
+        topk_grid,
     ):
         if selection == "confidence" and topk is not None:
             continue
@@ -71,7 +81,15 @@ def fit_source_free_grid_predict_proba(
             "source_free_grid_prior": format_target_prior(prior),
             "source_free_grid_selected_score": float(score),
         }
-        row = {"score": float(score), "selection": selection, "topk": topk, "threshold": float(threshold), "prototype_weight": float(prototype_weight), "prior_strength": float(prior_strength), **terms}
+        row = {
+            "score": float(score),
+            "selection": selection,
+            "topk": topk,
+            "threshold": float(threshold),
+            "prototype_weight": float(prototype_weight),
+            "prior_strength": float(prior_strength),
+            **terms,
+        }
         rows.append(row)
         if best_metadata is None or score > float(best_metadata["source_free_grid_selected_score"]):
             best_metadata = metadata
@@ -92,6 +110,39 @@ def score_probability_shape(probabilities: np.ndarray, *, active_classes: int = 
     active_fraction = float(min(max(active_classes, 0), n_classes) / n_classes)
     score = marginal_entropy + 0.5 * active_fraction + 0.25 * confidence - 0.1 * row_entropy
     return float(score), {"marginal_entropy": marginal_entropy, "row_entropy": row_entropy, "confidence": confidence, "active_fraction": active_fraction}
+
+
+def _candidate_values(values: Any, *, name: str, allow_none: bool = False) -> tuple[Any, ...]:
+    """Return a non-empty candidate tuple without splitting string scalars.
+
+    Source-free grid options are often supplied from YAML/JSON configs where a
+    single value is represented as a scalar.  Treat such scalars as one-element
+    grids; notably, strings must not be converted with ``tuple(value)`` because
+    that would iterate over characters instead of selection names.
+    """
+
+    if values is None:
+        if allow_none:
+            return (None,)
+        raise ValueError(f"{name} must contain at least one candidate")
+    if isinstance(values, (str, bytes)):
+        return (values,)
+    if isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            return (values.item(),)
+        if values.ndim != 1:
+            raise ValueError(f"{name} must be a scalar or one-dimensional sequence")
+        candidates = tuple(values.tolist())
+    elif isinstance(values, np.generic):
+        candidates = (values.item(),)
+    else:
+        try:
+            candidates = tuple(values)
+        except TypeError:
+            candidates = (values,)
+    if not candidates:
+        raise ValueError(f"{name} must contain at least one candidate")
+    return candidates
 
 
 def _normalize(probabilities: np.ndarray) -> np.ndarray:
