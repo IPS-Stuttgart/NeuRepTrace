@@ -106,7 +106,7 @@ def calibrated_prototype_config(
 ) -> CalibratedPrototypeConfig:
     """Normalize calibrated prototype options."""
 
-    fixed = None if fixed_calibration_weight in {None, "", "none", "None"} else _unit_interval_float(fixed_calibration_weight, name="fixed_calibration_weight")
+    fixed = _optional_unit_interval_float(fixed_calibration_weight, name="fixed_calibration_weight")
     return CalibratedPrototypeConfig(
         prior_strength=_positive_float(prior_strength, name="prior_strength"),
         fixed_calibration_weight=fixed,
@@ -114,6 +114,21 @@ def calibrated_prototype_config(
         diagonal_scale=bool(diagonal_scale),
         epsilon=_positive_float(epsilon, name="epsilon"),
     )
+
+
+def _optional_unit_interval_float(value: Any, *, name: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be in [0, 1] or omitted.")
+        return _optional_unit_interval_float(value.item(), name=name)
+    if isinstance(value, str):
+        text = value.strip()
+        if text == "" or text.lower() == "none":
+            return None
+        return _unit_interval_float(text, name=name)
+    return _unit_interval_float(value, name=name)
 
 
 def _coerce_config(config: CalibratedPrototypeConfig | Mapping[str, Any]) -> CalibratedPrototypeConfig:
