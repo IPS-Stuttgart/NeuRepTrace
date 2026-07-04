@@ -146,6 +146,8 @@ def _classes(labels: np.ndarray, classes: Sequence[Any] | np.ndarray | None) -> 
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, n_classes: int, epsilon: float) -> np.ndarray:
+    if _contains_boolean_value(values):
+        raise ValueError("probabilities must not contain boolean values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] != n_classes:
         raise ValueError(f"probabilities must have shape n_rows x {n_classes}.")
@@ -153,6 +155,8 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, n_cla
 
 
 def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.ndarray:
+    if _contains_boolean_value(values):
+        raise ValueError("probability rows must not contain boolean values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probability rows must be finite and non-negative.")
@@ -160,6 +164,24 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     if np.any(row_sums <= 0.0):
         raise ValueError("probability rows must have positive mass.")
     return matrix / row_sums
+
+
+def _contains_boolean_value(values: Any) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_value(item) for item in values.flat)
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return False
+    return any(_contains_boolean_value(item) for item in iterator)
 
 
 def _normalize_probability_vector(values: np.ndarray, *, epsilon: float) -> np.ndarray:
