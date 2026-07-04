@@ -97,6 +97,17 @@ def _validate_sample_weights(*, n_samples: int, class_labels: np.ndarray, class_
     return weights
 
 
+def _positive_class_vector(values: Sequence[float] | np.ndarray, *, source: str) -> np.ndarray:
+    scores = np.asarray(values, dtype=float)
+    if scores.ndim == 1:
+        return scores
+    if scores.ndim != 2:
+        raise ValueError(f"{source} must return a one- or two-dimensional score array.")
+    if scores.shape[1] < 2:
+        raise ValueError(f"{source} must expose at least two class columns for positive-class scoring.")
+    return scores[:, 1]
+
+
 def install() -> None:
     classifiers = importlib.import_module("neureptrace.decoding.classifiers")
     _patch_calibration_split_label_equality()
@@ -142,7 +153,20 @@ def install() -> None:
             return scores
         return original_decision_function(self, features)
 
+    def positive_class_score(model: Any, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+        """Return a one-dimensional binary score for the positive class."""
+
+        features_array = np.asarray(features, dtype=float)
+        if features_array.ndim != 2:
+            raise ValueError("features must be a two-dimensional feature matrix.")
+        if hasattr(model, "decision_function"):
+            return _positive_class_vector(model.decision_function(features_array), source="decision_function")
+        if hasattr(model, "predict_proba"):
+            return _positive_class_vector(model.predict_proba(features_array), source="predict_proba")
+        return np.asarray(model.predict(features_array), dtype=float).reshape(-1)
+
     classifiers.encode_classifier_labels = encode_classifier_labels
     classifiers.CorrelationPrototypeClassifier.fit = fit
     classifiers.DecodedLabelClassifier.decision_function = decision_function
+    classifiers.positive_class_score = positive_class_score
     setattr(classifiers, _PATCH_MARKER, True)
