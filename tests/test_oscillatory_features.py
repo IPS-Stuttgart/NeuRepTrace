@@ -46,6 +46,28 @@ def test_compute_band_features_accepts_numpy_integer_axes() -> None:
     assert len(rows) == data.shape[0]
 
 
+def test_compute_band_features_accepts_single_window_tuple() -> None:
+    data, time = _fixture()
+
+    rows = compute_band_features(data, time, windows=(-0.25, 0.25), outputs=("mean_power",))
+
+    assert len(rows) == data.shape[0]
+    assert {row["window"] for row in rows} == {"window"}
+    assert rows[0]["time_window_start"] == pytest.approx(-0.25)
+    assert rows[0]["time_window_stop"] == pytest.approx(0.25)
+
+
+def test_compute_band_features_accepts_single_named_window_tuple() -> None:
+    data, time = _fixture()
+
+    rows = compute_band_features(data, time, windows=("response", -0.25, 0.25), outputs=("mean_power",))
+
+    assert len(rows) == data.shape[0]
+    assert {row["window"] for row in rows} == {"response"}
+    assert rows[0]["time_window_start"] == pytest.approx(-0.25)
+    assert rows[0]["time_window_stop"] == pytest.approx(0.25)
+
+
 @pytest.mark.parametrize(
     "window",
     [
