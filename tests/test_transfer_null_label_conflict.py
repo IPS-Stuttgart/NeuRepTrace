@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from neureptrace.decoding.transfer import append_null_class_features, cross_validate_feature_decoding
 
@@ -25,13 +24,17 @@ def test_cross_validate_feature_decoding_preserves_observed_zero_label_without_n
     assert result.accuracy == 0.5
 
 
-def test_append_null_class_features_rejects_ambiguous_observed_null_label():
-    with pytest.raises(ValueError, match="null_label must not overlap observed labels"):
-        append_null_class_features(
-            np.array([[-2.0], [2.0]]),
-            np.array([0, 1]),
-            np.array([[0.1], [0.2]]),
-        )
+def test_append_null_class_features_uses_unused_label_for_conflicting_default():
+    features, labels = append_null_class_features(
+        np.array([[-2.0], [2.0]]),
+        np.array([0, 1]),
+        np.array([[0.1], [0.2]]),
+    )
+
+    assert features.tolist() == [[-2.0], [2.0], [0.1], [0.2]]
+    assert labels[:2].tolist() == [0, 1]
+    assert labels[2] == labels[3]
+    assert labels[2] not in {0, 1}
 
 
 def test_append_null_class_features_allows_disjoint_null_label_for_zero_based_classes():
