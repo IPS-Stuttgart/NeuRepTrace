@@ -50,6 +50,31 @@ def _int_value(row: pd.Series, column: str, default: int) -> int:
     return int_value
 
 
+def _bool_value(row: pd.Series, column: str, default: bool = False) -> bool:
+    """Return a tolerant boolean value from manifest cells."""
+
+    if column not in row or _missing(row[column]):
+        return default
+
+    value = row[column]
+    if isinstance(value, bool):
+        return value
+
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+
+    try:
+        numeric_value = float(text)
+    except ValueError:
+        return default
+    if math.isfinite(numeric_value) and numeric_value in {0.0, 1.0}:
+        return bool(numeric_value)
+    return default
+
+
 def _resolve(value: str | None, base_dir: Path) -> Path | None:
     if value is None:
         return None
@@ -86,7 +111,7 @@ def _load_metadata_for_row(row: pd.Series, base_dir: Path) -> tuple[pd.DataFrame
                 label_column=label_column,
                 positive_label=_value(row, "positive_label", "positive") or "positive",
                 negative_label=_value(row, "negative_label", "negative") or "negative",
-                case_sensitive=(_value(row, "case_sensitive") or "").lower() in {"1", "true", "yes", "y"},
+                case_sensitive=_bool_value(row, "case_sensitive", default=False),
             )
         except ValueError as exc:
             return None, [str(exc)]
