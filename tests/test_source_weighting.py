@@ -204,3 +204,11 @@ def test_target_similarity_rejects_nonfinite_source_features(bad_source_features
 
     with pytest.raises(ValueError, match="finite"):
         target_similarity_scores(source_features, target_features)
+
+
+def test_target_similarity_rejects_feature_width_mismatch():
+    source_features = {"wide": np.asarray([[1.0, 0.0, 0.5], [0.9, 0.1, 0.4]])}
+    target_features = np.asarray([[1.0, 0.0], [1.1, -0.1]])
+
+    with pytest.raises(ValueError, match="same feature width"):
+        target_similarity_scores(source_features, target_features)
