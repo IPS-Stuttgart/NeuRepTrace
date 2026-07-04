@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from functools import wraps
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_openneuro_decode_diagnostics_scalar_bool_patch_installed"
@@ -13,7 +14,14 @@ _TRUE_TOKENS = {"1", "true", "yes", "y", "on"}
 _FALSE_TOKENS = {"0", "false", "no", "n", "off"}
 
 
+def _unbox_zero_dim_array(value: Any) -> Any:
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return value.item()
+    return value
+
+
 def _is_missing_scalar(value: Any) -> bool:
+    value = _unbox_zero_dim_array(value)
     if value is None:
         return True
     if isinstance(value, str):
@@ -24,10 +32,14 @@ def _is_missing_scalar(value: Any) -> bool:
         missing = pd.isna(value)
     except (TypeError, ValueError):
         return False
-    return bool(missing) if isinstance(missing, bool) else False
+    try:
+        return bool(missing)
+    except (TypeError, ValueError):
+        return False
 
 
 def _tokenize_bool_values(value: Any) -> list[Any]:
+    value = _unbox_zero_dim_array(value)
     if _is_missing_scalar(value):
         return []
     if isinstance(value, str):
