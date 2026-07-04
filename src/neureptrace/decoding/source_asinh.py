@@ -27,6 +27,13 @@ class SourceAsinhConfig:
     multiplier: float = 1.0
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize direct dataclass construction consistently with the config helper."""
+
+        object.__setattr__(self, "scale_mode", normalize_scale_mode(self.scale_mode))
+        object.__setattr__(self, "multiplier", _positive_float(self.multiplier, name="multiplier"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceAsinhMap:
@@ -190,10 +197,22 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
+    message = f"{name} must be positive and finite."
+    scalar = _scalar_numeric_value(value, message=message)
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(message)
     try:
-        parsed = float(value)
+        parsed = float(scalar)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive and finite.") from exc
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
+
+
+def _scalar_numeric_value(value: Any, *, message: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return value.item()
+    return value
