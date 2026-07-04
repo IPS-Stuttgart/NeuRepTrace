@@ -62,6 +62,28 @@ def test_source_minmax_reference_can_be_reused() -> None:
     assert np.allclose(transformed.ravel(), np.asarray([0.5]))
 
 
+def test_source_minmax_accepts_one_pass_feature_iterables() -> None:
+    source = (iter(row) for row in ([0.0, 10.0], [2.0, 20.0]))
+    test = (iter(row) for row in ([1.0, 15.0],))
+
+    result = fit_source_minmax_transform(source_features=source, test_features=test)
+
+    assert np.allclose(result.train_features, np.asarray([[0.0, 0.0], [1.0, 1.0]]))
+    assert np.allclose(result.test_features, np.asarray([[0.5, 0.5]], dtype=np.float32))
+    assert result.metadata["source_minmax_n_source_rows"] == 2
+    assert result.metadata["source_minmax_n_test_rows"] == 1
+
+
+def test_source_minmax_accepts_object_arrays_containing_generator_rows() -> None:
+    source = np.asarray([iter([0.0, 10.0]), iter([2.0, 20.0])], dtype=object)
+    reference = fit_source_minmax_reference(source)
+
+    transformed = apply_source_minmax_transform(np.asarray([iter([1.0, 15.0])], dtype=object), reference)
+
+    assert transformed.shape == (1, 2)
+    assert np.allclose(transformed, np.asarray([[0.5, 0.5]], dtype=np.float32))
+
+
 def test_source_minmax_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_minmax_transform(source_features=[[0.0, 1.0]], test_features=[[0.0]])
