@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_minmax import (
     SOURCE_MINMAX_CATEGORY,
+    SourceMinMaxReference,
     apply_source_minmax_transform,
     fit_source_minmax_reference,
     fit_source_minmax_transform,
@@ -86,6 +87,25 @@ def test_source_minmax_rejects_bad_range() -> None:
 def test_source_minmax_rejects_malformed_or_boolean_ranges(feature_range: object) -> None:
     with pytest.raises(ValueError, match="feature_range"):
         fit_source_minmax_reference([[0.0], [1.0]], feature_range=feature_range)
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        SourceMinMaxReference(minimum=[0.0], maximum=[np.inf], feature_range=(0.0, 1.0), n_fit_rows=2),
+        SourceMinMaxReference(minimum=[0.0, 1.0], maximum=[1.0], feature_range=(0.0, 1.0), n_fit_rows=2),
+    ],
+)
+def test_source_minmax_rejects_invalid_reused_reference(reference: SourceMinMaxReference) -> None:
+    with pytest.raises(ValueError, match="source minmax reference bounds"):
+        apply_source_minmax_transform([[0.5]], reference)
+
+
+def test_source_minmax_rejects_reused_reference_bad_range() -> None:
+    reference = SourceMinMaxReference(minimum=[0.0], maximum=[1.0], feature_range=(1.0, 0.0), n_fit_rows=2)
+
+    with pytest.raises(ValueError, match="feature_range"):
+        apply_source_minmax_transform([[0.5]], reference)
 
 
 def test_heldout_labels_are_not_part_of_public_api() -> None:

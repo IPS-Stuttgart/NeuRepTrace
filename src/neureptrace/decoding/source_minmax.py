@@ -10,23 +10,9 @@ import numpy as np
 SOURCE_MINMAX_PROTOCOL = "strict_source_only_minmax_scaling"
 SOURCE_MINMAX_CATEGORY = "1_strict_source_only"
 _RANGE_ERROR = "feature_range must contain exactly two finite numeric non-boolean values with low < high."
-_REF_HIGH_FIELD = "max" + "imum"
-_ReferenceBase = namedtuple("Ref", ("minimum", _REF_HIGH_FIELD, "feature_range", "n_fit_rows"))
-_ResultBase = namedtuple("Result", ("train_features", "test_features", "reference", "metadata"))
-
-
-def _make_reference(*args, **kwargs):
-    if "upper" in kwargs and _REF_HIGH_FIELD not in kwargs:
-        kwargs[_REF_HIGH_FIELD] = kwargs.pop("upper")
-    return _ReferenceBase(*args, **kwargs)
-
-
-def _make_result(train_features, test_features, reference, metadata=None):
-    return _ResultBase(train_features, test_features, reference, {} if metadata is None else metadata)
-
-
-globals()["Source" + "MinMaxReference"] = _make_reference
-globals()["Source" + "MinMaxResult"] = _make_result
+_REFERENCE_ERROR = "source minmax reference bounds must be one-dimensional finite arrays with matching widths."
+SourceMinMaxReference = namedtuple("SourceMinMaxReference", ("minimum", "maximum", "feature_range", "n_fit_rows"))
+SourceMinMaxResult = namedtuple("SourceMinMaxResult", ("train_features", "test_features", "reference", "metadata"))
 
 
 def fit_source_minmax_transform(*, source_features, test_features, feature_range=(0.0, 1.0)):
@@ -52,24 +38,24 @@ def fit_source_minmax_transform(*, source_features, test_features, feature_range
         "source_minmax_range_low": float(reference.feature_range[0]),
         "source_minmax_range_high": float(reference.feature_range[1]),
     }
-    return _make_result(train, test_out, reference, metadata)
+    return SourceMinMaxResult(train, test_out, reference, metadata)
 
 
 def fit_source_minmax_reference(source_features, *, feature_range=(0.0, 1.0)):
     source = _matrix(source_features, name="source_features")
     low, high = _range(feature_range)
-    return _make_reference(minimum=np.min(source, axis=0), upper=np.amax(source, axis=0), feature_range=(low, high), n_fit_rows=int(source.shape[0]))
+    return SourceMinMaxReference(minimum=np.min(source, axis=0), maximum=np.amax(source, axis=0), feature_range=(low, high), n_fit_rows=int(source.shape[0]))
 
 
 def apply_source_minmax_transform(features, reference) -> np.ndarray:
     matrix = _matrix(features, name="features")
-    high_values = getattr(reference, _REF_HIGH_FIELD)
-    if matrix.shape[1] != reference.minimum.shape[0] or matrix.shape[1] != high_values.shape[0]:
+    minimum, maximum, feature_range = _reference_parts(reference)
+    if matrix.shape[1] != minimum.shape[0]:
         raise ValueError("features width must match source minmax reference.")
-    data_range = high_values - reference.minimum
+    data_range = maximum - minimum
     denom = np.where(data_range > 0.0, data_range, 1.0)
-    low, high = reference.feature_range
-    scaled = (matrix - reference.minimum) / denom
+    low, high = feature_range
+    scaled = (matrix - minimum) / denom
     return (scaled * (high - low) + low).astype(np.float32, copy=False)
 
 
@@ -80,6 +66,17 @@ def _matrix(values, *, name: str) -> np.ndarray:
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain finite values.")
     return matrix
+
+
+def _reference_parts(reference) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
+    minimum = np.asarray(reference.minimum, dtype=float).reshape(-1)
+    maximum = np.asarray(reference.maximum, dtype=float).reshape(-1)
+    if minimum.shape[0] < 1 or maximum.shape[0] != minimum.shape[0]:
+        raise ValueError(_REFERENCE_ERROR)
+    if not np.all(np.isfinite(minimum)) or not np.all(np.isfinite(maximum)):
+        raise ValueError(_REFERENCE_ERROR)
+    feature_range = _range(reference.feature_range)
+    return minimum, maximum, feature_range
 
 
 def _range(values) -> tuple[float, float]:
