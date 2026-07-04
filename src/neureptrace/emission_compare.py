@@ -160,10 +160,10 @@ def compare_emission_modes(summary: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for decoder, decoder_frame in summary.groupby("decoder", sort=True):
         modes = {mode: frame for mode, frame in decoder_frame.groupby("emission_mode", sort=True)}
+        for emission_mode, mode_frame in modes.items():
+            _validate_emission_mode_frame(mode_frame, decoder=str(decoder), emission_mode=str(emission_mode))
         if not all(mode in modes for mode in PAIRED_EMISSION_MODES):
             continue
-        for emission_mode in PAIRED_EMISSION_MODES:
-            _validate_emission_mode_frame(modes[emission_mode], decoder=str(decoder), emission_mode=emission_mode)
         calibrated = summarize_emission_mode(modes["calibrated"])
         uncalibrated = summarize_emission_mode(modes["uncalibrated"])
         delta_control_margin = calibrated["control_margin"] - uncalibrated["control_margin"]
