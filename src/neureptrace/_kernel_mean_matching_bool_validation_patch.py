@@ -1,19 +1,50 @@
-"""Runtime patch for strict KMM numeric parameter validation."""
+"""Runtime patch for strict KMM parameter validation."""
 
 from __future__ import annotations
 
 from functools import wraps
+from numbers import Integral
 from typing import Any
 
 import numpy as np
 
 _GAMMA_ERROR = "KMM gamma must be positive and finite, or one of: median, auto, scale."
 _EPSILON_ERROR = "KMM epsilon must be finite and non-negative, 'auto', or None."
+_TRUE_STRINGS = {"1", "true", "yes", "y", "on", "enable", "enabled"}
+_FALSE_STRINGS = {"0", "false", "no", "n", "off", "disable", "disabled", "none"}
 _PATCH_MARKER = "_neureptrace_kmm_bool_validation_patched"
 
 
 def _is_boolean(value: Any) -> bool:
     return isinstance(value, (bool, np.bool_))
+
+
+def _scalar_control(value: Any, *, name: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.shape != ():
+            raise ValueError(f"KMM {name} must be a boolean value.")
+        return value.item()
+    return value
+
+
+def _normalize_bool_control(value: Any, *, name: str) -> bool:
+    value = _scalar_control(value, name=name)
+    if value is None:
+        return False
+    if _is_boolean(value):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower().replace("-", "_")
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS or normalized == "":
+            return False
+        raise ValueError(f"KMM {name} must be a boolean value.")
+    if isinstance(value, Integral):
+        parsed = int(value)
+        if parsed in {0, 1}:
+            return bool(parsed)
+    raise ValueError(f"KMM {name} must be a boolean value.")
 
 
 def _validate_box_sum_constraints(*, n_source: int, max_weight: float, epsilon: float | None) -> None:
@@ -30,7 +61,7 @@ def _validate_box_sum_constraints(*, n_source: int, max_weight: float, epsilon: 
 
 
 def install() -> None:
-    """Reject invalid KMM numeric parameters before Python coerces them to floats."""
+    """Reject invalid KMM numeric and boolean parameters before Python coerces them."""
 
     from neureptrace.decoding import kernel_mean_matching as kmm
 
@@ -79,17 +110,22 @@ def install() -> None:
             regularization=regularization,
             max_iter=max_iter,
             tol=tol,
-            normalize=normalize,
-            class_balance=class_balance,
+            normalize=_normalize_bool_control(normalize, name="normalize"),
+            class_balance=_normalize_bool_control(class_balance, name="class_balance"),
         )
 
     @wraps(original_kernel_mean_matching_weights)
     def kernel_mean_matching_weights(source_features: Any, target_features: Any, **kwargs: Any) -> kmm.KernelMeanMatchingResult:
+        patched_kwargs = dict(kwargs)
+        if "normalize" in patched_kwargs:
+            patched_kwargs["normalize"] = _normalize_bool_control(patched_kwargs["normalize"], name="normalize")
+        if "class_balance" in patched_kwargs:
+            patched_kwargs["class_balance"] = _normalize_bool_control(patched_kwargs["class_balance"], name="class_balance")
         source = kmm._feature_matrix(source_features, name="source_features")
-        max_weight_value = kmm._positive_float(kwargs.get("max_weight", kmm.DEFAULT_KMM_MAX_WEIGHT), name="max_weight")
-        epsilon_value = normalize_kmm_epsilon(kwargs.get("epsilon", kmm.DEFAULT_KMM_EPSILON), n_source=source.shape[0])
+        max_weight_value = kmm._positive_float(patched_kwargs.get("max_weight", kmm.DEFAULT_KMM_MAX_WEIGHT), name="max_weight")
+        epsilon_value = normalize_kmm_epsilon(patched_kwargs.get("epsilon", kmm.DEFAULT_KMM_EPSILON), n_source=source.shape[0])
         _validate_box_sum_constraints(n_source=source.shape[0], max_weight=max_weight_value, epsilon=epsilon_value)
-        return original_kernel_mean_matching_weights(source_features, target_features, **kwargs)
+        return original_kernel_mean_matching_weights(source_features, target_features, **patched_kwargs)
 
     setattr(resolve_kmm_gamma, _PATCH_MARKER, True)
     setattr(normalize_kmm_epsilon, _PATCH_MARKER, True)
