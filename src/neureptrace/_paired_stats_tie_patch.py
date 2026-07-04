@@ -58,4 +58,7 @@ def install() -> None:
     paired_stats.paired_decoder_statistics = paired_decoder_statistics
 
 
+install()
+
+
 __all__ = ["install"]
