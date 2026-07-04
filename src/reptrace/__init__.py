@@ -38,7 +38,7 @@ class _ReptraceAliasLoader(importlib.abc.Loader):
         module.__loader__ = alias_loader
         module.__spec__ = alias_spec
         if hasattr(target, "__path__"):
-            module.__path__ = []
+            module.__path__ = list(getattr(target, "__path__", ()))
 
 
 class _ReptraceAliasFinder(importlib.abc.MetaPathFinder):
@@ -61,7 +61,7 @@ class _ReptraceAliasFinder(importlib.abc.MetaPathFinder):
             is_package=is_package,
         )
         if spec is not None and is_package:
-            spec.submodule_search_locations = []
+            spec.submodule_search_locations = list(target_spec.submodule_search_locations or ())
         return spec
 
 
@@ -73,7 +73,7 @@ def _install_alias_finder() -> None:
 _target_module = importlib.import_module("neureptrace")
 __all__ = getattr(_target_module, "__all__", ())
 __version__ = getattr(_target_module, "__version__", "0.0.0")
-__path__: list[str] = []
+__path__: list[str] = list(getattr(_target_module, "__path__", ()))
 _install_alias_finder()
 
 
