@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
-from typing import Any
 
 import numpy as np
 
