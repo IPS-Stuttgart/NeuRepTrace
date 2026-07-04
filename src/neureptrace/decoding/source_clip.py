@@ -9,10 +9,12 @@ from typing import Any
 import numpy as np
 
 SOURCE_CLIP_PROTOCOL = "strict_source_only_feature_clipping"
+SOURCE_CLIP_STANDARDIZE_PROTOCOL = "strict_source_only_feature_clip_standardize"
 SOURCE_CLIP_CATEGORY = "1_strict_source_only"
 CENTER_MODES = ("median", "mean", "zero")
 DEFAULT_LOWER_QUANTILE = 0.01
 DEFAULT_UPPER_QUANTILE = 0.99
+DEFAULT_EPSILON = 1e-8
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +53,16 @@ class SourceClipResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class SourceClipStandardizeResult:
+    train_features: np.ndarray
+    test_features: np.ndarray
+    clip_result: SourceClipResult
+    center: np.ndarray
+    scale: np.ndarray
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 def fit_source_clip(
     *,
     source_features: Sequence[Sequence[float]] | np.ndarray,
@@ -75,6 +87,48 @@ def fit_source_clip(
     )
 
 
+def fit_source_clip_then_standardize(
+    *,
+    source_features: Sequence[Sequence[float]] | np.ndarray,
+    test_features: Sequence[Sequence[float]] | np.ndarray,
+    config: SourceClipConfig | Mapping[str, Any] | None = None,
+    epsilon: float | str = DEFAULT_EPSILON,
+) -> SourceClipStandardizeResult:
+    """Clip with source-fitted bounds, then standardize with clipped source rows."""
+
+    eps = _positive_float(epsilon, name="epsilon")
+    clipped = fit_source_clip(source_features=source_features, test_features=test_features, config=config)
+    center = np.mean(clipped.train_features, axis=0)
+    scale = np.std(clipped.train_features - center, axis=0, ddof=1 if clipped.train_features.shape[0] > 1 else 0)
+    scale = np.maximum(scale, eps)
+    train_scaled = (clipped.train_features - center) / scale
+    test_scaled = (clipped.test_features - center) / scale
+    metadata = dict(clipped.metadata)
+    metadata.update(
+        {
+            "source_clip_standardize": True,
+            "source_clip_standardize_protocol": SOURCE_CLIP_STANDARDIZE_PROTOCOL,
+            "source_clip_standardize_protocol_category": SOURCE_CLIP_CATEGORY,
+            "source_clip_standardize_uses_source_features": True,
+            "source_clip_standardize_uses_test_features_for_fitting": False,
+            "source_clip_standardize_uses_test_labels": False,
+            "source_clip_standardize_valid_for_strict_source_only": True,
+            "source_clip_standardize_valid_for_benchmark": True,
+            "source_clip_standardize_epsilon": float(eps),
+            "source_clip_standardize_min_scale": float(np.min(scale)),
+            "source_clip_standardize_max_scale": float(np.max(scale)),
+        }
+    )
+    return SourceClipStandardizeResult(
+        train_features=train_scaled.astype(np.float32, copy=False),
+        test_features=test_scaled.astype(np.float32, copy=False),
+        clip_result=clipped,
+        center=center.astype(float, copy=False),
+        scale=scale.astype(float, copy=False),
+        metadata=metadata,
+    )
+
+
 def source_clip_config(
     *,
     lower_quantile: float | str = DEFAULT_LOWER_QUANTILE,
@@ -82,12 +136,7 @@ def source_clip_config(
     symmetric: bool | str | int | float = False,
     center: str | None = "median",
 ) -> SourceClipConfig:
-    return SourceClipConfig(
-        lower_quantile=lower_quantile,
-        upper_quantile=upper_quantile,
-        symmetric=symmetric,
-        center=center,
-    )
+    return SourceClipConfig(lower_quantile=lower_quantile, upper_quantile=upper_quantile, symmetric=symmetric, center=center)
 
 
 def normalize_center_mode(value: str | None) -> str:
@@ -98,11 +147,7 @@ def normalize_center_mode(value: str | None) -> str:
     return normalized
 
 
-def fit_source_clip_bounds(
-    source_features: Sequence[Sequence[float]] | np.ndarray,
-    *,
-    config: SourceClipConfig | Mapping[str, Any] | None = None,
-) -> SourceClipBounds:
+def fit_source_clip_bounds(source_features: Sequence[Sequence[float]] | np.ndarray, *, config: SourceClipConfig | Mapping[str, Any] | None = None) -> SourceClipBounds:
     cfg = source_clip_config() if config is None else _coerce_config(config)
     source = _feature_matrix(source_features, name="source_features")
     center = _center_vector(source, mode=cfg.center)
@@ -213,4 +258,14 @@ def _unit_interval_float(value: float | str, *, name: str) -> float:
         raise ValueError(f"{name} must be in [0, 1].") from exc
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
+    return parsed
+
+
+def _positive_float(value: float | str, *, name: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError(f"{name} must be positive and finite.")
     return parsed
