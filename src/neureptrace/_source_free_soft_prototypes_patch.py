@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 import numpy as np
 
 import neureptrace.decoding.source_free as _sf
 from neureptrace._source_free_standardize_target_patch import _normalize_bool, _persist_normalized_numeric_config
+
+
+_TARGET_PRIOR_MODULE = "neureptrace.decoding.source_free_target_prior"
 
 
 def _prototype_estimator_mode(value: Any) -> str:
@@ -244,6 +248,13 @@ def _fit_source_free_predict_proba(
     return _sf.SourceFreeAdaptationResult(adapter=adapter, probabilities=adapter.probabilities_.copy(), metadata=adapter.metadata())
 
 
+def _refresh_loaded_target_prior_module() -> None:
+    module = sys.modules.get(_TARGET_PRIOR_MODULE)
+    if module is None:
+        return
+    module.fit_source_free_predict_proba = _fit_source_free_predict_proba
+
+
 _ORIGINAL_METADATA = _sf.SourceFreeSubjectAdapter.metadata
 _INSTALLED = False
 
@@ -251,6 +262,7 @@ _INSTALLED = False
 def install() -> None:
     global _INSTALLED
     if _INSTALLED:
+        _refresh_loaded_target_prior_module()
         return
     _sf.PrototypeEstimator = str
     _sf._prototype_estimator_mode = _prototype_estimator_mode
@@ -258,4 +270,5 @@ def install() -> None:
     _sf.SourceFreeSubjectAdapter.fit = _fit
     _sf.SourceFreeSubjectAdapter.metadata = _metadata
     _sf.fit_source_free_predict_proba = _fit_source_free_predict_proba
+    _refresh_loaded_target_prior_module()
     _INSTALLED = True
