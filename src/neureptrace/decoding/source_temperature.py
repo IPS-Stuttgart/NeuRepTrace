@@ -266,13 +266,19 @@ def _contains_boolean(value: Any) -> bool:
 
 
 def _materialize_one_pass_iterable(value: Any) -> Any:
-    if isinstance(value, (np.ndarray, str, bytes, Mapping, Sequence)):
+    if isinstance(value, np.ndarray):
+        if value.dtype == object:
+            if value.ndim == 0:
+                return _materialize_one_pass_iterable(value.item())
+            return _materialize_one_pass_iterable(value.tolist())
+        return value
+    if isinstance(value, (str, bytes, Mapping)):
         return value
     try:
         iterator = iter(value)
     except TypeError:
         return value
-    return list(iterator)
+    return [_materialize_one_pass_iterable(item) for item in iterator]
 
 
 def _label_index_vector(labels: Sequence[int] | np.ndarray, *, n_rows: int, n_classes: int) -> np.ndarray:
