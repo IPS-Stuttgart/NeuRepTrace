@@ -171,6 +171,12 @@ def _interaction_pairs(n_features: int, *, max_interactions: int | str) -> tuple
 
 
 def _max_interactions_value(value: int | str) -> int | str:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError("max_interactions must be a non-negative integer.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"all", "full"}:

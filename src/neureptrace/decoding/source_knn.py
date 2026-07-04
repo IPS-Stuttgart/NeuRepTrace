@@ -222,20 +222,19 @@ def _resolve_k(value: int | str, *, n_source: int) -> int:
 
 
 def _normalize_k_request(value: Any) -> int | str:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(_K_ERROR)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"all", "full"}:
             return text
         value = text
-    else:
-        if isinstance(value, np.ndarray):
-            if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
-                raise ValueError(_K_ERROR)
-            value = value.item()
-        if isinstance(value, np.generic):
-            value = value.item()
-        if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
-            raise ValueError(_K_ERROR)
+    elif isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(_K_ERROR)
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
