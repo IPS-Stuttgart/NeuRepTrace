@@ -31,6 +31,15 @@ class SourceThresholdConfig:
     positive_value: float = 1.0
     negative_value: float = 0.0
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "threshold_mode", normalize_threshold_mode(self.threshold_mode))
+        object.__setattr__(self, "quantile", _unit_interval_float(self.quantile, name="quantile"))
+        object.__setattr__(self, "output", normalize_output_mode(self.output))
+        object.__setattr__(self, "positive_value", _finite_float(self.positive_value, name="positive_value"))
+        object.__setattr__(self, "negative_value", _finite_float(self.negative_value, name="negative_value"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceThresholdMap:
@@ -94,11 +103,11 @@ def source_threshold_config(
     """Normalize source-threshold options."""
 
     return SourceThresholdConfig(
-        threshold_mode=normalize_threshold_mode(threshold_mode),
-        quantile=_unit_interval_float(quantile, name="quantile"),
-        output=normalize_output_mode(output),
-        positive_value=_finite_float(positive_value, name="positive_value"),
-        negative_value=_finite_float(negative_value, name="negative_value"),
+        threshold_mode=threshold_mode,
+        quantile=quantile,
+        output=output,
+        positive_value=positive_value,
+        negative_value=negative_value,
     )
 
 
@@ -209,10 +218,19 @@ def _unit_interval_float(value: float | str, *, name: str) -> float:
 
 
 def _finite_float(value: float | str, *, name: str) -> float:
+    message = f"{name} must be finite."
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(message)
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be finite.") from exc
+        raise ValueError(message) from exc
     if not np.isfinite(parsed):
-        raise ValueError(f"{name} must be finite.")
+        raise ValueError(message)
     return parsed
