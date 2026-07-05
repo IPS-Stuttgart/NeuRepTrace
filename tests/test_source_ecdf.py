@@ -30,6 +30,17 @@ def test_source_ecdf_uniform_transform_shapes_and_metadata() -> None:
     assert result.metadata["source_ecdf_valid_for_strict_source_only"] is True
 
 
+def test_source_ecdf_accepts_one_pass_feature_iterables() -> None:
+    source_rows = ([float(row), float(row + 10)] for row in range(4))
+    test_rows = ([1.5, 11.5], [4.0, 9.0])
+
+    result = fit_source_ecdf_transform(source_features=source_rows, test_features=(row for row in test_rows), config={"output": "rank"})
+
+    assert result.train_features.shape == (4, 2)
+    assert result.test_features.shape == (2, 2)
+    assert result.test_features.tolist() == [[2.0, 2.0], [4.0, 0.0]]
+
+
 def test_source_ecdf_reference_can_be_reused() -> None:
     source = np.asarray([[0.0], [1.0], [2.0]], dtype=float)
     test = np.asarray([[1.5], [3.0]], dtype=float)
@@ -39,6 +50,15 @@ def test_source_ecdf_reference_can_be_reused() -> None:
     via_fit = fit_source_ecdf_transform(source_features=source, test_features=test)
 
     assert np.allclose(direct, via_fit.test_features)
+
+
+def test_source_ecdf_apply_accepts_one_pass_iterables() -> None:
+    reference = fit_source_ecdf_reference(([float(value)] for value in range(3)))
+
+    transformed = apply_source_ecdf_transform(([1.5], [3.0]), reference)
+
+    assert transformed.shape == (2, 1)
+    assert np.allclose(transformed.ravel(), [0.625, 0.875])
 
 
 def test_source_ecdf_rank_output_returns_counts() -> None:
