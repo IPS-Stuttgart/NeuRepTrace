@@ -161,6 +161,8 @@ def _coerce_config(config: SourceConfidenceWeightConfig | Mapping[str, Any]) -> 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float) -> np.ndarray:
     eps = _positive_float(epsilon, name="epsilon")
+    if _contains_boolean_probability_value(values):
+        raise ValueError("source_probabilities must contain numeric probability values, not boolean flags.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError("source_probabilities must be a non-empty two-dimensional matrix.")
@@ -172,6 +174,27 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
     matrix = matrix / row_sums
     matrix = np.maximum(matrix, eps)
     return matrix / np.sum(matrix, axis=1, keepdims=True)
+
+
+def _contains_boolean_probability_value(values: Any) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype != object:
+            return False
+        return any(_contains_boolean_probability_value(item) for item in values.ravel())
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, Mapping):
+        iterable = values.values()
+    else:
+        try:
+            iterable = iter(values)
+        except TypeError:
+            return False
+    return any(_contains_boolean_probability_value(item) for item in iterable)
 
 
 def _label_indices(values: Sequence[int] | np.ndarray, *, expected_length: int, n_classes: int) -> np.ndarray:

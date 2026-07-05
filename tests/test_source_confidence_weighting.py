@@ -82,6 +82,22 @@ def test_source_confidence_weighting_rejects_zero_mass_rows() -> None:
         confidence_scores([[0.0, 0.0]], mode="confidence")
 
 
+@pytest.mark.parametrize(
+    "bad_probabilities",
+    [
+        np.asarray([[True, False], [False, True]], dtype=bool),
+        [[1.0, False]],
+        np.asarray([[1.0, np.bool_(False)]], dtype=object),
+    ],
+)
+def test_source_confidence_weighting_rejects_boolean_probability_values(bad_probabilities) -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        compute_source_confidence_weights(bad_probabilities)
+
+    with pytest.raises(ValueError, match="boolean"):
+        confidence_scores(bad_probabilities)
+
+
 def test_aliases_and_validation() -> None:
     assert normalize_confidence_weight_mode("max-prob") == "confidence"
     assert normalize_confidence_weight_mode("label-confidence") == "correct_confidence"
