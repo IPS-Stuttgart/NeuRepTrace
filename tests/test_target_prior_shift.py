@@ -53,6 +53,34 @@ def test_target_prior_shift_initial_prior_aliases() -> None:
         normalize_initial_prior("bad")
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"max_iter": True}, "max_iter"),
+        ({"max_iter": np.asarray(3)}, "max_iter"),
+        ({"tol": True}, "tol"),
+        ({"tol": np.asarray(1e-8)}, "tol"),
+        ({"epsilon": np.bool_(True)}, "epsilon"),
+        ({"epsilon": np.asarray(1e-12)}, "epsilon"),
+    ],
+)
+def test_target_prior_shift_config_rejects_boolean_and_array_scalar_controls(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        target_prior_shift_config(**kwargs)
+
+
+def test_target_prior_shift_config_accepts_numpy_numeric_scalar_controls() -> None:
+    config = target_prior_shift_config(
+        max_iter=np.int64(5),
+        tol=np.float64(1e-7),
+        epsilon=np.float64(1e-10),
+    )
+
+    assert config.max_iter == 5
+    assert np.isclose(config.tol, 1e-7)
+    assert np.isclose(config.epsilon, 1e-10)
+
+
 def test_target_prior_shift_rejects_bad_prior_length() -> None:
     with pytest.raises(ValueError, match="source_prior"):
         adapt_target_probabilities_prior_shift([[0.5, 0.5]], source_prior=[1.0, 0.0, 0.0])
