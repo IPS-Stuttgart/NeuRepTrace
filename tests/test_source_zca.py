@@ -114,7 +114,7 @@ def test_source_zca_rejects_invalid_direct_config_objects() -> None:
         fit_source_zca_reference(source, config=SourceZCAConfig(recolor=np.asarray([True])))  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("bad_regularization", [True, np.bool_(True), np.asarray([1e-4]), np.asarray([True]), [1e-4]])
+@pytest.mark.parametrize("bad_regularization", [True, np.bool_(True), np.asarray([1e-4]), np.asarray([True]), np.asarray(True, dtype=object), [1e-4]])
 def test_source_zca_regularization_rejects_bool_and_array_controls(bad_regularization: object) -> None:
     with pytest.raises(ValueError, match="regularization"):
         source_zca_config(regularization=bad_regularization)  # type: ignore[arg-type]
