@@ -24,6 +24,11 @@ class RowL1Config:
 
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class RowL1Result:
@@ -96,7 +101,7 @@ def normalize_rows_l1(
 
 def _coerce_config(config: RowL1Config | Mapping[str, Any]) -> RowL1Config:
     if isinstance(config, RowL1Config):
-        return config
+        return row_l1_config(epsilon=config.epsilon)
     return row_l1_config(**dict(config))
 
 
@@ -118,6 +123,10 @@ def _is_boolean_scalar(value: Any) -> bool:
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
     if _is_boolean_scalar(value):
         raise ValueError(f"{name} must be positive and finite.")
     try:
