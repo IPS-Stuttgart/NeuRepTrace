@@ -24,6 +24,9 @@ class RowMaxAbsConfig:
 
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class RowMaxAbsResult:
@@ -109,7 +112,23 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _is_boolean_scalar(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray) and value.shape == ():
+        return isinstance(value.item(), (bool, np.bool_))
+    return False
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
+    if _is_boolean_scalar(value):
+        raise ValueError(f"{name} must be positive and finite.")
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
+        if _is_boolean_scalar(value):
+            raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:

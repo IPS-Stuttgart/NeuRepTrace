@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.row_l1 import (
     ROW_L1_CATEGORY,
+    RowL1Config,
     normalize_rows_l1,
     normalize_train_test_rows_l1,
     row_l1_config,
@@ -47,8 +48,27 @@ def test_row_l1_config_validation() -> None:
         row_l1_config(epsilon=0.0)
 
 
+def test_row_l1_config_direct_construction_normalizes_epsilon() -> None:
+    assert RowL1Config(epsilon="1e-5").epsilon == 1e-5  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("epsilon", [True, np.bool_(True), np.asarray(True), np.asarray(True, dtype=object)])
 def test_row_l1_rejects_boolean_epsilon_values(epsilon: object) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        RowL1Config(epsilon=epsilon)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="epsilon"):
+        row_l1_config(epsilon=epsilon)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="epsilon"):
+        normalize_rows_l1([[1.0, 2.0]], epsilon=epsilon)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("epsilon", [np.asarray([1e-5]), np.asarray([1e-5], dtype=object)])
+def test_row_l1_rejects_array_epsilon_values(epsilon: object) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        RowL1Config(epsilon=epsilon)  # type: ignore[arg-type]
+
     with pytest.raises(ValueError, match="epsilon"):
         row_l1_config(epsilon=epsilon)  # type: ignore[arg-type]
 

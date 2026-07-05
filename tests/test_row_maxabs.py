@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.row_maxabs import (
     ROW_MAXABS_CATEGORY,
+    RowMaxAbsConfig,
     normalize_rows_maxabs,
     normalize_train_score_rows_maxabs,
     row_maxabs_config,
@@ -42,3 +43,31 @@ def test_row_maxabs_config_validation() -> None:
     assert row_maxabs_config(epsilon="1e-5").epsilon == 1e-5
     with pytest.raises(ValueError, match="epsilon"):
         row_maxabs_config(epsilon=0.0)
+
+
+def test_row_maxabs_config_direct_construction_normalizes_epsilon() -> None:
+    assert RowMaxAbsConfig(epsilon="1e-5").epsilon == 1e-5  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("epsilon", [True, np.bool_(True), np.asarray(True), np.asarray(True, dtype=object)])
+def test_row_maxabs_rejects_boolean_epsilon_values(epsilon: object) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        RowMaxAbsConfig(epsilon=epsilon)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="epsilon"):
+        row_maxabs_config(epsilon=epsilon)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="epsilon"):
+        normalize_rows_maxabs([[1.0, 2.0]], epsilon=epsilon)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("epsilon", [np.asarray([1e-5]), np.asarray([1e-5], dtype=object)])
+def test_row_maxabs_rejects_array_epsilon_values(epsilon: object) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        RowMaxAbsConfig(epsilon=epsilon)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="epsilon"):
+        row_maxabs_config(epsilon=epsilon)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="epsilon"):
+        normalize_rows_maxabs([[1.0, 2.0]], epsilon=epsilon)  # type: ignore[arg-type]
