@@ -230,7 +230,7 @@ def _unit_interval_float(value: float | str, *, name: str) -> float:
 
 
 def _float_value(value: object, *, message: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, np.ndarray)):
         raise ValueError(message)
     try:
         return float(value)
