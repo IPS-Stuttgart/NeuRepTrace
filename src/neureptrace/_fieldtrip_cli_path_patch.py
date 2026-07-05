@@ -7,15 +7,50 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 _NO_PATH_SENTINELS = {"", "none", "null", "false", "off", "-"}
 _PATCH_MARKER = "_neureptrace_fieldtrip_cli_path_options_patched"
 _WRITER_PATCH_MARKER = "_neureptrace_fieldtrip_output_paths_patched"
+_PARSE_PATH_PATCH_MARKER = "_neureptrace_fieldtrip_parse_path_bool_guard_patched"
+_PATH_TOKEN_ERROR = "path tokens must be strings or integer indices, not boolean values."
 
 
 def _format_path_default(tokens: Sequence[Any] | None) -> str:
     if tokens is None:
         return "none"
     return ",".join(str(token) for token in tokens)
+
+
+def _path_tokens_contain_boolean(value: Any) -> bool:
+    """Return whether a path-token object contains Python or NumPy booleans."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if value is None or isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype == object:
+            return any(_path_tokens_contain_boolean(item) for item in value.ravel(order="C"))
+        return False
+    try:
+        iterator = iter(value)
+    except TypeError:
+        return False
+    return any(_path_tokens_contain_boolean(item) for item in iterator)
+
+
+def _materialize_path_tokens(value: Any) -> Any:
+    """Materialize one-pass token iterables before validation consumes them."""
+
+    if value is None or isinstance(value, (str, bytes, np.ndarray)):
+        return value
+    try:
+        return tuple(value)
+    except TypeError:
+        return value
 
 
 def _parse_optional_path_tokens(
@@ -105,6 +140,25 @@ def _build_parser(fieldtrip_mat: Any, prog: str | None = None) -> argparse.Argum
     return parser
 
 
+def _install_parse_path_tokens_patch(fieldtrip_mat: Any) -> None:
+    """Reject boolean path tokens before Python treats them as integer indices."""
+
+    if getattr(fieldtrip_mat.parse_path_tokens, _PARSE_PATH_PATCH_MARKER, False):
+        return
+
+    original_parse_path_tokens = fieldtrip_mat.parse_path_tokens
+
+    def parse_path_tokens(value: Any, default: Sequence[Any]) -> tuple[Any, ...]:
+        materialized = _materialize_path_tokens(value)
+        if _path_tokens_contain_boolean(materialized):
+            raise ValueError(_PATH_TOKEN_ERROR)
+        return original_parse_path_tokens(materialized, default)
+
+    setattr(parse_path_tokens, _PARSE_PATH_PATCH_MARKER, True)
+    parse_path_tokens.__wrapped__ = original_parse_path_tokens
+    fieldtrip_mat.parse_path_tokens = parse_path_tokens
+
+
 def _install_writer_path_patch(fieldtrip_mat: Any) -> None:
     """Normalize public writer output paths before the original writer touches them."""
 
@@ -139,6 +193,7 @@ def install() -> None:
 
     import neureptrace.fieldtrip_mat as fieldtrip_mat
 
+    _install_parse_path_tokens_patch(fieldtrip_mat)
     _install_writer_path_patch(fieldtrip_mat)
 
     if getattr(fieldtrip_mat.main, _PATCH_MARKER, False):
