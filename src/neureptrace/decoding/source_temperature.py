@@ -27,6 +27,10 @@ class SourceTemperatureConfig:
     temperatures: tuple[float, ...] = DEFAULT_TEMPERATURE_GRID
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "temperatures", _normalize_temperature_grid(self.temperatures))
+        object.__setattr__(self, "epsilon", _probability_epsilon(self.epsilon))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceTemperatureResult:
@@ -96,6 +100,10 @@ def source_temperature_config(
 ) -> SourceTemperatureConfig:
     """Normalize source-temperature options."""
 
+    return SourceTemperatureConfig(temperatures=temperatures, epsilon=epsilon)
+
+
+def _normalize_temperature_grid(temperatures: Sequence[float] | str) -> tuple[float, ...]:
     if isinstance(temperatures, str):
         raw_values = tuple(part.strip() for part in temperatures.replace(";", ",").split(",") if part.strip())
     else:
@@ -106,7 +114,7 @@ def source_temperature_config(
     values = tuple(_positive_float(value, name="temperatures") for value in raw_values)
     if not values:
         raise ValueError("temperatures must contain at least one value.")
-    return SourceTemperatureConfig(temperatures=values, epsilon=_probability_epsilon(epsilon))
+    return values
 
 
 def _coerce_config(config: SourceTemperatureConfig | Mapping[str, Any]) -> SourceTemperatureConfig:
