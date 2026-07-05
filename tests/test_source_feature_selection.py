@@ -190,3 +190,44 @@ def test_heldout_labels_are_not_part_of_public_api() -> None:
             test_features=[[0.5]],
             heldout_labels=[0],  # type: ignore[call-arg]
         )
+
+
+def _iter_rows(rows):
+    return (iter(row) for row in rows)
+
+
+def test_source_feature_scores_accepts_nested_row_iterators() -> None:
+    source = [
+        [0.0, 10.0, 0.1],
+        [0.2, 10.1, 0.2],
+        [5.0, 10.2, 0.1],
+        [5.2, 10.3, 0.2],
+    ]
+    labels = ["a", "a", "b", "b"]
+
+    scores = source_feature_scores(_iter_rows(source), (label for label in labels), method="anova")
+
+    assert np.argmax(scores) == 0
+    assert scores[0] > scores[1]
+
+
+def test_source_feature_selection_accepts_nested_row_iterators() -> None:
+    source = [
+        [0.0, 10.0, 0.1],
+        [0.2, 10.1, 0.2],
+        [5.0, 10.2, 0.1],
+        [5.2, 10.3, 0.2],
+    ]
+    labels = ["a", "a", "b", "b"]
+    heldout = [[0.1, 9.9, 0.0], [5.1, 10.4, 0.3]]
+
+    result = fit_source_feature_selection(
+        source_features=_iter_rows(source),
+        source_labels=(label for label in labels),
+        test_features=_iter_rows(heldout),
+        config={"method": "anova", "k": 1},
+    )
+
+    assert result.selected_indices.tolist() == [0]
+    assert result.train_features.shape == (4, 1)
+    assert result.test_features.shape == (2, 1)
