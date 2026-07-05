@@ -30,6 +30,12 @@ class TargetPriorShiftConfig:
     epsilon: float = DEFAULT_EPSILON
     initial_prior: str = "mean_probability"
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "max_iter", _positive_int(self.max_iter, name="max_iter"))
+        object.__setattr__(self, "tol", _positive_float(self.tol, name="tol"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+        object.__setattr__(self, "initial_prior", normalize_initial_prior(self.initial_prior))
+
 
 @dataclass(frozen=True, slots=True)
 class TargetPriorShiftResult:
