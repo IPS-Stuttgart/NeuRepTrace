@@ -22,34 +22,7 @@ WEAK_LABEL_PROPORTION_CATEGORY = "category_2_weak_label_proportion_target_adapti
 
 @dataclass(frozen=True, slots=True)
 class WeakLabelProportionCalibrationResult:
-    """Result of weak target calibration from known class proportions.
-
-    Attributes
-    ----------
-    probabilities:
-        Row-normalized probabilities after label-proportion calibration.
-    classes:
-        Class order corresponding to the columns in ``probabilities``.
-    target_proportions:
-        Normalized target proportions in ``classes`` order. This is empty for
-        block-wise results because each block can have a different prior.
-    class_bias:
-        Multiplicative class-bias factors used before row renormalization. This
-        is empty for block-wise results.
-    iterations:
-        Maximum number of iterative-proportional-fitting iterations used. For
-        block-wise results this is the maximum over blocks.
-    max_mean_proportion_error:
-        Maximum absolute discrepancy between requested class proportions and the
-        mean calibrated probability distribution. For block-wise results this is
-        the maximum discrepancy over blocks.
-    converged:
-        Whether the requested tolerance was reached in every fitted calibration.
-    metadata:
-        JSON-serializable protocol/provenance fields.
-    block_metadata:
-        Per-block provenance rows for block-wise calibration.
-    """
+    """Result of weak target calibration from known class proportions."""
 
     probabilities: np.ndarray
     classes: tuple[Any, ...]
@@ -302,7 +275,7 @@ def _as_probability_matrix(probabilities: Sequence[Sequence[float]] | np.ndarray
 def _apply_class_bias(probabilities: np.ndarray, class_bias: np.ndarray, *, epsilon: float) -> np.ndarray:
     weighted = probabilities * class_bias.reshape(1, -1)
     row_sums = np.sum(weighted, axis=1, keepdims=True)
-    if np.any(row_sums <= epsilon):
+    if np.any(row_sums <= 0.0):
         raise ValueError("Label-proportion calibration produced a zero-probability row; check proportions and input probabilities.")
     return weighted / row_sums
 
