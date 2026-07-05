@@ -5,6 +5,9 @@ PyTorch-backed decoders so bad prediction inputs raise stable ValueErrors before
 falling through to low-level tensor/matrix errors. It additionally validates the
 Torch MLP estimator's scalar numeric options before the optional torch import so
 misspecified configs fail deterministically even in lightweight environments.
+For the Torch MLP, it also preserves row-wise composite labels by dense-encoding
+them for the underlying tensor training loop and restoring the public class
+labels afterwards.
 """
 
 from __future__ import annotations
@@ -174,6 +177,65 @@ def _class_counts(labels: np.ndarray) -> list[int]:
     return counts
 
 
+def _is_composite_label(label: Any) -> bool:
+    if isinstance(label, (str, bytes)):
+        return False
+    if isinstance(label, np.ndarray):
+        return label.ndim != 0
+    return isinstance(label, (dict, list, tuple))
+
+
+def _contains_composite_labels(labels: np.ndarray) -> bool:
+    return any(_is_composite_label(label) for label in labels.tolist())
+
+
+def _object_vector(items: list[Any]) -> np.ndarray:
+    vector = np.empty(len(items), dtype=object)
+    for index, item in enumerate(items):
+        vector[index] = item
+    return vector
+
+
+def _dense_composite_label_encoding(labels: Any) -> tuple[np.ndarray, np.ndarray] | None:
+    """Dense-encode composite labels while keeping original public classes."""
+
+    label_vector = _label_vector(labels)
+    if not _contains_composite_labels(label_vector):
+        return None
+
+    classes: list[Any] = []
+    encoded: list[int] = []
+    for label in label_vector.tolist():
+        for index, class_label in enumerate(classes):
+            if _values_equal(label, class_label):
+                encoded.append(index)
+                break
+        else:
+            classes.append(label)
+            encoded.append(len(classes) - 1)
+    return np.asarray(encoded, dtype=np.int64), _object_vector(classes)
+
+
+def _replace_call_labels(
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    labels: np.ndarray,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    if len(args) >= 2:
+        updated_args = list(args)
+        updated_args[1] = labels
+        return tuple(updated_args), kwargs
+
+    updated_kwargs = dict(kwargs)
+    if "labels" in updated_kwargs:
+        updated_kwargs["labels"] = labels
+    elif "y" in updated_kwargs:
+        updated_kwargs["y"] = labels
+    else:
+        updated_kwargs["labels"] = labels
+    return args, updated_kwargs
+
+
 def _small_stratified_holdout(labels: Any, fraction_value: Any) -> bool:
     fraction = _valid_fraction(fraction_value)
     if fraction is None:
@@ -250,11 +312,22 @@ def _install_fit_guard(
             and labels is not None
             and _small_stratified_holdout(labels, validation_fraction)
         )
+        label_encoding = _dense_composite_label_encoding(labels) if class_object.__name__ == "TorchMLPClassifier" and labels is not None else None
+        call_args, call_kwargs = args, kwargs
+        if label_encoding is not None:
+            encoded_labels, public_classes = label_encoding
+            call_args, call_kwargs = _replace_call_labels(args, kwargs, encoded_labels)
         if not needs_training_loss_fallback:
-            return original_fit(self, *args, **kwargs)
+            result = original_fit(self, *call_args, **call_kwargs)
+            if label_encoding is not None:
+                self.classes_ = public_classes
+            return result
         self.validation_fraction = 0.0
         try:
-            return original_fit(self, *args, **kwargs)
+            result = original_fit(self, *call_args, **call_kwargs)
+            if label_encoding is not None:
+                self.classes_ = public_classes
+            return result
         finally:
             self.validation_fraction = validation_fraction
 
