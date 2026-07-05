@@ -29,6 +29,14 @@ class SourceWhitenConfig:
     center: bool = True
     regularization: float = DEFAULT_REGULARIZATION
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "method", normalize_whiten_method(self.method))
+        object.__setattr__(self, "n_components", _normalize_n_components_request(self.n_components))
+        object.__setattr__(self, "center", _bool_config(self.center, name="center"))
+        object.__setattr__(self, "regularization", _nonnegative_float(self.regularization, name="regularization"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceWhitenTransform:
@@ -93,10 +101,10 @@ def source_whiten_config(
     """Normalize public source-whitening options."""
 
     return SourceWhitenConfig(
-        method=normalize_whiten_method(method),
+        method=method,
         n_components=n_components,
-        center=_bool_config(center, name="center"),
-        regularization=_nonnegative_float(regularization, name="regularization"),
+        center=center,
+        regularization=regularization,
     )
 
 
@@ -170,18 +178,36 @@ def _covariance(centered: np.ndarray) -> np.ndarray:
     return centered.T @ centered / float(centered.shape[0] - 1)
 
 
-def _effective_components(value: int | str | None, *, max_components: int) -> int:
+def _normalize_n_components_request(value: int | str | None) -> int | str | None:
+    message = "n_components must be a positive integer or 'all'."
     if value is None:
-        return int(max_components)
+        return None
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"", "all", "full", "none"}:
-            return int(max_components)
-        requested = float(text)
-    else:
+            return "all"
+        value = text
+    elif isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(message)
+    try:
         requested = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(requested) or requested % 1.0 != 0.0 or requested < 1:
-        raise ValueError("n_components must be a positive integer or 'all'.")
+        raise ValueError(message)
+    return int(requested)
+
+
+def _effective_components(value: int | str | None, *, max_components: int) -> int:
+    requested = _normalize_n_components_request(value)
+    if requested is None or isinstance(requested, str):
+        return int(max_components)
     return min(int(requested), int(max_components))
 
 
@@ -241,10 +267,19 @@ def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
+    message = f"{name} must be non-negative and finite."
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(message)
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be non-negative and finite.") from exc
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed < 0.0:
-        raise ValueError(f"{name} must be non-negative and finite.")
+        raise ValueError(message)
     return parsed

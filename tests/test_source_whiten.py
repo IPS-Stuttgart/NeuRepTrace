@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_whiten import (
     SOURCE_WHITEN_CATEGORY,
+    SourceWhitenConfig,
     apply_source_whiten,
     fit_source_whiten,
     fit_source_whiten_transform,
@@ -57,8 +58,33 @@ def test_source_whiten_aliases_and_validation() -> None:
     with pytest.raises(ValueError, match="whitening method"):
         normalize_whiten_method("bad")
 
+    with pytest.raises(ValueError, match="n_components"):
+        source_whiten_config(n_components=True)
+
+    with pytest.raises(ValueError, match="regularization"):
+        source_whiten_config(regularization=np.asarray(True))
+
     with pytest.raises(ValueError, match="ZCA"):
         fit_source_whiten_transform([[0.0, 0.0], [1.0, 1.0]], config={"method": "zca", "n_components": 1})
+
+
+def test_source_whiten_direct_config_is_normalized_and_validated() -> None:
+    source = np.asarray([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]], dtype=float)
+    cfg = SourceWhitenConfig(method="pca-whiten", n_components=np.asarray(1), center="false", regularization="0")
+
+    assert cfg.method == "pca"
+    assert cfg.n_components == 1
+    assert cfg.center is False
+    assert cfg.regularization == 0.0
+
+    transform = fit_source_whiten_transform(source, config=cfg)
+    assert np.allclose(transform.mean, np.zeros(source.shape[1]))
+
+    with pytest.raises(ValueError, match="n_components"):
+        SourceWhitenConfig(n_components=np.asarray([True], dtype=object))
+
+    with pytest.raises(ValueError, match="regularization"):
+        SourceWhitenConfig(regularization=True)
 
 
 def test_source_whiten_rejects_width_mismatch() -> None:
