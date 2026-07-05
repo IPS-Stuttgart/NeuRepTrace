@@ -30,6 +30,14 @@ class SourceCentroidConfig:
     shrinkage: float = 0.0
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "temperature", _positive_float(self.temperature, name="temperature"))
+        object.__setattr__(self, "use_diagonal_scale", _boolean(self.use_diagonal_scale, name="use_diagonal_scale"))
+        object.__setattr__(self, "shrinkage", _unit_interval_float(self.shrinkage, name="shrinkage"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceCentroidResult:
@@ -319,27 +327,25 @@ def _boolean(value: Any, *, name: str) -> bool:
     raise ValueError(f"{name} must be a boolean value.")
 
 
-def _reject_boolean_numeric(value: Any, *, name: str, message: str) -> None:
+def _reject_boolean_or_array_numeric(value: Any, *, message: str) -> None:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(message)
-    if isinstance(value, np.ndarray) and value.ndim == 0 and isinstance(value.item(), (bool, np.bool_)):
-        raise ValueError(message)
-    if isinstance(value, np.ndarray) and value.ndim > 0 and np.issubdtype(value.dtype, np.bool_):
+    if isinstance(value, np.ndarray):
         raise ValueError(message)
 
 
-def _positive_float(value: float | str, *, name: str) -> float:
+def _positive_float(value: Any, *, name: str) -> float:
     message = f"{name} must be positive and finite."
-    _reject_boolean_numeric(value, name=name, message=message)
+    _reject_boolean_or_array_numeric(value, message=message)
     parsed = float(value)
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(message)
     return parsed
 
 
-def _unit_interval_float(value: float | str, *, name: str) -> float:
+def _unit_interval_float(value: Any, *, name: str) -> float:
     message = f"{name} must be in [0, 1]."
-    _reject_boolean_numeric(value, name=name, message=message)
+    _reject_boolean_or_array_numeric(value, message=message)
     parsed = float(value)
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(message)
