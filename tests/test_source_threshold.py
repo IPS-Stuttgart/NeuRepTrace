@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_threshold import (
     SOURCE_THRESHOLD_CATEGORY,
+    SourceThresholdConfig,
     apply_source_threshold_transform,
     fit_source_threshold_map,
     fit_source_threshold_transform,
@@ -66,3 +67,40 @@ def test_source_threshold_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="quantile"):
         source_threshold_config(quantile=1.5)
+
+
+def test_source_threshold_rejects_boolean_numeric_config() -> None:
+    with pytest.raises(ValueError, match="quantile"):
+        source_threshold_config(quantile=True)
+
+    with pytest.raises(ValueError, match="positive_value"):
+        source_threshold_config(positive_value=np.asarray(True))
+
+    with pytest.raises(ValueError, match="negative_value"):
+        source_threshold_config(negative_value=np.asarray([0.0]))
+
+
+def test_source_threshold_direct_config_is_normalized_and_validated() -> None:
+    cfg = SourceThresholdConfig(
+        threshold_mode="avg",
+        quantile=np.asarray("0.25"),
+        output="pm1",
+        positive_value=np.asarray(2.0),
+        negative_value="-3",
+    )
+
+    assert cfg.threshold_mode == "mean"
+    assert cfg.quantile == 0.25
+    assert cfg.output == "signed"
+    assert cfg.positive_value == 2.0
+    assert cfg.negative_value == -3.0
+
+    threshold_map = fit_source_threshold_map([[0.0], [4.0]], config=cfg)
+    out = apply_source_threshold_transform([[0.0], [2.0], [4.0]], threshold_map)
+    assert out.ravel().tolist() == [-2.0, 2.0, 2.0]
+
+    with pytest.raises(ValueError, match="threshold_mode"):
+        SourceThresholdConfig(threshold_mode="bad")
+
+    with pytest.raises(ValueError, match="positive_value"):
+        SourceThresholdConfig(positive_value=True)
