@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_mixstyle import (
     SOURCE_MIXSTYLE_CATEGORY,
+    SourceMixStyleConfig,
     augment_source_domains_mixstyle,
     mixstyle_row,
     source_mixstyle_config,
@@ -83,6 +84,21 @@ def test_source_mixstyle_include_original_false_returns_only_synthetic_rows() ->
     assert result.n_synthetic == features.shape[0]
     assert np.all(result.synthetic_mask)
     assert result.labels.tolist() == labels.tolist()
+
+
+def test_source_mixstyle_direct_config_normalizes_string_false_and_none_seed() -> None:
+    features, labels, domains = _toy_source_data()
+    config = SourceMixStyleConfig(include_original="false", random_state="none")  # type: ignore[arg-type]
+
+    assert config.include_original is False
+    assert config.random_state is None
+
+    result = augment_source_domains_mixstyle(features, labels, domains, config=config)
+
+    assert result.features.shape == features.shape
+    assert result.n_original == 0
+    assert result.n_synthetic == features.shape[0]
+    assert np.all(result.synthetic_mask)
 
 
 def test_source_mixstyle_zero_mixes_returns_original_only() -> None:
