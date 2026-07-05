@@ -99,6 +99,7 @@ def augment_source_with_feature_roll(
     features = _feature_matrix(source_features, name="source_features")
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
+    n_source_domains = _count_unique_hashable(domains)
     classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=labels.dtype if labels.dtype != object else object)
 
     if not cfg.enabled:
@@ -107,7 +108,7 @@ def augment_source_with_feature_roll(
             n_source_rows=features.shape[0],
             n_synthetic_rows=0,
             n_classes=classes.shape[0],
-            n_source_domains=np.unique(domains).shape[0],
+            n_source_domains=n_source_domains,
             feature_dim=features.shape[1],
         )
         return SourceFeatureRollResult(
@@ -152,7 +153,7 @@ def augment_source_with_feature_roll(
         n_source_rows=features.shape[0],
         n_synthetic_rows=synthetic_features.shape[0],
         n_classes=classes.shape[0],
-        n_source_domains=np.unique(domains).shape[0],
+        n_source_domains=n_source_domains,
         feature_dim=features.shape[1],
     )
     return SourceFeatureRollResult(
@@ -301,6 +302,10 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_l
         except TypeError as exc:
             raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
     return vector
+
+
+def _count_unique_hashable(values: np.ndarray) -> int:
+    return len(dict.fromkeys(values.tolist()))
 
 
 def _scalar_value(value: Any, *, name: str) -> Any:
