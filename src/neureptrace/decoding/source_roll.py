@@ -100,7 +100,7 @@ def augment_source_with_feature_roll(
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
     n_source_domains = _count_unique_hashable(domains)
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=labels.dtype if labels.dtype != object else object)
+    classes = _unique_label_vector(labels)
 
     if not cfg.enabled:
         metadata = _metadata(
@@ -126,7 +126,7 @@ def augment_source_with_feature_roll(
     content_indices: list[int] = []
     shifts: list[int] = []
     for class_label in classes.tolist():
-        class_indices = np.flatnonzero(labels == class_label)
+        class_indices = _matching_label_indices(labels, class_label)
         if class_indices.size == 0:
             continue
         for _ in range(cfg.synthetic_per_class):
@@ -138,7 +138,7 @@ def augment_source_with_feature_roll(
             shifts.append(shift)
 
     synthetic_features = np.vstack(synthetic_rows).astype(np.float32, copy=False) if synthetic_rows else np.empty((0, features.shape[1]), dtype=np.float32)
-    synthetic_labels_array = np.asarray(synthetic_labels, dtype=labels.dtype if labels.dtype != object else object)
+    synthetic_labels_array = _label_array(synthetic_labels, dtype=labels.dtype)
     if cfg.preserve_original:
         output_features = np.vstack([features, synthetic_features]).astype(np.float32, copy=False)
         output_labels = np.concatenate([labels, synthetic_labels_array])
@@ -284,18 +284,61 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
+    if isinstance(values, np.ndarray):
+        vector = _array_label_vector(values, expected_length=expected_length, name=name)
+    elif isinstance(values, (str, bytes)):
+        vector = np.asarray([values], dtype=object)
+    else:
+        try:
+            items = list(values)
+        except TypeError:
+            items = [values]
+        vector = _label_array(items, dtype=np.asarray(items).dtype if items and not _contains_composite_label(items) else object)
+    if vector.ndim != 1 or vector.shape[0] != expected_length:
+        raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0] if vector.ndim else 1} != {expected_length}.")
     return vector
+
+
+def _array_label_vector(values: np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    if values.ndim == 0:
+        return values.reshape(1)
+    if values.ndim == 1:
+        return values.astype(object, copy=False) if values.dtype == object else values
+    if values.ndim == 2 and values.shape[1] == 1:
+        flat = values.reshape(-1)
+        return flat.astype(object, copy=False) if flat.dtype == object else flat
+    if values.shape[0] == expected_length:
+        rows = [_as_hashable_label(row) for row in values.reshape(values.shape[0], -1)]
+        return _object_vector(rows)
+    flat = values.reshape(-1)
+    if flat.shape[0] != expected_length:
+        raise ValueError(f"{name} must contain one value per feature row: {flat.shape[0]} != {expected_length}.")
+    return flat.astype(object, copy=False) if flat.dtype == object else flat
+
+
+def _label_array(values: Sequence[Any], *, dtype: np.dtype) -> np.ndarray:
+    if dtype == object or _contains_composite_label(values):
+        return _object_vector([_as_hashable_label(value) for value in values])
+    return np.asarray(values, dtype=dtype)
+
+
+def _unique_label_vector(labels: np.ndarray) -> np.ndarray:
+    unique: list[Any] = []
+    for label in labels.tolist():
+        normalized = _as_hashable_label(label)
+        if not any(_labels_equal(normalized, existing) for existing in unique):
+            unique.append(normalized)
+    return _label_array(unique, dtype=labels.dtype)
+
+
+def _matching_label_indices(labels: np.ndarray, expected_label: Any) -> np.ndarray:
+    return np.asarray([index for index, label in enumerate(labels.tolist()) if _labels_equal(label, expected_label)], dtype=int)
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
-    vector = np.asarray(values, dtype=object).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"source_domains must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
+    vector = _label_vector(values, expected_length=expected_length, name="source_domains")
     for value in vector.tolist():
         try:
             hash(value)
@@ -306,6 +349,69 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_l
 
 def _count_unique_hashable(values: np.ndarray) -> int:
     return len(dict.fromkeys(values.tolist()))
+
+
+def _contains_composite_label(values: Sequence[Any]) -> bool:
+    return any(_is_composite_label(value) for value in values)
+
+
+def _is_composite_label(value: Any) -> bool:
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.ndarray):
+        return value.ndim != 0
+    return isinstance(value, (dict, list, tuple))
+
+
+def _object_vector(values: Sequence[Any]) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    vector[:] = list(values)
+    return vector
+
+
+def _as_hashable_label(value: Any) -> Any:
+    value = _as_python_scalar(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _as_hashable_label(value.item())
+        return tuple(_as_hashable_label(item) for item in value.tolist())
+    if isinstance(value, (list, tuple)):
+        return tuple(_as_hashable_label(item) for item in value)
+    if isinstance(value, dict):
+        pairs = [(_as_hashable_label(key), _as_hashable_label(item)) for key, item in value.items()]
+        return tuple(sorted(pairs, key=repr))
+    return value
+
+
+def _as_python_scalar(value: Any) -> Any:
+    return value.item() if isinstance(value, np.generic) else value
+
+
+def _labels_equal(left: Any, right: Any) -> bool:
+    left = _as_hashable_label(left)
+    right = _as_hashable_label(right)
+    if isinstance(left, tuple) and isinstance(right, tuple):
+        if len(left) != len(right):
+            return False
+        return all(_labels_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
+    try:
+        comparison = left == right
+    except (TypeError, ValueError):
+        comparison = False
+    if isinstance(comparison, np.ndarray):
+        try:
+            return bool(np.all(comparison))
+        except (TypeError, ValueError):
+            return False
+    try:
+        if bool(comparison):
+            return True
+    except (TypeError, ValueError):
+        pass
+    try:
+        return bool(np.isscalar(left) and np.isscalar(right) and np.isnan(left) and np.isnan(right))
+    except (TypeError, ValueError):
+        return False
 
 
 def _scalar_value(value: Any, *, name: str) -> Any:
