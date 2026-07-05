@@ -26,6 +26,12 @@ class SourceEcdfConfig:
     n_quantiles: int = DEFAULT_N_QUANTILES
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "n_quantiles", _positive_int(self.n_quantiles, name="n_quantiles"))
+        object.__setattr__(self, "epsilon", _open_unit_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceEcdfMap:
@@ -107,7 +113,7 @@ def apply_source_ecdf_transform(features: Sequence[Sequence[float]] | np.ndarray
 
 def _coerce_config(config: SourceEcdfConfig | Mapping[str, Any]) -> SourceEcdfConfig:
     if isinstance(config, SourceEcdfConfig):
-        return config
+        return source_ecdf_config(n_quantiles=config.n_quantiles, epsilon=config.epsilon)
     return source_ecdf_config(**dict(config))
 
 
@@ -148,9 +154,23 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    message = f"{name} must be a positive integer."
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
-        raise ValueError(f"{name} must be a positive integer.")
+        raise ValueError(message)
     return int(parsed)
 
 
