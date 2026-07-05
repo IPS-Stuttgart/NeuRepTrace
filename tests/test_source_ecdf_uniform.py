@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_ecdf_uniform import (
     SOURCE_ECDF_CATEGORY,
+    SourceEcdfConfig,
     apply_source_ecdf_transform,
     fit_source_ecdf_map,
     fit_source_ecdf_transform,
@@ -44,3 +45,28 @@ def test_source_ecdf_config_validation() -> None:
         source_ecdf_config(n_quantiles=0)
     with pytest.raises(ValueError, match="epsilon"):
         source_ecdf_config(epsilon=0.5)
+
+
+def test_source_ecdf_config_dataclass_validation() -> None:
+    config = SourceEcdfConfig(n_quantiles="3", epsilon="1e-4")  # type: ignore[arg-type]
+
+    assert config.n_quantiles == 3
+    assert config.epsilon == 1e-4
+
+    with pytest.raises(ValueError, match="n_quantiles"):
+        SourceEcdfConfig(n_quantiles=0)
+    with pytest.raises(ValueError, match="n_quantiles"):
+        SourceEcdfConfig(n_quantiles=True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="epsilon"):
+        SourceEcdfConfig(epsilon=0.5)
+
+
+def test_source_ecdf_transform_accepts_direct_dataclass_config() -> None:
+    result = fit_source_ecdf_transform(
+        source_features=[[0.0], [1.0], [2.0]],
+        test_features=[[0.5]],
+        config=SourceEcdfConfig(n_quantiles="2", epsilon="1e-4"),  # type: ignore[arg-type]
+    )
+
+    assert result.metadata["source_ecdf_requested_quantiles"] == 2
+    assert result.metadata["source_ecdf_epsilon"] == 1e-4
