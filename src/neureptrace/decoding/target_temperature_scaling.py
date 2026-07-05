@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 TARGET_TEMPERATURE_PROTOCOL = "supervised_target_temperature_scaling"
 TARGET_TEMPERATURE_CATEGORY = "3_supervised_calibrated_target_alignment"
 DEFAULT_TEMPERATURE_GRID = (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0)
@@ -58,15 +60,25 @@ def fit_target_temperature_scaling(
 
     cfg = target_temperature_config() if config is None else _coerce_config(config)
     class_values = _class_vector(classes)
-    cal_prob = _probability_matrix(calibration_probabilities, expected_columns=class_values.shape[0], name="calibration_probabilities", epsilon=cfg.epsilon)
+    cal_prob = _probability_matrix(
+        calibration_probabilities,
+        expected_columns=class_values.shape[0],
+        name="calibration_probabilities",
+        epsilon=cfg.epsilon,
+    )
     score_prob = _probability_matrix(probabilities, expected_columns=class_values.shape[0], name="probabilities", epsilon=cfg.epsilon)
     cal_labels = _label_vector(calibration_labels, expected_length=cal_prob.shape[0], name="calibration_labels")
-    unknown = sorted({label for label in cal_labels.tolist() if label not in set(class_values.tolist())}, key=repr)
+    unknown = _unknown_labels(cal_labels, class_values)
     if unknown:
-        raise ValueError(f"calibration_labels contain labels absent from classes: {unknown}.")
+        raise ValueError(f"calibration_labels contain labels absent from classes: {unknown!r}.")
 
     nll_by_temperature = {
-        temperature: negative_log_likelihood(apply_temperature_to_probabilities(cal_prob, temperature=temperature, epsilon=cfg.epsilon), cal_labels, classes=class_values, epsilon=cfg.epsilon)
+        temperature: negative_log_likelihood(
+            apply_temperature_to_probabilities(cal_prob, temperature=temperature, epsilon=cfg.epsilon),
+            cal_labels,
+            classes=class_values,
+            epsilon=cfg.epsilon,
+        )
         for temperature in cfg.temperature_grid
     }
     best_temperature = min(nll_by_temperature, key=lambda value: (nll_by_temperature[value], value))
@@ -122,12 +134,13 @@ def apply_temperature_to_probabilities(
 ) -> np.ndarray:
     """Apply temperature scaling to probability rows."""
 
-    prob = _probability_matrix(probabilities, expected_columns=None, name="probabilities", epsilon=epsilon)
+    eps = _positive_float(epsilon, name="epsilon")
+    prob = _probability_matrix(probabilities, expected_columns=None, name="probabilities", epsilon=eps)
     temp = _positive_float(temperature, name="temperature")
-    logits = np.log(np.maximum(prob, epsilon)) / temp
+    logits = np.log(np.maximum(prob, eps)) / temp
     logits = logits - np.max(logits, axis=1, keepdims=True)
     exp_logits = np.exp(np.clip(logits, -50.0, 50.0))
-    return _normalize_probability_rows(exp_logits, epsilon=epsilon)
+    return _normalize_probability_rows(exp_logits, epsilon=eps)
 
 
 def negative_log_likelihood(
@@ -139,15 +152,12 @@ def negative_log_likelihood(
 ) -> float:
     """Return mean negative log likelihood for labels in class order."""
 
+    eps = _positive_float(epsilon, name="epsilon")
     class_values = _class_vector(classes)
-    prob = _probability_matrix(probabilities, expected_columns=class_values.shape[0], name="probabilities", epsilon=epsilon)
+    prob = _probability_matrix(probabilities, expected_columns=class_values.shape[0], name="probabilities", epsilon=eps)
     label_vector = _label_vector(labels, expected_length=prob.shape[0], name="labels")
-    class_to_column = {label: index for index, label in enumerate(class_values.tolist())}
-    try:
-        columns = np.asarray([class_to_column[label] for label in label_vector.tolist()], dtype=int)
-    except KeyError as exc:
-        raise ValueError(f"labels contain a value absent from classes: {exc.args[0]!r}.") from exc
-    return float(-np.mean(np.log(np.maximum(prob[np.arange(prob.shape[0]), columns], epsilon))))
+    columns = np.asarray([_class_index(label, class_values, name="labels") for label in label_vector], dtype=int)
+    return float(-np.mean(np.log(np.maximum(prob[np.arange(prob.shape[0]), columns], eps))))
 
 
 def _coerce_config(config: TargetTemperatureConfig | Mapping[str, Any]) -> TargetTemperatureConfig:
@@ -168,19 +178,81 @@ def _temperature_grid(values: Sequence[float] | str) -> tuple[float, ...]:
 
 
 def _class_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _object_label_vector(values)
     if vector.shape[0] < 2:
         raise ValueError("classes must contain at least two values.")
-    if len(set(vector.tolist())) != vector.shape[0]:
-        raise ValueError("classes must be unique.")
+    for index, label in enumerate(vector):
+        if any(values_equal(label, prior_label) for prior_label in vector[:index]):
+            raise ValueError("classes must be unique.")
     return vector
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _object_label_vector(values)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
     return vector
+
+
+def _object_label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            return _object_vector([values.item()])
+        rows = values.reshape(values.shape[0], -1)
+        if rows.shape[1] == 1:
+            return rows[:, 0].astype(object, copy=False).reshape(-1)
+        return _object_vector([tuple(row.tolist()) for row in rows])
+    if isinstance(values, (str, bytes)):
+        return _object_vector([values])
+    try:
+        items = list(values)
+    except TypeError:
+        return _object_vector([values])
+    if any(isinstance(item, (list, tuple, np.ndarray)) for item in items):
+        return _object_vector([_label_object(item) for item in items])
+    return np.asarray(items, dtype=object).reshape(-1)
+
+
+def _label_object(value: object) -> object:
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            return array.item()
+        flattened = array.reshape(-1)
+        if flattened.shape[0] == 1:
+            return flattened[0]
+        return tuple(flattened.tolist())
+    if isinstance(value, list):
+        return tuple(value)
+    return value
+
+
+def _object_vector(values: Sequence[object]) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
+    return vector
+
+
+def _unknown_labels(labels: np.ndarray, classes: np.ndarray) -> list[object]:
+    unknown: list[object] = []
+    for label in labels:
+        if _has_label(classes, label):
+            continue
+        if not _has_label(unknown, label):
+            unknown.append(label)
+    return unknown
+
+
+def _has_label(values: Sequence[object] | np.ndarray, label: object) -> bool:
+    return any(values_equal(value, label) for value in values)
+
+
+def _class_index(label: object, classes: np.ndarray, *, name: str) -> int:
+    for index, class_label in enumerate(classes):
+        if values_equal(label, class_label):
+            return index
+    raise ValueError(f"{name} contain a value absent from classes: {label!r}.")
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, expected_columns: int | None, name: str, epsilon: float) -> np.ndarray:
@@ -193,14 +265,15 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, expec
 
 
 def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.ndarray:
+    eps = _positive_float(epsilon, name="epsilon")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must be finite and non-negative.")
-    matrix = np.maximum(matrix, float(epsilon))
     row_sums = np.sum(matrix, axis=1, keepdims=True)
     if np.any(row_sums <= 0.0):
         raise ValueError("probability rows must have positive mass.")
-    return matrix / row_sums
+    matrix = np.maximum(matrix, eps)
+    return matrix / np.sum(matrix, axis=1, keepdims=True)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
