@@ -215,9 +215,27 @@ def _materialize_array_input(values: Any) -> Any:
         return [values]
 
 
+def _materialize_feature_input(values: Any) -> Any:
+    outer = _materialize_array_input(values)
+    if isinstance(outer, np.ndarray):
+        return outer
+    rows = []
+    for row in outer:
+        if isinstance(row, np.ndarray):
+            rows.append(row)
+        elif isinstance(row, (str, bytes)):
+            rows.append(row)
+        else:
+            try:
+                rows.append(list(row))
+            except TypeError:
+                rows.append(row)
+    return rows
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
     try:
-        matrix = np.asarray(_materialize_array_input(values), dtype=float)
+        matrix = np.asarray(_materialize_feature_input(values), dtype=float)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must contain finite numeric feature values.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
