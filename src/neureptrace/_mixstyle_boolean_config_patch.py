@@ -199,11 +199,17 @@ def _patch_domain_mixstyle() -> None:
         source_mixstyle.augment_source_domains_mixstyle = augment_source_domains_mixstyle
 
 
+def _patch_composite_mixstyle_ids() -> None:
+    composite_ids_patch = importlib.import_module("neureptrace._mixstyle_composite_ids_patch")
+    composite_ids_patch.install()
+
+
 def install() -> None:
     """Install strict MixStyle boolean option normalization."""
 
     _patch_feature_mixstyle()
     _patch_domain_mixstyle()
+    _patch_composite_mixstyle_ids()
 
 
 __all__ = ["install"]
