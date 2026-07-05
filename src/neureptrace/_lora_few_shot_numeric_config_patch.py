@@ -28,6 +28,7 @@ _TARGET_MODULES = (
 _PATCH_MARKER = "_neureptrace_lora_few_shot_numeric_config_patch_installed"
 _FINDER_MARKER = "_neureptrace_lora_few_shot_numeric_config_finder"
 _PROBABILITY_NORMALIZE_MARKER = "_neureptrace_lora_probability_rows_wrapped"
+_RANDOM_STATE_METHOD_MARKER = "_neureptrace_lora_random_state_method_wrapped"
 
 
 def _is_boolean_scalar(value: Any) -> bool:
@@ -76,6 +77,37 @@ def _patch_probability_normalizer(module: ModuleType) -> None:
     setattr(module, "_normalize_probability_rows", _normalize_probability_rows)
 
 
+def _normalized_random_state(module: ModuleType, value: Any) -> int | None:
+    if value is None:
+        return None
+    return module._nonnegative_int(value, "lora_few_shot_random_state")
+
+
+def _patch_random_state_method(module: ModuleType, method_name: str) -> None:
+    classifier = getattr(module, "TorchLoRAFewShotClassifier", None)
+    if classifier is None:
+        return
+    original = getattr(classifier, method_name, None)
+    if original is None or getattr(original, _RANDOM_STATE_METHOD_MARKER, False):
+        return
+
+    @wraps(original)
+    def _wrapped(self, *args: Any, **kwargs: Any):
+        raw_random_state = getattr(self, "random_state", None)
+        normalized_random_state = _normalized_random_state(module, raw_random_state)
+        if normalized_random_state is raw_random_state:
+            return original(self, *args, **kwargs)
+
+        self.random_state = normalized_random_state
+        try:
+            return original(self, *args, **kwargs)
+        finally:
+            self.random_state = raw_random_state
+
+    setattr(_wrapped, _RANDOM_STATE_METHOD_MARKER, True)
+    setattr(classifier, method_name, _wrapped)
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
@@ -84,6 +116,8 @@ def _patch_module(module: ModuleType) -> None:
         if hasattr(module, validator_name):
             _patch_float_validator(module, validator_name)
     _patch_probability_normalizer(module)
+    _patch_random_state_method(module, "fit_source")
+    _patch_random_state_method(module, "adapt_target")
     setattr(module, _PATCH_MARKER, True)
 
 
