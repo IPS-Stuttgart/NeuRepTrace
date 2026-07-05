@@ -12,6 +12,7 @@ import numpy as np
 from neureptrace._object_label_utils import values_equal
 
 _PATCH_MARKER = "_neureptrace_classifier_tuple_labels_patch_installed"
+_HIERARCHICAL_PATCH_MARKER = "_neureptrace_hierarchical_tuple_labels_patch_installed"
 
 
 def _object_vector(values: Sequence[Any]) -> np.ndarray:
@@ -108,9 +109,51 @@ def _positive_class_vector(values: Sequence[float] | np.ndarray, *, source: str)
     return scores[:, 1]
 
 
+def _is_composite_label(value: object) -> bool:
+    if isinstance(value, np.ndarray):
+        return value.ndim > 0
+    return isinstance(value, (tuple, list, dict))
+
+
+def _has_composite_labels(labels: np.ndarray) -> bool:
+    if labels.dtype != object:
+        return False
+    return any(_is_composite_label(label) for label in labels.tolist())
+
+
+def _patch_hierarchical_three_class_logistic() -> None:
+    """Preserve row-wise composite labels in the hierarchical sklearn decoder."""
+
+    decoding = importlib.import_module("neureptrace.decoding")
+    estimator_cls = decoding.HierarchicalThreeClassLogistic
+    original_fit = estimator_cls.fit
+    if getattr(original_fit, _HIERARCHICAL_PATCH_MARKER, False):
+        return
+
+    @wraps(original_fit)
+    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence[Any] | np.ndarray):
+        feature_array = np.asarray(features, dtype=float)
+        label_vector = _atomic_label_vector(labels)
+        if feature_array.ndim < 1 or label_vector.shape[0] != feature_array.shape[0] or not _has_composite_labels(label_vector):
+            return original_fit(self, features, labels)
+
+        classes, encoded = _unique_labels_and_inverse(label_vector)
+        result = original_fit(self, feature_array, encoded)
+        self.classes_ = classes
+        primary_position = int(self.primary_class_index)
+        self.primary_class_ = classes[primary_position]
+        second_indices = np.asarray(self.second_stage_.classes_, dtype=int)
+        self.second_stage_.classes_ = classes[second_indices]
+        return result
+
+    setattr(fit, _HIERARCHICAL_PATCH_MARKER, True)
+    estimator_cls.fit = fit
+
+
 def install() -> None:
     classifiers = importlib.import_module("neureptrace.decoding.classifiers")
     _patch_calibration_split_label_equality()
+    _patch_hierarchical_three_class_logistic()
     if getattr(classifiers, _PATCH_MARKER, False):
         return
 
