@@ -202,8 +202,11 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must be finite and non-negative.")
-    matrix = np.maximum(matrix, float(epsilon))
-    return matrix / matrix.sum(axis=1, keepdims=True)
+    row_sums = matrix.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0):
+        raise ValueError("probability rows must have positive probability mass.")
+    clipped = np.maximum(matrix, float(epsilon))
+    return clipped / clipped.sum(axis=1, keepdims=True)
 
 
 def _auto_gamma(squared_distances: np.ndarray, *, epsilon: float) -> float:

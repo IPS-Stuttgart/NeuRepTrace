@@ -65,6 +65,13 @@ def test_smoothing_normalizes_unnormalized_initial_probabilities() -> None:
     assert np.allclose(result.probabilities.sum(axis=1), 1.0)
 
 
+def test_smoothing_rejects_zero_mass_initial_probability_rows() -> None:
+    features = np.asarray([[0.0], [1.0]], dtype=float)
+
+    with pytest.raises(ValueError, match="positive probability mass"):
+        smooth_target_probabilities(features, [[0.0, 0.0], [0.2, 0.8]], config={"alpha": 0.0})
+
+
 def test_config_aliases_and_validation() -> None:
     cfg = target_probability_smoothing_config(alpha="0.25", standardize="false", n_neighbors="2")
     assert cfg.alpha == 0.25
