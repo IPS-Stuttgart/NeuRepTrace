@@ -34,6 +34,21 @@ def test_target_temperature_scaling_uses_calibration_labels_only() -> None:
     assert result.metadata["target_temperature_valid_for_supervised_calibration"] is True
 
 
+def test_target_temperature_scaling_preserves_composite_class_labels() -> None:
+    classes = [("semantic", "animate"), ("semantic", "inanimate")]
+    result = fit_target_temperature_scaling(
+        calibration_probabilities=[[0.8, 0.2], [0.3, 0.7]],
+        calibration_labels=classes,
+        probabilities=[[0.6, 0.4], [0.45, 0.55]],
+        classes=classes,
+        config={"temperature_grid": [1.0]},
+    )
+
+    assert result.classes.tolist() == classes
+    assert result.metadata["target_temperature_n_classes"] == 2
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+
+
 def test_apply_temperature_changes_confidence() -> None:
     probabilities = np.asarray([[0.9, 0.1]], dtype=float)
 
@@ -46,12 +61,26 @@ def test_apply_temperature_changes_confidence() -> None:
     assert np.allclose(hot.sum(axis=1), 1.0)
 
 
+def test_apply_temperature_rejects_zero_mass_rows() -> None:
+    with pytest.raises(ValueError, match="positive mass"):
+        apply_temperature_to_probabilities([[0.0, 0.0]], temperature=1.0)
+
+
 def test_negative_log_likelihood_matches_manual_value() -> None:
     probabilities = np.asarray([[0.8, 0.2], [0.25, 0.75]], dtype=float)
 
     nll = negative_log_likelihood(probabilities, ["a", "b"], classes=["a", "b"])
 
     assert np.isclose(nll, -np.mean(np.log([0.8, 0.75])))
+
+
+def test_negative_log_likelihood_accepts_numpy_composite_labels() -> None:
+    classes = np.asarray([("left", 1), ("right", 2)], dtype=object)
+    labels = np.asarray([("left", 1), ("right", 2)], dtype=object)
+
+    nll = negative_log_likelihood([[0.9, 0.1], [0.25, 0.75]], labels, classes=classes)
+
+    assert np.isclose(nll, -np.mean(np.log([0.9, 0.75])))
 
 
 def test_target_temperature_config_parses_grid_string() -> None:
