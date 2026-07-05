@@ -197,15 +197,25 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     return matrix / row_sums
 
 
+def _numeric_scalar(value: object, *, name: str, expectation: str) -> float:
+    message = f"{name} must be {expectation}."
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+        raise ValueError(message)
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
 def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    parsed = _numeric_scalar(value, name=name, expectation="a positive integer")
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    parsed = _numeric_scalar(value, name=name, expectation="positive and finite")
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
