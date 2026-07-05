@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 TARGET_CONFIDENCE_FILTER_PROTOCOL = "unlabeled_target_confidence_filter"
 TARGET_CONFIDENCE_FILTER_CATEGORY = "2_unlabeled_target_adaptive"
 SORT_MODES = ("none", "confidence", "entropy")
@@ -213,12 +215,46 @@ def _metadata(
 
 
 def _classes(values: Sequence[Any] | np.ndarray, *, n_classes: int) -> np.ndarray:
-    classes = np.asarray(values, dtype=object).reshape(-1)
+    classes = _class_vector(values)
     if classes.shape[0] != n_classes:
         raise ValueError(f"classes must contain one value per probability column: {classes.shape[0]} != {n_classes}.")
-    if len(set(classes.tolist())) != classes.shape[0]:
+    if _has_duplicate_labels(classes):
         raise ValueError("classes must be unique.")
     return classes
+
+
+def _class_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            entries = [_as_python_scalar(values.item())]
+        elif values.ndim == 1 or (values.ndim == 2 and 1 in values.shape):
+            entries = [_as_python_scalar(value) for value in values.reshape(-1).tolist()]
+        else:
+            entries = [tuple(_as_python_scalar(item) for item in np.asarray(row, dtype=object).reshape(-1).tolist()) for row in values]
+    else:
+        try:
+            entries = list(values)
+        except TypeError as exc:
+            raise ValueError("classes must be a sequence with one value per probability column.") from exc
+    vector = np.empty(len(entries), dtype=object)
+    for index, value in enumerate(entries):
+        vector[index] = _as_python_scalar(value)
+    return vector
+
+
+def _as_python_scalar(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _has_duplicate_labels(values: np.ndarray) -> bool:
+    seen: list[Any] = []
+    for value in values:
+        if any(values_equal(value, existing) for existing in seen):
+            return True
+        seen.append(value)
+    return False
 
 
 def _contains_boolean_value(values: Any) -> bool:
