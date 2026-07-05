@@ -146,24 +146,38 @@ def _classes(labels: np.ndarray, classes: Sequence[Any] | np.ndarray | None) -> 
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, n_classes: int, epsilon: float) -> np.ndarray:
-    if _contains_boolean_value(values):
+    materialized = _materialize_iterables(values)
+    if _contains_boolean_value(materialized):
         raise ValueError("probabilities must not contain boolean values.")
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] != n_classes:
         raise ValueError(f"probabilities must have shape n_rows x {n_classes}.")
     return _normalize_probability_rows(matrix, epsilon=epsilon)
 
 
 def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.ndarray:
-    if _contains_boolean_value(values):
+    materialized = _materialize_iterables(values)
+    if _contains_boolean_value(materialized):
         raise ValueError("probability rows must not contain boolean values.")
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probability rows must be finite and non-negative.")
     row_sums = np.sum(matrix, axis=1, keepdims=True)
     if np.any(row_sums <= 0.0):
         raise ValueError("probability rows must have positive mass.")
     return matrix / row_sums
+
+
+def _materialize_iterables(values: Any) -> Any:
+    """Recursively materialize one-pass iterable probability inputs."""
+
+    if isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
+        return values
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return values
+    return [_materialize_iterables(item) for item in iterator]
 
 
 def _contains_boolean_value(values: Any) -> bool:
