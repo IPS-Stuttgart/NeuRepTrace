@@ -36,6 +36,16 @@ def test_source_feature_roll_appends_synthetic_rows() -> None:
     assert result.metadata["source_feature_roll_valid_for_strict_source_only"] is True
 
 
+def test_source_feature_roll_counts_mixed_hashable_domains_without_sorting() -> None:
+    features = np.asarray([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0], [3.0, 4.0]], dtype=float)
+    labels = np.asarray(["a", "a", "b", "b"], dtype=object)
+    domains = np.asarray(["s1", 1, ("session", 2), "s1"], dtype=object)
+
+    result = augment_source_with_feature_roll(features, labels, source_domains=domains)
+
+    assert result.metadata["source_feature_roll_n_source_domains"] == 3
+
+
 def test_roll_feature_row_circular_and_constant_modes() -> None:
     row = np.asarray([1.0, 2.0, 3.0, 4.0])
 
