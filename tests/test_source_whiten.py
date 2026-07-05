@@ -29,6 +29,18 @@ def test_pca_source_whiten_shapes_and_metadata() -> None:
     assert result.metadata["source_whiten_valid_for_strict_source_only"] is True
 
 
+def test_source_whiten_accepts_nested_one_pass_iterables() -> None:
+    source = (iter(row) for row in [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+    test = (iter(row) for row in [[0.25, 0.75], [0.75, 0.25]])
+
+    result = fit_source_whiten(source_features=source, test_features=test, config={"method": "pca", "n_components": 1})
+    transformed = apply_source_whiten((iter(row) for row in [[0.5, 0.5]]), result.transform)
+
+    assert result.train_features.shape == (4, 1)
+    assert result.test_features.shape == (2, 1)
+    assert transformed.shape == (1, 1)
+
+
 def test_zca_whiten_preserves_feature_width() -> None:
     source = np.asarray([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=float)
     test = np.asarray([[0.25, 0.75]], dtype=float)

@@ -8,7 +8,7 @@ or scale differences can destabilize downstream decoders.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -57,8 +57,8 @@ class SourceWhiteningResult:
 
 def fit_source_whitening(
     *,
-    source_features: Sequence[Sequence[float]] | np.ndarray,
-    test_features: Sequence[Sequence[float]] | np.ndarray,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
+    test_features: Iterable[Iterable[float]] | np.ndarray,
     config: SourceWhiteningConfig | Mapping[str, Any] | None = None,
 ) -> SourceWhiteningResult:
     """Fit a source-only whitening transform and apply it to source/test rows.
@@ -121,7 +121,7 @@ def normalize_whitening_mode(value: str | None) -> str:
 
 
 def fit_source_whitening_transform(
-    source_features: Sequence[Sequence[float]] | np.ndarray,
+    source_features: Iterable[Iterable[float]] | np.ndarray,
     *,
     config: SourceWhiteningConfig | Mapping[str, Any] | None = None,
 ) -> SourceWhiteningTransform:
@@ -157,7 +157,7 @@ def fit_source_whitening_transform(
     )
 
 
-def apply_source_whitening(features: Sequence[Sequence[float]] | np.ndarray, transform: SourceWhiteningTransform) -> np.ndarray:
+def apply_source_whitening(features: Iterable[Iterable[float]] | np.ndarray, transform: SourceWhiteningTransform) -> np.ndarray:
     """Apply a frozen source-fitted whitening transform."""
 
     matrix = _feature_matrix(features, name="features")
@@ -218,8 +218,22 @@ def _metadata(
     }
 
 
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
