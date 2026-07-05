@@ -13,7 +13,11 @@ _NO_PATH_SENTINELS = {"", "none", "null", "false", "off", "-"}
 _PATCH_MARKER = "_neureptrace_fieldtrip_cli_path_options_patched"
 _WRITER_PATCH_MARKER = "_neureptrace_fieldtrip_output_paths_patched"
 _PARSE_PATH_PATCH_MARKER = "_neureptrace_fieldtrip_parse_path_bool_guard_patched"
+_LABEL_CONFIG_PATCH_MARKER = "_neureptrace_fieldtrip_label_config_validation_patched"
 _PATH_TOKEN_ERROR = "path tokens must be strings or integer indices, not boolean values."
+_LABEL_BASE_ERROR = "label_base must be a finite numeric scalar or None, not a boolean value."
+_LABEL_BASE_PARSE_ERROR = "label-base must be finite numeric or 'none'."
+_TRIALINFO_COLUMN_ERROR = "trialinfo_column must be an integer column index, not a boolean value."
 
 
 def _format_path_default(tokens: Sequence[Any] | None) -> str:
@@ -67,8 +71,20 @@ def _parse_optional_path_tokens(
     return fieldtrip_mat.parse_path_tokens(value, () if default is None else default)
 
 
-def _parse_label_base(value: str | int | float | None) -> float | None:
-    """Parse ``--label-base`` and allow ``none`` for already-normalized labels."""
+def _scalar_value_for_numeric_config(value: Any, *, message: str) -> Any:
+    """Return a scalar config value while rejecting booleans and arrays."""
+
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    return value
+
+
+def _coerce_label_base(value: Any) -> float | None:
+    """Normalize FieldTrip label-base controls without bool-to-float coercion."""
 
     if value is None:
         return None
@@ -77,10 +93,36 @@ def _parse_label_base(value: str | int | float | None) -> float | None:
         if text.lower() in {"", "none", "null"}:
             return None
         value = text
+    value = _scalar_value_for_numeric_config(value, message=_LABEL_BASE_ERROR)
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise argparse.ArgumentTypeError("label-base must be numeric or 'none'.") from exc
+        raise ValueError(_LABEL_BASE_ERROR) from exc
+    if not np.isfinite(parsed):
+        raise ValueError(_LABEL_BASE_ERROR)
+    return parsed
+
+
+def _coerce_trialinfo_column(value: Any) -> int:
+    """Normalize a FieldTrip trialinfo column index without bool-as-int leakage."""
+
+    value = _scalar_value_for_numeric_config(value, message=_TRIALINFO_COLUMN_ERROR)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_TRIALINFO_COLUMN_ERROR) from exc
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
+        raise ValueError(_TRIALINFO_COLUMN_ERROR)
+    return int(parsed)
+
+
+def _parse_label_base(value: str | int | float | None) -> float | None:
+    """Parse ``--label-base`` and allow ``none`` for already-normalized labels."""
+
+    try:
+        return _coerce_label_base(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(_LABEL_BASE_PARSE_ERROR) from exc
 
 
 def _build_parser(fieldtrip_mat: Any, prog: str | None = None) -> argparse.ArgumentParser:
@@ -159,6 +201,47 @@ def _install_parse_path_tokens_patch(fieldtrip_mat: Any) -> None:
     fieldtrip_mat.parse_path_tokens = parse_path_tokens
 
 
+def _install_label_config_patch(fieldtrip_mat: Any) -> None:
+    """Reject boolean FieldTrip label controls before numeric coercion."""
+
+    if getattr(fieldtrip_mat._metadata_from_trialinfo, _LABEL_CONFIG_PATCH_MARKER, False):
+        return
+
+    original_parse_label_base = fieldtrip_mat._parse_label_base
+    original_metadata_from_trialinfo = fieldtrip_mat._metadata_from_trialinfo
+
+    def _patched_parse_label_base(value: Any) -> float | None:
+        try:
+            return _coerce_label_base(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(_LABEL_BASE_PARSE_ERROR) from exc
+
+    def _metadata_from_trialinfo(
+        *,
+        n_trials: int,
+        trialinfo: np.ndarray | None,
+        sampleinfo: np.ndarray | None,
+        label_column: str,
+        label_base: Any,
+        trialinfo_column: Any,
+    ) -> Any:
+        return original_metadata_from_trialinfo(
+            n_trials=n_trials,
+            trialinfo=trialinfo,
+            sampleinfo=sampleinfo,
+            label_column=label_column,
+            label_base=_coerce_label_base(label_base),
+            trialinfo_column=_coerce_trialinfo_column(trialinfo_column),
+        )
+
+    setattr(_patched_parse_label_base, _LABEL_CONFIG_PATCH_MARKER, True)
+    setattr(_metadata_from_trialinfo, _LABEL_CONFIG_PATCH_MARKER, True)
+    _patched_parse_label_base.__wrapped__ = original_parse_label_base
+    _metadata_from_trialinfo.__wrapped__ = original_metadata_from_trialinfo
+    fieldtrip_mat._parse_label_base = _patched_parse_label_base
+    fieldtrip_mat._metadata_from_trialinfo = _metadata_from_trialinfo
+
+
 def _install_writer_path_patch(fieldtrip_mat: Any) -> None:
     """Normalize public writer output paths before the original writer touches them."""
 
@@ -194,6 +277,7 @@ def install() -> None:
     import neureptrace.fieldtrip_mat as fieldtrip_mat
 
     _install_parse_path_tokens_patch(fieldtrip_mat)
+    _install_label_config_patch(fieldtrip_mat)
     _install_writer_path_patch(fieldtrip_mat)
 
     if getattr(fieldtrip_mat.main, _PATCH_MARKER, False):
