@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from .source_prior import _object_contains, _object_mask, _object_vector, _unique_object_values
+
 SOURCE_PRIOR_PROTOCOL = "strict_source_only_class_prior"
 SOURCE_PRIOR_CATEGORY = "1_strict_source_only"
 PRIOR_MODES = ("empirical", "uniform")
@@ -31,12 +33,12 @@ def compute_source_class_prior(
 ) -> SourcePriorResult:
     """Estimate a class prior from source labels only."""
 
-    labels = np.asarray(source_labels, dtype=object).reshape(-1)
+    labels = _object_vector(source_labels, name="source_labels")
     if labels.shape[0] < 1:
         raise ValueError("source_labels must contain at least one value.")
     class_values = _classes(labels, classes)
     resolved = normalize_prior_mode(mode)
-    counts = np.asarray([np.count_nonzero(labels == class_label) for class_label in class_values.tolist()], dtype=int)
+    counts = np.asarray([np.count_nonzero(_object_mask(labels, class_label)) for class_label in class_values.tolist()], dtype=int)
     if resolved == "uniform":
         prior = np.full(class_values.shape[0], 1.0 / class_values.shape[0], dtype=float)
     else:
@@ -69,15 +71,14 @@ def normalize_prior_mode(value: str | None) -> str:
 
 def _classes(labels: np.ndarray, classes: Sequence[Any] | np.ndarray | None) -> np.ndarray:
     if classes is None:
-        values = tuple(dict.fromkeys(labels.tolist()))
+        class_values = _object_vector(_unique_object_values(labels), name="classes")
     else:
-        values = tuple(np.asarray(classes, dtype=object).reshape(-1).tolist())
-    class_values = np.asarray(values, dtype=object)
+        class_values = _object_vector(classes, name="classes")
     if class_values.shape[0] < 1:
         raise ValueError("classes must contain at least one value.")
-    if len(set(class_values.tolist())) != class_values.shape[0]:
+    if len(_unique_object_values(class_values)) != class_values.shape[0]:
         raise ValueError("classes must be unique.")
-    unknown = sorted({label for label in labels.tolist() if label not in set(class_values.tolist())}, key=repr)
+    unknown = sorted((label for label in _unique_object_values(labels) if not _object_contains(class_values, label)), key=repr)
     if unknown:
         raise ValueError(f"source_labels contain labels absent from classes: {unknown}.")
     return class_values
