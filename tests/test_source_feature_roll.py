@@ -46,6 +46,26 @@ def test_source_feature_roll_counts_mixed_hashable_domains_without_sorting() -> 
     assert result.metadata["source_feature_roll_n_source_domains"] == 3
 
 
+def test_source_feature_roll_preserves_composite_labels_and_tuple_domains() -> None:
+    features = np.asarray([[0.0, 1.0], [1.0, 2.0], [10.0, 11.0], [11.0, 12.0]], dtype=float)
+    labels = [("subject-a", "stim-a"), ("subject-a", "stim-a"), ("subject-b", "stim-b"), ("subject-b", "stim-b")]
+    domains = [("source", 1), ("source", 1), ("source", 2), ("source", 2)]
+
+    result = augment_source_with_feature_roll(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "max_shift": 1, "random_state": 11},
+    )
+
+    assert result.labels.shape == (6,)
+    assert result.labels.tolist()[:4] == labels
+    assert result.labels.tolist()[4:].count(("subject-a", "stim-a")) == 1
+    assert result.labels.tolist()[4:].count(("subject-b", "stim-b")) == 1
+    assert result.metadata["source_feature_roll_n_classes"] == 2
+    assert result.metadata["source_feature_roll_n_source_domains"] == 2
+
+
 def test_roll_feature_row_circular_and_constant_modes() -> None:
     row = np.asarray([1.0, 2.0, 3.0, 4.0])
 
