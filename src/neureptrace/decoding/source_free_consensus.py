@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from neureptrace.decoding.source_free import _as_label_vector
 from neureptrace.decoding.source_free_target_prior import (
     SourceFreeTargetPriorCorrectionResult,
     fit_source_free_target_prior_predict_proba,
@@ -99,12 +100,13 @@ def fit_source_free_consensus_predict_proba(
     """
 
     target_matrix = _feature_matrix(target_features, name="target_features")
+    class_vector = None if classes is None else _as_label_vector(classes, "classes")
     specs = _coerce_variants(variants)
     variant_results = tuple(
         fit_source_free_target_prior_predict_proba(
             source_model=source_model,
             target_features=target_matrix,
-            classes=None if classes is None else np.asarray(classes, dtype=object).reshape(-1),
+            classes=class_vector,
             **dict(spec.kwargs),
         )
         for spec in specs

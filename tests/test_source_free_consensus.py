@@ -20,6 +20,17 @@ class _ToySourceModel:
         return probabilities
 
 
+class _CompositeToySourceModel:
+    def __init__(self) -> None:
+        self.classes_ = np.empty(2, dtype=object)
+        self.classes_[:] = [("cue", "left"), ("cue", "right")]
+
+    def predict_proba(self, features: np.ndarray) -> np.ndarray:
+        probabilities = np.full((features.shape[0], 2), [0.90, 0.10], dtype=float)
+        probabilities[features[:, 0] > 0.0] = [0.20, 0.80]
+        return probabilities
+
+
 def test_combine_probability_variants_logit_mean_normalizes_rows() -> None:
     first = np.array([[0.80, 0.20], [0.40, 0.60]], dtype=float)
     second = np.array([[0.60, 0.40], [0.20, 0.80]], dtype=float)
@@ -94,6 +105,21 @@ def test_fit_source_free_consensus_returns_protocol_metadata() -> None:
     assert result.metadata["source_free_consensus_uses_source_rows_during_adaptation"] is False
     assert result.metadata["source_free_consensus_valid_for_protocol_2_5"] is True
     assert result.metadata["source_free_consensus_variants"] == "raw|prior"
+
+
+def test_fit_source_free_consensus_preserves_explicit_composite_classes() -> None:
+    target_features = np.array([[-1.0], [1.0]], dtype=float)
+    classes = np.array([["cue", "left"], ["cue", "right"]], dtype=object)
+
+    result = fit_source_free_consensus_predict_proba(
+        source_model=_CompositeToySourceModel(),
+        target_features=target_features,
+        classes=classes,
+        variants=[SourceFreeConsensusVariant("raw", {"max_iterations": 0, "target_prior_correction": "none"})],
+    )
+
+    assert result.probabilities.shape == (2, 2)
+    assert result.variant_results[0].base_result.adapter.classes_.tolist() == [("cue", "left"), ("cue", "right")]
 
 
 def test_fit_source_free_consensus_accepts_named_default_variants() -> None:
