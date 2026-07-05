@@ -73,8 +73,11 @@ def _validate_metadata_columns_config(config: Mapping[str, Any], *, error_type: 
 def install() -> None:
     """Install stricter metadata column-index validation."""
 
+    from neureptrace import _fieldtrip_label_config_validation_patch
     from neureptrace import dataset_config
     from neureptrace.io import fieldtrip_mat
+
+    _fieldtrip_label_config_validation_patch.install()
 
     if getattr(dataset_config, _PATCH_MARKER, False):
         return
