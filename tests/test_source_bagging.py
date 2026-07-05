@@ -70,8 +70,14 @@ def test_source_bagging_config_validation() -> None:
         source_bagging_config(n_estimators=0)
 
 
-@pytest.mark.parametrize("value", [np.asarray(3), np.asarray([3]), np.asarray(True)])
-def test_source_bagging_rejects_array_valued_n_estimators(value: object) -> None:
+def test_source_bagging_accepts_scalar_numpy_n_estimators() -> None:
+    cfg = source_bagging_config(n_estimators=np.asarray(3))
+
+    assert cfg.n_estimators == 3
+
+
+@pytest.mark.parametrize("value", [np.asarray([3]), np.asarray(True), np.asarray(3.5)])
+def test_source_bagging_rejects_non_integral_or_boolean_n_estimators(value: object) -> None:
     with pytest.raises(ValueError, match="n_estimators"):
         source_bagging_config(n_estimators=value)
 

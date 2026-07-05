@@ -24,11 +24,19 @@ def _positive_float_error(name: str) -> ValueError:
 
 
 def _positive_int(value: Any, *, name: str) -> int:
-    """Return a positive integer while rejecting boolean and array controls."""
+    """Return a positive integer while rejecting booleans and non-scalar arrays."""
 
-    if isinstance(value, (bool, np.bool_, np.ndarray)):
+    if isinstance(value, (bool, np.bool_)):
         raise _positive_int_error(name)
-    if isinstance(value, (list, tuple, dict, set)):
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise _positive_int_error(name)
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise _positive_int_error(name)
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
         raise _positive_int_error(name)
     try:
         parsed = float(value)
