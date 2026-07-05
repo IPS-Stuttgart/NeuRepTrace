@@ -19,17 +19,25 @@ TARGET_CONFIDENCE_FILTER_CATEGORY = "2_unlabeled_target_adaptive"
 SORT_MODES = ("none", "confidence", "entropy")
 DEFAULT_MIN_CONFIDENCE = 0.8
 DEFAULT_EPSILON = 1e-12
+_ABSENT_STRING_VALUES = {"", "none", "null"}
 
 
 @dataclass(frozen=True, slots=True)
 class TargetConfidenceFilterConfig:
     """Configuration for target probability confidence filtering."""
 
-    min_confidence: float = DEFAULT_MIN_CONFIDENCE
-    max_entropy: float | None = None
-    top_k: int | None = None
-    sort_by: str = "none"
-    epsilon: float = DEFAULT_EPSILON
+    min_confidence: float | str | np.ndarray = DEFAULT_MIN_CONFIDENCE
+    max_entropy: float | str | np.ndarray | None = None
+    top_k: int | str | np.ndarray | None = None
+    sort_by: str | np.ndarray | None = "none"
+    epsilon: float | str | np.ndarray = DEFAULT_EPSILON
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "min_confidence", _unit_interval_float(self.min_confidence, name="min_confidence"))
+        object.__setattr__(self, "max_entropy", _optional_nonnegative_float(self.max_entropy, name="max_entropy"))
+        object.__setattr__(self, "top_k", _optional_positive_int(self.top_k, name="top_k"))
+        object.__setattr__(self, "sort_by", normalize_sort_mode(self.sort_by))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,27 +123,28 @@ def filter_target_probabilities_by_confidence(
 
 def target_confidence_filter_config(
     *,
-    min_confidence: float | str = DEFAULT_MIN_CONFIDENCE,
-    max_entropy: float | str | None = None,
-    top_k: int | str | None = None,
-    sort_by: str | None = "none",
-    epsilon: float | str = DEFAULT_EPSILON,
+    min_confidence: float | str | np.ndarray = DEFAULT_MIN_CONFIDENCE,
+    max_entropy: float | str | np.ndarray | None = None,
+    top_k: int | str | np.ndarray | None = None,
+    sort_by: str | np.ndarray | None = "none",
+    epsilon: float | str | np.ndarray = DEFAULT_EPSILON,
 ) -> TargetConfidenceFilterConfig:
     """Normalize target-confidence filter options."""
 
     return TargetConfidenceFilterConfig(
-        min_confidence=_unit_interval_float(min_confidence, name="min_confidence"),
-        max_entropy=None if max_entropy in {None, "", "none", "None", "null"} else _nonnegative_float(max_entropy, name="max_entropy"),
-        top_k=_optional_positive_int(top_k, name="top_k"),
-        sort_by=normalize_sort_mode(sort_by),
-        epsilon=_positive_float(epsilon, name="epsilon"),
+        min_confidence=min_confidence,
+        max_entropy=max_entropy,
+        top_k=top_k,
+        sort_by=sort_by,
+        epsilon=epsilon,
     )
 
 
-def normalize_sort_mode(value: str | None) -> str:
+def normalize_sort_mode(value: str | np.ndarray | None) -> str:
     """Normalize selected-row ordering aliases."""
 
-    normalized = "none" if value is None else str(value).strip().lower().replace("-", "_")
+    scalar = _scalar_value(value, name="sort_by")
+    normalized = "none" if scalar is None else str(scalar).strip().lower().replace("-", "_")
     normalized = {"off": "none", "conf": "confidence", "max_probability": "confidence", "low_entropy": "entropy"}.get(normalized, normalized)
     if normalized not in SORT_MODES:
         raise ValueError(f"Unknown sort_by {value!r}. Available values: {', '.join(SORT_MODES)}.")
@@ -145,8 +154,9 @@ def normalize_sort_mode(value: str | None) -> str:
 def probability_entropy(probabilities: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float = DEFAULT_EPSILON) -> np.ndarray:
     """Return row-wise entropy for probability rows."""
 
-    prob = _probability_matrix(probabilities, name="probabilities", epsilon=epsilon)
-    return -np.sum(prob * np.log(np.maximum(prob, _positive_float(epsilon, name="epsilon"))), axis=1)
+    eps = _positive_float(epsilon, name="epsilon")
+    prob = _probability_matrix(probabilities, name="probabilities", epsilon=eps)
+    return -np.sum(prob * np.log(np.maximum(prob, eps)), axis=1)
 
 
 def _coerce_config(config: TargetConfidenceFilterConfig | Mapping[str, Any]) -> TargetConfidenceFilterConfig:
@@ -211,8 +221,18 @@ def _classes(values: Sequence[Any] | np.ndarray, *, n_classes: int) -> np.ndarra
     return classes
 
 
+def _contains_boolean_value(values: Any) -> bool:
+    array = np.asarray(values, dtype=object)
+    return any(isinstance(value, (bool, np.bool_)) for value in array.reshape(-1))
+
+
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    if _contains_boolean_value(values):
+        raise ValueError(f"{name} must contain numeric scores, not booleans.")
+    try:
+        matrix = np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric values.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix with at least two columns.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
@@ -224,43 +244,89 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name:
     return matrix / row_sums
 
 
-def _optional_positive_int(value: int | str | None, *, name: str) -> int | None:
-    if value in {None, "", "none", "None", "null"}:
+def _scalar_value(value: Any, *, name: str) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.shape == ():
+            return value.item()
+        if value.size == 1:
+            item = value.reshape(-1)[0]
+            return item.item() if isinstance(item, np.generic) else item
+        raise ValueError(f"{name} must be a scalar.")
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _is_absent(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        scalar = _scalar_value(value, name="value")
+    except ValueError:
+        return False
+    if scalar is None:
+        return True
+    return isinstance(scalar, str) and scalar.strip().lower() in _ABSENT_STRING_VALUES
+
+
+def _optional_positive_int(value: int | str | np.ndarray | None, *, name: str) -> int | None:
+    if _is_absent(value):
         return None
     return _positive_int(value, name=name)
 
 
-def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+def _optional_nonnegative_float(value: float | str | np.ndarray | None, *, name: str) -> float | None:
+    if _is_absent(value):
+        return None
+    return _nonnegative_float(value, name=name)
+
+
+def _positive_int(value: int | str | np.ndarray, *, name: str) -> int:
+    scalar = _scalar_value(value, name=name)
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
+    try:
+        parsed = float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
     return int(parsed)
 
 
-def _unit_interval_float(value: float | str, *, name: str) -> float:
-    parsed = _finite_float(value, name=name)
-    if parsed < 0.0 or parsed > 1.0:
+def _unit_interval_float(value: float | str | np.ndarray, *, name: str) -> float:
+    scalar = _scalar_value(value, name=name)
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(f"{name} must be in [0, 1].")
+    try:
+        parsed = float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be in [0, 1].") from exc
+    if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
     return parsed
 
 
-def _nonnegative_float(value: float | str, *, name: str) -> float:
+def _nonnegative_float(value: float | str | np.ndarray, *, name: str) -> float:
     parsed = _finite_float(value, name=name)
     if parsed < 0.0:
         raise ValueError(f"{name} must be non-negative.")
     return parsed
 
 
-def _positive_float(value: float | str, *, name: str) -> float:
+def _positive_float(value: float | str | np.ndarray, *, name: str) -> float:
     parsed = _finite_float(value, name=name)
     if parsed <= 0.0:
         raise ValueError(f"{name} must be positive.")
     return parsed
 
 
-def _finite_float(value: float | str, *, name: str) -> float:
+def _finite_float(value: float | str | np.ndarray, *, name: str) -> float:
+    scalar = _scalar_value(value, name=name)
+    if isinstance(scalar, (bool, np.bool_)):
+        raise ValueError(f"{name} must be finite numeric scalar, not boolean.")
     try:
-        parsed = float(value)
+        parsed = float(scalar)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be finite.") from exc
     if not np.isfinite(parsed):
