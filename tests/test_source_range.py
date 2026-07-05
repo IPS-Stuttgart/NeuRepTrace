@@ -61,6 +61,22 @@ def test_source_range_helpers_accept_one_pass_feature_iterables() -> None:
     assert metadata["source_range_n_test_rows"] == 2
 
 
+def test_source_range_accepts_object_arrays_containing_generator_rows() -> None:
+    source = np.asarray([iter([0.0, 10.0]), iter([2.0, 12.0])], dtype=object)
+    test = np.asarray([iter([-5.0, 11.0]), iter([5.0, 20.0])], dtype=object)
+
+    train, test_out, lower, upper, train_mask, test_mask, metadata = source_range_clip(source_features=source, test_features=test)
+
+    np.testing.assert_allclose(train, [[0.0, 10.0], [2.0, 12.0]])
+    np.testing.assert_allclose(test_out, [[0.0, 11.0], [2.0, 12.0]])
+    np.testing.assert_allclose(lower, [0.0, 10.0])
+    np.testing.assert_allclose(upper, [2.0, 12.0])
+    assert not np.any(train_mask)
+    assert test_mask.tolist() == [[True, False], [True, True]]
+    assert metadata["source_range_n_source_rows"] == 2
+    assert metadata["source_range_n_test_rows"] == 2
+
+
 def test_apply_source_range_clip_accepts_one_pass_bounds() -> None:
     clipped, mask = apply_source_range_clip(
         (iter(row) for row in ([-5.0, 11.0], [5.0, 20.0])),
