@@ -11,6 +11,11 @@ It also keeps tuple-valued source-domain identifiers atomic when DTE source-doma
 selection materializes the top-k domain list.  Without that guard, NumPy can coerce
 ``[(subject, run), ...]`` into a 2-D string array, causing matching and domain
 selection to operate on flattened scalar cells instead of per-row domain tuples.
+
+Finally, MEKT estimator fits are routed through a dense integer label wrapper.
+Valid tuple-valued source classes remain exposed in MEKT results and predictions,
+but scikit-learn estimators no longer see sequence-valued class labels as legacy
+multilabel targets.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from types import ModuleType
 from typing import Any
 
 import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 
 _TARGET_MODULE = "neureptrace.decoding.mekt"
 _PATCH_MARKER = "_neureptrace_mekt_vector_validation_patch_installed"
@@ -112,6 +118,61 @@ def _select_top_domains(scores: Mapping[Any, float], top_k: int) -> np.ndarray:
     return _object_array(list(ordered[: min(int(top_k), len(ordered))]))
 
 
+class _EncodedLabelEstimator(BaseEstimator, ClassifierMixin):
+    """Fit a scikit-learn estimator on dense ids while exposing original labels."""
+
+    def __init__(self, base_estimator: Any):
+        self.base_estimator = base_estimator
+
+    def fit(self, features: Any, labels: Any, **fit_params: Any):
+        from neureptrace.decoding.classifiers import encode_classifier_labels
+
+        self.classes_, encoded_labels = encode_classifier_labels(labels)
+        self.estimator_ = clone(self.base_estimator)
+        self.estimator_.fit(features, encoded_labels, **fit_params)
+        return self
+
+    def _require_fitted(self) -> Any:
+        if not hasattr(self, "estimator_") or not hasattr(self, "classes_"):
+            raise RuntimeError("MEKT label-encoded estimator must be fitted before prediction.")
+        return self.estimator_
+
+    def predict(self, features: Any) -> np.ndarray:
+        estimator = self._require_fitted()
+        encoded = np.asarray(estimator.predict(features), dtype=int).reshape(-1)
+        if np.any(encoded < 0) or np.any(encoded >= self.classes_.shape[0]):
+            raise ValueError("MEKT estimator returned an encoded label outside the fitted class range.")
+        return self.classes_[encoded]
+
+    def predict_proba(self, features: Any) -> np.ndarray:
+        estimator = self._require_fitted()
+        if not hasattr(estimator, "predict_proba"):
+            raise AttributeError(f"{estimator.__class__.__name__!r} object has no attribute 'predict_proba'")
+        return np.asarray(estimator.predict_proba(features), dtype=float)
+
+    def decision_function(self, features: Any) -> np.ndarray:
+        estimator = self._require_fitted()
+        if hasattr(estimator, "decision_function"):
+            scores = np.asarray(estimator.decision_function(features), dtype=float)
+            if scores.ndim == 1 and self.classes_.shape[0] == 2:
+                return np.column_stack((-0.5 * scores, 0.5 * scores))
+            return scores
+        if hasattr(estimator, "predict_proba"):
+            return np.asarray(estimator.predict_proba(features), dtype=float)
+        encoded = np.asarray(estimator.predict(features), dtype=int).reshape(-1)
+        scores = np.zeros((encoded.shape[0], self.classes_.shape[0]), dtype=float)
+        valid = (encoded >= 0) & (encoded < self.classes_.shape[0])
+        scores[np.flatnonzero(valid), encoded[valid]] = 1.0
+        return scores
+
+
+def _wrap_estimator(module: ModuleType, estimator: Any | None) -> _EncodedLabelEstimator:
+    base_estimator = module._default_estimator() if estimator is None else estimator
+    if isinstance(base_estimator, _EncodedLabelEstimator):
+        return base_estimator
+    return _EncodedLabelEstimator(base_estimator)
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
@@ -151,6 +212,7 @@ def _patch_module(module: ModuleType) -> None:
             kwargs["source_domains"] = _normalize_optional_domain_vector(kwargs["source_domains"], name="source_domains")
         if kwargs.get("initial_pseudo_labels") is not None:
             kwargs["initial_pseudo_labels"] = _as_hashable_vector(kwargs["initial_pseudo_labels"], name="initial_pseudo_labels")
+        kwargs["estimator"] = _wrap_estimator(module, kwargs.get("estimator"))
         return original_transfer(source_covariances, _as_hashable_vector(source_labels, name="source_labels"), target_covariances, **kwargs)
 
     @wraps(original_fit_predict)
@@ -158,6 +220,7 @@ def _patch_module(module: ModuleType) -> None:
         kwargs = dict(kwargs)
         if "source_domains" in kwargs:
             kwargs["source_domains"] = _normalize_optional_domain_vector(kwargs["source_domains"], name="source_domains")
+        kwargs["estimator"] = _wrap_estimator(module, kwargs.get("estimator"))
         return original_fit_predict(source_covariances, _as_hashable_vector(source_labels, name="source_labels"), target_covariances, **kwargs)
 
     @wraps(original_scores)
