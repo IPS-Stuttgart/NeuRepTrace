@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,13 @@ def _hashable_row_id(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_hashable_row_id(item) for item in value)
     return value
+
+
+def _object_vector(values: tuple[Any, ...]) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
+    return vector
 
 
 def _row_id_tuple(values: Any, *, expected_length: int | None = None, name: str = "row_ids") -> tuple[Any, ...]:
@@ -70,6 +78,36 @@ def _row_id_tuple(values: Any, *, expected_length: int | None = None, name: str 
     return row_ids
 
 
+def _label_vector(values: Any) -> np.ndarray:
+    """Normalize source labels while preserving row-wise composite labels."""
+
+    labels = _row_id_tuple(values, name="train_labels")
+    if any(isinstance(label, tuple) for label in labels):
+        return _object_vector(labels)
+    return np.asarray(labels).reshape(-1)
+
+
+def _label_requires_encoding(labels: np.ndarray) -> bool:
+    return any(isinstance(label, tuple) for label in labels.tolist())
+
+
+def _classifier_fit_labels(labels: np.ndarray, *, classifiers) -> tuple[np.ndarray, np.ndarray, bool]:
+    if _label_requires_encoding(labels):
+        classes, encoded = classifiers.encode_classifier_labels(labels)
+        return np.asarray(classes), np.asarray(encoded, dtype=int), True
+    return np.unique(labels), labels, False
+
+
+def _encoded_class_weight(class_weight: Any, classes: np.ndarray) -> Any:
+    if not isinstance(class_weight, Mapping):
+        return class_weight
+    encoded: dict[int, float] = {}
+    for encoded_label, class_label in enumerate(classes.tolist()):
+        if class_label in class_weight:
+            encoded[int(encoded_label)] = float(class_weight[class_label])
+    return encoded
+
+
 def _requested_row_ids(values: Any, index: dict[Any, int]) -> tuple[Any, ...]:
     """Normalize requested row ids, preserving a bare composite-id lookup.
 
@@ -101,9 +139,10 @@ def _positive_float(value: Any, *, name: str) -> float:
 
 
 def install() -> None:
-    """Patch precomputed foundation-feature row-id, probability, and scalar validation."""
+    """Patch precomputed foundation-feature row-id, label, probability, and scalar validation."""
 
     module = importlib.import_module("neureptrace.decoding.precomputed_foundation")
+    classifiers = importlib.import_module("neureptrace.decoding.classifiers")
     if getattr(module, _PATCH_MARKER, False):
         return
 
@@ -198,12 +237,13 @@ def install() -> None:
         classifier_class_weight="balanced",
         sample_weight=None,
     ):
-        labels = module._label_vector(train_labels)
+        labels = _label_vector(train_labels)
         train_ids = _row_id_tuple(train_row_ids, expected_length=labels.shape[0], name="train_row_ids")
         test_ids = _requested_row_ids(test_row_ids, feature_table.row_index())
         if labels.shape[0] != len(train_ids):
             raise ValueError(f"train_labels must contain one value per train row id: {labels.shape[0]} != {len(train_ids)}.")
-        if labels.shape[0] < 1 or np.unique(labels).shape[0] < 2:
+        classes, fit_labels, decode_labels = _classifier_fit_labels(labels, classifiers=classifiers)
+        if labels.shape[0] < 1 or classes.shape[0] < 2:
             raise ValueError("train_labels must contain at least two classes.")
         train_features = align_precomputed_foundation_features(feature_table, train_ids)
         test_features = align_precomputed_foundation_features(feature_table, test_ids)
@@ -214,29 +254,32 @@ def install() -> None:
             if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
                 raise ValueError("sample_weight must contain finite non-negative values.")
 
+        model_class_weight = _encoded_class_weight(classifier_class_weight, classes) if decode_labels else classifier_class_weight
         model = module.clone(classifier) if classifier is not None else module.LogisticRegression(
             C=module._positive_float(classifier_C, name="classifier_C"),
             max_iter=module._positive_int(classifier_max_iter, name="classifier_max_iter"),
-            class_weight=classifier_class_weight,
+            class_weight=model_class_weight,
             random_state=13,
         )
         fit_kwargs = {} if weights is None else {"sample_weight": weights}
-        model.fit(train_features, labels, **fit_kwargs)
-        predictions = np.asarray(model.predict(test_features))
-        probabilities = module._predict_probabilities_or_none(model, test_features)
-        classes = np.asarray(getattr(model, "classes_", np.unique(labels)))
-        metadata = module._probe_metadata(feature_table, n_train_rows=len(train_ids), n_test_rows=len(test_ids), classifier=model)
+        model.fit(train_features, fit_labels, **fit_kwargs)
+        classifier_model = classifiers.DecodedLabelClassifier(model, classes) if decode_labels else model
+        predictions = np.asarray(classifier_model.predict(test_features))
+        probabilities = module._predict_probabilities_or_none(classifier_model, test_features)
+        output_classes = np.asarray(getattr(classifier_model, "classes_", classes))
+        metadata = module._probe_metadata(feature_table, n_train_rows=len(train_ids), n_test_rows=len(test_ids), classifier=classifier_model)
         return module.PrecomputedFoundationProbeResult(
             train_features=train_features,
             test_features=test_features,
             predictions=predictions,
             probabilities=probabilities,
-            classes=classes,
-            classifier=model,
+            classes=output_classes,
+            classifier=classifier_model,
             metadata=metadata,
         )
 
     module._row_id_tuple = _row_id_tuple
+    module._label_vector = _label_vector
     module._positive_float = _positive_float
     module.PrecomputedFoundationFeatureTable.__post_init__ = __post_init__
     module._load_npz_features = _load_npz_features

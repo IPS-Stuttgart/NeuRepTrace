@@ -106,6 +106,35 @@ def test_fit_precomputed_foundation_probe_uses_only_train_labels() -> None:
     assert result.metadata["precomputed_foundation_valid_for_strict_source_only"] is True
 
 
+def test_fit_precomputed_foundation_probe_preserves_composite_train_labels() -> None:
+    table = make_precomputed_foundation_feature_table(
+        [[-2.0, 0.0], [-1.5, 0.2], [2.0, 0.0], [1.6, -0.2], [-1.8, 0.1], [1.8, -0.1]],
+        row_ids=["s0", "s1", "s2", "s3", "t0", "t1"],
+    )
+    train_labels = np.asarray(
+        [
+            ["left", "early"],
+            ["left", "early"],
+            ["right", "late"],
+            ["right", "late"],
+        ],
+        dtype=object,
+    )
+
+    result = fit_precomputed_foundation_probe(
+        feature_table=table,
+        train_row_ids=["s0", "s1", "s2", "s3"],
+        train_labels=train_labels,
+        test_row_ids=["t0", "t1"],
+    )
+
+    assert result.predictions.tolist() == [("left", "early"), ("right", "late")]
+    assert result.classes.tolist() == [("left", "early"), ("right", "late")]
+    assert result.probabilities is not None
+    assert result.probabilities.shape == (2, 2)
+    assert result.classifier.__class__.__name__ == "DecodedLabelClassifier"
+
+
 def test_fit_precomputed_foundation_probe_supports_decision_function_classifier() -> None:
     table = make_precomputed_foundation_feature_table(
         [[-2.0], [-1.0], [2.0], [1.0], [-1.5], [1.5]],
