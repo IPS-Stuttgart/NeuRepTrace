@@ -63,8 +63,7 @@ def _materialize_one_pass_iterables(value):
     if isinstance(value, np.ndarray):
         if value.dtype != object:
             return value
-        materialized = [_materialize_one_pass_iterables(item) for item in value.ravel(order="C")]
-        return np.asarray(materialized, dtype=object).reshape(value.shape)
+        return _materialize_one_pass_iterables(value.tolist())
     if isinstance(value, (str, bytes)):
         return value
     if not isinstance(value, Iterable):
