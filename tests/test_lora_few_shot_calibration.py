@@ -8,6 +8,7 @@ from neureptrace.decoding.lora_few_shot import (  # noqa: E402
     LORA_FEW_SHOT_CALIBRATION_CATEGORY,
     LORA_FEW_SHOT_CALIBRATION_PROTOCOL,
     LoRAFewShotTargetCalibrationSplit,
+    TorchLoRAFewShotClassifier,
     fit_lora_few_shot_target_calibrated_decoder,
     select_lora_few_shot_target_calibration_split,
 )
@@ -29,6 +30,26 @@ def _toy_problem(seed=0):
     target_labels = np.array([0] * 4 + [1] * 4)
     split = LoRAFewShotTargetCalibrationSplit(calibration_indices=np.array([0, 4]), evaluation_indices=np.array([1, 2, 3, 5, 6, 7]))
     return source_features, source_labels, source_subjects, target_features, target_labels, split
+
+
+def test_lora_few_shot_classifier_accepts_string_random_state():
+    source_features, source_labels, source_subjects, target_features, target_labels, _split = _toy_problem(seed=4)
+    model = TorchLoRAFewShotClassifier(
+        hidden_units=8,
+        lora_rank=2,
+        source_max_epochs=1,
+        adaptation_steps=1,
+        batch_size=8,
+        dropout=0.0,
+        random_state="31",
+    )
+
+    model.fit_source(source_features, source_labels, source_subjects=source_subjects)
+    model.adapt_target(target_features[[0, 4]], target_labels[[0, 4]])
+    probabilities = model.predict_proba(target_features[[1, 5]])
+
+    assert probabilities.shape == (2, 2)
+    np.testing.assert_allclose(probabilities.sum(axis=1), np.ones(2))
 
 
 def test_select_lora_few_shot_target_calibration_split_is_balanced_and_disjoint():
