@@ -1,10 +1,11 @@
-"""Preserve NumPy composite labels in class-limiting sampling."""
+"""Preserve NumPy composite labels and validate class-limit controls."""
 
 from __future__ import annotations
 
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_sampling_composite_label_array_patch_installed"
+_INTEGER_PATCH_MARKER = "_neureptrace_sampling_integer_array_patch_installed"
 
 
 def _coerce_label_item(item):
@@ -76,16 +77,40 @@ def _labels_equal(left: object, right: object) -> bool:
         return False
 
 
+def _normalize_integer(value, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be an integer.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(number) or number % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    integer = int(number)
+    if minimum is not None and integer < minimum:
+        raise ValueError(f"{name} must be at least {minimum}.")
+    return integer
+
+
 def install() -> None:
-    """Install a sampler label fix for multi-column and sequence-valued labels."""
+    """Install sampler fixes for labels and integer-like controls."""
 
     from neureptrace.decoding import sampling
 
-    if getattr(sampling, _PATCH_MARKER, False):
-        return
-    sampling._label_vector = _label_vector
-    sampling._labels_equal = _labels_equal
-    setattr(sampling, _PATCH_MARKER, True)
+    if not getattr(sampling, _PATCH_MARKER, False):
+        sampling._label_vector = _label_vector
+        sampling._labels_equal = _labels_equal
+        setattr(sampling, _PATCH_MARKER, True)
+
+    if not getattr(sampling, _INTEGER_PATCH_MARKER, False):
+        sampling._normalize_integer = _normalize_integer
+        setattr(sampling, _INTEGER_PATCH_MARKER, True)
 
 
 __all__ = ["install"]
