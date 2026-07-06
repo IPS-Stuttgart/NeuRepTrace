@@ -8,7 +8,7 @@ of the public API.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -257,16 +257,48 @@ def _has_duplicate_labels(values: np.ndarray) -> bool:
     return False
 
 
+def _materialize_nested_iterables(values: Any) -> Any:
+    """Materialize generator-backed probability rows before validation."""
+
+    if isinstance(values, np.ndarray):
+        if values.dtype != object:
+            return values
+        materialized = [_materialize_nested_iterables(value) for value in values.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(values.shape)
+    if isinstance(values, (str, bytes)):
+        return values
+    if not isinstance(values, Iterable):
+        return values
+    return [_materialize_nested_iterables(value) for value in values]
+
+
 def _contains_boolean_value(values: Any) -> bool:
-    array = np.asarray(values, dtype=object)
-    return any(isinstance(value, (bool, np.bool_)) for value in array.reshape(-1))
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype != object:
+            return False
+        return any(_contains_boolean_value(value) for value in values.reshape(-1))
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, Mapping):
+        iterable = values.values()
+    else:
+        try:
+            iterable = iter(values)
+        except TypeError:
+            return False
+    return any(_contains_boolean_value(value) for value in iterable)
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
-    if _contains_boolean_value(values):
+    materialized = _materialize_nested_iterables(values)
+    if _contains_boolean_value(materialized):
         raise ValueError(f"{name} must contain numeric scores, not booleans.")
     try:
-        matrix = np.asarray(values, dtype=float)
+        matrix = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must contain numeric values.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
