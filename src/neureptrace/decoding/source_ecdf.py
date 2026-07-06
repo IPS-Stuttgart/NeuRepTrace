@@ -55,7 +55,7 @@ class SourceECDFResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-# pylint: disable-next=too-many-arguments)
+# Keep the explicit keyword-only API; callers use named inputs in configs.
 def fit_source_ecdf_transform(
     *,
     source_features: Sequence[Sequence[float]] | np.ndarray,
