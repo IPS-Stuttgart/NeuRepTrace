@@ -63,6 +63,28 @@ def test_source_prior_accepts_rectangular_numpy_composite_values() -> None:
     assert result.metadata["source_prior_n_classes"] == 2
 
 
+def test_source_prior_treats_nan_labels_as_matching_class_values() -> None:
+    probabilities = np.asarray([[0.8, 0.2], [0.3, 0.7]], dtype=float)
+    source_labels = np.asarray(["seen", np.nan, "seen", np.nan], dtype=object)
+    classes = np.asarray(["seen", np.nan], dtype=object)
+
+    prior, inferred_classes = estimate_source_class_prior(source_labels, classes=classes)
+    result = adjust_probabilities_to_source_prior(
+        probabilities,
+        source_labels=source_labels,
+        classes=classes,
+        config={"target_prior": "source"},
+    )
+
+    assert inferred_classes[0] == "seen"
+    assert np.isnan(inferred_classes[1])
+    assert result.classes[0] == "seen"
+    assert np.isnan(result.classes[1])
+    np.testing.assert_allclose(prior, np.asarray([0.5, 0.5]))
+    np.testing.assert_allclose(result.source_prior, np.asarray([0.5, 0.5]))
+    np.testing.assert_allclose(result.probabilities, probabilities)
+
+
 def test_source_prior_target_source_is_identity_after_normalization() -> None:
     probabilities = np.asarray([[0.2, 0.8], [0.7, 0.3]], dtype=float)
 
