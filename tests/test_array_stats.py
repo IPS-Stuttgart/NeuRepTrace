@@ -20,7 +20,7 @@ def test_column_stats_accepts_scalar_array_scale_floor():
     np.testing.assert_allclose(result.scale, np.array([0.25], dtype=np.float32))
 
 
-@pytest.mark.parametrize("scale_floor", [True, np.bool_(True)])
+@pytest.mark.parametrize("scale_floor", [True, np.bool_(True), np.asarray(True)])
 def test_column_stats_rejects_boolean_scale_floor(scale_floor):
     with pytest.raises(ValueError, match="scale_floor"):
         column_stats([[1.0]], scale_floor=scale_floor)
