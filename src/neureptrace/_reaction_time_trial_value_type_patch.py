@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterable, Mapping
 
 import numpy as np
 
@@ -26,8 +27,20 @@ def _to_float(value: object) -> float:
         return np.nan
 
 
+def _materialize_value_sequence(values: object) -> object:
+    """Preserve scalar values while expanding one-pass iterables once."""
+
+    if isinstance(values, np.ndarray):
+        return values
+    if isinstance(values, (str, bytes, Mapping)):
+        return values
+    if isinstance(values, Iterable):
+        return list(values)
+    return values
+
+
 def _numeric_values(values: object) -> list[float]:
-    array = np.asarray(values, dtype=object).ravel()
+    array = np.asarray(_materialize_value_sequence(values), dtype=object).ravel()
     return [_to_float(value) for value in array]
 
 
