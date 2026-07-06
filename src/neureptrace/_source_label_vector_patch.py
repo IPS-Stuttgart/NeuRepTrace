@@ -102,7 +102,7 @@ def _value_mask(values: np.ndarray, target: Any) -> np.ndarray:
 
 def _synthetic_label_vector(labels: Iterable[Any], dtype: np.dtype) -> np.ndarray:
     items = list(labels)
-    if dtype == object:
+    if np.dtype(dtype).kind == "O":
         return _object_value_vector(items)
     return np.asarray(items, dtype=dtype)
 
