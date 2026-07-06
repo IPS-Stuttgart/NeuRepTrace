@@ -281,7 +281,28 @@ def _object_contains(values: Sequence[Any] | np.ndarray, target: Any) -> bool:
     return any(_object_equal(value, target) for value in _object_vector(values, name="values").tolist())
 
 
+def _is_nan_scalar(value: Any) -> bool:
+    if isinstance(value, np.generic):
+        value = value.item()
+    return isinstance(value, float) and np.isnan(value)
+
+
 def _object_equal(left: Any, right: Any) -> bool:
+    if _is_nan_scalar(left) and _is_nan_scalar(right):
+        return True
+    if isinstance(left, np.generic):
+        left = left.item()
+    if isinstance(right, np.generic):
+        right = right.item()
+    if isinstance(left, (np.ndarray, list, tuple, dict)) or isinstance(right, (np.ndarray, list, tuple, dict)):
+        left = _hashable_object_value(left)
+        right = _hashable_object_value(right)
+        if _is_nan_scalar(left) and _is_nan_scalar(right):
+            return True
+        if isinstance(left, tuple) or isinstance(right, tuple):
+            if not isinstance(left, tuple) or not isinstance(right, tuple) or len(left) != len(right):
+                return False
+            return all(_object_equal(left_value, right_value) for left_value, right_value in zip(left, right, strict=True))
     try:
         equal = left == right
     except (TypeError, ValueError):
