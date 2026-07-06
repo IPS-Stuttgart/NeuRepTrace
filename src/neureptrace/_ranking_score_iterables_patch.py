@@ -59,3 +59,6 @@ def install() -> None:
     if metrics_package is not None:
         metrics_package.rank_class_scores = _rank_class_scores_with_score_iterables
     _PATCHED = True
+
+
+__all__ = ["install"]
