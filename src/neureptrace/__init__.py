@@ -33,6 +33,7 @@ from . import (  # noqa: E402
     _category2_autoencoder_all_protocols_patch,
     _category2_autoencoder_max_folds_patch,
     _classifier_tuple_labels_patch,
+    _cli_argv_patch,
     _config_workflow_float_bool_patch,
     _decode_from_config_section_validation_patch,
     _conditional_coral_bool_config_patch,
@@ -198,6 +199,7 @@ _config_workflow_float_bool_patch.install()
 _decode_from_config_section_validation_patch.install()
 _conditional_coral_bool_config_patch.install()
 _event_detection_extensions.install()
+_cli_argv_patch.install()
 _onset_boolean_summary_patch.install()
 _stimulus_detection_boolean_summary_patch.install()
 _fieldtrip_sampleinfo_validation_patch.install()
