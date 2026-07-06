@@ -195,8 +195,7 @@ def test_augment_source_smote_accepts_direct_string_config() -> None:
 
 def test_invalid_interpolation_weight_is_rejected() -> None:
     with pytest.raises(ValueError, match="lam"):
-        interpolate_rows([0.0], [1.0], 1.5
-)
+        interpolate_rows([0.0], [1.0], 1.5)
 
 
 def test_interpolation_weight_rejects_boolean_scalar_array() -> None:
