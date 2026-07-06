@@ -136,6 +136,15 @@ def test_source_rff_accepts_scalar_numpy_array_config_values() -> None:
     assert np.isclose(reference.config.epsilon, 1e-6)
 
 
+@pytest.mark.parametrize("value", [None, "", " none ", "NULL", np.asarray("none"), np.asarray(None, dtype=object), np.str_("null")])
+def test_source_rff_accepts_none_like_random_state_values(value: object) -> None:
+    cfg = source_rff_config(random_state=value)  # type: ignore[arg-type]
+    direct = SourceRFFConfig(random_state=value)  # type: ignore[arg-type]
+
+    assert cfg.random_state is None
+    assert direct.random_state is None
+
+
 def test_source_rff_revalidates_direct_config_instances() -> None:
     source = np.asarray([[0.0, 2.0], [2.0, 4.0], [4.0, 6.0]], dtype=float)
     cfg = SourceRFFConfig(
