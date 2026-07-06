@@ -123,6 +123,28 @@ def test_source_bagging_random_state_accepts_none_like_values(value: object) -> 
     assert cfg.random_state is None
 
 
+@pytest.mark.parametrize("value", [np.asarray(""), np.asarray(" none "), np.asarray("NULL"), np.str_("none")])
+def test_source_bagging_random_state_accepts_numpy_none_like_values(value: object) -> None:
+    cfg = source_bagging_config(random_state=value)
+
+    assert cfg.random_state is None
+
+
+def test_source_bagging_direct_config_accepts_numpy_none_like_random_state() -> None:
+    source_features = np.asarray([[-2.0], [-1.0], [1.0], [2.0]], dtype=float)
+    source_labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+    test_features = np.asarray([[-1.8], [1.8]], dtype=float)
+
+    result = fit_source_bagging_decoder(
+        source_features=source_features,
+        source_labels=source_labels,
+        test_features=test_features,
+        config=SourceBaggingConfig(n_estimators=1, random_state=np.asarray("none")),
+    )
+
+    assert result.metadata["source_bagging_random_state"] == ""
+
+
 def test_source_bagging_random_state_accepts_scalar_numpy_seed() -> None:
     cfg = source_bagging_config(random_state=np.asarray(7))
 
