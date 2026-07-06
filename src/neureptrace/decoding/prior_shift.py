@@ -137,6 +137,8 @@ def adapt_probability_blocks_for_prior_shift(
     matrix = _probability_matrix(probabilities, epsilon=kwargs.get("epsilon", EPSILON))
     blocks = _object_vector(block_ids, expected_length=matrix.shape[0], name="block_ids")
     minimum = _positive_int(min_block_rows, name="min_block_rows")
+    source_prior = _materialize_numeric_iterables(source_prior)
+    kwargs = _materialize_reused_prior_kwargs(kwargs)
     adapted = np.empty_like(matrix)
     results: dict[Hashable, PriorShiftAdaptationResult] = {}
     for block in _unique_values(blocks):
@@ -197,8 +199,26 @@ def _metadata(*, mode: str, n_rows: int, n_classes: int, source_prior: np.ndarra
     }
 
 
+def _materialize_numeric_iterables(values: Any) -> Any:
+    if values is None or isinstance(values, np.ndarray) or hasattr(values, "__array__") or isinstance(values, (str, bytes, bytearray, Mapping)):
+        return values
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return values
+    return [_materialize_numeric_iterables(item) for item in iterator]
+
+
+def _materialize_reused_prior_kwargs(kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    materialized = dict(kwargs)
+    for key in ("initial_target_prior", "target_prior"):
+        if key in materialized:
+            materialized[key] = _materialize_numeric_iterables(materialized[key])
+    return materialized
+
+
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float | str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(_materialize_numeric_iterables(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a non-empty two-dimensional matrix with at least two classes.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
@@ -217,7 +237,7 @@ def _prior(values: Sequence[float] | np.ndarray | None, *, n_classes: int, defau
     if values is None:
         vector = np.full(n_classes, 1.0 / n_classes, dtype=float) if default == "uniform" else np.ones(n_classes, dtype=float)
     else:
-        vector = np.asarray(values, dtype=float).reshape(-1)
+        vector = np.asarray(_materialize_numeric_iterables(values), dtype=float).reshape(-1)
     if vector.shape[0] != n_classes:
         raise ValueError(f"{name} must contain one value per class: {vector.shape[0]} != {n_classes}.")
     if not np.all(np.isfinite(vector)) or np.any(vector < 0.0):
