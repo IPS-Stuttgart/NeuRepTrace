@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -92,15 +92,42 @@ def accepted_probability_rows(probabilities: Sequence[Sequence[float]] | np.ndar
     return matrix[mask].astype(np.float32, copy=False)
 
 
+def _materialize_nested_iterables(values: Any) -> Any:
+    """Materialize nested one-pass iterables before validation and coercion."""
+
+    if isinstance(values, np.ndarray):
+        if values.dtype != object:
+            return values
+        materialized = [_materialize_nested_iterables(value) for value in values.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(values.shape)
+    if isinstance(values, (str, bytes)):
+        return values
+    if not isinstance(values, Iterable):
+        return values
+    return [_materialize_nested_iterables(value) for value in values]
+
+
 def _contains_boolean_value(values: Any) -> bool:
-    array = np.asarray(values, dtype=object)
-    return any(isinstance(value, (bool, np.bool_)) for value in array.reshape(-1))
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_value(value) for value in values.reshape(-1))
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, Iterable):
+        return any(_contains_boolean_value(value) for value in values)
+    return False
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-    if _contains_boolean_value(values):
+    materialized = _materialize_nested_iterables(values)
+    if _contains_boolean_value(materialized):
         raise ValueError("probabilities must contain numeric scores, not booleans.")
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a two-dimensional matrix with at least two columns.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
