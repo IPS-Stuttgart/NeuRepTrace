@@ -14,6 +14,7 @@ _SUMMARY_PATCH_ATTR = "_neureptrace_rejects_bool_metric_table_inputs"
 _OPTIONAL_PATCH_ATTR = "_neureptrace_results_optional_metric_aggregation"
 _POSITIVE_INTEGER_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_positive_integer_controls"
 _FINITE_SCALAR_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_finite_numeric_scalars"
+_POSITIVE_COUNT_COLUMN_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_positive_count_columns"
 _OPTIONAL_METRICS = ("balanced_accuracy", "top2_accuracy", "top3_accuracy")
 
 
@@ -151,6 +152,19 @@ def install() -> None:
         setattr(_validate_positive_integer_checked, _POSITIVE_INTEGER_ARRAY_PATCH_ATTR, True)
         _validate_positive_integer_checked.__wrapped__ = original_validate_positive_integer
         results._validate_positive_integer = _validate_positive_integer_checked
+
+    original_positive_count_column = results._coerce_positive_count_column
+    if not getattr(original_positive_count_column, _POSITIVE_COUNT_COLUMN_ARRAY_PATCH_ATTR, False):
+
+        def _coerce_positive_count_column_checked(frame: pd.DataFrame, column: str) -> pd.Series:
+            rows = _array_rows(frame[column]) if column in frame.columns else []
+            if rows:
+                raise ValueError(f"Column '{column}' must contain positive integer fold sizes; array-valued row(s): {rows}.")
+            return original_positive_count_column(frame, column)
+
+        setattr(_coerce_positive_count_column_checked, _POSITIVE_COUNT_COLUMN_ARRAY_PATCH_ATTR, True)
+        _coerce_positive_count_column_checked.__wrapped__ = original_positive_count_column
+        results._coerce_positive_count_column = _coerce_positive_count_column_checked
 
     original_finite_numeric_scalar = tables._finite_numeric_scalar
     if not getattr(original_finite_numeric_scalar, _FINITE_SCALAR_ARRAY_PATCH_ATTR, False):
