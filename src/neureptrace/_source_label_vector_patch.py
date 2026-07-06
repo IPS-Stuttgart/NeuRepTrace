@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from functools import wraps
 from typing import Any
 
@@ -14,6 +14,7 @@ _DANN_SHAPE_ERROR = "DANN source_labels must contain one label per source row."
 _SOURCE_DG_ROW_ERROR = "source_features and source_labels must contain the same rows."
 _SOURCE_DG_SHAPE_ERROR = "source-domain generalization source_labels must contain one label per source row."
 _SOURCE_PROTOTYPE_CLASS_PATCH_MARKER = "_source_prototype_explicit_class_vector_patched"
+_SOURCE_FEATURE_SCALING_INPUT_PATCH_MARKER = "_source_feature_scaling_iterable_inputs_patched"
 
 
 def _source_row_count(source_features: Any) -> int | None:
@@ -70,6 +71,24 @@ def _as_class_vector(classes: Any) -> np.ndarray:
     return _object_value_vector(tuple(row.tolist()) for row in rows)
 
 
+def _materialize_nested_iterables(value: Any) -> Any:
+    """Materialize generator-like values without treating strings or mappings as sequences."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype == object:
+            return np.asarray(_materialize_nested_iterables(value.tolist()), dtype=object)
+        return value
+    if isinstance(value, (str, bytes, Mapping)):
+        return value
+    if isinstance(value, tuple):
+        return tuple(_materialize_nested_iterables(item) for item in value)
+    if isinstance(value, list):
+        return [_materialize_nested_iterables(item) for item in value]
+    if isinstance(value, Iterable):
+        return [_materialize_nested_iterables(item) for item in value]
+    return value
+
+
 def _install_source_prototype_class_patch() -> None:
     source_prototypes = importlib.import_module("neureptrace.decoding.source_prototype_features")
     if getattr(source_prototypes.class_prototypes, _SOURCE_PROTOTYPE_CLASS_PATCH_MARKER, False):
@@ -87,12 +106,45 @@ def _install_source_prototype_class_patch() -> None:
     source_prototypes.class_prototypes = class_prototypes
 
 
+def _install_source_feature_scaling_input_patch() -> None:
+    """Accept one-pass iterable feature, label, and domain inputs in source scaling."""
+
+    source_scaling = importlib.import_module("neureptrace.decoding.source_scaling")
+
+    original_feature_matrix = source_scaling._feature_matrix
+    if not getattr(original_feature_matrix, _SOURCE_FEATURE_SCALING_INPUT_PATCH_MARKER, False):
+
+        @wraps(original_feature_matrix)
+        def _feature_matrix(values: Any, *, name: str) -> np.ndarray:
+            return original_feature_matrix(_materialize_nested_iterables(values), name=name)
+
+        setattr(_feature_matrix, _SOURCE_FEATURE_SCALING_INPUT_PATCH_MARKER, True)
+        source_scaling._feature_matrix = _feature_matrix
+
+    original_atomic_value_vector = source_scaling._atomic_value_vector
+    if not getattr(original_atomic_value_vector, _SOURCE_FEATURE_SCALING_INPUT_PATCH_MARKER, False):
+
+        @wraps(original_atomic_value_vector)
+        def _atomic_value_vector(values: Any, *, expected_length: int, name: str, require_hashable: bool) -> np.ndarray:
+            materialized = _materialize_nested_iterables(values)
+            return original_atomic_value_vector(
+                materialized,
+                expected_length=expected_length,
+                name=name,
+                require_hashable=require_hashable,
+            )
+
+        setattr(_atomic_value_vector, _SOURCE_FEATURE_SCALING_INPUT_PATCH_MARKER, True)
+        source_scaling._atomic_value_vector = _atomic_value_vector
+
+
 def install() -> None:
     """Install source-label vector normalization for neural source decoders."""
     importlib.import_module("neureptrace._source_mixup_lambda_patch").install()
     source_centroid_patch = importlib.import_module("neureptrace._source_centroid_numeric_config_patch")
     source_centroid_patch.install()
     _install_source_prototype_class_patch()
+    _install_source_feature_scaling_input_patch()
 
     import neureptrace.decoding.dann as dann
     import neureptrace.decoding.source_domain_generalization as source_dg
