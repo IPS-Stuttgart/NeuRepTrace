@@ -15,6 +15,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 TARGET_CONFIDENCE_SELECTION_PROTOCOL = "unlabeled_target_confidence_selection"
 TARGET_CONFIDENCE_SELECTION_CATEGORY = "2_unlabeled_target_adaptive"
 DEFAULT_MIN_CONFIDENCE = 0.0
@@ -164,12 +166,46 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
 def _classes(values: Sequence[Any] | np.ndarray | None, *, n_classes: int) -> np.ndarray:
     if values is None:
         return np.arange(n_classes, dtype=int)
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = _class_vector(values)
     if vector.shape[0] != n_classes:
         raise ValueError(f"classes must contain one value per probability column: {vector.shape[0]} != {n_classes}.")
-    if len(set(vector.tolist())) != n_classes:
+    if _has_duplicate_labels(vector):
         raise ValueError("classes must be unique.")
     return vector
+
+
+def _class_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            entries = [_as_python_scalar(values.item())]
+        elif values.ndim == 1 or (values.ndim == 2 and 1 in values.shape):
+            entries = [_as_python_scalar(value) for value in values.reshape(-1).tolist()]
+        else:
+            entries = [tuple(_as_python_scalar(item) for item in np.asarray(row, dtype=object).reshape(-1).tolist()) for row in values]
+    else:
+        try:
+            entries = list(values)
+        except TypeError as exc:
+            raise ValueError("classes must be a sequence with one value per probability column.") from exc
+    vector = np.empty(len(entries), dtype=object)
+    for index, value in enumerate(entries):
+        vector[index] = _as_python_scalar(value)
+    return vector
+
+
+def _as_python_scalar(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _has_duplicate_labels(values: np.ndarray) -> bool:
+    seen: list[Any] = []
+    for value in values:
+        if any(values_equal(value, existing) for existing in seen):
+            return True
+        seen.append(value)
+    return False
 
 
 def _top_fraction_mask(confidence: np.ndarray, *, top_fraction: float) -> np.ndarray:
