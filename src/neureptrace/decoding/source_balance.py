@@ -360,6 +360,8 @@ def _hashable_value(value: Any) -> Hashable:
         value = value.item()
     if isinstance(value, np.ndarray):
         value = value.tolist()
+    if _is_nan_scalar(value):
+        return np.nan
     if isinstance(value, list):
         value = tuple(_hashable_value(item) for item in value)
     elif isinstance(value, tuple):
@@ -369,6 +371,15 @@ def _hashable_value(value: Any) -> Hashable:
     except TypeError as exc:
         raise ValueError(f"source balance grouping values must be hashable; got {value!r}.") from exc
     return value
+
+
+def _is_nan_scalar(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return False
+    try:
+        return bool(np.isscalar(value) and np.isnan(value))
+    except (TypeError, ValueError):
+        return False
 
 
 def _nonnegative_int(value: int | str, *, name: str) -> int:
