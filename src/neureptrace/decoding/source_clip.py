@@ -270,21 +270,32 @@ def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
     raise ValueError(f"{name} must be a boolean value.")
 
 
-def _unit_interval_float(value: float | str, *, name: str) -> float:
+def _numeric_scalar(value: Any, *, message: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
     try:
-        parsed = float(value)
+        return float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be in [0, 1].") from exc
+        raise ValueError(message) from exc
+
+
+def _unit_interval_float(value: Any, *, name: str) -> float:
+    message = f"{name} must be in [0, 1]."
+    parsed = _numeric_scalar(value, message=message)
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
-        raise ValueError(f"{name} must be in [0, 1].")
+        raise ValueError(message)
     return parsed
 
 
-def _positive_float(value: float | str, *, name: str) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive and finite.") from exc
+def _positive_float(value: Any, *, name: str) -> float:
+    message = f"{name} must be positive and finite."
+    parsed = _numeric_scalar(value, message=message)
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
