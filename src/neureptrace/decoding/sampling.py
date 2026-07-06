@@ -97,19 +97,29 @@ def _label_vector(labels) -> np.ndarray:
     except TypeError:
         items = [labels]
 
-    if any(isinstance(item, tuple) for item in items):
-        vector = np.empty(len(items), dtype=object)
-        vector[:] = items
-        return vector
+    if any(_is_composite_label(item) for item in items):
+        return _object_label_vector(items)
     return np.asarray(items, dtype=object).reshape(-1)
 
 
 def _row_tuple_label_vector(array: np.ndarray) -> np.ndarray:
     """Interpret an object row matrix as one composite label per input row."""
 
-    vector = np.empty(array.shape[0], dtype=object)
-    vector[:] = [tuple(row) for row in array.tolist()]
+    return _object_label_vector([tuple(row) for row in array.tolist()])
+
+
+def _object_label_vector(items: list[object]) -> np.ndarray:
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
     return vector
+
+
+def _is_composite_label(label: object) -> bool:
+    if isinstance(label, (str, bytes)):
+        return False
+    if isinstance(label, np.ndarray):
+        return label.ndim != 0
+    return isinstance(label, tuple)
 
 
 def _ordered_unique_labels(labels) -> list[object]:
@@ -134,14 +144,37 @@ def _label_mask(labels, target: object) -> np.ndarray:
 
 
 def _labels_equal(left: object, right: object) -> bool:
+    left = _as_comparable_label(left)
+    right = _as_comparable_label(right)
+    if isinstance(left, tuple) and isinstance(right, tuple):
+        if len(left) != len(right):
+            return False
+        return all(_labels_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
     try:
         equal = left == right
     except (TypeError, ValueError):
         return False
+    if isinstance(equal, np.ndarray):
+        try:
+            return bool(np.all(equal))
+        except (TypeError, ValueError):
+            return False
     try:
         return bool(equal)
     except (TypeError, ValueError):
         return False
+
+
+def _as_comparable_label(label: object) -> object:
+    if isinstance(label, np.ndarray):
+        if label.ndim == 0:
+            return _as_comparable_label(label.item())
+        return tuple(_as_comparable_label(item) for item in label.tolist())
+    if isinstance(label, tuple):
+        return tuple(_as_comparable_label(item) for item in label)
+    if isinstance(label, np.generic):
+        return label.item()
+    return label
 
 
 def normalize_class_limit_selection(value: str) -> str:
