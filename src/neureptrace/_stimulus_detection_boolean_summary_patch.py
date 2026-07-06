@@ -69,12 +69,30 @@ def _coerce_boolean_summary_columns(events: pd.DataFrame) -> pd.DataFrame:
     return parsed
 
 
+def _install_group_completion_patch() -> None:
+    """Keep zero-detection group preservation active for direct public-module users."""
+
+    from neureptrace import _group_completion_patch
+
+    _group_completion_patch.install()
+
+
+def _sync_public_module(stimulus_public: Any) -> None:
+    public_module = sys.modules.get("neureptrace.stimulus_detection")
+    if public_module is not None:
+        public_module.summarize_stimulus_events = stimulus_public.summarize_stimulus_events
+        if hasattr(public_module, "_matched_events"):
+            public_module._matched_events = stimulus_public._matched_events
+
+
 def install() -> None:
     """Install robust boolean parsing for stimulus summary helpers."""
 
     import neureptrace._stimulus_detection_public as stimulus_public
 
     if getattr(stimulus_public, _PATCH_MARKER, False):
+        _install_group_completion_patch()
+        _sync_public_module(stimulus_public)
         return
 
     original_matched_events = stimulus_public._matched_events
@@ -107,11 +125,8 @@ def install() -> None:
     stimulus_public.summarize_stimulus_events = summarize_stimulus_events
     setattr(stimulus_public, _PATCH_MARKER, True)
 
-    public_module = sys.modules.get("neureptrace.stimulus_detection")
-    if public_module is not None:
-        public_module.summarize_stimulus_events = summarize_stimulus_events
-        if hasattr(public_module, "_matched_events"):
-            public_module._matched_events = _matched_events
+    _install_group_completion_patch()
+    _sync_public_module(stimulus_public)
 
 
 __all__ = ["install"]

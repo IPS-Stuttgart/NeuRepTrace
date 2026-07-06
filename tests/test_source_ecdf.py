@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_ecdf import (
     SOURCE_ECDF_CATEGORY,
+    SourceECDFConfig,
     apply_source_ecdf_transform,
     fit_source_ecdf_reference,
     fit_source_ecdf_transform,
@@ -97,6 +98,26 @@ def test_source_ecdf_normal_output_is_finite() -> None:
     assert result.test_features.shape == (3, 1)
     assert np.all(np.isfinite(result.test_features))
     assert result.test_features[0, 0] < result.test_features[1, 0] < result.test_features[2, 0]
+
+
+def test_source_ecdf_direct_config_normalizes_aliases_and_numeric_strings() -> None:
+    cfg = SourceECDFConfig(output="normal-score", epsilon="1e-4")
+
+    assert cfg.output == "normal"
+    assert cfg.epsilon == pytest.approx(1e-4)
+
+    reference = fit_source_ecdf_reference([[0.0], [1.0], [2.0]], config=cfg)
+
+    assert reference.output == "normal"
+    assert reference.epsilon == pytest.approx(1e-4)
+
+
+def test_source_ecdf_direct_config_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="output mode"):
+        SourceECDFConfig(output="bad")
+
+    with pytest.raises(ValueError, match="epsilon"):
+        SourceECDFConfig(epsilon=0.75)
 
 
 def test_source_ecdf_aliases_and_validation() -> None:

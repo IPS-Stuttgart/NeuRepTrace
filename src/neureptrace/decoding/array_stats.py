@@ -49,6 +49,8 @@ def _positive_float(value: Any, *, name: str) -> float:
         if value.ndim != 0:
             raise ValueError(f"{name} must be positive and finite.")
         value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(f"{name} must be positive and finite.")
     if isinstance(value, (list, tuple, dict, set)):
         raise ValueError(f"{name} must be positive and finite.")
     try:

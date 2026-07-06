@@ -28,6 +28,12 @@ class SourceECDFConfig:
     output: str = "uniform"
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "output", normalize_ecdf_output(self.output))
+        object.__setattr__(self, "epsilon", _unit_interval_open_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceECDFReference:
@@ -49,8 +55,8 @@ class SourceECDFResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+# Keep the explicit keyword-only API; callers use named inputs in configs.
 # pylint: disable-next=too-many-arguments,too-many-locals
-
 def fit_source_ecdf_transform(
     *,
     source_features: Sequence[Sequence[float]] | np.ndarray,
