@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ _PATCH_MARKER = "_neureptrace_fieldtrip_sampleinfo_validation_patched"
 _LABEL_CONFIG_PATCH_MARKER = "_neureptrace_fieldtrip_label_config_validation_patched"
 _TOPLEVEL_SHARED_TIME_VECTOR_PATCH_MARKER = "_neureptrace_fieldtrip_shared_time_vector_patched"
 _IO_BOOL_PATCH_MARKER = "_neureptrace_io_fieldtrip_bool_config_patched"
+_IO_SPEC_BOOL_PATCH_MARKER = "_neureptrace_io_fieldtrip_spec_bool_config_patched"
 _IO_TRIAL_STACK_PATCH_MARKER = "_neureptrace_io_fieldtrip_trial_stack_patched"
 _IO_SHARED_TIME_VECTOR_PATCH_MARKER = "_neureptrace_io_fieldtrip_shared_time_vector_patched"
 _LABEL_BASE_ERROR = "label_base must be a finite numeric scalar or None, not a boolean value."
@@ -21,6 +23,11 @@ _LABEL_BASE_PARSE_ERROR = "label-base must be finite numeric or 'none'."
 _TRIALINFO_COLUMN_ERROR = "trialinfo_column must be an integer column index, not a boolean value."
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
+_IO_SPEC_BOOL_FIELDS = (
+    "trim_channel_labels_to_data",
+    "require_equal_trial_time_lengths",
+    "require_trialinfo_rows_equal_trials",
+)
 
 
 def _contains_boolean(value: np.ndarray) -> bool:
@@ -70,6 +77,10 @@ def _as_integer_sample_bounds(array: np.ndarray) -> np.ndarray:
 def parse_bool_config(value: Any, *, name: str) -> bool:
     """Parse booleans from Python/YAML values without treating ``"false"`` as true."""
 
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        return parse_bool_config(value.item(), name=name)
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_)):
@@ -290,7 +301,7 @@ def _normalize_trials_with_axis_hints(
             raise ValueError(
                 "Could not infer the trial axis for a 3-D FieldTrip trial array "
                 f"with shape {stacked.shape}; labels imply {n_channels} channels "
-                f"and time vectors imply sample counts {sorted(time_lengths) or '<unknown>'}."
+                f"and time vectors imply sample counts {sorted(time_lengths) or '<unknown'}."
             )
 
     return io_fieldtrip_mat._normalize_trials(trials)
@@ -317,6 +328,44 @@ def _install_io_shared_time_vector_patch() -> None:
 
     setattr(_normalize_times, _IO_SHARED_TIME_VECTOR_PATCH_MARKER, True)
     io_fieldtrip_mat._normalize_times = _normalize_times
+
+
+def _normalized_spec_bool_args(original_spec: type[Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    field_names = tuple(field.name for field in dataclasses.fields(original_spec))
+    args_list = list(args)
+    normalized_kwargs = dict(kwargs)
+    for field_name in _IO_SPEC_BOOL_FIELDS:
+        position = field_names.index(field_name)
+        if position < len(args_list):
+            args_list[position] = parse_bool_config(args_list[position], name=f"FieldTripMatSpec.{field_name}")
+        if field_name in normalized_kwargs:
+            normalized_kwargs[field_name] = parse_bool_config(normalized_kwargs[field_name], name=f"FieldTripMatSpec.{field_name}")
+    return tuple(args_list), normalized_kwargs
+
+
+def _install_io_spec_bool_config_patch() -> None:
+    import neureptrace.io as io_package
+    import neureptrace.io.fieldtrip_mat as io_fieldtrip_mat
+
+    current_spec = io_fieldtrip_mat.FieldTripMatSpec
+    if getattr(current_spec, _IO_SPEC_BOOL_PATCH_MARKER, False):
+        return
+    original_spec = current_spec
+
+    class FieldTripMatSpec(original_spec):  # type: ignore[misc, valid-type]
+        """FieldTrip spec constructor that preserves quoted boolean semantics."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            normalized_args, normalized_kwargs = _normalized_spec_bool_args(original_spec, args, kwargs)
+            super().__init__(*normalized_args, **normalized_kwargs)
+
+    FieldTripMatSpec.__name__ = original_spec.__name__
+    FieldTripMatSpec.__qualname__ = original_spec.__qualname__
+    FieldTripMatSpec.__module__ = original_spec.__module__
+    FieldTripMatSpec.__wrapped__ = original_spec  # type: ignore[attr-defined]
+    setattr(FieldTripMatSpec, _IO_SPEC_BOOL_PATCH_MARKER, True)
+    io_fieldtrip_mat.FieldTripMatSpec = FieldTripMatSpec
+    io_package.FieldTripMatSpec = FieldTripMatSpec
 
 
 def _install_io_trial_stack_patch() -> None:
@@ -445,6 +494,7 @@ def install() -> None:
     _install_label_config_patch()
     _install_top_level_shared_time_vector_patch()
     _install_io_shared_time_vector_patch()
+    _install_io_spec_bool_config_patch()
     _install_io_trial_stack_patch()
     _install_io_bool_config_patch()
 
