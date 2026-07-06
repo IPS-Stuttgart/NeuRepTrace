@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 import numpy as np
@@ -41,6 +42,8 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+
+    importlib.import_module("neureptrace._source_interpolation_one_pass_patch").install()
 
     from neureptrace.decoding import source_gaussian, source_mahalanobis
 
