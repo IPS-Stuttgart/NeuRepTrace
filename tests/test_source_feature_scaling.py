@@ -205,6 +205,25 @@ def test_random_state_config_accepts_integer_values(value: object) -> None:
     assert config.random_state == 3
 
 
+def test_source_feature_scaling_accepts_one_pass_inputs() -> None:
+    features = (iter(row) for row in ([1.0, 2.0], [2.0, 4.0], [10.0, 20.0], [12.0, 24.0]))
+    labels = (label for label in ("a", "a", "b", "b"))
+    domains = (domain for domain in ("s1", "s1", "s2", "s2"))
+
+    result = augment_source_with_feature_scaling(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "scale_std": 0.1, "random_state": 11},
+    )
+
+    assert result.features.shape == (6, 2)
+    assert result.labels.tolist() == ["a", "a", "b", "b", "a", "b"]
+    assert result.metadata["source_feature_scaling_n_classes"] == 2
+    assert result.metadata["source_feature_scaling_n_source_domains"] == 2
+    assert result.n_synthetic == 2
+
+
 @pytest.mark.parametrize("value", [True, -1, 0.5, "1.5", [1], np.asarray(True), np.asarray([1, 2])])
 def test_source_feature_scaling_rejects_invalid_random_state(value: object) -> None:
     with pytest.raises(ValueError, match="random_state"):
