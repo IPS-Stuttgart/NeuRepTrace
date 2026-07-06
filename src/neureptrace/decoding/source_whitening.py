@@ -30,6 +30,14 @@ class SourceWhiteningConfig:
     center: bool = True
     epsilon: float = DEFAULT_EPSILON
 
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "mode", normalize_whitening_mode(self.mode))
+        object.__setattr__(self, "regularization", _nonnegative_float(self.regularization, name="regularization"))
+        object.__setattr__(self, "center", _bool_config(self.center, name="center"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceWhiteningTransform:
@@ -168,7 +176,12 @@ def apply_source_whitening(features: Iterable[Iterable[float]] | np.ndarray, tra
 
 def _coerce_config(config: SourceWhiteningConfig | Mapping[str, Any]) -> SourceWhiteningConfig:
     if isinstance(config, SourceWhiteningConfig):
-        return config
+        return source_whitening_config(
+            mode=config.mode,
+            regularization=config.regularization,
+            center=config.center,
+            epsilon=config.epsilon,
+        )
     return source_whitening_config(**dict(config))
 
 
@@ -242,6 +255,12 @@ def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str
 
 
 def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean value.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if isinstance(value, str):
@@ -258,6 +277,14 @@ def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
@@ -268,6 +295,14 @@ def _positive_float(value: float | str, *, name: str) -> float:
 
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(f"{name} must be non-negative and finite.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(f"{name} must be non-negative and finite.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
