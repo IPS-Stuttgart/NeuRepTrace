@@ -56,6 +56,29 @@ def test_margin_and_entropy_scores() -> None:
     assert np.isclose(confidence[1], 0.0)
 
 
+def test_generator_probability_rows_are_materialized_once() -> None:
+    rows = (row for row in ([0.8, 0.2], [0.45, 0.55]))
+
+    result = gate_target_probabilities_by_confidence(rows, config={"confidence_threshold": 0.5})
+
+    assert result.predictions.tolist() == [0, 1]
+    assert result.accepted_mask.tolist() == [True, True]
+
+    score_rows = (row for row in ([0.9, 0.1], [0.6, 0.4]))
+    assert np.allclose(target_confidence_scores(score_rows), np.asarray([0.9, 0.6]))
+
+
+def test_probability_inputs_reject_boolean_values() -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        gate_target_probabilities_by_confidence([[True, False], [False, True]])
+
+    with pytest.raises(ValueError, match="boolean"):
+        target_confidence_scores(np.asarray([[True, False], [False, True]]))
+
+    with pytest.raises(ValueError, match="boolean"):
+        target_confidence_scores((row for row in ([0.9, 0.1], [np.bool_(True), np.bool_(False)])))
+
+
 def test_class_length_and_probability_validation() -> None:
     with pytest.raises(ValueError, match="classes"):
         gate_target_probabilities_by_confidence([[0.5, 0.5]], classes=["only_one"])
