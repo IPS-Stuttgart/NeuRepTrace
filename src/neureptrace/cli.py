@@ -227,6 +227,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if remaining and args.command is None:
         parser.error(f"unrecognized arguments: {' '.join(remaining)}")
 
+    if args.list_format != "text" and not args.list_commands:
+        parser.error("--list-format can only be used with --list-commands/--list.")
+
     if args.list_commands:
         if args.command is not None or remaining:
             extras = [arg for arg in (args.command, *remaining) if arg is not None]
@@ -237,9 +240,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
-
-    if args.list_format != "text":
-        parser.error("--list-format can only be used with --list-commands/--list.")
 
     if args.command not in COMMAND_MODULES:
         print(_format_unknown_command_error(args.command), file=sys.stderr)
