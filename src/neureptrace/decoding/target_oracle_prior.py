@@ -179,7 +179,8 @@ def _value_vector(values: Sequence[Any] | np.ndarray, *, name: str, expected_len
                 items = [tuple(row.tolist()) for row in rows]
 
     if expected_length is not None and len(items) != expected_length:
-        raise ValueError(f"{name} must contain one value per probability row: {len(items)} != {expected_length}.")
+        unit = "probability row" if name == "target_labels" else "probability column"
+        raise ValueError(f"{name} must contain one value per {unit}: {len(items)} != {expected_length}.")
     return _object_vector(items)
 
 
