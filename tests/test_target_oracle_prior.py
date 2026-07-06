@@ -43,6 +43,27 @@ def test_oracle_target_prior_function_respects_class_order() -> None:
     assert np.allclose(prior, np.asarray([0.25, 0.75]))
 
 
+def test_oracle_target_prior_preserves_composite_labels() -> None:
+    probabilities = np.asarray(
+        [
+            [0.8, 0.2],
+            [0.7, 0.3],
+            [0.4, 0.6],
+            [0.6, 0.4],
+        ],
+        dtype=float,
+    )
+    labels = [("face", "left"), ("face", "left"), ("scene", "right"), ("face", "left")]
+    classes = [("face", "left"), ("scene", "right")]
+
+    result = apply_oracle_target_prior(probabilities, labels, classes=classes, source_prior=[0.5, 0.5])
+    prior = oracle_target_prior(np.asarray(labels, dtype=object), classes=np.asarray(classes, dtype=object))
+
+    assert result.classes.tolist() == classes
+    assert np.allclose(result.target_prior, np.asarray([0.75, 0.25], dtype=np.float32))
+    assert np.allclose(prior, np.asarray([0.75, 0.25]))
+
+
 def test_oracle_target_prior_rejects_unknown_label() -> None:
     with pytest.raises(ValueError, match="absent from classes"):
         oracle_target_prior(["a", "c"], classes=["a", "b"])
