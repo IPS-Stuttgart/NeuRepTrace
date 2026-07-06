@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from neureptrace._stimulus_detection_public import _resolve_event_conflicts
 from neureptrace.stimulus_detection import detect_stimulus_events
 
 THRESHOLD_WINDOW = (-0.65, -0.05)
@@ -111,3 +112,25 @@ def test_highest_peak_per_window_keeps_one_event_per_peak_time():
 
     assert events["stimulus_class"].tolist() == ["A"]
     assert events["conflict_resolution"].eq("highest_peak_per_window").all()
+
+
+def test_conflict_resolution_preserves_missing_partition_key_events():
+    events = pd.DataFrame(
+        [
+            {
+                "stream_id": np.nan,
+                "event_index": 0,
+                "onset_time": 0.10,
+                "offset_time": 0.20,
+                "peak_time": 0.20,
+                "stimulus_class": "A",
+                "peak_score": 0.70,
+            }
+        ]
+    )
+
+    resolved = _resolve_event_conflicts(events, partition_columns=("stream_id",), conflict_resolution="winner_take_all")
+
+    assert len(resolved) == 1
+    assert pd.isna(resolved.iloc[0]["stream_id"])
+    assert resolved.iloc[0]["stimulus_class"] == "A"
