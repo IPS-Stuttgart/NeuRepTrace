@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -121,12 +122,27 @@ def _normalized_reference_fields(reference: SourceRankReference) -> tuple[np.nda
 
 
 def _matrix(values, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    try:
+        matrix = np.asarray(_materialize_nested_iterables(values), dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain finite numeric values.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain finite values.")
     return matrix
+
+
+def _materialize_nested_iterables(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_nested_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_nested_iterables(item) for item in value]
 
 
 def _normalize_bool(value: Any, *, name: str) -> bool:
