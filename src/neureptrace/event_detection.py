@@ -8,6 +8,10 @@ first-onset-per-sequence semantics.
 
 from __future__ import annotations
 
+from neureptrace import _stimulus_detection_conflict_na_patch
+
+_stimulus_detection_conflict_na_patch.install()
+
 from neureptrace._stimulus_detection_public import (
     CONFLICT_RESOLUTION_MODES,
     DEFAULT_GROUP_COLUMNS,
