@@ -59,6 +59,23 @@ def test_prior_aliases_and_validation() -> None:
         target_prior_adjustment_config(strength=1.5)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"strength": True}, "strength"),
+        ({"strength": np.asarray(True)}, "strength"),
+        ({"strength": [0.5]}, "strength"),
+        ({"max_iter": True}, "max_iter"),
+        ({"max_iter": np.asarray([3])}, "max_iter"),
+        ({"tol": False}, "tol"),
+        ({"epsilon": np.asarray([1e-12])}, "epsilon"),
+    ],
+)
+def test_numeric_config_rejects_boolean_and_nonscalar_values(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        target_prior_adjustment_config(**kwargs)
+
+
 def test_probability_validation() -> None:
     with pytest.raises(ValueError, match="at least two classes"):
         estimate_target_prior_mean([[1.0], [1.0]])
