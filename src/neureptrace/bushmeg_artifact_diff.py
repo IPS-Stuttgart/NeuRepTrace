@@ -35,6 +35,46 @@ def _existing_columns(frame: pd.DataFrame, columns: Sequence[str]) -> list[str]:
     return [column for column in columns if column in frame.columns]
 
 
+def _is_scalar_missing(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
+def _same_group_key(left: object, right: object) -> bool:
+    if _is_scalar_missing(left) or _is_scalar_missing(right):
+        return _is_scalar_missing(left) and _is_scalar_missing(right)
+    try:
+        return bool(left == right)
+    except (TypeError, ValueError):
+        return str(left) == str(right)
+
+
+def _append_group_key(keys: list[object], value: object) -> None:
+    if not any(_same_group_key(value, existing) for existing in keys):
+        keys.append(value)
+
+
+def _ordered_group_keys(*frames: pd.DataFrame, group_column: str) -> list[object]:
+    keys: list[object] = []
+    for frame in frames:
+        for value in frame[group_column].tolist():
+            _append_group_key(keys, value)
+    return sorted(keys, key=lambda value: "<NA>" if _is_scalar_missing(value) else str(value))
+
+
+def _series_value_for_group(series: pd.Series, group: object) -> object:
+    if _is_scalar_missing(group):
+        missing_index = np.asarray(pd.isna(series.index), dtype=bool)
+        matches = np.flatnonzero(missing_index)
+        if matches.size:
+            return series.iloc[int(matches[0])]
+        return np.nan
+    return series.get(group, np.nan)
+
+
 def _metric_direction(metric: str) -> str:
     return "lower_is_better" if metric in {"log_loss", "brier", "ece"} else "higher_is_better"
 
@@ -55,21 +95,41 @@ def compare_summary_frames(
     if group_column in reference.columns and group_column in candidate.columns:
         ref_grouped = reference.groupby(group_column, dropna=False)
         cand_grouped = candidate.groupby(group_column, dropna=False)
-        groups = sorted(set(ref_grouped.groups) | set(cand_grouped.groups), key=str)
+        groups = _ordered_group_keys(reference, candidate, group_column=group_column)
     else:
         reference = reference.reset_index().rename(columns={"index": "row_index"})
         candidate = candidate.reset_index().rename(columns={"index": "row_index"})
         group_column = "row_index"
         ref_grouped = reference.groupby(group_column, dropna=False)
         cand_grouped = candidate.groupby(group_column, dropna=False)
-        groups = sorted(set(ref_grouped.groups) | set(cand_grouped.groups), key=str)
+        groups = _ordered_group_keys(reference, candidate, group_column=group_column)
 
     for metric in available_metrics:
+        ref_metric_means = ref_grouped[metric].mean()
+        cand_metric_means = cand_grouped[metric].mean()
         for group in groups:
-            ref_value = float(ref_grouped[metric].mean().get(group, np.nan))
-            cand_value = float(cand_grouped[metric].mean().get(group, np.nan))
-            rows.append({group_column: group, "metric": metric, "direction": _metric_direction(metric), "reference": ref_value, "candidate": cand_value, "delta_candidate_minus_reference": cand_value - ref_value})
-        rows.append({group_column: "__mean__", "metric": metric, "direction": _metric_direction(metric), "reference": float(reference[metric].mean()), "candidate": float(candidate[metric].mean()), "delta_candidate_minus_reference": float(candidate[metric].mean() - reference[metric].mean())})
+            ref_value = float(_series_value_for_group(ref_metric_means, group))
+            cand_value = float(_series_value_for_group(cand_metric_means, group))
+            rows.append(
+                {
+                    group_column: group,
+                    "metric": metric,
+                    "direction": _metric_direction(metric),
+                    "reference": ref_value,
+                    "candidate": cand_value,
+                    "delta_candidate_minus_reference": cand_value - ref_value,
+                }
+            )
+        rows.append(
+            {
+                group_column: "__mean__",
+                "metric": metric,
+                "direction": _metric_direction(metric),
+                "reference": float(reference[metric].mean()),
+                "candidate": float(candidate[metric].mean()),
+                "delta_candidate_minus_reference": float(candidate[metric].mean() - reference[metric].mean()),
+            }
+        )
     return pd.DataFrame(rows)
 
 
