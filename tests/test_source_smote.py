@@ -94,6 +94,26 @@ def test_source_smote_accepts_one_pass_labels_and_domains() -> None:
         assert domain_values[content_index] != domain_values[partner_index]
 
 
+def test_source_smote_accepts_label_and_domain_row_vectors() -> None:
+    features = np.arange(12, dtype=float).reshape(4, 3)
+    labels = np.asarray([["cat", "cat", "dog", "dog"]], dtype=object)
+    domains = np.asarray([["s1", "s2", "s1", "s2"]], dtype=object)
+
+    result = augment_source_with_smote(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "cross_domain_partner": True, "random_state": 11},
+    )
+
+    assert result.features.shape == (6, 3)
+    assert result.labels.tolist()[:4] == ["cat", "cat", "dog", "dog"]
+    assert result.labels.tolist()[4:] == ["cat", "dog"]
+    assert result.metadata["source_smote_n_classes"] == 2
+    assert result.metadata["source_smote_n_source_domains"] == 2
+    assert np.all(result.partner_indices != result.content_indices)
+
+
 def test_interpolate_rows_returns_convex_interpolation() -> None:
     row = interpolate_rows([0.0, 2.0], [4.0, 6.0], 0.25)
 
@@ -175,7 +195,8 @@ def test_augment_source_smote_accepts_direct_string_config() -> None:
 
 def test_invalid_interpolation_weight_is_rejected() -> None:
     with pytest.raises(ValueError, match="lam"):
-        interpolate_rows([0.0], [1.0], 1.5)
+        interpolate_rows([0.0], [1.0], 1.5
+)
 
 
 def test_interpolation_weight_rejects_boolean_scalar_array() -> None:
