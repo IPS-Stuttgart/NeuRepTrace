@@ -1,4 +1,10 @@
-"""Unlabeled target-prior probability adjustment."""
+"""Unlabeled target-prior probability adjustment.
+
+This module adjusts target probability rows by estimating a target class prior
+from the probability rows themselves.  It is a Category-2 post-processing helper:
+source-model probabilities on held-out target rows may be used, but held-out
+target labels are not part of the API.
+"""
 
 from __future__ import annotations
 
@@ -47,7 +53,17 @@ def adjust_target_probabilities_to_prior(
     *,
     config: TargetPriorAdjustmentConfig | Mapping[str, Any] | None = None,
 ) -> TargetPriorAdjustmentResult:
-    """Adjust target probability rows using an unlabeled target-prior estimate."""
+    """Adjust target probability rows using an unlabeled target-prior estimate.
+
+    Parameters
+    ----------
+    probabilities:
+        Target probability rows produced by a source-trained model.  Rows are
+        normalized internally.
+    config:
+        Prior-adjustment options.  A mapping is normalized through
+        :func:`target_prior_adjustment_config`.
+    """
 
     cfg = target_prior_adjustment_config() if config is None else _coerce_config(config)
     original = _probability_matrix(probabilities, epsilon=cfg.epsilon)
