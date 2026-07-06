@@ -56,6 +56,7 @@ class SourceECDFResult:
 
 
 # Keep the explicit keyword-only API; callers use named inputs in configs.
+# pylint: disable-next=too-many-arguments,too-many-locals
 def fit_source_ecdf_transform(
     *,
     source_features: Sequence[Sequence[float]] | np.ndarray,
@@ -122,12 +123,18 @@ def apply_source_ecdf_transform(features: Sequence[Sequence[float]] | np.ndarray
             f"{matrix.shape[1]} != {reference.sorted_values.shape[0]}."
         )
     ranks = np.empty_like(matrix, dtype=float)
+    constant_columns: list[int] = []
     for feature_index in range(matrix.shape[1]):
-        ranks[:, feature_index] = np.searchsorted(reference.sorted_values[feature_index], matrix[:, feature_index], side="right")
+        sorted_feature = reference.sorted_values[feature_index]
+        ranks[:, feature_index] = np.searchsorted(sorted_feature, matrix[:, feature_index], side="right")
+        if sorted_feature[0] == sorted_feature[-1]:
+            constant_columns.append(feature_index)
     if reference.output == "rank":
         return ranks
     uniform = (ranks + 0.5) / float(reference.n_source_rows + 1)
     uniform = np.clip(uniform, reference.epsilon, 1.0 - reference.epsilon)
+    if constant_columns:
+        uniform[:, constant_columns] = 0.5
     if reference.output == "uniform":
         return uniform
     if reference.output == "normal":

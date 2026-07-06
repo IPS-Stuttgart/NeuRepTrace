@@ -62,6 +62,24 @@ def test_source_ecdf_apply_accepts_one_pass_iterables() -> None:
     assert np.allclose(transformed.ravel(), [0.625, 0.875])
 
 
+def test_source_ecdf_constant_feature_maps_uniform_to_half() -> None:
+    reference = fit_source_ecdf_reference([[2.0], [2.0], [2.0]], config={"output": "uniform"})
+
+    transformed = apply_source_ecdf_transform([[1.0], [2.0], [3.0]], reference)
+
+    assert transformed.shape == (3, 1)
+    assert np.allclose(transformed, 0.5)
+
+
+def test_source_ecdf_constant_feature_maps_normal_score_to_zero() -> None:
+    reference = fit_source_ecdf_reference([[2.0], [2.0], [2.0]], config={"output": "normal"})
+
+    transformed = apply_source_ecdf_transform([[1.0], [2.0], [3.0]], reference)
+
+    assert transformed.shape == (3, 1)
+    assert np.allclose(transformed, 0.0)
+
+
 def test_source_ecdf_rank_output_returns_counts() -> None:
     source = np.asarray([[0.0], [1.0], [2.0]], dtype=float)
     test = np.asarray([[-1.0], [0.0], [1.5], [3.0]], dtype=float)
