@@ -18,6 +18,28 @@ def test_compare_summary_frames_reports_fold_and_mean_deltas():
     assert np.isclose(mean_ba["delta_candidate_minus_reference"], 0.015)
 
 
+def test_compare_summary_frames_preserves_missing_group_values():
+    reference = pd.DataFrame(
+        {
+            "outer_test_subject": ["s1", np.nan],
+            "balanced_accuracy": [0.10, 0.20],
+        }
+    )
+    candidate = pd.DataFrame(
+        {
+            "outer_test_subject": ["s1", np.nan],
+            "balanced_accuracy": [0.15, 0.25],
+        }
+    )
+
+    diff = compare_summary_frames(reference, candidate, metrics=("balanced_accuracy",))
+
+    missing_row = diff[diff["outer_test_subject"].isna()].iloc[0]
+    assert np.isclose(missing_row["reference"], 0.20)
+    assert np.isclose(missing_row["candidate"], 0.25)
+    assert np.isclose(missing_row["delta_candidate_minus_reference"], 0.05)
+
+
 def test_compare_prediction_frames_reports_label_mismatches_and_recall_deltas():
     reference = pd.DataFrame(
         {
