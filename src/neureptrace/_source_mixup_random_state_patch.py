@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import wraps
 from typing import Any
 
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_source_mixup_random_state_patch_installed"
+_DIRECT_CONFIG_MARKER = "_neureptrace_source_mixup_direct_config_patch_installed"
 _NONE_STRINGS = {"", "none", "null"}
 
 
@@ -107,10 +108,42 @@ def _validate_mixup_config_numeric_values(source_mixup: Any, config: Any) -> Non
             _positive_float(config["alpha"], name="alpha")
 
 
+def _install_direct_source_mixup_config_normalization(source_mixup: Any) -> None:
+    """Normalize direct SourceMixUpConfig construction, not only helper-built configs."""
+
+    original_cls = source_mixup.SourceMixUpConfig
+    if getattr(original_cls, _DIRECT_CONFIG_MARKER, False):
+        return
+
+    @dataclass(frozen=True, slots=True)
+    class SourceMixUpConfig(original_cls):  # type: ignore[misc, valid-type]
+        """Direct-construction normalizing Source MixUp config."""
+
+        def __post_init__(self) -> None:
+            object.__setattr__(self, "synthetic_per_class", _normalize_nonnegative_int(self.synthetic_per_class, name="synthetic_per_class"))
+            object.__setattr__(self, "alpha", _positive_float(self.alpha, name="alpha"))
+            object.__setattr__(
+                self,
+                "random_state",
+                _normalize_optional_random_state(self.random_state, normalizer=_normalize_nonnegative_int),
+            )
+            object.__setattr__(self, "same_class_partner", source_mixup._bool_value(self.same_class_partner, name="same_class_partner"))
+            object.__setattr__(self, "cross_domain_partner", source_mixup._bool_value(self.cross_domain_partner, name="cross_domain_partner"))
+            object.__setattr__(self, "hard_label_policy", source_mixup.normalize_hard_label_policy(self.hard_label_policy))
+            object.__setattr__(self, "preserve_original", source_mixup._bool_value(self.preserve_original, name="preserve_original"))
+
+    SourceMixUpConfig.__module__ = original_cls.__module__
+    SourceMixUpConfig.__qualname__ = original_cls.__qualname__
+    setattr(SourceMixUpConfig, _DIRECT_CONFIG_MARKER, True)
+    setattr(SourceMixUpConfig, "_neureptrace_original_config_class", original_cls)
+    source_mixup.SourceMixUpConfig = SourceMixUpConfig
+
+
 def install() -> None:
     """Install early Source MixUp/SMOTE random-state and numeric-config validation."""
 
     source_mixup = importlib.import_module("neureptrace.decoding.source_mixup")
+    _install_direct_source_mixup_config_normalization(source_mixup)
 
     original_config = source_mixup.source_mixup_config
     if not getattr(original_config, _PATCH_MARKER, False):
