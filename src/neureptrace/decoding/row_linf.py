@@ -100,7 +100,14 @@ def normalize_rows_linf(
 def _coerce_config(config: RowLinfConfig | Mapping[str, Any]) -> RowLinfConfig:
     if isinstance(config, RowLinfConfig):
         return config
-    return row_linf_config(**dict(config))
+    try:
+        options = dict(config)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Row L-infinity config must be a mapping or RowLinfConfig.") from exc
+    unknown = sorted(str(key) for key in options if key != "epsilon")
+    if unknown:
+        raise ValueError(f"Unknown row L-infinity config option(s): {', '.join(unknown)}.")
+    return row_linf_config(**options)
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
