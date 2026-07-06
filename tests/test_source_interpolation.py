@@ -58,6 +58,25 @@ def test_interpolate_rows_and_config_validation() -> None:
         interpolate_rows([0.0], [1.0], 1.5)
 
 
+def test_source_interpolation_accepts_one_pass_feature_label_and_domain_iterables() -> None:
+    feature_rows = [[0.0, 0.0], [1.0, 0.0], [10.0, 10.0], [11.0, 10.0]]
+    labels = ["a", "a", "b", "b"]
+    domains = ["s1", "s2", "s1", "s2"]
+
+    result = augment_source_with_interpolation(
+        (row for row in feature_rows),
+        (label for label in labels),
+        source_domains=(domain for domain in domains),
+        config={"synthetic_per_class": 1, "pair_mode": "same_class_cross_domain", "random_state": 5},
+    )
+
+    assert result.features.shape == (6, 2)
+    assert result.labels.tolist()[:4] == labels
+    assert result.labels.tolist()[4:] == ["a", "b"]
+    assert result.n_synthetic == 2
+    assert np.all(np.asarray(domains, dtype=object)[result.content_indices] != np.asarray(domains, dtype=object)[result.partner_indices])
+
+
 def test_source_interpolation_config_normalizes_direct_dataclass_values() -> None:
     cfg = SourceInterpolationConfig(
         synthetic_per_class="2",  # type: ignore[arg-type]
