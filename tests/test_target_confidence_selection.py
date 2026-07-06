@@ -57,6 +57,30 @@ def test_classes_validation_and_config_validation() -> None:
         target_confidence_selection_config(top_fraction=0.0)
 
 
+def test_composite_classes_are_preserved_as_labels() -> None:
+    tuple_classes = [("face", "upright"), ("face", "inverted")]
+    tuple_result = select_target_confident_predictions(
+        [[0.8, 0.2], [0.1, 0.9]],
+        classes=tuple_classes,
+    )
+
+    assert tuple_result.classes.tolist() == tuple_classes
+    assert tuple_result.predictions.tolist() == tuple_classes
+
+    matrix_result = select_target_confident_predictions(
+        [[0.8, 0.2], [0.1, 0.9]],
+        classes=np.asarray([[1, 10], [2, 20]]),
+    )
+
+    assert matrix_result.classes.tolist() == [(1, 10), (2, 20)]
+    assert matrix_result.predictions.tolist() == [(1, 10), (2, 20)]
+
+
+def test_duplicate_nan_classes_are_rejected() -> None:
+    with pytest.raises(ValueError, match="unique"):
+        select_target_confident_predictions([[0.8, 0.2]], classes=[np.nan, float("nan")])
+
+
 def test_target_labels_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
         select_target_confident_predictions([[0.5, 0.5]], target_labels=[0])  # type: ignore[call-arg]
