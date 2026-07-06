@@ -143,6 +143,41 @@ def test_source_mixup_accepts_scalar_numpy_numeric_config_controls() -> None:
     assert result.metadata["source_mixup_alpha"] == 0.5
 
 
+def test_source_mixup_direct_config_normalizes_public_aliases() -> None:
+    cfg = SourceMixUpConfig(
+        synthetic_per_class="2",
+        alpha=np.asarray(0.5),
+        random_state="none",
+        same_class_partner="no",
+        cross_domain_partner=np.asarray(True),
+        hard_label_policy="lambda-dominant",
+        preserve_original=0,
+    )
+
+    assert cfg.synthetic_per_class == 2
+    assert cfg.alpha == 0.5
+    assert cfg.random_state is None
+    assert cfg.same_class_partner is False
+    assert cfg.cross_domain_partner is True
+    assert cfg.hard_label_policy == "dominant"
+    assert cfg.preserve_original is False
+    assert cfg.enabled is True
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"synthetic_per_class": np.asarray(True)}, "synthetic_per_class"),
+        ({"alpha": np.asarray([0.4])}, "alpha"),
+        ({"same_class_partner": "maybe"}, "same_class_partner"),
+        ({"hard_label_policy": "unknown"}, "hard_label_policy"),
+    ],
+)
+def test_source_mixup_direct_config_rejects_invalid_values(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        SourceMixUpConfig(**kwargs)
+
+
 @pytest.mark.parametrize(
     ("kwargs", "match"),
     [
