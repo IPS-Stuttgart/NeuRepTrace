@@ -35,6 +35,28 @@ def test_confidence_scores_break_probability_ties_by_lowest_index() -> None:
     assert np.allclose(margin, [0.0, 0.0, 0.0])
 
 
+def test_confidence_scores_accept_one_pass_probability_iterables() -> None:
+    probabilities = (row for row in ([2.0, 0.0], [1.0, 1.0], [0.25, 0.75]))
+
+    confidence, margin, entropy, predicted = confidence_scores(probabilities)
+
+    assert predicted.tolist() == [0, 0, 1]
+    assert np.allclose(confidence, [1.0, 0.5, 0.75])
+    assert np.allclose(margin, [1.0, 0.0, 0.5])
+    assert np.all(entropy >= 0.0)
+    assert np.all(entropy <= 1.0)
+
+
+def test_select_confident_rows_accepts_one_pass_probability_iterables() -> None:
+    probabilities = (row for row in ([0.9, 0.1], [0.55, 0.45], [0.1, 0.9]))
+
+    result = select_confident_rows(probabilities, min_confidence=0.8, min_margin=0.6)
+
+    assert result.accepted_mask.tolist() == [True, False, True]
+    assert result.metadata["confidence_selection_n_rows"] == 3
+    assert result.metadata["confidence_selection_n_accepted"] == 2
+
+
 def test_select_confident_rows_applies_all_thresholds() -> None:
     probabilities = np.asarray([[0.95, 0.05], [0.55, 0.45], [0.7, 0.3]], dtype=float)
 
@@ -71,6 +93,13 @@ def test_confidence_rejects_boolean_probability_inputs() -> None:
         confidence_scores(np.asarray([[True, False], [False, True]], dtype=bool))
     with pytest.raises(ValueError, match="booleans"):
         confidence_scores([[1.0, False]])
+
+
+def test_confidence_rejects_boolean_one_pass_probability_inputs() -> None:
+    probabilities = (row for row in ([1.0, 0.0], [0.0, False]))
+
+    with pytest.raises(ValueError, match="booleans"):
+        confidence_scores(probabilities)
 
 
 def test_confidence_thresholds_must_be_numeric_scalars() -> None:
