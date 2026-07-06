@@ -8,16 +8,38 @@ from functools import wraps
 import numpy as np
 
 _WEIGHT_ERROR = "sample_weight must contain numeric weights, not boolean values"
-_MASK_SCALAR_TYPES = (type(True), np.asarray(True).dtype.type)
+_MASK_SCALAR_TYPES = (bool, np.bool_)
+
+
+def _is_mask_scalar(value: object) -> bool:
+    if isinstance(value, _MASK_SCALAR_TYPES):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype == object:
+            return any(_is_mask_scalar(item) for item in value.ravel())
+    return False
 
 
 def _contains_mask_scalar(values: np.ndarray) -> bool:
-    return any(isinstance(value, _MASK_SCALAR_TYPES) for value in values.ravel())
+    return any(_is_mask_scalar(value) for value in values.ravel())
+
+
+def _looks_like_valid_weight_shape(raw_weights: np.ndarray, n_samples: int) -> bool:
+    if raw_weights.ndim == 1:
+        return raw_weights.shape[0] == n_samples
+    if raw_weights.ndim == 2:
+        return raw_weights.shape == (n_samples, 1)
+    return False
 
 
 def _validate_no_mask_scalars(sample_weight: Iterable[float] | np.ndarray, n_samples: int) -> None:
-    raw_weights = np.asarray(sample_weight, dtype=object)
-    if raw_weights.ndim == 1 and raw_weights.shape[0] == n_samples and _contains_mask_scalar(raw_weights):
+    try:
+        raw_weights = np.asarray(sample_weight, dtype=object)
+    except (TypeError, ValueError):
+        return
+    if _looks_like_valid_weight_shape(raw_weights, n_samples) and _contains_mask_scalar(raw_weights):
         raise ValueError(_WEIGHT_ERROR)
 
 
