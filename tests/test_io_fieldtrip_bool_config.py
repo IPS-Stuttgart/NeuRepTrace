@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from neureptrace._fieldtrip_sampleinfo_validation_patch import parse_bool_config
-from neureptrace.io import fieldtrip_mat
+from neureptrace.io import FieldTripMatSpec, fieldtrip_mat
 
 
 class _DummyEpochs:
@@ -24,9 +24,27 @@ def test_parse_bool_config_respects_false_strings() -> None:
     assert parse_bool_config("0", name="flag") is False
     assert parse_bool_config("true", name="flag") is True
     assert parse_bool_config("yes", name="flag") is True
+    assert parse_bool_config(np.array(False), name="flag") is False
 
     with pytest.raises(ValueError, match="flag must be a boolean value"):
         parse_bool_config("sometimes", name="flag")
+
+
+def test_fieldtrip_spec_direct_boolean_aliases_are_normalized() -> None:
+    spec = FieldTripMatSpec(
+        trim_channel_labels_to_data="false",
+        require_equal_trial_time_lengths="off",
+        require_trialinfo_rows_equal_trials=np.array(False),
+    )
+
+    assert spec.trim_channel_labels_to_data is False
+    assert spec.require_equal_trial_time_lengths is False
+    assert spec.require_trialinfo_rows_equal_trials is False
+
+
+def test_fieldtrip_spec_rejects_invalid_direct_boolean_alias() -> None:
+    with pytest.raises(ValueError, match="FieldTripMatSpec.trim_channel_labels_to_data must be a boolean value"):
+        FieldTripMatSpec(trim_channel_labels_to_data="sometimes")
 
 
 def test_fieldtrip_metadata_column_optional_false_string_is_false() -> None:

@@ -30,6 +30,31 @@ def test_source_rank_reference_transforms_source_and_eval_rows() -> None:
     assert result.metadata["source_rank_valid_for_strict_source_only"] is True
 
 
+def test_source_rank_transform_accepts_one_pass_feature_iterables() -> None:
+    source_rows = (row for row in ([0.0, 10.0], [1.0, 11.0], [2.0, 12.0], [3.0, 13.0]))
+    eval_rows = (row for row in ([1.5, 11.5], [5.0, 8.0]))
+
+    result = fit_source_rank_transform(source_features=source_rows, eval_features=eval_rows)
+
+    np.testing.assert_allclose(
+        result.eval_features,
+        np.asarray([[0.5, 0.5], [0.999999, 0.000001]], dtype=np.float32),
+        rtol=0.0,
+        atol=1e-7,
+    )
+
+
+def test_transform_source_rank_features_accepts_object_array_generator_rows() -> None:
+    features = np.empty(2, dtype=object)
+    features[0] = (value for value in [0.0])
+    features[1] = (value for value in [1.0])
+    reference = fit_source_rank_reference([[0.0], [1.0]], clip_extremes=False)
+
+    transformed = transform_source_rank_features(features, reference)
+
+    np.testing.assert_allclose(transformed, np.asarray([[0.25], [0.75]], dtype=np.float32))
+
+
 def test_centered_output_is_in_minus_one_one_range() -> None:
     source = np.asarray([[0.0], [1.0], [2.0], [3.0]], dtype=float)
     eval_features = np.asarray([[-1.0], [1.5], [4.0]], dtype=float)
