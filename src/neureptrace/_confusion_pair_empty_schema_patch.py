@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from collections.abc import Sequence
 from functools import wraps
@@ -86,6 +87,7 @@ def _empty_confusion_pair_summary_frame(
 
 def install() -> None:
     """Install stable schemas for no-error confusion-pair summaries."""
+    importlib.import_module("neureptrace._ranking_score_iterables_patch").install()
     import neureptrace.metrics.confusion as confusion
 
     if getattr(confusion.confusion_pair_summary, _PATCH_MARKER, False):
