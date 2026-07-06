@@ -23,6 +23,10 @@ if __name__ == "neureptrace._stimulus_detection_legacy":
         }
     )
 else:
+    from neureptrace import _stimulus_detection_conflict_na_patch
+
+    _stimulus_detection_conflict_na_patch.install()
+
     from neureptrace._stimulus_detection_public import *  # noqa: F401,F403
     from neureptrace._stimulus_detection_public import __all__ as _public_all
     from neureptrace._stimulus_detection_public import main
@@ -43,7 +47,7 @@ else:
     from neureptrace._stimulus_detection_public import summarize_stimulus_events  # noqa: F401,E402
 
     # Backwards-compatible private helpers used by the streaming detector.
-    from neureptrace._stimulus_detection_public import _event_row, _run_duration  # noqa: F401
+    from neureptrace._stimulus_detection_public import _event_row, _resolve_event_conflicts, _run_duration  # noqa: F401
 
     __all__ = [
         *_public_all,
