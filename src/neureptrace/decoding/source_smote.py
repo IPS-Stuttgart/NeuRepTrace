@@ -70,9 +70,9 @@ class SourceSmoteResult:
 # pylint: disable-next=too-many-locals
 def augment_source_with_smote(
     source_features: Sequence[Sequence[float]] | np.ndarray,
-    source_labels: Sequence[Any] | np.ndarray,
+    source_labels: Iterable[Any] | np.ndarray,
     *,
-    source_domains: Sequence[Hashable] | np.ndarray | None = None,
+    source_domains: Iterable[Hashable] | np.ndarray | None = None,
     config: SourceSmoteConfig | Mapping[str, Any] | None = None,
 ) -> SourceSmoteResult:
     """Append same-class source interpolation rows.
@@ -294,11 +294,23 @@ def _object_value_vector(values: Iterable[Any]) -> np.ndarray:
     return vector
 
 
-def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+def _atomic_input_array(values: Iterable[Any] | np.ndarray) -> np.ndarray:
+    """Return labels/domains as an object array without losing one-pass iterables."""
+
+    if isinstance(values, np.ndarray):
+        return values.astype(object, copy=False)
+    if isinstance(values, (str, bytes, Mapping)):
+        return np.asarray(values, dtype=object)
+    if isinstance(values, Iterable) and not isinstance(values, Sequence):
+        return np.asarray(list(values), dtype=object)
+    return np.asarray(values, dtype=object)
+
+
+def _atomic_value_vector(values: Iterable[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
     if isinstance(values, (str, bytes)):
         vector = _object_value_vector([values])
     else:
-        array = np.asarray(values, dtype=object)
+        array = _atomic_input_array(values)
         if array.ndim == 0:
             vector = _object_value_vector([array.item()])
         elif array.ndim == 1:
@@ -319,11 +331,11 @@ def _atomic_value_vector(values: Sequence[Any] | np.ndarray, *, expected_length:
     return vector
 
 
-def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+def _label_vector(values: Iterable[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
     return _atomic_value_vector(values, expected_length=expected_length, name=name)
 
 
-def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
+def _domain_vector(values: Iterable[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
     vector = _atomic_value_vector(values, expected_length=expected_length, name="source_domains")
