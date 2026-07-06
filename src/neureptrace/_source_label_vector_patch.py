@@ -89,6 +89,7 @@ def _install_source_prototype_class_patch() -> None:
 
 def install() -> None:
     """Install source-label vector normalization for neural source decoders."""
+    importlib.import_module("neureptrace._source_mixup_lambda_patch").install()
     source_centroid_patch = importlib.import_module("neureptrace._source_centroid_numeric_config_patch")
     source_centroid_patch.install()
     _install_source_prototype_class_patch()
