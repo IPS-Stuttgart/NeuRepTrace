@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -194,7 +195,8 @@ def stabilize_target_class_prior(
 ) -> np.ndarray:
     """Blend a target-prior estimate toward uniform and optionally floor it."""
 
-    target_prior = _validate_prior(prior, n_classes=np.asarray(prior).reshape(-1).shape[0])
+    materialized_prior = _materialize_probability_input(prior)
+    target_prior = _validate_prior(materialized_prior, n_classes=np.asarray(materialized_prior).reshape(-1).shape[0])
     smooth = _bounded_strength(smoothing, name="target_prior_smoothing")
     prior_floor = _bounded_floor(floor)
     n_classes = int(target_prior.shape[0])
@@ -278,8 +280,42 @@ def _bounded_floor(value: Any) -> float:
     return number
 
 
+def _materialize_probability_input(values: Any) -> Any:
+    if isinstance(values, np.ndarray) or isinstance(values, np.generic) or hasattr(values, "__array__"):
+        return values
+    if isinstance(values, (str, bytes, bytearray, Mapping)):
+        return values
+    if isinstance(values, Iterable):
+        return [_materialize_probability_input(value) for value in values]
+    return values
+
+
+def _contains_boolean_value(values: Any) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.generic):
+        return isinstance(values.item(), (bool, np.bool_))
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_value(value) for value in values.reshape(-1))
+        return False
+    if isinstance(values, (str, bytes, bytearray, Mapping)):
+        return False
+    if isinstance(values, Iterable):
+        return any(_contains_boolean_value(value) for value in values)
+    return False
+
+
 def _validate_prior(prior: np.ndarray, *, n_classes: int) -> np.ndarray:
-    target_prior = np.asarray(prior, dtype=float).reshape(-1)
+    materialized = _materialize_probability_input(prior)
+    if _contains_boolean_value(materialized):
+        raise ValueError("target prior must be numeric probability values, not boolean indicators.")
+    try:
+        target_prior = np.asarray(materialized, dtype=float).reshape(-1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("target prior must be numeric.") from exc
     if target_prior.shape[0] != int(n_classes):
         raise ValueError("target prior must have one entry per class.")
     if not np.all(np.isfinite(target_prior)) or np.any(target_prior < 0.0):
@@ -291,7 +327,13 @@ def _validate_prior(prior: np.ndarray, *, n_classes: int) -> np.ndarray:
 
 
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
-    raw = np.asarray(probabilities)
+    materialized = _materialize_probability_input(probabilities)
+    if _contains_boolean_value(materialized):
+        raise ValueError("probabilities must be numeric probability values, not boolean indicators.")
+    try:
+        raw = np.asarray(materialized)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("probabilities must be numeric.") from exc
     if np.issubdtype(raw.dtype, np.bool_) or (
         raw.dtype == object and any(isinstance(value, (bool, np.bool_)) for value in raw.reshape(-1))
     ):
