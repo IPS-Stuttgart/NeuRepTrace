@@ -6,6 +6,7 @@ from sklearn.base import BaseEstimator
 
 from neureptrace.decoding.domain_importance import (
     DOMAIN_IMPORTANCE_CATEGORY,
+    DomainImportanceConfig,
     DomainImportanceResult,
     apply_domain_importance_weights,
     domain_importance_config,
@@ -46,6 +47,24 @@ def test_domain_weights_record_clip_none() -> None:
     assert result.metadata["domain_importance_clip_min"] == ""
     assert result.metadata["domain_importance_clip_max"] == ""
     assert np.isclose(result.sample_weights.mean(), 1.0)
+
+
+def test_domain_weights_normalize_direct_config_values() -> None:
+    source = np.asarray([[-4.0], [-3.8], [0.0], [0.2], [4.0], [4.2]], dtype=float)
+    target = np.asarray([[3.7], [4.1], [4.4]], dtype=float)
+    config = DomainImportanceConfig(
+        clip="off",
+        normalize="false",
+        account_for_sample_priors=np.asarray(False),
+        epsilon="1e-6",
+    )
+
+    result = fit_domain_classifier_importance_weights(source, target, config=config)
+
+    assert result.metadata["domain_importance_clip_min"] == ""
+    assert result.metadata["domain_importance_clip_max"] == ""
+    assert result.metadata["domain_importance_normalize"] is False
+    assert result.metadata["domain_importance_account_for_sample_priors"] is False
 
 
 def test_domain_importance_config_treats_boolean_false_clip_as_disabled() -> None:
