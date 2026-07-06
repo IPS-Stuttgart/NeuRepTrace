@@ -14,6 +14,7 @@ _PATCH_MARKER = "_neureptrace_random_state_config_patch_installed"
 _FEATURE_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_feature_mixstyle_random_state_dataclass_init_patch_installed"
 _DOMAIN_MIXSTYLE_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_domain_mixstyle_random_state_dataclass_init_patch_installed"
 _SOURCE_INTERPOLATION_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_interpolation_dataclass_init_patch_installed"
+_SOURCE_RFF_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_rff_dataclass_init_patch_installed"
 
 
 def _random_state_error(name: str) -> ValueError:
@@ -385,6 +386,62 @@ def _patch_source_interpolation() -> None:
     source_interpolation.source_interpolation_config = source_interpolation_config
 
 
+def _patch_source_rff_dataclass(source_rff: Any) -> None:
+    original_init = source_rff.SourceRFFConfig.__init__
+    if getattr(original_init, _SOURCE_RFF_DATACLASS_INIT_PATCH_MARKER, False):
+        return
+
+    @wraps(original_init)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        object.__setattr__(
+            self,
+            "random_state",
+            _normalize_optional_nonnegative_int(
+                self.random_state,
+                normalizer=source_rff._nonnegative_int,
+                name="random_state",
+            ),
+        )
+
+    setattr(__init__, _SOURCE_RFF_DATACLASS_INIT_PATCH_MARKER, True)
+    source_rff.SourceRFFConfig.__init__ = __init__
+
+
+def _patch_source_rff() -> None:
+    source_rff = importlib.import_module("neureptrace.decoding.source_rff")
+    _patch_source_rff_dataclass(source_rff)
+
+    original_config = source_rff.source_rff_config
+    if getattr(original_config, _PATCH_MARKER, False):
+        return
+
+    @wraps(original_config)
+    def source_rff_config(
+        *,
+        n_components: int | str = source_rff.DEFAULT_COMPONENTS,
+        gamma: float | str = "scale",
+        random_state: int | str | None = source_rff.DEFAULT_RANDOM_STATE,
+        standardize: bool | int | str = False,
+        epsilon: float | str = source_rff.DEFAULT_EPSILON,
+    ):
+        seed = _normalize_optional_nonnegative_int(
+            random_state,
+            normalizer=source_rff._nonnegative_int,
+            name="random_state",
+        )
+        return original_config(
+            n_components=n_components,
+            gamma=gamma,
+            random_state=seed,
+            standardize=standardize,
+            epsilon=epsilon,
+        )
+
+    setattr(source_rff_config, _PATCH_MARKER, True)
+    source_rff.source_rff_config = source_rff_config
+
+
 def install() -> None:
     """Install random-state validation patches for config helpers."""
 
@@ -395,4 +452,5 @@ def install() -> None:
     _patch_domain_mixstyle()
     _patch_source_domain_mask()
     _patch_source_interpolation()
+    _patch_source_rff()
     _INSTALLED = True
