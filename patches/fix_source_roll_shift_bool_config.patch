@@ -1,0 +1,15 @@
+diff --git a/src/neureptrace/decoding/source_roll.py b/src/neureptrace/decoding/source_roll.py
+--- a/src/neureptrace/decoding/source_roll.py
++++ b/src/neureptrace/decoding/source_roll.py
+@@
+-def sample_roll_shift(max_shift: int | str, *, include_zero_shift: bool = False, rng: np.random.Generator | None = None) -> int:
++def sample_roll_shift(max_shift: int | str, *, include_zero_shift: bool | str | int | float = False, rng: np.random.Generator | None = None) -> int:
+@@
+     maximum = _positive_int(max_shift, name="max_shift")
++    include_zero = _bool_config(include_zero_shift, name="include_zero_shift")
+     generator = np.random.default_rng() if rng is None else rng
+     candidates = np.arange(-maximum, maximum + 1, dtype=int)
+-    if not include_zero_shift:
++    if not include_zero:
+         candidates = candidates[candidates != 0]
+     return int(generator.choice(candidates))
