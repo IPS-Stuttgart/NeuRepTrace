@@ -28,6 +28,28 @@ def test_source_temperature_infers_integer_classes_in_probability_column_order()
     assert np.isclose(result.source_losses[1.0], expected_loss)
 
 
+def test_source_temperature_allows_missing_integer_classes_when_width_is_known() -> None:
+    source_probabilities = np.asarray(
+        [
+            [0.80, 0.15, 0.05],
+            [0.05, 0.90, 0.05],
+            [0.75, 0.20, 0.05],
+        ],
+        dtype=float,
+    )
+
+    result = fit_source_temperature_scaling(
+        source_probabilities=source_probabilities,
+        source_labels=[0, 1, 0],
+        test_probabilities=[[0.20, 0.30, 0.50]],
+        config={"temperatures": [1.0]},
+    )
+
+    expected_loss = -np.mean(np.log([0.80, 0.90, 0.75]))
+    assert np.isclose(result.source_losses[1.0], expected_loss)
+    assert result.metadata["source_temperature_n_classes"] == 3
+
+
 def test_source_temperature_rejects_out_of_range_inferred_integer_labels() -> None:
     with pytest.raises(ValueError, match="integer source_labels"):
         fit_source_temperature_scaling(
