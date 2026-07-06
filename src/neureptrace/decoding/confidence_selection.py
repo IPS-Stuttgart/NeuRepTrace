@@ -192,9 +192,16 @@ def _contains_boolean_numeric_value(value: Any) -> bool:
     if isinstance(value, np.ndarray):
         if np.issubdtype(value.dtype, np.bool_):
             return True
-        if value.dtype == object:
-            return any(_contains_boolean_numeric_value(item) for item in value.ravel())
-    return False
+        if value.dtype != object:
+            return False
+        return any(_contains_boolean_numeric_value(item) for item in value.ravel())
+    if isinstance(value, (str, bytes)):
+        return False
+    try:
+        iterable = iter(value)
+    except TypeError:
+        return False
+    return any(_contains_boolean_numeric_value(item) for item in iterable)
 
 
 def _optional_positive_int(value: int | str | None, *, name: str) -> int | None:

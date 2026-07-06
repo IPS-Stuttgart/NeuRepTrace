@@ -129,7 +129,9 @@ def test_config_aliases_and_validation() -> None:
         ({"threshold": np.asarray(True)}, "threshold must be finite"),
         ({"threshold": np.asarray([np.bool_(False)])}, "threshold must be finite"),
         ({"min_margin": np.asarray(True, dtype=object)}, "min_margin must be finite"),
+        ({"epsilon": np.asarray([False], dtype=object)}, "epsilon must be finite"),
         ({"top_k": np.asarray(True)}, "top_k must be an integer"),
+        ({"top_k": np.asarray([False], dtype=object)}, "top_k must be an integer"),
         ({"per_class_top_k": np.asarray([np.bool_(True)])}, "per_class_top_k must be an integer"),
     ],
 )
