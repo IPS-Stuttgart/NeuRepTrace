@@ -1,10 +1,4 @@
-"""Unlabeled target-prior probability adjustment.
-
-This module adjusts target probability rows by estimating a target class prior
-from the probability rows themselves.  It is a Category-2 post-processing helper:
-source-model probabilities on held-out target rows may be used, but held-out
-target labels are not part of the API.
-"""
+"""Unlabeled target-prior probability adjustment."""
 
 from __future__ import annotations
 
@@ -53,17 +47,7 @@ def adjust_target_probabilities_to_prior(
     *,
     config: TargetPriorAdjustmentConfig | Mapping[str, Any] | None = None,
 ) -> TargetPriorAdjustmentResult:
-    """Adjust target probability rows using an unlabeled target-prior estimate.
-
-    Parameters
-    ----------
-    probabilities:
-        Target probability rows produced by a source-trained model.  Rows are
-        normalized internally.
-    config:
-        Prior-adjustment options.  A mapping is normalized through
-        :func:`target_prior_adjustment_config`.
-    """
+    """Adjust target probability rows using an unlabeled target-prior estimate."""
 
     cfg = target_prior_adjustment_config() if config is None else _coerce_config(config)
     original = _probability_matrix(probabilities, epsilon=cfg.epsilon)
@@ -73,7 +57,13 @@ def adjust_target_probabilities_to_prior(
         n_iter = 1
         converged = True
     elif cfg.estimator == "em":
-        target_prior, n_iter, converged = estimate_target_prior_em(original, source_prior=source_prior, max_iter=cfg.max_iter, tol=cfg.tol, epsilon=cfg.epsilon)
+        target_prior, n_iter, converged = estimate_target_prior_em(
+            original,
+            source_prior=source_prior,
+            max_iter=cfg.max_iter,
+            tol=cfg.tol,
+            epsilon=cfg.epsilon,
+        )
     else:  # pragma: no cover - guarded by config normalization
         raise ValueError(f"Unhandled target-prior estimator {cfg.estimator!r}.")
     blended_prior = (1.0 - cfg.strength) * source_prior + cfg.strength * target_prior
@@ -157,9 +147,7 @@ def normalize_prior_estimator(value: str | None) -> str:
 
 
 def _coerce_config(config: TargetPriorAdjustmentConfig | Mapping[str, Any]) -> TargetPriorAdjustmentConfig:
-    if isinstance(config, TargetPriorAdjustmentConfig):
-        return config
-    return target_prior_adjustment_config(**dict(config))
+    return config if isinstance(config, TargetPriorAdjustmentConfig) else target_prior_adjustment_config(**dict(config))
 
 
 def _source_prior(value: str | Sequence[float], *, n_classes: int, epsilon: float) -> np.ndarray:
@@ -219,22 +207,51 @@ def _metadata(cfg: TargetPriorAdjustmentConfig, *, n_rows: int, n_classes: int, 
     }
 
 
+def _numeric_config_scalar(value: Any, *, message: str) -> Any:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
+    elif isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(message)
+    return value
+
+
 def _positive_int(value: int | str, *, name: str) -> int:
-    parsed = float(value)
+    message = f"{name} must be a positive integer."
+    scalar = _numeric_config_scalar(value, message=message)
+    try:
+        parsed = float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
-        raise ValueError(f"{name} must be a positive integer.")
+        raise ValueError(message)
     return int(parsed)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be positive and finite."
+    scalar = _numeric_config_scalar(value, message=message)
+    try:
+        parsed = float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
 def _unit_interval_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be in [0, 1]."
+    scalar = _numeric_config_scalar(value, message=message)
+    try:
+        parsed = float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
-        raise ValueError(f"{name} must be in [0, 1].")
+        raise ValueError(message)
     return parsed
