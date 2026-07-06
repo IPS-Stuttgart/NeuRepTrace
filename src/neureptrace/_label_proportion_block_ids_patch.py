@@ -11,9 +11,13 @@ import neureptrace.decoding.label_proportions as _label_proportions
 
 _BLOCK_ID_PATCH_MARKER = "_neureptrace_label_proportion_block_ids_patch_installed"
 _ZERO_SUPPORT_PATCH_MARKER = "_neureptrace_label_proportion_zero_support_patch_installed"
+_POSITIVE_INT_PATCH_MARKER = "_neureptrace_label_proportion_positive_int_validation_patch_installed"
 _POSITIVE_FLOAT_PATCH_MARKER = "_neureptrace_label_proportion_positive_float_validation_patch_installed"
 _NONNEGATIVE_FLOAT_PATCH_MARKER = "_neureptrace_label_proportion_nonnegative_float_validation_patch_installed"
 _PROPORTION_VECTOR_PATCH_MARKER = "_neureptrace_label_proportion_vector_validation_patch_installed"
+_PROPORTION_BOOL_MESSAGE = "target_proportions must be numeric counts or proportions, not boolean flags."
+_PROPORTION_NUMERIC_MESSAGE = "target_proportions must be finite and non-negative."
+_PROPORTION_VECTOR_MESSAGE = "target_proportions must be a one-dimensional sequence of class proportions."
 
 
 def _object_block_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int | None = None) -> np.ndarray:
@@ -93,28 +97,72 @@ def _apply_class_bias(probabilities: np.ndarray, class_bias: np.ndarray, *, epsi
     return weighted / row_sums
 
 
+def _numeric_scalar(value: Any, *, message: str) -> Any:
+    """Return a scalar numeric-like value while rejecting arrays and booleans."""
+
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        if np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
+        raise ValueError(message)
+    return value
+
+
+def _normalize_positive_int(value: int | str, *, name: str) -> int:
+    message = f"{name} must be a positive integer."
+    value = _numeric_scalar(value, message=message)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
+        raise ValueError(message)
+    return int(numeric)
+
+
 def _normalize_positive_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be positive and finite.")
+    message = f"{name} must be positive and finite."
+    value = _numeric_scalar(value, message=message)
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive and finite.") from exc
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(message)
     return parsed
 
 
 def _normalize_nonnegative_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be non-negative and finite.")
+    message = f"{name} must be non-negative and finite."
+    value = _numeric_scalar(value, message=message)
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be non-negative and finite.") from exc
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed < 0.0:
-        raise ValueError(f"{name} must be non-negative and finite.")
+        raise ValueError(message)
     return parsed
+
+
+def _proportion_scalar(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(_PROPORTION_VECTOR_MESSAGE)
+        if np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(_PROPORTION_BOOL_MESSAGE)
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(_PROPORTION_BOOL_MESSAGE)
+    if isinstance(value, (list, tuple, dict, set)):
+        raise ValueError(_PROPORTION_NUMERIC_MESSAGE)
+    return value
 
 
 def _proportion_values_to_float_array(values: Any) -> np.ndarray:
@@ -122,14 +170,13 @@ def _proportion_values_to_float_array(values: Any) -> np.ndarray:
 
     array = np.asarray(values, dtype=object)
     if array.ndim > 1:
-        raise ValueError("target_proportions must be a one-dimensional sequence of class proportions.")
+        raise ValueError(_PROPORTION_VECTOR_MESSAGE)
     raw = array.reshape(-1)
-    if any(isinstance(value, (bool, np.bool_)) for value in raw):
-        raise ValueError("target_proportions must be numeric counts or proportions, not boolean flags.")
+    cleaned = [_proportion_scalar(value) for value in raw]
     try:
-        return raw.astype(float)
+        return np.asarray(cleaned, dtype=float)
     except (TypeError, ValueError) as exc:
-        raise ValueError("target_proportions must be finite and non-negative.") from exc
+        raise ValueError(_PROPORTION_NUMERIC_MESSAGE) from exc
 
 
 def _adjust_probability_blocks_to_label_proportions(
@@ -236,6 +283,11 @@ def install() -> None:
     if not getattr(current_bias, _ZERO_SUPPORT_PATCH_MARKER, False):
         setattr(_apply_class_bias, _ZERO_SUPPORT_PATCH_MARKER, True)
         _label_proportions._apply_class_bias = _apply_class_bias
+
+    current_positive_int = _label_proportions._normalize_positive_int
+    if not getattr(current_positive_int, _POSITIVE_INT_PATCH_MARKER, False):
+        setattr(_normalize_positive_int, _POSITIVE_INT_PATCH_MARKER, True)
+        _label_proportions._normalize_positive_int = _normalize_positive_int
 
     current_positive_float = _label_proportions._normalize_positive_float
     if not getattr(current_positive_float, _POSITIVE_FLOAT_PATCH_MARKER, False):
