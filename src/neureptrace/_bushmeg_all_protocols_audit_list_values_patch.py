@@ -11,6 +11,7 @@ import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_bushmeg_all_protocols_audit_list_values_patch_installed"
 _TRUE_TOKENS = {"1", "true", "yes", "y", "on"}
+_FALSE_TOKENS = {"0", "false", "no", "n", "off"}
 
 
 def _is_nonstring_iterable(value: Any) -> bool:
@@ -46,6 +47,18 @@ def _coerce_repeated_scalar(value: Any) -> Any:
     return value
 
 
+def _numeric_bool_like(value: Any) -> bool:
+    """Interpret numeric audit flags only when they are explicit 0/1 values."""
+
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not math.isfinite(numeric) or numeric not in {0.0, 1.0}:
+        return False
+    return bool(numeric)
+
+
 def _bool_like(value: Any) -> bool:
     value = _coerce_repeated_scalar(value)
     if _is_missing_scalar(value):
@@ -53,12 +66,17 @@ def _bool_like(value: Any) -> bool:
     if isinstance(value, bytes):
         value = value.decode(errors="replace")
     if isinstance(value, str):
-        return value.strip().lower() in _TRUE_TOKENS
+        text = value.strip().lower()
+        if text in _TRUE_TOKENS:
+            return True
+        if text in _FALSE_TOKENS:
+            return False
+        return False
     if isinstance(value, Mapping):
         return bool(value)
     if _is_nonstring_iterable(value):
         return any(_bool_like(item) for item in value)
-    return bool(value)
+    return _numeric_bool_like(value)
 
 
 def _first_present(row: pd.Series, names: tuple[str, ...]) -> Any:

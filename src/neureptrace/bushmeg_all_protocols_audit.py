@@ -382,7 +382,9 @@ def build_audit_markdown(
         p3_count_failures = _protocol3_calibration_count_failures(summary)
         p4_ok = oracle_debug or p4.empty
         target_accuracy_columns = [column for column in summary.columns if "target_accuracy" in str(column).lower()]
-        target_accuracy_ok = not target_accuracy_columns or not summary[target_accuracy_columns].applymap(_bool_like).any().any()
+        target_accuracy_ok = not target_accuracy_columns or not summary[target_accuracy_columns].apply(
+            lambda column: column.map(_bool_like)
+        ).any().any()
         outer_ok = "outer_test_subject" in summary.columns and summary["outer_test_subject"].notna().all()
         lines.append(_status_line(p1_ok, "Protocol 1 rows have `uses_target_data=false` and `uses_target_labels_for_fitting=false`."))
         lines.append(_status_line(p2_ok, "Protocol 2 rows have `uses_target_data=true` and `uses_target_labels_for_fitting=false`."))
