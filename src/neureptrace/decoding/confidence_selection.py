@@ -186,6 +186,24 @@ def _contains_boolean_probability_value(values: Any) -> bool:
     return any(_contains_boolean_probability_value(item) for item in iterable)
 
 
+def _contains_boolean_config_value(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype != object:
+            return False
+        return any(_contains_boolean_config_value(item) for item in value.ravel())
+    if isinstance(value, (str, bytes)):
+        return False
+    try:
+        iterable = iter(value)
+    except TypeError:
+        return False
+    return any(_contains_boolean_config_value(item) for item in iterable)
+
+
 def _optional_positive_int(value: int | str | None, *, name: str) -> int | None:
     if value is None:
         return None
@@ -202,7 +220,7 @@ def _positive_int(value: int | str, *, name: str) -> int:
 
 
 def _integer(value: int | str, *, name: str) -> int:
-    if isinstance(value, (bool, np.bool_)):
+    if _contains_boolean_config_value(value):
         raise ValueError(f"{name} must be an integer.")
     numeric = float(value)
     if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
@@ -232,7 +250,7 @@ def _positive_float(value: float | str, *, name: str) -> float:
 
 
 def _float_value(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if _contains_boolean_config_value(value):
         raise ValueError(f"{name} must be finite.")
     numeric = float(value)
     if not np.isfinite(numeric):
