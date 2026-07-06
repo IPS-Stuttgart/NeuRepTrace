@@ -170,6 +170,12 @@ def _coerce_config(config: SourceBaggingConfig | Mapping[str, Any]) -> SourceBag
 def _is_none_like_random_state(value: Any) -> bool:
     if value is None:
         return True
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            return False
+        return _is_none_like_random_state(value.item())
+    if isinstance(value, np.generic):
+        return _is_none_like_random_state(value.item())
     if isinstance(value, str):
         return value.strip().lower() in {"", "none", "null"}
     return False
