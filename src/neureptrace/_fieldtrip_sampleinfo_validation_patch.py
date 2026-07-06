@@ -301,7 +301,7 @@ def _normalize_trials_with_axis_hints(
             raise ValueError(
                 "Could not infer the trial axis for a 3-D FieldTrip trial array "
                 f"with shape {stacked.shape}; labels imply {n_channels} channels "
-                f"and time vectors imply sample counts {sorted(time_lengths) or '<unknown'}."
+                f"and time vectors imply sample counts {sorted(time_lengths) or '<unknown>'}."
             )
 
     return io_fieldtrip_mat._normalize_trials(trials)
