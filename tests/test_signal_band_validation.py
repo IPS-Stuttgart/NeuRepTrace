@@ -36,6 +36,23 @@ def test_validate_signal_values_rejects_boolean_axis(axis):
         validate_signal_values(np.ones((3, 4), dtype=float), axis=axis)
 
 
+@pytest.mark.parametrize(
+    "signal_values",
+    [
+        True,
+        np.bool_(False),
+        np.asarray(True),
+        [False, True],
+        [0.0, True, 2.0],
+        np.array([0.0, np.bool_(True), 2.0], dtype=object),
+        np.array([[0.0, 1.0], [np.bool_(False), 2.0]], dtype=object),
+    ],
+)
+def test_validate_signal_values_rejects_boolean_samples(signal_values):
+    with pytest.raises(ValueError, match="not boolean"):
+        validate_signal_values(signal_values)
+
+
 def test_validate_signal_values_accepts_numpy_integer_axis():
     signal = np.ones((3, 4), dtype=float)
 

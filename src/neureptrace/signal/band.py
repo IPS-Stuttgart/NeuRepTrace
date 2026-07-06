@@ -113,6 +113,8 @@ def validate_sampling_rate(sampling_rate) -> float:
 def validate_signal_values(signal_values, *, axis: int = -1) -> np.ndarray:
     """Return finite real-valued signal samples with at least two time samples."""
 
+    if _contains_bool_like(signal_values):
+        raise ValueError("signal_values must contain real-valued samples, not boolean values.")
     signal_values = np.asarray(signal_values, dtype=float)
     if signal_values.ndim == 0:
         raise ValueError("signal_values must have at least one sample dimension.")
