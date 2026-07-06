@@ -25,7 +25,7 @@ def select_class_limited_indices(
     ----------
     labels:
         One-dimensional class labels, or any array-like object that can be flattened.
-        Tuple-valued labels are treated as scalar composite class labels.
+        Tuple-valued and array-valued labels are treated as scalar composite class labels.
     max_per_class:
         Maximum number of rows to keep per class. ``None`` keeps every row.
     selection:
