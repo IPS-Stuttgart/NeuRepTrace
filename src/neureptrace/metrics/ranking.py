@@ -21,6 +21,9 @@ def rank_class_scores(
     rank summaries are undefined and returned as ``NaN``.
     """
 
+    classes = _materialize_reusable_label_input(classes)
+    y_true = _materialize_reusable_label_input(y_true)
+
     if classes is not None and _has_incompatible_array_label_shape(y_true, classes):
         raise ValueError("y_true must be one-dimensional.")
     y_true = _label_vector(y_true, name="y_true")
@@ -116,6 +119,17 @@ def _has_incompatible_class_matrix(classes: object, *, expected_n_classes: int) 
 
 def _is_matrix_label_array(values: object) -> bool:
     return isinstance(values, np.ndarray) and values.ndim > 1
+
+
+def _materialize_reusable_label_input(values: object) -> object:
+    """Return label inputs that can be inspected more than once without data loss."""
+
+    if values is None or isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
+        return values
+    try:
+        return list(values)
+    except TypeError:
+        return values
 
 
 def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
