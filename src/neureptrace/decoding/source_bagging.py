@@ -186,9 +186,10 @@ def _scalar_random_state_value(value: Any, *, name: str) -> Any:
 
 
 def _optional_nonnegative_int(value: Any, *, name: str) -> int | None:
-    if _is_none_like_random_state(value):
+    scalar_value = _scalar_random_state_value(value, name=name)
+    if _is_none_like_random_state(scalar_value):
         return None
-    return _nonnegative_int(_scalar_random_state_value(value, name=name), name=name)
+    return _nonnegative_int(scalar_value, name=name)
 
 
 def _default_estimator(cfg: SourceBaggingConfig) -> BaseEstimator:
