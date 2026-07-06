@@ -194,6 +194,20 @@ def test_config_aliases_and_validation() -> None:
         normalize_conditional_coral_fallback("unknown")
 
 
+def test_conditional_coral_config_normalizes_random_state_sentinels() -> None:
+    assert conditional_coral_config(random_state=np.asarray(7)).random_state == 7
+    assert conditional_coral_config(random_state=np.int64(11)).random_state == 11
+    assert conditional_coral_config(random_state="None").random_state is None
+    assert conditional_coral_config(random_state="null").random_state is None
+
+    with pytest.raises(ValueError, match="random_state"):
+        conditional_coral_config(random_state=np.asarray([7, 8]))
+    with pytest.raises(ValueError, match="random_state"):
+        conditional_coral_config(random_state=[7])
+    with pytest.raises(ValueError, match="random_state"):
+        conditional_coral_config(random_state=True)
+
+
 def test_target_labels_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
         fit_pseudo_label_conditional_coral(
