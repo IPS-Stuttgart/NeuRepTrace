@@ -18,8 +18,18 @@ _POSITIVE_COUNT_COLUMN_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_positive_c
 _OPTIONAL_METRICS = ("balanced_accuracy", "top2_accuracy", "top3_accuracy")
 
 
+def _is_boolean_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            return False
+        return isinstance(value.item(), (bool, np.bool_))
+    return False
+
+
 def _bool_mask(values: pd.Series) -> pd.Series:
-    return values.map(lambda value: isinstance(value, (bool, np.bool_))).fillna(False).astype(bool)
+    return values.map(_is_boolean_value).fillna(False).astype(bool)
 
 
 def _boolean_rows(values: pd.Series) -> list[object]:
