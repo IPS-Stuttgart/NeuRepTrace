@@ -70,6 +70,30 @@ def test_source_smote_preserves_composite_labels_and_domains() -> None:
         assert domains[content_index] != domains[partner_index]
 
 
+def test_source_smote_accepts_one_pass_labels_and_domains() -> None:
+    features = np.arange(20, dtype=float).reshape(4, 5)
+    label_values = [("cat", 1), ("cat", 1), ("dog", 2), ("dog", 2)]
+    domain_values = [("s1", "run1"), ("s1", "run2"), ("s2", "run1"), ("s2", "run2")]
+    labels = (value for value in label_values)
+    domains = (value for value in domain_values)
+
+    result = augment_source_with_smote(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "cross_domain_partner": True, "random_state": 11},
+    )
+
+    assert result.features.shape == (6, 5)
+    assert result.labels.tolist()[:4] == label_values
+    assert result.labels.tolist()[4:] == [("cat", 1), ("dog", 2)]
+    assert result.metadata["source_smote_n_classes"] == 2
+    assert result.metadata["source_smote_n_source_domains"] == 4
+    for content_index, partner_index in zip(result.content_indices, result.partner_indices, strict=True):
+        assert label_values[content_index] == label_values[partner_index]
+        assert domain_values[content_index] != domain_values[partner_index]
+
+
 def test_interpolate_rows_returns_convex_interpolation() -> None:
     row = interpolate_rows([0.0, 2.0], [4.0, 6.0], 0.25)
 
