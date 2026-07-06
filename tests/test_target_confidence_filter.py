@@ -28,6 +28,32 @@ def test_target_confidence_filter_selects_and_orders_pseudo_labels() -> None:
     assert result.metadata["target_confidence_filter_uses_target_labels"] is False
 
 
+def test_target_confidence_filter_accepts_one_pass_probability_rows() -> None:
+    probabilities = (row for row in ([0.90, 0.10], [0.55, 0.45], [0.20, 0.80]))
+
+    result = filter_target_probabilities_by_confidence(
+        probabilities,
+        classes=["left", "right"],
+        config={"min_confidence": 0.75, "sort_by": "confidence"},
+    )
+
+    assert result.selected_mask.tolist() == [True, False, True]
+    assert result.selected_indices.tolist() == [0, 2]
+    assert result.selected_pseudo_labels.tolist() == ["left", "right"]
+    assert result.metadata["target_confidence_filter_n_rows"] == 3
+    assert result.metadata["target_confidence_filter_n_selected"] == 2
+
+
+def test_target_confidence_entropy_accepts_one_pass_probability_rows() -> None:
+    probabilities = (row for row in ([2.0, 0.0], [1.0, 1.0]))
+
+    entropy = probability_entropy(probabilities)
+
+    assert entropy.shape == (2,)
+    assert entropy[0] < 1e-8
+    assert entropy[1] == pytest.approx(np.log(2.0))
+
+
 def test_target_confidence_filter_direct_config_normalizes_scalars() -> None:
     cfg = TargetConfidenceFilterConfig(
         min_confidence=np.asarray([0.5]),
@@ -80,3 +106,10 @@ def test_target_confidence_filter_rejects_boolean_probability_rows() -> None:
 
     with pytest.raises(ValueError, match="booleans"):
         probability_entropy([[1.0, False]])
+
+
+def test_target_confidence_filter_rejects_boolean_one_pass_probability_rows() -> None:
+    probabilities = (row for row in ([1.0, 0.0], [0.0, False]))
+
+    with pytest.raises(ValueError, match="booleans"):
+        filter_target_probabilities_by_confidence(probabilities)
