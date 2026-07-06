@@ -123,6 +123,21 @@ def test_config_aliases_and_validation() -> None:
         normalize_selection_mode("bad")
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"threshold": np.asarray(True)}, "threshold must be finite"),
+        ({"threshold": np.asarray([np.bool_(False)])}, "threshold must be finite"),
+        ({"min_margin": np.asarray(True, dtype=object)}, "min_margin must be finite"),
+        ({"top_k": np.asarray(True)}, "top_k must be an integer"),
+        ({"per_class_top_k": np.asarray([np.bool_(True)])}, "per_class_top_k must be an integer"),
+    ],
+)
+def test_boolean_array_numeric_config_values_are_rejected(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        confidence_selection_config(**kwargs)
+
+
 def test_optional_count_sentinels_are_normalized() -> None:
     assert confidence_selection_config(mode="top_k", top_k=" ALL ").top_k is None
     assert confidence_selection_config(mode="top_k", top_k="Null").top_k is None
