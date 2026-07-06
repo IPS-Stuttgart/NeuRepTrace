@@ -12,6 +12,7 @@ _PATCH_MARKER = "_neureptrace_vrex_numeric_config_patch_installed"
 _DANN_NUMERIC_PATCH_MARKER = "_neureptrace_dann_bool_array_numeric_config_patch_installed"
 _SOURCE_VREX_FEATURE_PATCH_MARKER = "_neureptrace_source_vrex_finite_fit_feature_patch_installed"
 _SOURCE_VREX_DOMAIN_BATCH_PATCH_MARKER = "_neureptrace_source_vrex_domain_batch_patch_installed"
+_LINEAR_VREX_FEATURE_MATRIX_PATCH_MARKER = "_neureptrace_linear_vrex_feature_matrix_iterable_patch_installed"
 
 
 def _is_boolean_scalar_like(value: Any) -> bool:
@@ -67,6 +68,27 @@ def _nonnegative_float(value: Any, *, name: str) -> float:
     if not np.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be finite and non-negative.")
     return parsed
+
+
+def _linear_vrex_feature_matrix(values: Any, *, name: str) -> np.ndarray:
+    """Convert array-like or one-pass feature rows into a finite 2-D matrix."""
+
+    raw_values = values
+    if not isinstance(values, np.ndarray) and not hasattr(values, "__array__") and not isinstance(values, (str, bytes)):
+        try:
+            raw_values = list(values)
+        except TypeError:
+            raw_values = values
+
+    try:
+        matrix = np.asarray(raw_values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-empty two-dimensional feature matrix.") from exc
+    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
+        raise ValueError(f"{name} must be a non-empty two-dimensional feature matrix.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(f"{name} must contain only finite values.")
+    return matrix
 
 
 def _validate_finite_source_features(source_features: Any) -> None:
@@ -155,6 +177,15 @@ def _install_linear_vrex_numeric_validators() -> None:
     vrex._nonnegative_float = _nonnegative_float
 
 
+def _install_linear_vrex_feature_matrix() -> None:
+    vrex = importlib.import_module("neureptrace.decoding.vrex")
+    if getattr(vrex._feature_matrix, _LINEAR_VREX_FEATURE_MATRIX_PATCH_MARKER, False):
+        return
+
+    setattr(_linear_vrex_feature_matrix, _LINEAR_VREX_FEATURE_MATRIX_PATCH_MARKER, True)
+    vrex._feature_matrix = _linear_vrex_feature_matrix
+
+
 def _install_source_vrex_fit_feature_validator() -> None:
     source_vrex = importlib.import_module("neureptrace.decoding.source_vrex")
     original_fit = source_vrex.TorchVRExClassifier.fit
@@ -184,6 +215,7 @@ def install() -> None:
 
     _install_dann_numeric_validators()
     _install_linear_vrex_numeric_validators()
+    _install_linear_vrex_feature_matrix()
     _install_source_vrex_fit_feature_validator()
     _install_source_vrex_domain_balanced_batch()
 
