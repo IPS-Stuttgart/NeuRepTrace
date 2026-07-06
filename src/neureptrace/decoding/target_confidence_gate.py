@@ -9,7 +9,7 @@ pseudo-label pipelines.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -200,7 +200,10 @@ def _coerce_config(config: TargetConfidenceGateConfig | Mapping[str, Any]) -> Ta
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_nested_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError("probabilities must contain numeric probabilities, not boolean values.")
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a non-empty two-dimensional matrix with at least two columns.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
@@ -219,6 +222,42 @@ def _class_vector(values: Sequence[Any] | np.ndarray | None, *, n_classes: int) 
     if vector.shape[0] != n_classes:
         raise ValueError(f"classes must contain one value per probability column: {vector.shape[0]} != {n_classes}.")
     return vector
+
+
+def _materialize_nested_iterables(values: Any) -> Any:
+    if isinstance(values, np.ndarray) or _is_scalar_like(values):
+        return values
+    if isinstance(values, Mapping):
+        return values
+    if isinstance(values, Iterable):
+        return [list(row) if _is_row_iterable(row) else row for row in values]
+    return values
+
+
+def _is_row_iterable(value: Any) -> bool:
+    return isinstance(value, Iterable) and not isinstance(value, np.ndarray) and not _is_scalar_like(value) and not isinstance(value, Mapping)
+
+
+def _is_scalar_like(value: Any) -> bool:
+    return isinstance(value, (str, bytes))
+
+
+def _contains_boolean_value(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if value.dtype == np.bool_:
+            return True
+        if value.dtype != object:
+            return False
+        return any(_contains_boolean_value(item) for item in value.flat)
+    if _is_scalar_like(value):
+        return False
+    if isinstance(value, Mapping):
+        return any(_contains_boolean_value(item) for pair in value.items() for item in pair)
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
