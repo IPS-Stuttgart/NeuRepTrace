@@ -8,12 +8,13 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-_PATCH_ATTR = "_neureptrace_rejects_bool_time_decode_metrics"
-_OBSERVATION_PATCH_ATTR = "_neureptrace_rejects_bool_probability_observations"
+_PATCH_ATTR = "_neureptrace_rejects_bool_or_array_time_decode_metrics"
+_OBSERVATION_PATCH_ATTR = "_neureptrace_rejects_bool_or_array_probability_observations"
 _SUMMARY_PATCH_ATTR = "_neureptrace_rejects_bool_metric_table_inputs"
 _OPTIONAL_PATCH_ATTR = "_neureptrace_results_optional_metric_aggregation"
 _POSITIVE_INTEGER_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_positive_integer_controls"
 _FINITE_SCALAR_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_finite_numeric_scalars"
+_COUNT_COLUMN_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_count_columns"
 _OPTIONAL_METRICS = ("balanced_accuracy", "top2_accuracy", "top3_accuracy")
 
 
@@ -164,6 +165,20 @@ def install() -> None:
         _finite_numeric_scalar_checked.__wrapped__ = original_finite_numeric_scalar
         tables._finite_numeric_scalar = _finite_numeric_scalar_checked
 
+    original_positive_count_column = results._coerce_positive_count_column
+    if not getattr(original_positive_count_column, _COUNT_COLUMN_ARRAY_PATCH_ATTR, False):
+
+        def _coerce_positive_count_column_checked(frame: pd.DataFrame, column: str) -> pd.Series:
+            if column in frame.columns:
+                rows = _array_rows(frame[column])
+                if rows:
+                    raise ValueError(f"Column '{column}' must contain positive integer fold sizes; array-valued row(s): {rows}.")
+            return original_positive_count_column(frame, column)
+
+        setattr(_coerce_positive_count_column_checked, _COUNT_COLUMN_ARRAY_PATCH_ATTR, True)
+        _coerce_positive_count_column_checked.__wrapped__ = original_positive_count_column
+        results._coerce_positive_count_column = _coerce_positive_count_column_checked
+
     original = results._coerce_finite_metric_columns
     if not getattr(original, _PATCH_ATTR, False):
 
@@ -177,6 +192,9 @@ def install() -> None:
                 rows = _boolean_rows(frame[metric])
                 if rows:
                     raise ValueError(f"Metric column '{metric}' must not contain booleans; bad row(s): {rows}.")
+                rows = _array_rows(frame[metric])
+                if rows:
+                    raise ValueError(f"Metric column '{metric}' must not contain arrays; bad row(s): {rows}.")
             return original(frame, metric_columns)
 
         setattr(_coerce_finite_metric_columns_checked, _PATCH_ATTR, True)
@@ -199,6 +217,9 @@ def install() -> None:
                 rows = _boolean_rows(observations[column])
                 if rows:
                     raise ValueError(f"Probability-observation column '{column}' must not contain booleans; bad row(s): {rows}.")
+                rows = _array_rows(observations[column])
+                if rows:
+                    raise ValueError(f"Probability-observation column '{column}' must not contain arrays; bad row(s): {rows}.")
             return original_probability_ece_by_group(observations, group_columns, n_bins=n_bins)
 
         setattr(_probability_ece_by_group_checked, _OBSERVATION_PATCH_ATTR, True)
