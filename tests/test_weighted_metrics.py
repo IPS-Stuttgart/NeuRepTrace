@@ -131,6 +131,25 @@ def test_validate_sample_weight_rejects_invalid_weights() -> None:
         validate_sample_weight(np.array([1.0, np.nan]), 2)
 
 
+@pytest.mark.parametrize(
+    "bad_sample_weight",
+    [
+        np.array([np.asarray(True), 1.0], dtype=object),
+        np.array([[np.asarray(False)], [1.0]], dtype=object),
+        np.array([np.array([True], dtype=bool), 1.0], dtype=object),
+    ],
+)
+def test_validate_sample_weight_rejects_boolean_ndarray_cells(bad_sample_weight: np.ndarray) -> None:
+    probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
+    labels = np.array([0, 1])
+
+    with pytest.raises(ValueError, match="boolean values"):
+        validate_sample_weight(bad_sample_weight, 2)
+
+    with pytest.raises(ValueError, match="boolean values"):
+        weighted_top_k_accuracy(probabilities, labels, bad_sample_weight)
+
+
 def test_weighted_probability_metrics_accept_integer_like_labels() -> None:
     probabilities = np.array([[0.7, 0.3], [0.4, 0.6]])
     labels = np.array(["0", "1"])
