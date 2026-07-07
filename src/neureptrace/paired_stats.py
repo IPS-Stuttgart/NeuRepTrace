@@ -108,8 +108,20 @@ def _report_column_heading(column: str) -> str:
     return " ".join(words)
 
 
+def _is_missing_scalar(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    if isinstance(missing, (bool, np.bool_)):
+        return bool(missing)
+    return False
+
+
 def _markdown_cell(value: object) -> str:
-    if value is None or pd.isna(value):
+    if _is_missing_scalar(value):
         return ""
     return str(value).replace("\n", " ").replace("|", r"\|")
 
