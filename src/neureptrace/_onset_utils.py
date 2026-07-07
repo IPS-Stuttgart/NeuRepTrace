@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from neureptrace._object_label_utils import values_equal
 from neureptrace._onset_constants import GROUP_COLUMNS
 from neureptrace.temporal_model import _normalize_probabilities, probability_columns
 
@@ -59,6 +60,23 @@ def _integer_label(value: object) -> int | None:
     if not np.isfinite(numeric) or not numeric.is_integer():
         return None
     return int(numeric)
+
+
+def _has_value(value: object) -> bool:
+    """Return whether a scalar or composite label cell contains usable content."""
+
+    if value is None:
+        return False
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return True
+    if isinstance(missing, (bool, np.bool_)):
+        return not bool(missing)
+    try:
+        return not bool(np.all(missing))
+    except (TypeError, ValueError):
+        return True
 
 
 def _confidence_values(frame: pd.DataFrame) -> pd.Series:
@@ -131,9 +149,9 @@ def prediction_values(frame: pd.DataFrame) -> np.ndarray:
 
 
 def prediction_value(row: pd.Series) -> object:
-    if "predicted_label" in row and pd.notna(row["predicted_label"]):
+    if "predicted_label" in row and _has_value(row["predicted_label"]):
         return row["predicted_label"]
-    if "predicted_class" in row and pd.notna(row["predicted_class"]):
+    if "predicted_class" in row and _has_value(row["predicted_class"]):
         return row["predicted_class"]
     return None
 
@@ -150,12 +168,13 @@ def sequence_identity(row: pd.Series) -> dict:
 
 
 def is_correct_detection(row: pd.Series) -> bool:
-    if "true_label" in row and "predicted_label" in row and pd.notna(row["true_label"]) and pd.notna(row["predicted_label"]):
+    if "true_label" in row and "predicted_label" in row and _has_value(row["true_label"]) and _has_value(row["predicted_label"]):
         true_label = _integer_label(row["true_label"])
         predicted_label = _integer_label(row["predicted_label"])
         if true_label is not None and predicted_label is not None:
             return true_label == predicted_label
-    if "true_class" in row and "predicted_class" in row and pd.notna(row["true_class"]) and pd.notna(row["predicted_class"]):
+        return values_equal(row["true_label"], row["predicted_label"])
+    if "true_class" in row and "predicted_class" in row and _has_value(row["true_class"]) and _has_value(row["predicted_class"]):
         return str(row["true_class"]) == str(row["predicted_class"])
     return False
 
