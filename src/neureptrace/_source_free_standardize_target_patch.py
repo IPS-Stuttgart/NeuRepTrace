@@ -32,9 +32,19 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise ValueError(f"{name} must be a boolean value.")
 
 
+def _is_boolean_scalar(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        return value.ndim == 0 and np.issubdtype(value.dtype, np.bool_)
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (bool, np.bool_))
+    return False
+
+
 def _is_array_like_scalar(value: Any) -> bool:
     if isinstance(value, np.ndarray):
-        return True
+        return value.ndim != 0
     if isinstance(value, Mapping):
         return True
     if isinstance(value, (set, frozenset)):
@@ -43,7 +53,7 @@ def _is_array_like_scalar(value: Any) -> bool:
 
 
 def _reject_array_scalar(value: Any, *, name: str, expectation: str) -> None:
-    if _is_array_like_scalar(value):
+    if _is_boolean_scalar(value) or _is_array_like_scalar(value):
         raise ValueError(f"{name} must be {expectation}.")
 
 
@@ -75,7 +85,7 @@ def _install_numeric_array_guards(source_free: Any) -> None:
 
         @wraps(original_bounded_float)
         def _bounded_float_checked(value: Any, name: str, *, lower: float, upper: float, include_upper: bool) -> float:
-            if _is_array_like_scalar(value):
+            if _is_boolean_scalar(value) or _is_array_like_scalar(value):
                 closing = "]" if include_upper else ")"
                 raise ValueError(f"{name} must be finite in [{lower}, {upper}{closing}.")
             return original_bounded_float(value, name, lower=lower, upper=upper, include_upper=include_upper)
