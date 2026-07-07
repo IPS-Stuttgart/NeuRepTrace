@@ -60,6 +60,7 @@ class EpochDataset:
 
     def with_channels(self, channel_names: list[str]) -> Self:
         """Return a dataset view containing channels in the requested order."""
+
         index_by_name = {channel_name: index for index, channel_name in enumerate(self.channel_names)}
         missing = [channel_name for channel_name in channel_names if channel_name not in index_by_name]
         if missing:
