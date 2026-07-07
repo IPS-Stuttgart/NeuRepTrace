@@ -25,6 +25,7 @@ DOMAIN_IMPORTANCE_PROTOCOL = "unlabeled_target_domain_classifier_importance_weig
 DOMAIN_IMPORTANCE_CATEGORY = "2_unlabeled_target_adaptive"
 DEFAULT_WEIGHT_CLIP = (0.05, 20.0)
 DEFAULT_EPSILON = 1e-9
+_EPSILON_MESSAGE = "epsilon must be a finite scalar probability clipping value in the open interval (0, 0.5)."
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,7 +143,7 @@ def domain_importance_config(
         clip=_normalize_clip(clip),
         normalize=_boolean(normalize, name="normalize"),
         account_for_sample_priors=_boolean(account_for_sample_priors, name="account_for_sample_priors"),
-        epsilon=_positive_float(epsilon, name="epsilon"),
+        epsilon=_probability_clipping_epsilon(epsilon),
     )
 
 
@@ -172,9 +173,17 @@ def _target_domain_probabilities(model: BaseEstimator, features: np.ndarray, *, 
     classes = np.asarray(getattr(model, "classes_", [0, 1])).reshape(-1)
     if probabilities.ndim != 2 or probabilities.shape[0] != features.shape[0]:
         raise ValueError("Domain classifier predict_proba returned an invalid probability matrix.")
+    if probabilities.shape[1] != classes.shape[0]:
+        raise ValueError("Domain classifier classes_ length must match probability columns.")
+    source_columns = np.flatnonzero(classes == 0)
     target_columns = np.flatnonzero(classes == 1)
-    if target_columns.size != 1:
-        raise ValueError("Domain classifier classes_ must contain target-domain label 1 exactly once.")
+    if probabilities.shape[1] != 2 or source_columns.size != 1 or target_columns.size != 1:
+        raise ValueError("Domain classifier classes_ must contain exactly source-domain label 0 and target-domain label 1.")
+    if not np.all(np.isfinite(probabilities)) or np.any(probabilities < 0.0):
+        raise ValueError("Domain classifier probabilities must be finite and non-negative.")
+    row_sums = np.sum(probabilities, axis=1)
+    if not np.allclose(row_sums, 1.0, rtol=1e-5, atol=1e-8):
+        raise ValueError("Domain classifier probability rows must sum to 1.")
     target_probability = probabilities[:, int(target_columns[0])]
     return np.clip(target_probability, epsilon, 1.0 - epsilon)
 
@@ -196,7 +205,12 @@ def _posterior_to_importance_weights(
 
 def _coerce_config(config: DomainImportanceConfig | Mapping[str, Any]) -> DomainImportanceConfig:
     if isinstance(config, DomainImportanceConfig):
-        return config
+        return DomainImportanceConfig(
+            clip=config.clip,
+            normalize=config.normalize,
+            account_for_sample_priors=config.account_for_sample_priors,
+            epsilon=_probability_clipping_epsilon(config.epsilon),
+        )
     return domain_importance_config(**dict(config))
 
 
@@ -356,13 +370,19 @@ def _label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
     return _object_vector(rows)
 
 
-def _positive_float(value: float | str, *, name: str) -> float:
+def _probability_clipping_epsilon(value: object) -> float:
     if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(_EPSILON_MESSAGE)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(_EPSILON_MESSAGE)
+        if np.issubdtype(value.dtype, np.bool_):
+            raise ValueError(_EPSILON_MESSAGE)
+        value = value.item()
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive and finite.") from exc
-    if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
+        raise ValueError(_EPSILON_MESSAGE) from exc
+    if not np.isfinite(parsed) or parsed <= 0.0 or parsed >= 0.5:
+        raise ValueError(_EPSILON_MESSAGE)
     return parsed
