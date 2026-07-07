@@ -14,6 +14,8 @@ import numbers
 from collections.abc import Mapping
 from typing import Any, NoReturn
 
+import numpy as np
+
 _PATCH_MARKER = "_neureptrace_metadata_column_validation_patch_installed"
 
 
@@ -47,6 +49,20 @@ def _coerce_metadata_column_index(value: Any, *, error_type: type[Exception] = V
     return index
 
 
+def _coerce_metadata_column_optional(value: Any, *, error_type: type[Exception] = ValueError) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "y"}:
+            return True
+        if text in {"false", "0", "no", "n"}:
+            return False
+    _fail(error_type, f"metadata.columns.optional must be a boolean; got {value!r}.")
+
+
 def _metadata_columns(config: Mapping[str, Any]) -> list[Any]:
     metadata_config = config.get("metadata", {}) or {}
     if not isinstance(metadata_config, Mapping):
@@ -68,6 +84,7 @@ def _validate_metadata_columns_config(config: Mapping[str, Any], *, error_type: 
         if not isinstance(column, Mapping) or "name" not in column or "index" not in column:
             raise error_type("metadata.columns entries must contain name and index.")
         _coerce_metadata_column_index(column["index"], error_type=error_type)
+        _coerce_metadata_column_optional(column.get("optional", False), error_type=error_type)
 
 
 def install() -> None:
@@ -99,7 +116,7 @@ def install() -> None:
                 fieldtrip_mat.MetadataColumnSpec(
                     name=str(column["name"]),
                     index=_coerce_metadata_column_index(column["index"]),
-                    optional=bool(column.get("optional", False)),
+                    optional=_coerce_metadata_column_optional(column.get("optional", False)),
                 )
             )
         return tuple(specs)
