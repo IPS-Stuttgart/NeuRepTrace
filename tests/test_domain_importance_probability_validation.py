@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 from sklearn.base import BaseEstimator
 
+from neureptrace.decoding import domain_importance as patched_domain_importance
 from neureptrace.decoding.domain_importance import fit_domain_classifier_importance_weights
 
 
@@ -57,3 +62,20 @@ def test_domain_importance_rejects_non_normalized_probability_rows() -> None:
 
     with pytest.raises(ValueError, match="rows must sum to 1"):
         fit_domain_classifier_importance_weights(source, target, estimator=estimator)
+
+
+def test_domain_importance_core_rejects_invalid_probabilities_without_runtime_patch() -> None:
+    module_path = Path(patched_domain_importance.__file__)
+    spec = importlib.util.spec_from_file_location("_neureptrace_domain_importance_core_probe", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        source, target = _domain_features()
+        estimator = _StaticDomainEstimator([[0.8, 0.8]], classes=(0, 1))
+
+        with pytest.raises(ValueError, match="rows must sum to 1"):
+            module.fit_domain_classifier_importance_weights(source, target, estimator=estimator)
+    finally:
+        sys.modules.pop(spec.name, None)
