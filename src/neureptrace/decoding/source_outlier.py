@@ -219,7 +219,25 @@ def _coerce_config(config: SourceOutlierConfig | Mapping[str, Any]) -> SourceOut
     return source_outlier_config(**dict(config))
 
 
+def _contains_boolean_feature_value(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean_feature_value(item) for item in value.reshape(-1).tolist())
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Sequence):
+        return any(_contains_boolean_feature_value(item) for item in value)
+    return False
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    if _contains_boolean_feature_value(values):
+        raise ValueError(f"{name} must contain numeric, non-boolean values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
