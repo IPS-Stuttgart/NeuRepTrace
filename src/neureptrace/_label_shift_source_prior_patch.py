@@ -21,8 +21,27 @@ _SCALAR_ERROR_SUFFIXES = {
 }
 
 
-def _missing_class_labels(source_prior: Mapping[Any, float], classes: Sequence[Any]) -> list[Any]:
-    return [class_label for class_label in classes if class_label not in source_prior]
+def _source_prior_value_for_class(label_shift: Any, source_prior: Mapping[Any, float], class_label: Any) -> tuple[bool, Any]:
+    """Return a mapping prior value using NeuRepTrace object-label equality."""
+
+    for prior_label, prior_value in source_prior.items():
+        if label_shift._object_equal(prior_label, class_label):
+            return True, prior_value
+    return False, None
+
+
+def _source_prior_values_for_classes(label_shift: Any, source_prior: Mapping[Any, float], classes: Sequence[Any]) -> tuple[list[Any], list[Any]]:
+    """Resolve mapping source-prior values for class labels that may be NaN/composite objects."""
+
+    values: list[Any] = []
+    missing: list[Any] = []
+    for class_label in classes:
+        found, prior_value = _source_prior_value_for_class(label_shift, source_prior, class_label)
+        if found:
+            values.append(prior_value)
+        else:
+            missing.append(class_label)
+    return values, missing
 
 
 def _format_label_preview(labels: Sequence[Any], *, limit: int = 5) -> str:
@@ -131,14 +150,13 @@ def install() -> None:
         ):
             _validate_unique_classes(label_shift, classes)
             if isinstance(source_prior, Mapping):
-                missing = _missing_class_labels(source_prior, classes)
+                values, missing = _source_prior_values_for_classes(label_shift, source_prior, classes)
                 if missing:
                     raise ValueError(
                         "source_prior mapping must provide a prior for every class; "
                         f"missing class label(s): {_format_label_preview(missing)}."
                     )
-                values = np.asarray([source_prior[class_label] for class_label in classes], dtype=float)
-                return label_shift._prior_vector(values, n_classes=n_classes, name="source_prior", epsilon=epsilon)
+                return label_shift._prior_vector(np.asarray(values, dtype=float), n_classes=n_classes, name="source_prior", epsilon=epsilon)
             labels = source_labels if source_labels is not None else source_validation_labels
             if labels is not None:
                 _reject_unknown_source_labels(label_shift, labels, classes)
