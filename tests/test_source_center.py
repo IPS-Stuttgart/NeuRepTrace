@@ -36,6 +36,41 @@ def test_source_center_median_and_zero_modes() -> None:
     assert apply_source_center_transform([[2.0]], median_map).ravel().tolist() == [1.0]
 
 
+@pytest.mark.parametrize(
+    "features",
+    [
+        np.asarray([[True, False], [False, True]], dtype=bool),
+        np.asarray([[True, 1.0], [False, 0.0]], dtype=object),
+        [[True, 0.0], [False, 1.0]],
+        ((value for value in row) for row in [[True, 0.0], [False, 1.0]]),
+    ],
+)
+def test_source_center_rejects_boolean_source_features(features) -> None:
+    with pytest.raises(ValueError, match="source_features.*boolean flags"):
+        fit_source_center_map(features)
+
+
+def test_source_center_transform_rejects_boolean_test_features() -> None:
+    with pytest.raises(ValueError, match="test_features.*boolean flags"):
+        fit_source_center_transform(
+            source_features=[[0.0, 1.0], [1.0, 0.0]],
+            test_features=np.asarray([[True, False]], dtype=bool),
+        )
+
+
+def test_source_center_accepts_one_pass_numeric_iterables() -> None:
+    source = ((float(i + offset) for offset in (0, 2)) for i in range(3))
+    test = ((float(i + offset) for offset in (1, 3)) for i in range(2))
+
+    result = fit_source_center_transform(source_features=source, test_features=test, config={"center": "mean"})
+
+    assert result.train_features.shape == (3, 2)
+    assert result.test_features.shape == (2, 2)
+    assert result.center_map.center.tolist() == [1.0, 3.0]
+    np.testing.assert_allclose(result.train_features.mean(axis=0), np.asarray([0.0, 0.0]))
+    np.testing.assert_allclose(result.test_features, np.asarray([[0.0, 0.0], [1.0, 1.0]], dtype=np.float32))
+
+
 def test_source_center_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_center_transform(source_features=[[0.0, 1.0]], test_features=[[0.0]])
