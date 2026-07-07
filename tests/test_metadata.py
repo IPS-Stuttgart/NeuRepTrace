@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -125,6 +126,30 @@ def test_add_binary_label_rejects_missing_text_parameters():
             label_column="condition",
             positive_label=None,  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"source_column": np.array(["category", "other"])}, "source_column must be a non-empty string"),
+        ({"positive_pattern": np.array(["face", "chair"])}, "positive_pattern must be a non-empty string"),
+        ({"negative_pattern": np.array(["chair", "car"])}, "negative_pattern must be a non-empty string"),
+        ({"label_column": np.array(["condition", "other"])}, "label_column must be a non-empty string"),
+        ({"positive_label": np.array(["face", "object"])}, "positive_label must be a non-empty string"),
+        ({"negative_label": np.array(["face", "object"])}, "negative_label must be a non-empty string"),
+    ],
+)
+def test_add_binary_label_rejects_vector_text_parameters(overrides, message):
+    metadata = pd.DataFrame({"category": ["face", "chair"]})
+    kwargs = {
+        "source_column": "category",
+        "positive_pattern": "face",
+        "label_column": "condition",
+    }
+    kwargs.update(overrides)
+
+    with pytest.raises(ValueError, match=message):
+        add_binary_label(metadata, **kwargs)
 
 
 def test_add_binary_label_rejects_invalid_regex():
