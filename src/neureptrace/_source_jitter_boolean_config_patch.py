@@ -10,6 +10,7 @@ import numpy as np
 
 _PATCH_MARKER = "_neureptrace_source_jitter_boolean_config_patch_installed"
 _AUGMENT_METADATA_PATCH_MARKER = "_neureptrace_source_jitter_disabled_metadata_patch_installed"
+_JITTER_SINGLETON_AXIS_PATCH_MARKER = "_neureptrace_source_jitter_singleton_axis_vector_patch_installed"
 _MASKING_INT_PATCH_MARKER = "_neureptrace_source_feature_masking_int_config_patch_installed"
 _MASKING_AUGMENT_CONFIG_PATCH_MARKER = "_neureptrace_source_feature_masking_dataclass_config_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
@@ -192,6 +193,18 @@ def _normalize_masking_dataclass_config(source_masking: Any, config: Any) -> Any
     )
 
 
+def _singleton_axis_items(values: Any, *, expected_length: int) -> list[Any] | None:
+    if expected_length == 1 or isinstance(values, (str, bytes)):
+        return None
+    try:
+        array = np.asarray(values, dtype=object)
+    except ValueError:
+        return None
+    if array.ndim < 2 or array.size != expected_length or 1 not in array.shape:
+        return None
+    return array.reshape(-1).tolist()
+
+
 def _install_source_jitter_patch() -> None:
     source_jitter = importlib.import_module("neureptrace.decoding.source_jitter")
 
@@ -248,6 +261,39 @@ def _install_source_jitter_patch() -> None:
         source_jitter.augment_source_with_feature_jitter = augment_source_with_feature_jitter
 
 
+def _install_source_jitter_singleton_axis_patch() -> None:
+    source_jitter = importlib.import_module("neureptrace.decoding.source_jitter")
+
+    original_atomic = source_jitter._atomic_value_vector
+    if getattr(original_atomic, _JITTER_SINGLETON_AXIS_PATCH_MARKER, False):
+        return
+
+    @wraps(original_atomic)
+    def _atomic_value_vector(values: Any, *, expected_length: int, name: str, require_hashable: bool):
+        items = _singleton_axis_items(values, expected_length=expected_length)
+        if items is None:
+            return original_atomic(
+                values,
+                expected_length=expected_length,
+                name=name,
+                require_hashable=require_hashable,
+            )
+        if len(items) != expected_length:
+            raise ValueError(f"{name} must contain one value per feature row: {len(items)} != {expected_length}.")
+        if require_hashable:
+            for value in items:
+                try:
+                    hash(value)
+                except TypeError as exc:
+                    raise ValueError(f"{name} must be hashable; got {value!r}.") from exc
+        if source_jitter._contains_composite_value(items):
+            return source_jitter._object_vector(items)
+        return np.asarray(items).reshape(-1)
+
+    setattr(_atomic_value_vector, _JITTER_SINGLETON_AXIS_PATCH_MARKER, True)
+    source_jitter._atomic_value_vector = _atomic_value_vector
+
+
 def _install_source_masking_patch() -> None:
     source_masking = importlib.import_module("neureptrace.decoding.source_masking")
 
@@ -298,6 +344,7 @@ def install() -> None:
     """Install numeric/scalar boolean normalization and source masking config validation."""
 
     _install_source_jitter_patch()
+    _install_source_jitter_singleton_axis_patch()
     _install_source_masking_patch()
 
 
