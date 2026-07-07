@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 SOURCE_PRIOR_PROTOCOL = "strict_source_only_class_prior_adjustment"
 SOURCE_PRIOR_CATEGORY = "1_strict_source_only"
@@ -289,7 +290,13 @@ def _object_contains(values: Sequence[Any] | np.ndarray, target: Any) -> bool:
 def _is_nan_scalar(value: Any) -> bool:
     if isinstance(value, np.generic):
         value = value.item()
-    return isinstance(value, float) and np.isnan(value)
+    if isinstance(value, (np.ndarray, list, tuple, dict)):
+        return False
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
 
 
 def _object_equal(left: Any, right: Any) -> bool:
