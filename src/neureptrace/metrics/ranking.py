@@ -136,6 +136,8 @@ def _materialize_reusable_score_input(values: object) -> object:
         if values.dtype != object:
             return values
         return _materialize_reusable_score_input(values.tolist())
+    if hasattr(values, "__array__"):
+        return values
     if not isinstance(values, Iterable):
         return values
     return [_materialize_reusable_score_input(value) for value in values]
@@ -150,6 +152,11 @@ def _scores_contain_boolean(values: object) -> bool:
         if values.dtype == object:
             return any(_scores_contain_boolean(value) for value in values.ravel(order="C"))
         return False
+    if hasattr(values, "__array__"):
+        try:
+            return _scores_contain_boolean(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
     if isinstance(values, (str, bytes)):
         return False
     if not isinstance(values, Iterable):
