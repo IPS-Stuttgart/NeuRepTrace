@@ -356,8 +356,13 @@ def _hashable_object_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_hashable_object_value(item) for item in value)
     if isinstance(value, dict):
-        return tuple(sorted((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items()))
+        normalized_items = ((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items())
+        return tuple(sorted(normalized_items, key=lambda pair: (_hashable_object_sort_key(pair[0]), _hashable_object_sort_key(pair[1]))))
     return value
+
+
+def _hashable_object_sort_key(value: Any) -> tuple[str, str, str]:
+    return (type(value).__module__, type(value).__qualname__, repr(value))
 
 
 def _unique_object_values(values: Sequence[Any] | np.ndarray) -> tuple[Any, ...]:
@@ -368,7 +373,28 @@ def _unique_object_values(values: Sequence[Any] | np.ndarray) -> tuple[Any, ...]
     return tuple(unique)
 
 
+def _is_nan_scalar(value: Any) -> bool:
+    if isinstance(value, np.generic):
+        value = value.item()
+    return isinstance(value, float) and np.isnan(value)
+
+
 def _object_equal(left: object, right: object) -> bool:
+    if _is_nan_scalar(left) and _is_nan_scalar(right):
+        return True
+    if isinstance(left, np.generic):
+        left = left.item()
+    if isinstance(right, np.generic):
+        right = right.item()
+    if isinstance(left, (np.ndarray, list, tuple, dict)) or isinstance(right, (np.ndarray, list, tuple, dict)):
+        left = _hashable_object_value(left)
+        right = _hashable_object_value(right)
+        if _is_nan_scalar(left) and _is_nan_scalar(right):
+            return True
+        if isinstance(left, tuple) or isinstance(right, tuple):
+            if not isinstance(left, tuple) or not isinstance(right, tuple) or len(left) != len(right):
+                return False
+            return all(_object_equal(left_value, right_value) for left_value, right_value in zip(left, right, strict=True))
     try:
         equal = left == right
     except (TypeError, ValueError):
