@@ -7,7 +7,7 @@ helper for fold-local cross-subject decoding.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -139,8 +139,54 @@ def _metadata(cfg: SourceCenterConfig, *, n_source_rows: int, n_test_rows: int, 
     }
 
 
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize generator-backed feature rows before NumPy conversion."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = [_materialize_one_pass_iterables(item) for item in value.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(value.shape)
+    if isinstance(value, (str, bytes)):
+        return value
+    if hasattr(value, "__array__"):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _contains_boolean_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (bool, np.bool_))
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_boolean_value(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
