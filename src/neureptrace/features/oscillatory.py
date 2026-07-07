@@ -241,7 +241,7 @@ def compute_band_trial_features(
 ) -> dict[str, float]:
     """Compute scalar band features for one trial/window/channel group."""
 
-    signal = np.asarray(signal, dtype=float)
+    signal = validate_signal_values(signal, axis=time_axis)
     if channel_indices is not None:
         if signal.ndim < 2:
             raise ValueError("channel_indices require a signal with a channel axis.")
@@ -287,7 +287,7 @@ def compute_band_features(
     band edges, channel count, optional label, and requested feature columns.
     """
 
-    data = np.asarray(data, dtype=float)
+    data = validate_signal_values(data, axis=time_axis)
     if data.ndim != 3:
         raise ValueError("data must be a 3D trials-by-channels-by-time array.")
     trial_axis = _normalize_axis(trial_axis, data.ndim)
