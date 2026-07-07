@@ -8,7 +8,7 @@ used to estimate statistics.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -152,8 +152,52 @@ def _metadata(cfg: SourceMADConfig, *, n_source_rows: int, n_test_rows: int, fea
     }
 
 
+def _materialize_feature_iterables(value: object) -> object:
+    """Materialize generator-backed feature rows before validation/conversion."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = [_materialize_feature_iterables(item) for item in value.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(value.shape)
+    if isinstance(value, (str, bytes)):
+        return value
+    if hasattr(value, "__array__"):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_feature_iterables(item) for item in value]
+
+
+def _features_contain_boolean(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype != object:
+            return False
+        return any(_features_contain_boolean(item) for item in value.ravel(order="C"))
+    if isinstance(value, (str, bytes)):
+        return False
+    if hasattr(value, "__array__"):
+        try:
+            return _features_contain_boolean(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(value, Iterable):
+        return False
+    return any(_features_contain_boolean(item) for item in value)
+
+
 def _matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_feature_iterables(values)
+    if _features_contain_boolean(materialized):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
