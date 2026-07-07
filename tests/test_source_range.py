@@ -110,6 +110,31 @@ def test_source_feature_range_rejects_nonfinite_values() -> None:
         source_feature_range([[0.0], [float("nan")]])
 
 
+@pytest.mark.parametrize(
+    "bad_source_features",
+    [
+        [[True, False], [False, True]],
+        np.asarray([[True, False], [False, True]], dtype=bool),
+        np.asarray([[True, 0.0], [False, 1.0]], dtype=object),
+    ],
+)
+def test_source_feature_range_rejects_boolean_values(bad_source_features) -> None:
+    with pytest.raises(ValueError, match="source_features.*non-boolean"):
+        source_feature_range(bad_source_features)
+
+
+def test_source_range_clip_rejects_boolean_test_features() -> None:
+    with pytest.raises(ValueError, match="test_features.*non-boolean"):
+        source_range_clip(source_features=[[0.0, 1.0]], test_features=[[True, False]])
+
+
+def test_apply_source_range_clip_rejects_boolean_bounds() -> None:
+    with pytest.raises(ValueError, match="lower.*non-boolean"):
+        apply_source_range_clip([[0.0, 1.0]], lower=[False, 0.0], upper=[1.0, 2.0])
+    with pytest.raises(ValueError, match="upper.*non-boolean"):
+        apply_source_range_clip([[0.0, 1.0]], lower=[0.0, 0.0], upper=[True, 2.0])
+
+
 def test_heldout_arguments_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
         source_feature_range([[0.0], [1.0]], heldout_features=[[0.5]])  # type: ignore[call-arg]

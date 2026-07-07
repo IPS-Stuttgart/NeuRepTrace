@@ -71,8 +71,27 @@ def _materialize_one_pass_iterables(value):
     return [_materialize_one_pass_iterables(item) for item in value]
 
 
+def _contains_boolean_values(value) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if value.dtype == np.bool_:
+            return value.size > 0
+        if value.dtype == object:
+            return any(_contains_boolean_values(item) for item in value.flat)
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_values(item) for item in value)
+    return False
+
+
 def _feature_matrix(values, *, name: str):
-    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_values(materialized):
+        raise ValueError(f"{name} must contain numeric, non-boolean values.")
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -81,4 +100,7 @@ def _feature_matrix(values, *, name: str):
 
 
 def _bound_vector(values, *, name: str):
-    return np.asarray(_materialize_one_pass_iterables(values), dtype=float).reshape(-1)
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_values(materialized):
+        raise ValueError(f"{name} must contain numeric, non-boolean values.")
+    return np.asarray(materialized, dtype=float).reshape(-1)
