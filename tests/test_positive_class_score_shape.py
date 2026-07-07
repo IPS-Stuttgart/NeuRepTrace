@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neureptrace.decoding.classifiers import positive_class_score
+from neureptrace.decoding.classifiers import _positive_class_vector, positive_class_score
 
 
 class MatrixDecisionModel:
@@ -24,6 +24,19 @@ class MatrixProbabilityModel:
 class OneColumnDecisionModel:
     def decision_function(self, features):
         return np.ones((np.asarray(features).shape[0], 1), dtype=float)
+
+
+def test_positive_class_vector_extracts_positive_matrix_column():
+    scores = np.asarray([[0.2, 0.8], [0.7, 0.3]], dtype=float)
+
+    positive = _positive_class_vector(scores, source="decision_function")
+
+    np.testing.assert_allclose(positive, np.asarray([0.8, 0.3]))
+
+
+def test_positive_class_vector_rejects_single_column_matrices():
+    with pytest.raises(ValueError, match="at least two class columns"):
+        _positive_class_vector(np.ones((2, 1)), source="decision_function")
 
 
 def test_positive_class_score_extracts_positive_decision_column():
