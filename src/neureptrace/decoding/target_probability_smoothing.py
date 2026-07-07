@@ -192,6 +192,8 @@ def _standardize(features: np.ndarray, *, enabled: bool, epsilon: float) -> np.n
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, expected_rows: int, epsilon: float) -> np.ndarray:
+    if _contains_boolean_values(values):
+        raise ValueError("probabilities must be numeric; boolean probability values are not allowed.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] != expected_rows:
         raise ValueError(f"probabilities must have {expected_rows} rows.")
@@ -199,6 +201,8 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, expec
 
 
 def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.ndarray:
+    if _contains_boolean_values(values):
+        raise ValueError("probabilities must be numeric; boolean probability values are not allowed.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must be finite and non-negative.")
@@ -302,3 +306,21 @@ def _is_array_like_control(value: Any) -> bool:
 def _reject_non_scalar_numeric(value: Any, *, name: str, expectation: str) -> None:
     if isinstance(value, (bool, np.bool_)) or _is_array_like_control(value):
         raise ValueError(f"{name} must be {expectation}.")
+
+
+def _contains_boolean_values(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if value.dtype == np.bool_:
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean_values(item) for item in value.reshape(-1))
+        return False
+    if isinstance(value, Mapping):
+        return any(_contains_boolean_values(item) for item in value.values())
+    if isinstance(value, (str, bytes, bytearray)):
+        return False
+    if isinstance(value, Sequence):
+        return any(_contains_boolean_values(item) for item in value)
+    return False
