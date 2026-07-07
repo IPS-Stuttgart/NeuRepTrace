@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from neureptrace.decoding.source_prior import (
@@ -80,6 +81,28 @@ def test_source_prior_treats_nan_labels_as_matching_class_values() -> None:
     assert np.isnan(inferred_classes[1])
     assert result.classes[0] == "seen"
     assert np.isnan(result.classes[1])
+    np.testing.assert_allclose(prior, np.asarray([0.5, 0.5]))
+    np.testing.assert_allclose(result.source_prior, np.asarray([0.5, 0.5]))
+    np.testing.assert_allclose(result.probabilities, probabilities)
+
+
+def test_source_prior_treats_pandas_missing_labels_as_matching_class_values() -> None:
+    probabilities = np.asarray([[0.8, 0.2], [0.3, 0.7]], dtype=float)
+    source_labels = pd.Series(["seen", pd.NA, "seen", pd.NA], dtype="object")
+    classes = pd.Index(["seen", pd.NA], dtype="object")
+
+    prior, inferred_classes = estimate_source_class_prior(source_labels, classes=classes)
+    result = adjust_probabilities_to_source_prior(
+        probabilities,
+        source_labels=source_labels,
+        classes=classes,
+        config={"target_prior": "source"},
+    )
+
+    assert inferred_classes[0] == "seen"
+    assert pd.isna(inferred_classes[1])
+    assert result.classes[0] == "seen"
+    assert pd.isna(result.classes[1])
     np.testing.assert_allclose(prior, np.asarray([0.5, 0.5]))
     np.testing.assert_allclose(result.source_prior, np.asarray([0.5, 0.5]))
     np.testing.assert_allclose(result.probabilities, probabilities)
