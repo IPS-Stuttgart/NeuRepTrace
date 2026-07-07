@@ -530,6 +530,17 @@ def prediction_scores(model: Any, features: Sequence[Sequence[float]] | np.ndarr
     return np.full(features.shape[0], np.nan, dtype=float)
 
 
+def _positive_class_vector(values: Sequence[float] | np.ndarray, *, source: str) -> np.ndarray:
+    scores = np.asarray(values, dtype=float)
+    if scores.ndim == 1:
+        return scores
+    if scores.ndim != 2:
+        raise ValueError(f"{source} must return a one- or two-dimensional score array.")
+    if scores.shape[1] < 2:
+        raise ValueError(f"{source} must expose at least two class columns for positive-class scoring.")
+    return scores[:, 1]
+
+
 def positive_class_score(model: Any, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
     """Return a binary model's score for the positive class."""
 
@@ -537,7 +548,7 @@ def positive_class_score(model: Any, features: Sequence[Sequence[float]] | np.nd
     if features.ndim != 2:
         raise ValueError("features must be a two-dimensional feature matrix.")
     if hasattr(model, "decision_function"):
-        return np.asarray(model.decision_function(features), dtype=float)
+        return _positive_class_vector(model.decision_function(features), source="decision_function")
     if hasattr(model, "predict_proba"):
-        return np.asarray(model.predict_proba(features), dtype=float)[:, 1]
-    return np.asarray(model.predict(features), dtype=float)
+        return _positive_class_vector(model.predict_proba(features), source="predict_proba")
+    return np.asarray(model.predict(features), dtype=float).reshape(-1)
