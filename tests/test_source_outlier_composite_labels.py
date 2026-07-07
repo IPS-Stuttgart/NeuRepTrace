@@ -64,3 +64,37 @@ def test_source_outlier_preserves_row_vector_labels_atomically() -> None:
     assert result.classes.tolist() == [("face", "seen"), ("object", "new")]
     assert set(result.thresholds) == {("face", "seen"), ("object", "new")}
     assert result.sample_weights.shape == (6,)
+
+
+def test_source_outlier_groups_nan_labels_as_one_class() -> None:
+    features = np.asarray([[0.0], [0.2], [2.0], [10.0], [10.2], [13.0]], dtype=float)
+    labels = np.asarray(
+        [
+            float("nan"),
+            np.nan,
+            np.float64("nan"),
+            "object",
+            "object",
+            "object",
+        ],
+        dtype=object,
+    )
+
+    result = compute_source_outlier_weights(
+        features,
+        labels,
+        config={
+            "threshold_mode": "quantile",
+            "quantile": 0.75,
+            "weight_mode": "binary",
+            "use_diagonal_scale": False,
+        },
+    )
+
+    assert result.classes.shape == (2,)
+    assert np.isnan(result.classes[0])
+    assert result.classes[1] == "object"
+    assert result.sample_weights.shape == (6,)
+    assert result.metadata["source_outlier_n_classes"] == 2
+    assert "nan:3" in result.metadata["source_outlier_class_counts"]
+    assert result.thresholds[np.nan] >= 0.0
