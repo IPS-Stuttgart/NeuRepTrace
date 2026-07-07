@@ -265,8 +265,13 @@ def _hashable_object_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_hashable_object_value(item) for item in value)
     if isinstance(value, dict):
-        return tuple(sorted((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items()))
+        normalized_items = ((_hashable_object_value(key), _hashable_object_value(item)) for key, item in value.items())
+        return tuple(sorted(normalized_items, key=lambda pair: (_hashable_object_sort_key(pair[0]), _hashable_object_sort_key(pair[1]))))
     return value
+
+
+def _hashable_object_sort_key(value: Any) -> tuple[str, str, str]:
+    return (type(value).__module__, type(value).__qualname__, repr(value))
 
 
 def _unique_object_values(values: Sequence[Any] | np.ndarray) -> tuple[Any, ...]:
