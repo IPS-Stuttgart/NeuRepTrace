@@ -225,6 +225,39 @@ def test_source_quantile_helpers_reject_array_valued_scalar_controls(call) -> No
         call()
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: source_feature_quantiles(np.asarray([[True], [False]], dtype=bool)),
+        lambda: source_quantile_clip(source_features=[[0.0], [1.0]], test_features=np.asarray([[np.bool_(True)]], dtype=object)),
+        lambda: source_quantile_rank(source_features=np.asarray([[0.0], [True]], dtype=object), test_features=[[0.5]]),
+        lambda: source_quantile_bins(source_features=[[0.0], [1.0]], test_features=((value,) for value in [False])),
+        lambda: apply_source_quantile_rank([[True]], sorted_values=[[0.0], [1.0]]),
+    ],
+)
+def test_source_quantile_feature_matrices_reject_boolean_values(call) -> None:
+    with pytest.raises(ValueError, match="not boolean flags"):
+        call()
+
+
+def test_source_quantile_helpers_accept_one_pass_numeric_iterables() -> None:
+    source = ((float(i), float(i + 10)) for i in range(4))
+    test = ((float(i), float(i + 10.5)) for i in [-1, 2])
+
+    clipped = source_quantile_clip(source_features=source, test_features=test, lower=0.25, upper=0.75)
+
+    assert clipped.train_features.shape == (4, 2)
+    assert clipped.test_features.shape == (2, 2)
+
+    ranks = apply_source_quantile_rank(
+        ((value,) for value in [0.5, 2.5]),
+        sorted_values=((value,) for value in [0.0, 1.0, 2.0, 3.0]),
+        epsilon=0.01,
+    )
+
+    assert np.allclose(ranks, np.asarray([[0.25], [0.75]]))
+
+
 def test_source_feature_quantiles_reject_nonfinite_values() -> None:
     with pytest.raises(ValueError, match="finite"):
         source_feature_quantiles([[0.0], [float("nan")]])
