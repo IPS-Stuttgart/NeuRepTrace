@@ -164,6 +164,22 @@ def test_mapping_source_prior_and_method_aliases() -> None:
     assert np.allclose(result.source_prior, (0.25, 0.75))
 
 
+def test_mapping_source_prior_matches_nan_class_labels() -> None:
+    prior_nan = float("nan")
+    class_nan = float("nan")
+
+    result = adapt_label_shift_probabilities(
+        [[0.9, 0.1], [0.2, 0.8]],
+        method="em",
+        source_prior={prior_nan: 0.25, "known": 0.75},
+        classes=[class_nan, "known"],
+        max_iter=1,
+    )
+
+    assert result.method == "em"
+    assert np.allclose(result.source_prior, (0.25, 0.75))
+
+
 def test_label_shift_rejects_duplicate_explicit_classes() -> None:
     with pytest.raises(ValueError, match="classes must be unique"):
         adapt_label_shift_probabilities(
