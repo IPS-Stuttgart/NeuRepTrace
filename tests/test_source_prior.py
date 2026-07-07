@@ -108,6 +108,18 @@ def test_source_prior_treats_pandas_missing_labels_as_matching_class_values() ->
     np.testing.assert_allclose(result.probabilities, probabilities)
 
 
+def test_source_prior_treats_composite_pandas_missing_labels_as_matching_class_values() -> None:
+    source_labels = [(pd.NA, "cue"), ("seen", "cue"), (pd.NA, "cue")]
+    classes = [(pd.NA, "cue"), ("seen", "cue")]
+
+    prior, inferred_classes = estimate_source_class_prior(source_labels, classes=classes)
+
+    assert pd.isna(inferred_classes[0][0])
+    assert inferred_classes[0][1] == "cue"
+    assert inferred_classes[1] == ("seen", "cue")
+    np.testing.assert_allclose(prior, np.asarray([2.0 / 3.0, 1.0 / 3.0]))
+
+
 def test_source_prior_target_source_is_identity_after_normalization() -> None:
     probabilities = np.asarray([[0.2, 0.8], [0.7, 0.3]], dtype=float)
 
