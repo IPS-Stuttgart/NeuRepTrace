@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -34,7 +34,13 @@ def rank_class_scores(
     if scores is None or classes is None:
         return _empty_class_rank_result(y_true, top_k)
 
-    score_matrix = np.asarray(scores, dtype=float)
+    scores = _materialize_reusable_score_input(scores)
+    if _scores_contain_boolean(scores):
+        raise ValueError("scores must contain numeric score values, not boolean flags.")
+    try:
+        score_matrix = np.asarray(scores, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("scores must be a two-dimensional matrix.") from exc
     if score_matrix.ndim != 2:
         raise ValueError("scores must be a two-dimensional matrix.")
     if _has_incompatible_class_matrix(classes, expected_n_classes=score_matrix.shape[1]):
@@ -119,6 +125,43 @@ def _has_incompatible_class_matrix(classes: object, *, expected_n_classes: int) 
 
 def _is_matrix_label_array(values: object) -> bool:
     return isinstance(values, np.ndarray) and values.ndim > 1
+
+
+def _materialize_reusable_score_input(values: object) -> object:
+    """Return score inputs that can be inspected more than once without data loss."""
+
+    if values is None or isinstance(values, (str, bytes)):
+        return values
+    if isinstance(values, np.ndarray):
+        if values.dtype != object:
+            return values
+        return _materialize_reusable_score_input(values.tolist())
+    if hasattr(values, "__array__"):
+        return values
+    if not isinstance(values, Iterable):
+        return values
+    return [_materialize_reusable_score_input(value) for value in values]
+
+
+def _scores_contain_boolean(values: object) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_scores_contain_boolean(value) for value in values.ravel(order="C"))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _scores_contain_boolean(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if not isinstance(values, Iterable):
+        return False
+    return any(_scores_contain_boolean(value) for value in values)
 
 
 def _materialize_reusable_label_input(values: object) -> object:
