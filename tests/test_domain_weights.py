@@ -77,6 +77,21 @@ def test_domain_importance_config_rejects_boolean_true_clip() -> None:
         domain_importance_config(clip=True)
 
 
+def test_domain_importance_config_accepts_numpy_scalar_boolean_flags() -> None:
+    cfg = domain_importance_config(
+        normalize=np.asarray(False),
+        account_for_sample_priors=np.asarray(True),
+    )
+
+    assert cfg.normalize is False
+    assert cfg.account_for_sample_priors is True
+
+
+def test_domain_importance_config_rejects_vector_boolean_flags() -> None:
+    with pytest.raises(ValueError, match="normalize"):
+        domain_importance_config(normalize=np.asarray([True, False]))
+
+
 def test_apply_domain_weights_preserves_composite_source_labels() -> None:
     features, labels, weights = apply_domain_importance_weights(
         [[0.0, 0.1], [1.0, 1.1]],
