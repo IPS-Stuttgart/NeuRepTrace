@@ -41,10 +41,11 @@ def _contains_boolean_value(value: Any) -> bool:
     return any(_contains_boolean_value(item) for item in value)
 
 
-def _reject_boolean_probabilities(value: Any, *, source: str) -> None:
+def _validated_probability_input(value: Any, *, source: str) -> Any:
     materialized = _materialize_nested_iterables(value)
     if _contains_boolean_value(materialized):
         raise ValueError(f"{source} must contain numeric probability values, not boolean flags.")
+    return materialized
 
 
 def install() -> None:
@@ -58,13 +59,15 @@ def install() -> None:
     @wraps(original_predict_source_probabilities)
     def _predict_source_probabilities(model: Any, features: np.ndarray, classes: np.ndarray) -> np.ndarray:
         if hasattr(model, "predict_proba"):
-            _reject_boolean_probabilities(model.predict_proba(features), source="source_model probabilities")
+            probabilities = _validated_probability_input(model.predict_proba(features), source="source_model probabilities")
+            model_classes = source_free._as_label_vector(getattr(model, "classes_", classes), "source_model.classes_")
+            return source_free._align_probability_columns(probabilities, model_classes=model_classes, classes=classes)
         return original_predict_source_probabilities(model, features, classes)
 
     @wraps(original_normalize_probability_rows)
     def _normalize_probability_rows(probabilities: Any) -> np.ndarray:
-        _reject_boolean_probabilities(probabilities, source="probabilities")
-        return original_normalize_probability_rows(probabilities)
+        validated = _validated_probability_input(probabilities, source="probabilities")
+        return original_normalize_probability_rows(validated)
 
     source_free._predict_source_probabilities = _predict_source_probabilities
     source_free._normalize_probability_rows = _normalize_probability_rows
