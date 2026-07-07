@@ -11,14 +11,16 @@ _ORIGINAL_RANK_CLASS_SCORES = _ranking.rank_class_scores
 _PATCHED = False
 
 
+_SCORE_BOOLEAN_ERROR = "scores must contain numeric score values, not boolean flags."
+
+
 def _materialize_score_iterables(value: object) -> object:
     """Materialize generator-backed score rows before NumPy conversion."""
 
     if isinstance(value, np.ndarray):
         if value.dtype != object:
             return value
-        materialized = [_materialize_score_iterables(item) for item in value.ravel(order="C")]
-        return np.asarray(materialized, dtype=object).reshape(value.shape)
+        return _materialize_score_iterables(value.tolist())
     if isinstance(value, (str, bytes)):
         return value
     if not isinstance(value, Iterable):
@@ -27,13 +29,13 @@ def _materialize_score_iterables(value: object) -> object:
 
 
 def _coerce_score_matrix(scores: object) -> np.ndarray:
+    materialized = _materialize_score_iterables(scores)
+    if _ranking._scores_contain_boolean(materialized):
+        raise ValueError(_SCORE_BOOLEAN_ERROR)
     try:
-        return np.asarray(scores, dtype=float)
-    except (TypeError, ValueError):
-        try:
-            return np.asarray(_materialize_score_iterables(scores), dtype=float)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("scores must be a two-dimensional matrix.") from exc
+        return np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("scores must be a two-dimensional matrix.") from exc
 
 
 def _rank_class_scores_with_score_iterables(
