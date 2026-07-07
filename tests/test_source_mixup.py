@@ -194,6 +194,14 @@ def test_mixup_rows_reject_invalid_lambdas() -> None:
         mixup_rows([[0.0]], [[1.0]], lambdas=[1.5])
 
 
+def test_mixup_rows_rejects_boolean_lambdas() -> None:
+    with pytest.raises(ValueError, match="not booleans"):
+        mixup_rows([[0.0]], [[1.0]], lambdas=True)
+
+    with pytest.raises(ValueError, match="not booleans"):
+        mixup_rows([[0.0], [2.0]], [[1.0], [3.0]], lambdas=np.asarray([True, False]))
+
+
 def test_target_labels_are_not_part_of_public_api() -> None:
     with pytest.raises(TypeError):
         augment_source_with_mixup(

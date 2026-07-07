@@ -1,4 +1,4 @@
-"""Normalize Source MixUp boolean config values and composite row identifiers."""
+"""Normalize Source MixUp boolean config values, lambda weights, and composite row identifiers."""
 
 from __future__ import annotations
 
@@ -170,7 +170,7 @@ def _canonicalize_source_domains(source_domains: Any, *, expected_length: int | 
 
 
 def install() -> None:
-    """Install strict Source MixUp boolean option normalization."""
+    """Install strict Source MixUp boolean option and lambda-weight validation."""
 
     source_mixup = importlib.import_module("neureptrace.decoding.source_mixup")
 
@@ -241,6 +241,9 @@ def install() -> None:
 
         setattr(augment_source_with_mixup, _PATCH_MARKER, True)
         source_mixup.augment_source_with_mixup = augment_source_with_mixup
+
+    lambda_patch = importlib.import_module("neureptrace._source_mixup_lambda_patch")
+    lambda_patch.install()
 
 
 __all__ = ["install"]
