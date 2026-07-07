@@ -321,11 +321,14 @@ def _atomic_value_vector(values: Iterable[Any] | np.ndarray, *, expected_length:
             else:
                 vector = array.reshape(-1)
         else:
-            rows = array.reshape(array.shape[0], -1)
-            if rows.shape[1] == 1:
-                vector = rows[:, 0].reshape(-1)
+            if array.size == expected_length and 1 in array.shape:
+                vector = array.reshape(-1)
             else:
-                vector = _object_value_vector(tuple(row.tolist()) for row in rows)
+                rows = array.reshape(array.shape[0], -1)
+                if rows.shape[1] == 1:
+                    vector = rows[:, 0].reshape(-1)
+                else:
+                    vector = _object_value_vector(tuple(row.tolist()) for row in rows)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
     return vector
