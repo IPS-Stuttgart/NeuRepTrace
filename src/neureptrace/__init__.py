@@ -29,6 +29,7 @@ from . import (  # noqa: E402
     _bushmeg_protocol_selection_patch,
     _bushmeg_source_loso_ensemble_numeric_patch,
     _bushmeg_source_loso_prototype_patch,
+    _calibration_bool_numeric_patch,
     _calibration_weight_fraction_patch,
     _category2_autoencoder_all_protocols_patch,
     _category2_autoencoder_max_folds_patch,
@@ -54,7 +55,9 @@ from . import (  # noqa: E402
     _decoding_probability_patch,
     _decoding_regularization_patch,
     _decoder_random_state_patch,
+    _domain_importance_bool_config_patch,
     _domain_importance_epsilon_patch,
+    _emission_compare_empty_pairs_patch,
     _event_detection_extensions,
     _fieldtrip_cli_path_patch,
     _fieldtrip_sampleinfo_validation_patch,
@@ -64,6 +67,7 @@ from . import (  # noqa: E402
     _few_shot_tuple_labels_patch,
     _generative_augmentation_composite_labels_patch,
     _generative_augmentation_random_state_patch,
+    _group_completion_patch,
     _joint_distribution_adaptation_config_bool_patch,
     _kernel_mean_matching_bool_validation_patch,
     _label_shift_source_prior_patch,
@@ -80,6 +84,7 @@ from . import (  # noqa: E402
     _mekt_vector_validation_patch,
     _metadata_column_validation_patch,
     _mixstyle_boolean_config_patch,
+    _mixstyle_composite_ids_patch,
     _mmd_source_weighting_gamma_patch,
     _mne_alignment_calibration_anchor_patch,
     _mne_pseudo_alignment_fallback_validity_patch,
@@ -144,6 +149,7 @@ from . import (  # noqa: E402
     _source_free_soft_prototypes_patch,
     _source_free_tuple_labels_patch,
     _source_gaussian_mahalanobis_numpy_scalar_patch,
+    _source_interpolation_one_pass_patch,
     _source_jitter_boolean_config_patch,
     _source_label_vector_patch,
     _source_mixup_boolean_config_patch,
@@ -151,8 +157,11 @@ from . import (  # noqa: E402
     _source_mixstyle_direct_config_patch,
     _source_mixstyle_tuple_labels_patch,
     _source_mixstyle_tuple_vectors_patch,
+    _source_numpy_string_alias_config_patch,
+    _source_outlier_nan_labels_patch,
     _source_quantile_bin_dtype_patch,
     _source_rff_random_state_patch,
+    _source_roll_label_patch,
     _source_selection_class_balance_patch,
     _source_selection_composite_ids_patch,
     _source_selection_optional_bounds_patch,
@@ -199,9 +208,11 @@ _config_workflow_float_bool_patch.install()
 _decode_from_config_section_validation_patch.install()
 _conditional_coral_bool_config_patch.install()
 _event_detection_extensions.install()
+_emission_compare_empty_pairs_patch.install()
 _cli_argv_patch.install()
 _onset_boolean_summary_patch.install()
 _stimulus_detection_boolean_summary_patch.install()
+_group_completion_patch.install()
 _fieldtrip_sampleinfo_validation_patch.install()
 _fieldtrip_cli_path_patch.install()
 _few_shot_array_integer_patch.install()
@@ -228,6 +239,7 @@ _decoding_classifier_param_patch.install()
 _decoding_grouped_cv_patch.install()
 _decoding_option_type_validation_patch.install()
 _decoding_probability_patch.install()
+_domain_importance_bool_config_patch.install()
 _domain_importance_epsilon_patch.install()
 _observation_schema_bool_numeric_patch.install()
 _observation_schema_probability_patch.install()
@@ -276,12 +288,14 @@ _mcca_subject_pca_components_patch.install()
 _mekt_vector_validation_patch.install()
 _mmd_source_weighting_gamma_patch.install()
 _mixstyle_boolean_config_patch.install()
+_mixstyle_composite_ids_patch.install()
 _mne_alignment_calibration_anchor_patch.install()
 _mne_pseudo_alignment_fallback_validity_patch.install()
 _mne_source_time_selection_guard_patch.install()
 _mne_time_decode_ensemble_param_validation_patch.install()
 _mne_time_decode_float_sequence_validation_patch.install()
 _nll_eps_validation_patch.install()
+_calibration_bool_numeric_patch.install()
 _calibration_weight_fraction_patch.install()
 _sample_weight_validation_patch.install()
 _sampling_composite_label_array_patch.install()
@@ -315,6 +329,10 @@ _source_free_tuple_labels_patch.install()
 _source_gaussian_mahalanobis_numpy_scalar_patch.install()
 _source_jitter_boolean_config_patch.install()
 _source_label_vector_patch.install()
+_source_interpolation_one_pass_patch.install()
+_source_numpy_string_alias_config_patch.install()
+_source_outlier_nan_labels_patch.install()
+_source_roll_label_patch.install()
 _source_mixup_boolean_config_patch.install()
 _source_mixup_random_state_patch.install()
 _source_mixstyle_direct_config_patch.install()
