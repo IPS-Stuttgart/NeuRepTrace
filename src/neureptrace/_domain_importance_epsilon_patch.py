@@ -32,6 +32,40 @@ def _normalize_epsilon(value: Any) -> float:
     return epsilon
 
 
+def _normalize_boolean(value: Any, *, name: str) -> bool:
+    """Return a scalar boolean config value without Python truthiness surprises."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean.")
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean.")
+
+
+def _normalize_direct_config(domain_importance, config):
+    """Normalize direct DomainImportanceConfig instances before core fitting."""
+
+    return domain_importance.DomainImportanceConfig(
+        clip=domain_importance._normalize_clip(config.clip),
+        normalize=_normalize_boolean(config.normalize, name="normalize"),
+        account_for_sample_priors=_normalize_boolean(
+            config.account_for_sample_priors,
+            name="account_for_sample_priors",
+        ),
+        epsilon=_normalize_epsilon(config.epsilon),
+    )
+
+
 def _checked_target_domain_probabilities(model, features: np.ndarray, *, epsilon: float) -> np.ndarray:
     """Return checked target-domain posteriors from an sklearn-like estimator."""
 
@@ -78,15 +112,18 @@ def install() -> None:
     ):
         return original_domain_importance_config(
             clip=clip,
-            normalize=normalize,
-            account_for_sample_priors=account_for_sample_priors,
+            normalize=_normalize_boolean(normalize, name="normalize"),
+            account_for_sample_priors=_normalize_boolean(
+                account_for_sample_priors,
+                name="account_for_sample_priors",
+            ),
             epsilon=_normalize_epsilon(epsilon),
         )
 
     @wraps(original_fit_domain_classifier_importance_weights)
     def fit_domain_classifier_importance_weights(source_features, target_features, *, estimator=None, config=None):
         if isinstance(config, domain_importance.DomainImportanceConfig):
-            _normalize_epsilon(config.epsilon)
+            config = _normalize_direct_config(domain_importance, config)
         return original_fit_domain_classifier_importance_weights(
             source_features,
             target_features,
