@@ -248,6 +248,31 @@ def test_source_free_string_boolean_is_parsed_for_metadata():
     assert result.metadata["source_free_standardize_target"] is False
 
 
+def test_source_free_accepts_zero_dimensional_numpy_numeric_controls():
+    target_features = np.array([[-1.0, 0.0], [2.0, 0.0]], dtype=float)
+
+    result = fit_source_free_predict_proba(
+        source_model=_CompositeLabelSourceModel(),
+        target_features=target_features,
+        confidence_threshold=np.asarray(0.50),
+        max_iterations=np.asarray(0),
+        min_class_count=np.asarray(1),
+        min_active_classes=np.asarray(1),
+        prototype_weight=np.asarray(0.0),
+        prototype_temperature=np.asarray(1.0),
+        pseudo_label_selection="balanced_topk",
+        balanced_topk_per_class=np.asarray(1),
+    )
+
+    assert result.metadata["source_free_confidence_threshold"] == 0.50
+    assert result.metadata["source_free_max_iterations"] == 0
+    assert result.metadata["source_free_min_class_count"] == 1
+    assert result.metadata["source_free_min_active_classes"] == 1
+    assert result.metadata["source_free_prototype_weight"] == 0.0
+    assert result.metadata["source_free_prototype_temperature"] == 1.0
+    assert result.metadata["source_free_balanced_topk_per_class"] == 1
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -261,6 +286,31 @@ def test_source_free_string_boolean_is_parsed_for_metadata():
     ],
 )
 def test_source_free_rejects_array_like_numeric_scalar_controls(field: str, value: object):
+    target_features = np.array([[-1.0, 0.0], [2.0, 0.0]], dtype=float)
+    kwargs = {field: value}
+    if field == "balanced_topk_per_class":
+        kwargs["pseudo_label_selection"] = "balanced_topk"
+
+    with pytest.raises(ValueError, match=field):
+        SourceFreeSubjectAdapter(
+            source_model=_CompositeLabelSourceModel(),
+            **kwargs,
+        ).fit(target_features)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("confidence_threshold", np.asarray(True)),
+        ("max_iterations", np.asarray(False)),
+        ("min_class_count", np.asarray(True)),
+        ("min_active_classes", np.asarray(True)),
+        ("prototype_weight", np.asarray(False)),
+        ("prototype_temperature", np.asarray(True)),
+        ("balanced_topk_per_class", np.asarray(True)),
+    ],
+)
+def test_source_free_rejects_numpy_boolean_numeric_controls(field: str, value: object):
     target_features = np.array([[-1.0, 0.0], [2.0, 0.0]], dtype=float)
     kwargs = {field: value}
     if field == "balanced_topk_per_class":
