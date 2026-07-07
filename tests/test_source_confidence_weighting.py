@@ -98,6 +98,21 @@ def test_source_confidence_weighting_rejects_boolean_probability_values(bad_prob
         confidence_scores(bad_probabilities)
 
 
+def test_source_confidence_weighting_accepts_one_pass_probability_iterables() -> None:
+    probability_rows = (row for row in ([0.9, 0.1], [0.25, 0.75]))
+
+    result = compute_source_confidence_weights(
+        probability_rows,
+        config={"mode": "confidence", "min_weight": 0.0, "normalize_weights": False},
+    )
+
+    assert result.scores.tolist() == pytest.approx([0.9, 0.75])
+    assert result.sample_weights.tolist() == pytest.approx([0.9, 0.75])
+
+    nested_one_pass_rows = (iter(row) for row in ([0.8, 0.2], [0.3, 0.7]))
+    assert confidence_scores(nested_one_pass_rows).tolist() == pytest.approx([0.8, 0.7])
+
+
 def test_aliases_and_validation() -> None:
     assert normalize_confidence_weight_mode("max-prob") == "confidence"
     assert normalize_confidence_weight_mode("label-confidence") == "correct_confidence"
