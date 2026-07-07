@@ -176,7 +176,9 @@ def _initial_target_prior(probabilities: np.ndarray, *, source_prior: np.ndarray
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_iterables(values)
+    _reject_boolean_values(materialized, name=name)
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix with at least two columns.")
     return _normalize_probability_rows(matrix, epsilon=epsilon)
@@ -186,7 +188,9 @@ def _prior_vector(values: Sequence[float] | np.ndarray | None, *, n_classes: int
     if values is None:
         vector = np.full(n_classes, 1.0 / n_classes, dtype=float)
     else:
-        vector = np.asarray(values, dtype=float).reshape(-1)
+        materialized = _materialize_iterables(values)
+        _reject_boolean_values(materialized, name="source_prior")
+        vector = np.asarray(materialized, dtype=float).reshape(-1)
         if vector.shape[0] != n_classes:
             raise ValueError(f"source_prior must contain one value per probability column: {vector.shape[0]} != {n_classes}.")
     return _normalize_probability_rows(vector[None, :], epsilon=epsilon)[0]
@@ -201,6 +205,41 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     if np.any(row_sums <= 0.0):
         raise ValueError("probability rows must have positive mass.")
     return matrix / row_sums
+
+
+def _materialize_iterables(values: Any) -> Any:
+    """Recursively materialize one-pass iterable probability/prior inputs."""
+
+    if isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
+        return values
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return values
+    return [_materialize_iterables(item) for item in iterator]
+
+
+def _reject_boolean_values(values: Any, *, name: str) -> None:
+    if _contains_boolean_value(values):
+        raise ValueError(f"{name} must not contain boolean values.")
+
+
+def _contains_boolean_value(values: Any) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_value(item) for item in values.flat)
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return False
+    return any(_contains_boolean_value(item) for item in iterator)
 
 
 def _numeric_scalar(value: object, *, name: str, expectation: str) -> float:

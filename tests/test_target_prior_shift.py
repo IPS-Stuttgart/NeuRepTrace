@@ -81,6 +81,34 @@ def test_target_prior_shift_config_accepts_numpy_numeric_scalar_controls() -> No
     assert np.isclose(config.epsilon, 1e-10)
 
 
+@pytest.mark.parametrize(
+    "probabilities",
+    [
+        [[True, False]],
+        np.asarray([[True, False]], dtype=bool),
+        np.asarray([[np.bool_(True), 0.0]], dtype=object),
+        (row for row in [[True, False]]),
+    ],
+)
+def test_target_prior_shift_rejects_boolean_probability_rows(probabilities: object) -> None:
+    with pytest.raises(ValueError, match="probabilities.*boolean"):
+        adapt_target_probabilities_prior_shift(probabilities)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "source_prior",
+    [
+        [True, False],
+        np.asarray([True, False], dtype=bool),
+        np.asarray([np.bool_(True), 0.0], dtype=object),
+        (value for value in [True, False]),
+    ],
+)
+def test_target_prior_shift_rejects_boolean_source_prior(source_prior: object) -> None:
+    with pytest.raises(ValueError, match="source_prior.*boolean"):
+        adapt_target_probabilities_prior_shift([[0.5, 0.5]], source_prior=source_prior)  # type: ignore[arg-type]
+
+
 def test_target_prior_shift_rejects_bad_prior_length() -> None:
     with pytest.raises(ValueError, match="source_prior"):
         adapt_target_probabilities_prior_shift([[0.5, 0.5]], source_prior=[1.0, 0.0, 0.0])
