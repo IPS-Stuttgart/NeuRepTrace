@@ -21,6 +21,8 @@ def _materialize_score_iterables(value: object) -> object:
         if value.dtype != object:
             return value
         return _materialize_score_iterables(value.tolist())
+    if hasattr(value, "__array__"):
+        return value
     if isinstance(value, (str, bytes)):
         return value
     if not isinstance(value, Iterable):
