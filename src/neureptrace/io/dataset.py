@@ -37,6 +37,8 @@ class EpochDataset:
             raise ValueError("EpochDataset.data must have shape n_epochs × n_channels × n_times.")
         if self.times.ndim != 1:
             raise ValueError("EpochDataset.times must be one-dimensional.")
+        if not np.all(np.isfinite(self.times)):
+            raise ValueError("EpochDataset.times must contain only finite values.")
         if self.data.shape[2] != len(self.times):
             raise ValueError(
                 f"Data has {self.data.shape[2]} time points but times has {len(self.times)} entries."
@@ -137,7 +139,7 @@ class EpochDataset:
         )
 
     def infer_sampling_frequency(self) -> float:
-        """Infer the sampling frequency from the time vector."""
+        """Infer the sampling frequency from a uniformly sampled time vector."""
 
         if len(self.times) < 2:
             return 1.0
@@ -147,6 +149,8 @@ class EpochDataset:
         median_step = float(np.median(diffs))
         if median_step <= 0:
             raise ValueError("Cannot infer sampling frequency from a non-positive time step.")
+        if not np.allclose(diffs, median_step, rtol=1e-6, atol=1e-12):
+            raise ValueError("EpochDataset.times must be uniformly sampled to infer sampling frequency.")
         return 1.0 / median_step
 
     def to_mne_epochs(self, *, channel_type: str | list[str] = "mag", sfreq: float | None = None):
