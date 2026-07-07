@@ -44,6 +44,32 @@ def test_source_mad_reference_reuse_matches_fit_result() -> None:
     assert np.allclose(reference.scale, np.asarray([2.0]))
 
 
+def test_source_mad_accepts_one_pass_feature_iterables() -> None:
+    source = ((float(i + offset) for offset in (0, 2)) for i in range(3))
+    test = ((float(i + offset) for offset in (1, 3)) for i in range(2))
+
+    result = fit_source_mad_transform(source_features=source, test_features=test, config={"normal_consistency": False})
+
+    assert result.train_features.shape == (3, 2)
+    assert result.test_features.shape == (2, 2)
+    assert np.allclose(result.reference.center, np.asarray([1.0, 3.0]))
+    assert np.allclose(result.reference.scale, np.asarray([1.0, 1.0]))
+
+
+def test_source_mad_rejects_boolean_feature_values() -> None:
+    with pytest.raises(ValueError, match="source_features.*boolean flags"):
+        fit_source_mad_reference(np.asarray([[True, False], [False, True]]))
+
+    with pytest.raises(ValueError, match="test_features.*boolean flags"):
+        fit_source_mad_transform(source_features=[[0.0, 1.0], [1.0, 2.0]], test_features=[[True, False]])
+
+
+def test_source_mad_keeps_numeric_zero_one_features() -> None:
+    reference = fit_source_mad_reference([[0, 1], [1, 0], [1, 1]], config={"normal_consistency": False})
+
+    assert np.allclose(reference.center, np.asarray([1.0, 1.0]))
+
+
 def test_source_mad_can_disable_center_or_scale() -> None:
     source = np.asarray([[1.0], [3.0], [5.0]], dtype=float)
     test = np.asarray([[3.0]], dtype=float)
