@@ -1,9 +1,10 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from neureptrace.paired_stats import paired_decoder_statistics, sign_flip_p_value, subject_decoder_metrics
+from neureptrace.paired_stats import build_paired_stats_report, paired_decoder_statistics, sign_flip_p_value, subject_decoder_metrics
 
 
 def _write_decoder_csv(path: Path, subject: str, decoder: str, baseline: float, effect: float, *, emission_mode: str | None = None) -> None:
@@ -157,6 +158,31 @@ def test_paired_decoder_statistics_stratifies_additional_summary_columns():
     assert effect_rows.loc["10", "better_decoder_by_mean"] == "logistic"
     assert effect_rows.loc["20", "mean_difference_a_minus_b"] == pytest.approx(0.20)
     assert effect_rows.loc["20", "better_decoder_by_mean"] == "lda"
+
+
+def test_paired_stats_report_renders_array_valued_condition_cells() -> None:
+    statistics = pd.DataFrame(
+        [
+            {
+                "emission_mode": np.asarray(["calibrated", "subset|a"], dtype=object),
+                "decoder_a": "lda",
+                "decoder_b": "logistic",
+                "metric": "effect_accuracy",
+                "preferred_direction": "higher",
+                "n_subjects": 3,
+                "decoder_a_mean": 0.5,
+                "decoder_b_mean": 0.6,
+                "mean_difference_a_minus_b": -0.1,
+                "sign_flip_p": 0.25,
+                "better_decoder_by_mean": "logistic",
+            }
+        ]
+    )
+
+    report = build_paired_stats_report(statistics)
+
+    assert "subset\\|a" in report
+    assert "logistic" in report
 
 
 def test_paired_decoder_statistics_rejects_duplicate_subject_decoder_modes():
