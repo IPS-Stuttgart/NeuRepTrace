@@ -8,12 +8,22 @@ from typing import Pattern
 import pandas as pd
 
 
-def _non_empty_text(value: str, *, name: str) -> str:
-    if pd.isna(value):
-        raise ValueError(f"{name} must be a non-empty string.")
+def _non_empty_text(value: object, *, name: str) -> str:
+    message = f"{name} must be a non-empty string."
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if getattr(missing, "ndim", 0) != 0:
+        raise ValueError(message)
+    try:
+        if bool(missing):
+            raise ValueError(message)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     text = str(value)
     if text.strip() == "":
-        raise ValueError(f"{name} must be a non-empty string.")
+        raise ValueError(message)
     return text
 
 
