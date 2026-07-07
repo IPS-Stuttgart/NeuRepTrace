@@ -11,6 +11,7 @@ from typing import Any
 _BOOL_PATCH_MARKER = "_neureptrace_config_workflow_float_bool_patch_installed"
 _FLOAT_PAIR_PATCH_MARKER = "_neureptrace_config_workflow_string_pair_patch_installed"
 _BENCHMARK_BOOL_PATCH_MARKER = "_neureptrace_benchmark_manifest_bool_patch_installed"
+_BENCHMARK_MISSING_PATCH_MARKER = "_neureptrace_benchmark_manifest_missing_scalar_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 
@@ -22,6 +23,27 @@ def _install_domain_importance_bool_config_patch() -> None:
 
 def _install_benchmark_manifest_bool_patch() -> None:
     benchmark = importlib.import_module("neureptrace.benchmark")
+
+    original_missing = benchmark._missing
+    if not getattr(original_missing, _BENCHMARK_MISSING_PATCH_MARKER, False):
+
+        @wraps(original_missing)
+        def _missing(value: Any) -> bool:
+            if value is None:
+                return True
+            missing = benchmark.pd.isna(value)
+            if isinstance(missing, bool):
+                return missing or str(value).strip() == ""
+            if hasattr(missing, "item"):
+                try:
+                    return bool(missing.item()) or str(value).strip() == ""
+                except ValueError:
+                    pass
+            raise ValueError(f"Manifest values must be scalar, got {type(value).__name__}.")
+
+        setattr(_missing, _BENCHMARK_MISSING_PATCH_MARKER, True)
+        benchmark._missing = _missing
+
     original_bool_value = benchmark._bool_value
     if getattr(original_bool_value, _BENCHMARK_BOOL_PATCH_MARKER, False):
         return
