@@ -141,6 +141,7 @@ from . import (  # noqa: E402
     _source_ensemble_tuple_domains_patch,
     _source_free_standardize_target_patch,
     _source_free_probability_rows_patch,
+    _source_free_probability_bool_patch,
     _source_free_soft_prototypes_patch,
     _source_free_tuple_labels_patch,
     _source_gaussian_mahalanobis_numpy_scalar_patch,
@@ -310,6 +311,7 @@ _source_domain_generalization_composite_patch.install()
 _source_ensemble_tuple_domains_patch.install()
 _source_free_standardize_target_patch.install()
 _source_free_probability_rows_patch.install()
+_source_free_probability_bool_patch.install()
 _source_free_soft_prototypes_patch.install()
 _source_free_tuple_labels_patch.install()
 _source_gaussian_mahalanobis_numpy_scalar_patch.install()
