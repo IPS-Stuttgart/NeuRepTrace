@@ -120,6 +120,14 @@ def test_source_prior_treats_composite_pandas_missing_labels_as_matching_class_v
     np.testing.assert_allclose(prior, np.asarray([2.0 / 3.0, 1.0 / 3.0]))
 
 
+def test_source_prior_keeps_none_and_missing_labels_distinct() -> None:
+    prior, inferred_classes = estimate_source_class_prior([None, pd.NA, None], classes=[None, pd.NA])
+
+    assert inferred_classes[0] is None
+    assert pd.isna(inferred_classes[1])
+    np.testing.assert_allclose(prior, np.asarray([2.0 / 3.0, 1.0 / 3.0]))
+
+
 def test_source_prior_target_source_is_identity_after_normalization() -> None:
     probabilities = np.asarray([[0.2, 0.8], [0.7, 0.3]], dtype=float)
 
