@@ -212,7 +212,7 @@ def test_source_prior_rejects_boolean_epsilon(epsilon) -> None:
 @pytest.mark.parametrize(
     "probabilities",
     [
-        [True, False],
+        [[True, False]],
         np.asarray([[True, False]], dtype=bool),
         np.asarray([[True, 0.0]], dtype=object),
         [[np.bool_(True), np.bool_(False)]],
