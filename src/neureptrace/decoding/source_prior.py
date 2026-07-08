@@ -287,20 +287,16 @@ def _object_contains(values: Sequence[Any] | np.ndarray, target: Any) -> bool:
     return any(_object_equal(value, target) for value in _object_vector(values, name="values").tolist())
 
 
-def _is_nan_scalar(value: Any) -> bool:
+def _is_missing_label_scalar(value: Any) -> bool:
     if isinstance(value, np.generic):
         value = value.item()
-    if isinstance(value, (np.ndarray, list, tuple, dict)):
-        return False
-    try:
-        missing = pd.isna(value)
-    except (TypeError, ValueError):
-        return False
-    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+    if value is pd.NA or value is pd.NaT:
+        return True
+    return isinstance(value, float) and np.isnan(value)
 
 
 def _object_equal(left: Any, right: Any) -> bool:
-    if _is_nan_scalar(left) and _is_nan_scalar(right):
+    if _is_missing_label_scalar(left) and _is_missing_label_scalar(right):
         return True
     if isinstance(left, np.generic):
         left = left.item()
@@ -309,7 +305,7 @@ def _object_equal(left: Any, right: Any) -> bool:
     if isinstance(left, (np.ndarray, list, tuple, dict)) or isinstance(right, (np.ndarray, list, tuple, dict)):
         left = _hashable_object_value(left)
         right = _hashable_object_value(right)
-        if _is_nan_scalar(left) and _is_nan_scalar(right):
+        if _is_missing_label_scalar(left) and _is_missing_label_scalar(right):
             return True
         if isinstance(left, tuple) or isinstance(right, tuple):
             if not isinstance(left, tuple) or not isinstance(right, tuple) or len(left) != len(right):
