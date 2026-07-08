@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterable
 from functools import wraps
 from typing import Any
 
@@ -70,15 +71,51 @@ def _nonnegative_float(value: Any, *, name: str) -> float:
     return parsed
 
 
+def _materialize_feature_values(value: Any) -> Any:
+    """Materialize nested one-pass feature iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_feature_values(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if hasattr(value, "__array__"):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_feature_values(item) for item in value]
+
+
+def _contains_boolean_feature(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean_feature(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (bool, np.bool_))
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_boolean_feature(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_feature(item) for item in value)
+    return False
+
+
 def _linear_vrex_feature_matrix(values: Any, *, name: str) -> np.ndarray:
     """Convert array-like or one-pass feature rows into a finite 2-D matrix."""
 
-    raw_values = values
-    if not isinstance(values, np.ndarray) and not hasattr(values, "__array__") and not isinstance(values, (str, bytes)):
-        try:
-            raw_values = list(values)
-        except TypeError:
-            raw_values = values
+    raw_values = _materialize_feature_values(values)
+    if _contains_boolean_feature(raw_values):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
 
     try:
         matrix = np.asarray(raw_values, dtype=float)
