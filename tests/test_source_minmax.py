@@ -84,6 +84,39 @@ def test_source_minmax_accepts_object_arrays_containing_generator_rows() -> None
     assert np.allclose(transformed, np.asarray([[0.5, 0.5]], dtype=np.float32))
 
 
+@pytest.mark.parametrize(
+    "bad_features",
+    [
+        [[True, False], [False, True]],
+        np.asarray([[True, False], [False, True]], dtype=bool),
+        np.asarray([[True, 1.0], [False, 2.0]], dtype=object),
+        (iter(row) for row in ([True, 1.0], [False, 2.0])),
+    ],
+)
+def test_source_minmax_rejects_boolean_feature_values(bad_features: object) -> None:
+    with pytest.raises(ValueError, match="not boolean flags"):
+        fit_source_minmax_reference(bad_features)  # type: ignore[arg-type]
+
+
+def test_source_minmax_rejects_boolean_test_features() -> None:
+    with pytest.raises(ValueError, match="test_features.*not boolean flags"):
+        fit_source_minmax_transform(source_features=[[0.0, 1.0], [1.0, 2.0]], test_features=[[True, False]])
+
+
+def test_source_minmax_rejects_boolean_reused_features() -> None:
+    reference = fit_source_minmax_reference([[0.0, 1.0], [1.0, 2.0]])
+
+    with pytest.raises(ValueError, match="features.*not boolean flags"):
+        apply_source_minmax_transform([[False, True]], reference)
+
+
+def test_source_minmax_preserves_numeric_binary_feature_values() -> None:
+    result = fit_source_minmax_transform(source_features=[[0.0, 1.0], [1.0, 0.0]], test_features=[[1.0, 1.0]])
+
+    assert np.allclose(result.train_features, np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32))
+    assert np.allclose(result.test_features, np.asarray([[1.0, 1.0]], dtype=np.float32))
+
+
 def test_source_minmax_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_minmax_transform(source_features=[[0.0, 1.0]], test_features=[[0.0]])
