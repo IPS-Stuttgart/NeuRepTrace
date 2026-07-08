@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import numpy as np
@@ -12,6 +12,7 @@ from neureptrace._object_label_utils import label_accuracy, label_counts, values
 
 _INSTALLED = False
 _ORIGINAL_LABEL_VECTOR = None
+_ORIGINAL_CLASS_SCORE_MATRIX = None
 
 
 def _object_vector(values) -> np.ndarray:
@@ -114,14 +115,66 @@ def _balanced_accuracy(predictions: Sequence | np.ndarray, labels: Sequence | np
     return float(np.mean(recalls)) if recalls else np.nan
 
 
+def _materialize_feature_input(values: object) -> object:
+    """Return feature inputs that NumPy can inspect without consuming generators."""
+
+    if isinstance(values, np.ndarray):
+        if values.dtype != object:
+            return values
+        return _materialize_feature_input(values.tolist())
+    if isinstance(values, (str, bytes)):
+        return values
+    if hasattr(values, "__array__"):
+        return values
+    if not isinstance(values, Iterable):
+        return values
+    return [_materialize_feature_input(value) for value in values]
+
+
+def _features_contain_boolean(values: object) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return bool(values.size)
+        if values.dtype == object:
+            return any(_features_contain_boolean(value) for value in values.ravel(order="C"))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _features_contain_boolean(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if not isinstance(values, Iterable):
+        return False
+    return any(_features_contain_boolean(value) for value in values)
+
+
+def _class_score_feature_matrix(features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+    materialized = _materialize_feature_input(features)
+    if _features_contain_boolean(materialized):
+        raise ValueError("features must contain numeric, non-boolean values.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("features must be a two-dimensional numeric feature matrix.") from exc
+    if matrix.ndim != 2:
+        raise ValueError("features must be a two-dimensional feature matrix.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("features must contain only finite values.")
+    return matrix
+
+
 def install() -> None:
     """Install the composite-label-safe windowed decoding patch."""
 
-    global _INSTALLED, _ORIGINAL_LABEL_VECTOR
+    global _INSTALLED, _ORIGINAL_LABEL_VECTOR, _ORIGINAL_CLASS_SCORE_MATRIX
     if _INSTALLED:
         return
 
-    from neureptrace.decoding import windowed
+    from neureptrace.decoding import class_scores, windowed
 
     _ORIGINAL_LABEL_VECTOR = windowed._label_vector
     windowed._label_vector = _label_vector
@@ -129,6 +182,7 @@ def install() -> None:
 
     original_predict_window_model = windowed.predict_window_model
     original_permutation_score_curves = windowed.permutation_score_curves
+    _ORIGINAL_CLASS_SCORE_MATRIX = class_scores.class_score_matrix
 
     def predict_window_model(model_bundle: Any, features: Sequence[Sequence[float]] | np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         transformed_features = windowed.transform_window_features(model_bundle, features)
@@ -177,10 +231,31 @@ def install() -> None:
             permuted_balanced_accuracy.append(_balanced_accuracy(predictions, validation_labels))
         return np.asarray(permuted_accuracy, dtype=float), np.asarray(permuted_balanced_accuracy, dtype=float)
 
+    def class_score_matrix(
+        model: Any,
+        features: Sequence[Sequence[float]] | np.ndarray,
+        *,
+        classes: Sequence | np.ndarray | None = None,
+        fallback_labels: Sequence | np.ndarray | None = None,
+        score_methods: Sequence[str] = ("decision_function", "predict_proba"),
+        predict_fallback: bool = False,
+    ) -> tuple[np.ndarray | None, np.ndarray | None]:
+        return _ORIGINAL_CLASS_SCORE_MATRIX(
+            model,
+            _class_score_feature_matrix(features),
+            classes=classes,
+            fallback_labels=fallback_labels,
+            score_methods=score_methods,
+            predict_fallback=predict_fallback,
+        )
+
     predict_window_model.__name__ = original_predict_window_model.__name__
     predict_window_model.__doc__ = original_predict_window_model.__doc__
     permutation_score_curves.__name__ = original_permutation_score_curves.__name__
     permutation_score_curves.__doc__ = original_permutation_score_curves.__doc__
+    class_score_matrix.__name__ = _ORIGINAL_CLASS_SCORE_MATRIX.__name__
+    class_score_matrix.__doc__ = _ORIGINAL_CLASS_SCORE_MATRIX.__doc__
     windowed.predict_window_model = predict_window_model
     windowed.permutation_score_curves = permutation_score_curves
+    class_scores.class_score_matrix = class_score_matrix
     _INSTALLED = True
