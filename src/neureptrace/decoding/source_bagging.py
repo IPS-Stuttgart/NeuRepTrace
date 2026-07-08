@@ -93,8 +93,7 @@ def fit_source_bagging_decoder(
     classes = _unique_labels(labels)
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
-    class_to_code = {class_label: index for index, class_label in enumerate(classes.tolist())}
-    label_codes = np.asarray([class_to_code[class_label] for class_label in labels.tolist()], dtype=int)
+    label_codes = np.asarray([_label_index(class_label, classes, name="source_labels") for class_label in labels.tolist()], dtype=int)
     encoded_classes = np.arange(classes.shape[0], dtype=int)
     template = _default_estimator(cfg) if estimator is None else estimator
     rng = np.random.default_rng(cfg.random_state)
@@ -226,10 +225,10 @@ def _aligned_probabilities(model: BaseEstimator, features: np.ndarray, *, classe
         raw = np.asarray(model.predict_proba(features), dtype=float)
         model_classes = np.asarray(getattr(model, "classes_", classes), dtype=object)
         aligned = np.full((features.shape[0], classes.shape[0]), float(epsilon), dtype=float)
-        class_to_column = {class_label: index for index, class_label in enumerate(classes.tolist())}
         for column, class_label in enumerate(model_classes.tolist()):
-            if class_label in class_to_column:
-                aligned[:, class_to_column[class_label]] = raw[:, column]
+            class_index = _label_index_or_none(class_label, classes)
+            if class_index is not None:
+                aligned[:, class_index] = raw[:, column]
         return _normalize_probability_rows(aligned, epsilon=epsilon)
     if hasattr(model, "decision_function"):
         scores = np.asarray(model.decision_function(features), dtype=float)
@@ -238,10 +237,10 @@ def _aligned_probabilities(model: BaseEstimator, features: np.ndarray, *, classe
         return _normalize_probability_rows(np.exp(np.clip(scores - np.max(scores, axis=1, keepdims=True), -50.0, 50.0)), epsilon=epsilon)
     predictions = np.asarray(model.predict(features), dtype=object)
     output = np.full((features.shape[0], classes.shape[0]), float(epsilon), dtype=float)
-    class_to_column = {class_label: index for index, class_label in enumerate(classes.tolist())}
     for row, label in enumerate(predictions.tolist()):
-        if label in class_to_column:
-            output[row, class_to_column[label]] = 1.0
+        class_index = _label_index_or_none(label, classes)
+        if class_index is not None:
+            output[row, class_index] = 1.0
     return _normalize_probability_rows(output, epsilon=epsilon)
 
 
@@ -325,7 +324,7 @@ def _hashable_label(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_hashable_label(item) for item in value)
     if isinstance(value, dict):
-        return tuple((key, _hashable_label(item)) for key, item in value.items())
+        return tuple((_hashable_label(key), _hashable_label(item)) for key, item in value.items())
     return value
 
 
@@ -352,7 +351,44 @@ def _label_equal_mask(labels: np.ndarray, target: Any) -> np.ndarray:
     return np.asarray([_labels_equal(label, target) for label in labels.tolist()], dtype=bool)
 
 
+def _label_index(label: Any, classes: np.ndarray, *, name: str) -> int:
+    index = _label_index_or_none(label, classes)
+    if index is None:
+        raise ValueError(f"{name} contains a label absent from classes: {label!r}.")
+    return index
+
+
+def _label_index_or_none(label: Any, classes: np.ndarray) -> int | None:
+    for index, class_label in enumerate(classes.tolist()):
+        if _labels_equal(label, class_label):
+            return int(index)
+    return None
+
+
+def _is_nan_scalar(value: Any) -> bool:
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (np.ndarray, list, tuple, dict)):
+        return False
+    return isinstance(value, float) and np.isnan(value)
+
+
 def _labels_equal(left: Any, right: Any) -> bool:
+    if _is_nan_scalar(left) and _is_nan_scalar(right):
+        return True
+    if isinstance(left, np.generic):
+        left = left.item()
+    if isinstance(right, np.generic):
+        right = right.item()
+    if isinstance(left, (np.ndarray, list, tuple, dict)) or isinstance(right, (np.ndarray, list, tuple, dict)):
+        left = _hashable_label(left)
+        right = _hashable_label(right)
+        if _is_nan_scalar(left) and _is_nan_scalar(right):
+            return True
+        if isinstance(left, tuple) or isinstance(right, tuple):
+            if not isinstance(left, tuple) or not isinstance(right, tuple) or len(left) != len(right):
+                return False
+            return all(_labels_equal(left_value, right_value) for left_value, right_value in zip(left, right, strict=True))
     try:
         equal = left == right
     except (TypeError, ValueError):
