@@ -54,6 +54,37 @@ def test_source_threshold_rejects_width_mismatch() -> None:
         fit_source_threshold_transform(source_features=[[0.0, 1.0]], test_features=[[0.0]])
 
 
+def test_source_threshold_rejects_boolean_feature_values() -> None:
+    with pytest.raises(ValueError, match="source_features.*non-boolean"):
+        fit_source_threshold_transform(source_features=[[True, False]], test_features=[[0.0, 1.0]])
+
+    threshold_map = fit_source_threshold_map([[0.0, 1.0], [1.0, 0.0]])
+    with pytest.raises(ValueError, match="features.*non-boolean"):
+        apply_source_threshold_transform(np.asarray([[0.0, np.bool_(True)]], dtype=object), threshold_map)
+
+
+def test_source_threshold_materializes_one_pass_feature_iterables() -> None:
+    source_rows = ((float(row), float(row + 1)) for row in range(3))
+    test_rows = ([0.5, 1.5] for _ in range(2))
+
+    result = fit_source_threshold_transform(source_features=source_rows, test_features=test_rows)
+
+    assert result.threshold_map.thresholds.tolist() == [1.0, 2.0]
+    assert result.test_features.shape == (2, 2)
+    assert result.test_features.tolist() == [[0.0, 0.0], [0.0, 0.0]]
+
+
+def test_source_threshold_preserves_numeric_zero_one_features() -> None:
+    result = fit_source_threshold_transform(
+        source_features=[[0, 1], [1, 0]],
+        test_features=[[0, 1], [1, 0]],
+        config={"threshold_mode": "zero"},
+    )
+
+    assert result.train_features.tolist() == [[1.0, 1.0], [1.0, 1.0]]
+    assert result.test_features.tolist() == [[1.0, 1.0], [1.0, 1.0]]
+
+
 def test_source_threshold_aliases_and_validation() -> None:
     assert normalize_threshold_mode("avg") == "mean"
     assert normalize_output_mode("pm1") == "signed"
