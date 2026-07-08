@@ -1,8 +1,9 @@
-"""Reject malformed Source Bagging numeric options."""
+"""Reject malformed Source Bagging numeric options and feature matrices."""
 
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterable
 from functools import wraps
 from typing import Any
 
@@ -21,6 +22,10 @@ def _positive_int_error(name: str) -> ValueError:
 
 def _positive_float_error(name: str) -> ValueError:
     return ValueError(f"{name} must be positive and finite.")
+
+
+def _feature_matrix_error(name: str) -> ValueError:
+    return ValueError(f"{name} must contain numeric feature values, not boolean flags.")
 
 
 def _positive_int(value: Any, *, name: str) -> int:
@@ -91,6 +96,38 @@ def _positive_float(value: Any, *, name: str) -> float:
     return parsed
 
 
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before validation and NumPy coercion."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _contains_boolean_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (bool, np.bool_))
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
+
+
 def _validate_config(cfg: Any) -> Any:
     _positive_int(cfg.n_estimators, name="n_estimators")
     _bounded_fraction(cfg.sample_fraction, name="sample_fraction")
@@ -100,9 +137,22 @@ def _validate_config(cfg: Any) -> Any:
 
 
 def install() -> None:
-    """Install source-bagging numeric-option validation."""
+    """Install source-bagging numeric-option and feature-matrix validation."""
 
     source_bagging = importlib.import_module("neureptrace.decoding.source_bagging")
+
+    original_feature_matrix = source_bagging._feature_matrix
+    if not getattr(original_feature_matrix, _PATCH_MARKER, False):
+
+        @wraps(original_feature_matrix)
+        def _feature_matrix(values: Any, *, name: str):
+            materialized = _materialize_one_pass_iterables(values)
+            if _contains_boolean_value(materialized):
+                raise _feature_matrix_error(name)
+            return original_feature_matrix(materialized, name=name)
+
+        setattr(_feature_matrix, _PATCH_MARKER, True)
+        source_bagging._feature_matrix = _feature_matrix
 
     original_config = source_bagging.source_bagging_config
     if not getattr(original_config, _PATCH_MARKER, False):
