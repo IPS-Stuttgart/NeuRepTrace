@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from neureptrace.decoding.label_shift import (
@@ -62,6 +63,33 @@ def test_bbse_label_shift_uses_source_validation_confusion() -> None:
     assert result.target_prior[1] > result.target_prior[0]
     assert result.metadata["label_shift_uses_source_validation_probabilities"] is True
     assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+
+
+def test_label_shift_source_labels_treat_pandas_missing_as_class_value() -> None:
+    result = adapt_label_shift_probabilities(
+        [[0.8, 0.2], [0.2, 0.8]],
+        source_labels=pd.Series(["seen", pd.NA, "seen", pd.NA], dtype="object"),
+        classes=pd.Index(["seen", pd.NA], dtype="object"),
+        max_iter=3,
+    )
+
+    assert result.classes[0] == "seen"
+    assert pd.isna(result.classes[1])
+    np.testing.assert_allclose(result.source_prior, (0.5, 0.5))
+    np.testing.assert_allclose(result.probabilities.sum(axis=1), 1.0)
+
+
+def test_soft_confusion_matrix_treats_pandas_missing_as_class_value() -> None:
+    confusion = soft_confusion_matrix(
+        [[0.9, 0.1], [0.8, 0.2], [0.2, 0.8], [0.1, 0.9]],
+        pd.Series(["seen", "seen", pd.NA, pd.NA], dtype="object"),
+        classes=pd.Index(["seen", pd.NA], dtype="object"),
+    )
+
+    assert confusion.shape == (2, 2)
+    np.testing.assert_allclose(confusion.sum(axis=0), 1.0)
+    assert confusion[0, 0] > confusion[1, 0]
+    assert confusion[1, 1] > confusion[0, 1]
 
 
 def test_bbse_em_initializes_em_from_confusion_prior() -> None:
