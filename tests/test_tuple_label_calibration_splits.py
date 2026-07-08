@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -19,8 +21,12 @@ def _tuple_labels() -> list[tuple[str, str]]:
     ]
 
 
-def _labels_at(labels: list[tuple[str, str]], indices: np.ndarray) -> list[tuple[str, str]]:
+def _labels_at(labels: list[Any], indices: np.ndarray) -> list[Any]:
     return [labels[int(index)] for index in indices]
+
+
+def _nan_label_count(labels: list[Any]) -> int:
+    return sum(isinstance(label, (float, np.floating)) and bool(np.isnan(label)) for label in labels)
 
 
 def test_all_protocols_protocol3_split_treats_tuple_labels_atomically() -> None:
@@ -58,6 +64,27 @@ def test_category3_split_accepts_composite_numpy_label_rows() -> None:
     assert np.intersect1d(calibration_indices, evaluation_indices).size == 0
 
 
+def test_all_protocols_protocol3_split_groups_nan_labels() -> None:
+    labels: list[Any] = [float("nan"), float("nan"), float("nan"), "face", "face", "face"]
+
+    split = select_bushmeg_target_calibration_split(
+        labels,
+        per_class=1,
+        seed=29,
+        context=("nan-label-target", "few-shot"),
+    )
+
+    assert split.skipped is False
+    assert split.calibration_indices.size == 2
+    assert split.evaluation_indices.size == 4
+    calibration_labels = _labels_at(labels, split.calibration_indices)
+    evaluation_labels = _labels_at(labels, split.evaluation_indices)
+    assert _nan_label_count(calibration_labels) == 1
+    assert _nan_label_count(evaluation_labels) == 2
+    assert calibration_labels.count("face") == 1
+    assert evaluation_labels.count("face") == 2
+
+
 def test_few_shot_split_treats_tuple_labels_atomically() -> None:
     labels = _tuple_labels()
     assert np.asarray(labels, dtype=object).ndim == 2
@@ -76,6 +103,26 @@ def test_few_shot_split_treats_tuple_labels_atomically() -> None:
     for class_label in sorted(set(labels)):
         assert calibration_labels.count(class_label) == 1
         assert evaluation_labels.count(class_label) >= 1
+
+
+def test_few_shot_split_groups_nan_labels() -> None:
+    labels: list[Any] = [float("nan"), float("nan"), float("nan"), "face", "face", "face"]
+
+    split = few_shot.select_few_shot_target_calibration_split(
+        labels,
+        per_class=1,
+        seed=31,
+        context=("nan-label-target", "few-shot"),
+    )
+
+    assert split.calibration_indices.size == 2
+    assert split.evaluation_indices.size == 4
+    calibration_labels = _labels_at(labels, split.calibration_indices)
+    evaluation_labels = _labels_at(labels, split.evaluation_indices)
+    assert _nan_label_count(calibration_labels) == 1
+    assert _nan_label_count(evaluation_labels) == 2
+    assert calibration_labels.count("face") == 1
+    assert evaluation_labels.count("face") == 2
 
 
 def test_few_shot_tuple_label_patch_preserves_duplicate_index_guard() -> None:

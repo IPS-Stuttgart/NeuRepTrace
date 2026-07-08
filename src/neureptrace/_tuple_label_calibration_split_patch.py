@@ -45,11 +45,44 @@ def _atomic_label_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np
     return _object_value_vector(rows)
 
 
+def _is_nan_scalar(value: object) -> bool:
+    try:
+        return bool(np.isnan(value))
+    except (TypeError, ValueError):
+        return False
+
+
 def _values_equal(left: object, right: object) -> bool:
+    if _is_nan_scalar(left) and _is_nan_scalar(right):
+        return True
+    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
+        try:
+            return bool(np.array_equal(left, right, equal_nan=True))
+        except TypeError:
+            try:
+                return bool(np.array_equal(left, right))
+            except Exception:
+                return False
+    if isinstance(left, (tuple, list)) and isinstance(right, (tuple, list)):
+        if len(left) != len(right):
+            return False
+        return all(_values_equal(left_item, right_item) for left_item, right_item in zip(left, right))
+
     try:
         equal = left == right
     except (TypeError, ValueError):
         return False
+    if isinstance(equal, np.ndarray):
+        try:
+            return bool(np.all(equal))
+        except (TypeError, ValueError):
+            try:
+                return bool(np.array_equal(left, right, equal_nan=True))
+            except TypeError:
+                try:
+                    return bool(np.array_equal(left, right))
+                except Exception:
+                    return False
     try:
         return bool(equal)
     except (TypeError, ValueError):
