@@ -22,6 +22,8 @@ import numpy as np
 from sklearn.base import BaseEstimator, clone
 from sklearn.linear_model import LogisticRegression
 
+from neureptrace.decoding import classifiers
+
 FEATURE_FIT_SCOPES = (
     "external_frozen",
     "source_only",
@@ -75,9 +77,7 @@ class PrecomputedFoundationFeatureTable:
 
     def __post_init__(self) -> None:
         matrix = _feature_matrix(self.features, name="features")
-        row_ids = tuple(self.row_ids)
-        if matrix.shape[0] != len(row_ids):
-            raise ValueError(f"features and row_ids must have the same number of rows: {matrix.shape[0]} != {len(row_ids)}.")
+        row_ids = _row_id_tuple(self.row_ids, expected_length=matrix.shape[0], name="row_ids")
         feature_names = tuple(self.feature_names)
         if matrix.shape[1] != len(feature_names):
             raise ValueError(f"features and feature_names must have the same number of columns: {matrix.shape[1]} != {len(feature_names)}.")
@@ -175,9 +175,7 @@ def make_precomputed_foundation_feature_table(
     """Create a feature table directly from in-memory arrays."""
 
     matrix = _feature_matrix(features, name="features")
-    ids = tuple(range(matrix.shape[0])) if row_ids is None else tuple(np.asarray(row_ids, dtype=object).reshape(-1).tolist())
-    if len(ids) != matrix.shape[0]:
-        raise ValueError(f"row_ids must contain one value per feature row: {len(ids)} != {matrix.shape[0]}.")
+    ids = tuple(range(matrix.shape[0])) if row_ids is None else _row_id_tuple(row_ids, expected_length=matrix.shape[0], name="row_ids")
     names = tuple(f"foundation_{index}" for index in range(matrix.shape[1])) if feature_names is None else tuple(str(name) for name in feature_names)
     metadata = _feature_table_metadata(
         path=None,
@@ -195,8 +193,8 @@ def align_precomputed_foundation_features(
 ) -> np.ndarray:
     """Return table rows in the requested row-id order."""
 
-    requested = tuple(np.asarray(row_ids, dtype=object).reshape(-1).tolist())
     index = table.row_index()
+    requested = _requested_row_ids(row_ids, index)
     missing = [row_id for row_id in requested if row_id not in index]
     if missing:
         preview = ", ".join(repr(row_id) for row_id in missing[:5])
@@ -219,12 +217,13 @@ def fit_precomputed_foundation_probe(
 ) -> PrecomputedFoundationProbeResult:
     """Train a source-label probe on precomputed foundation features."""
 
-    train_ids = tuple(np.asarray(train_row_ids, dtype=object).reshape(-1).tolist())
-    test_ids = tuple(np.asarray(test_row_ids, dtype=object).reshape(-1).tolist())
     labels = _label_vector(train_labels)
+    train_ids = _row_id_tuple(train_row_ids, expected_length=labels.shape[0], name="train_row_ids")
+    test_ids = _requested_row_ids(test_row_ids, feature_table.row_index())
     if labels.shape[0] != len(train_ids):
         raise ValueError(f"train_labels must contain one value per train row id: {labels.shape[0]} != {len(train_ids)}.")
-    if labels.shape[0] < 1 or np.unique(labels).shape[0] < 2:
+    classes, fit_labels, decode_labels = _classifier_fit_labels(labels)
+    if labels.shape[0] < 1 or classes.shape[0] < 2:
         raise ValueError("train_labels must contain at least two classes.")
     train_features = align_precomputed_foundation_features(feature_table, train_ids)
     test_features = align_precomputed_foundation_features(feature_table, test_ids)
@@ -235,25 +234,27 @@ def fit_precomputed_foundation_probe(
         if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
             raise ValueError("sample_weight must contain finite non-negative values.")
 
+    model_class_weight = _encoded_class_weight(classifier_class_weight, classes) if decode_labels else classifier_class_weight
     model = clone(classifier) if classifier is not None else LogisticRegression(
         C=_positive_float(classifier_C, name="classifier_C"),
         max_iter=_positive_int(classifier_max_iter, name="classifier_max_iter"),
-        class_weight=classifier_class_weight,
+        class_weight=model_class_weight,
         random_state=13,
     )
     fit_kwargs = {} if weights is None else {"sample_weight": weights}
-    model.fit(train_features, labels, **fit_kwargs)
-    predictions = np.asarray(model.predict(test_features))
-    probabilities = _predict_probabilities_or_none(model, test_features)
-    classes = np.asarray(getattr(model, "classes_", np.unique(labels)))
-    metadata = _probe_metadata(feature_table, n_train_rows=len(train_ids), n_test_rows=len(test_ids), classifier=model)
+    model.fit(train_features, fit_labels, **fit_kwargs)
+    classifier_model = classifiers.DecodedLabelClassifier(model, classes) if decode_labels else model
+    predictions = np.asarray(classifier_model.predict(test_features))
+    probabilities = _predict_probabilities_or_none(classifier_model, test_features)
+    output_classes = np.asarray(getattr(classifier_model, "classes_", classes))
+    metadata = _probe_metadata(feature_table, n_train_rows=len(train_ids), n_test_rows=len(test_ids), classifier=classifier_model)
     return PrecomputedFoundationProbeResult(
         train_features=train_features,
         test_features=test_features,
         predictions=predictions,
         probabilities=probabilities,
-        classes=classes,
-        classifier=model,
+        classes=output_classes,
+        classifier=classifier_model,
         metadata=metadata,
     )
 
@@ -293,16 +294,102 @@ def normalize_feature_fit_scope(value: str | None) -> str:
     return normalized
 
 
-def _label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
-    try:
-        items = list(values)
-    except TypeError:
+def _hashable_row_id(value: Any) -> Any:
+    """Convert array/list row-id fragments into hashable atomic values."""
+
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _hashable_row_id(value.item())
+        return tuple(_hashable_row_id(item) for item in value.tolist())
+    if isinstance(value, list):
+        return tuple(_hashable_row_id(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_hashable_row_id(item) for item in value)
+    return value
+
+
+def _object_vector(values: tuple[Any, ...]) -> np.ndarray:
+    vector = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        vector[index] = value
+    return vector
+
+
+def _row_id_tuple(values: Any, *, expected_length: int | None = None, name: str = "row_ids") -> tuple[Any, ...]:
+    """Normalize row ids without flattening row-wise composite identifiers."""
+
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values, dtype=object)
+        if array.ndim == 0:
+            items = [array.item()]
+        elif array.ndim == 1:
+            if expected_length == 1 and array.shape[0] != 1:
+                items = [tuple(array.tolist())]
+            else:
+                items = array.tolist()
+        else:
+            rows = array.reshape(array.shape[0], -1)
+            if expected_length is None or rows.shape[0] == expected_length:
+                items = [row[0] if row.shape[0] == 1 else tuple(row.tolist()) for row in rows]
+            elif expected_length == 1:
+                items = [tuple(array.reshape(-1).tolist())]
+            elif array.size == expected_length and 1 in array.shape:
+                items = array.reshape(-1).tolist()
+            else:
+                items = [row[0] if row.shape[0] == 1 else tuple(row.tolist()) for row in rows]
+    elif isinstance(values, (str, bytes)):
         items = [values]
-    if any(isinstance(item, tuple) for item in items):
-        vector = np.empty(len(items), dtype=object)
-        vector[:] = items
-        return vector
-    return np.asarray(items).reshape(-1)
+    else:
+        try:
+            items = list(values)
+        except TypeError:
+            items = [values]
+        if expected_length == 1 and len(items) != 1:
+            items = [tuple(items)]
+
+    row_ids = tuple(_hashable_row_id(item) for item in items)
+    if expected_length is not None and len(row_ids) != expected_length:
+        raise ValueError(f"{name} must contain one value per feature row: {len(row_ids)} != {expected_length}.")
+    return row_ids
+
+
+def _requested_row_ids(values: Any, index: Mapping[Any, int]) -> tuple[Any, ...]:
+    """Normalize requested row ids, preserving a bare composite-id lookup."""
+
+    candidate = _hashable_row_id(values)
+    if candidate in index:
+        return (candidate,)
+    return _row_id_tuple(values, name="row_ids")
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    labels = _row_id_tuple(values, name="train_labels")
+    if any(isinstance(label, tuple) for label in labels):
+        return _object_vector(labels)
+    return np.asarray(labels).reshape(-1)
+
+
+def _label_requires_encoding(labels: np.ndarray) -> bool:
+    return any(isinstance(label, tuple) for label in labels.tolist())
+
+
+def _classifier_fit_labels(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray, bool]:
+    if _label_requires_encoding(labels):
+        classes, encoded = classifiers.encode_classifier_labels(labels)
+        return np.asarray(classes), np.asarray(encoded, dtype=int), True
+    return np.unique(labels), labels, False
+
+
+def _encoded_class_weight(class_weight: Any, classes: np.ndarray) -> Any:
+    if not isinstance(class_weight, Mapping):
+        return class_weight
+    encoded: dict[int, float] = {}
+    for encoded_label, class_label in enumerate(classes.tolist()):
+        if class_label in class_weight:
+            encoded[int(encoded_label)] = float(class_weight[class_label])
+    return encoded
 
 
 def _load_npz_features(path: Path, *, features_key: str, row_id_key: str, allow_pickle: bool) -> tuple[np.ndarray, tuple[Any, ...], tuple[str, ...]]:
@@ -316,13 +403,11 @@ def _load_npz_features(path: Path, *, features_key: str, row_id_key: str, allow_
             features = np.asarray(payload[matrix_keys[0]])
         features = _feature_matrix(features, name="features")
         if row_id_key in payload:
-            row_ids = tuple(np.asarray(payload[row_id_key], dtype=object).reshape(-1).tolist())
+            row_ids = _row_id_tuple(payload[row_id_key], expected_length=features.shape[0], name="row ids in NPZ")
         elif "row_id" in payload:
-            row_ids = tuple(np.asarray(payload["row_id"], dtype=object).reshape(-1).tolist())
+            row_ids = _row_id_tuple(payload["row_id"], expected_length=features.shape[0], name="row ids in NPZ")
         else:
             row_ids = tuple(range(features.shape[0]))
-        if len(row_ids) != features.shape[0]:
-            raise ValueError(f"row ids in NPZ must match feature rows: {len(row_ids)} != {features.shape[0]}.")
         if "feature_names" in payload:
             feature_names = tuple(str(value) for value in np.asarray(payload["feature_names"], dtype=object).reshape(-1).tolist())
         else:
@@ -414,12 +499,12 @@ def _predict_probabilities_or_none(model: BaseEstimator, features: np.ndarray) -
         return _normalize_probability_rows(probabilities)
     if hasattr(model, "decision_function"):
         scores = np.asarray(model.decision_function(features), dtype=float)
-        if scores.ndim == 1:
-            # For sklearn-compatible binary margins, decision_function returns the
-            # logit for classes_[1] against classes_[0].  Softmaxing [-s, s]
-            # would produce sigmoid(2s), doubling the implied log-odds.  Use a
-            # zero baseline so the positive column is sigmoid(s).
-            scores = np.column_stack([np.zeros_like(scores), scores])
+        if scores.ndim == 1 or (scores.ndim == 2 and scores.shape[1] == 1):
+            margins = np.clip(scores.reshape(-1), -50.0, 50.0)
+            positive = 1.0 / (1.0 + np.exp(-margins))
+            return _normalize_probability_rows(np.column_stack([1.0 - positive, positive]))
+        if scores.ndim != 2:
+            raise ValueError("Decision-function scores must be one- or two-dimensional.")
         shifted = scores - np.max(scores, axis=1, keepdims=True)
         exp_scores = np.exp(np.clip(shifted, -50.0, 50.0))
         return _normalize_probability_rows(exp_scores)
@@ -477,9 +562,12 @@ def _positive_int(value: int | str, *, name: str) -> int:
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
         raise ValueError(f"{name} must be positive and finite.")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be positive and finite.") from exc
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
     return parsed
