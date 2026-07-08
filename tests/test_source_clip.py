@@ -28,6 +28,43 @@ def test_source_clip_uses_source_bounds_only() -> None:
     assert np.count_nonzero(result.test_clipped_mask) == 2
 
 
+@pytest.mark.parametrize(
+    "features",
+    [
+        np.asarray([[True, False], [False, True]], dtype=bool),
+        np.asarray([[True, 1.0], [False, 0.0]], dtype=object),
+        [[True, 0.0], [False, 1.0]],
+        ((value for value in row) for row in [[True, 0.0], [False, 1.0]]),
+    ],
+)
+def test_source_clip_rejects_boolean_source_features(features) -> None:
+    with pytest.raises(ValueError, match="source_features.*boolean flags"):
+        fit_source_clip_bounds(features)
+
+
+def test_source_clip_rejects_boolean_test_features() -> None:
+    with pytest.raises(ValueError, match="test_features.*boolean flags"):
+        fit_source_clip(source_features=[[0.0, 1.0], [1.0, 0.0]], test_features=np.asarray([[True, False]], dtype=bool))
+
+
+def test_apply_source_clip_rejects_boolean_features() -> None:
+    bounds = fit_source_clip_bounds([[0.0, 1.0], [1.0, 0.0]])
+
+    with pytest.raises(ValueError, match="features.*boolean flags"):
+        apply_source_clip([[True, False]], bounds)
+
+
+def test_source_clip_accepts_numeric_zero_one_features() -> None:
+    result = fit_source_clip(
+        source_features=np.asarray([[0, 1], [1, 0]], dtype=int),
+        test_features=np.asarray([[1.0, 0.0]], dtype=float),
+        config={"lower_quantile": 0.0, "upper_quantile": 1.0},
+    )
+
+    assert result.train_features.tolist() == [[0.0, 1.0], [1.0, 0.0]]
+    assert result.test_features.tolist() == [[1.0, 0.0]]
+
+
 def test_source_clip_accepts_one_pass_feature_iterables() -> None:
     source_rows = ([float(index), float(index % 2)] for index in range(4))
     test_rows = ([0.5, 0.5], [2.0, 0.0])
