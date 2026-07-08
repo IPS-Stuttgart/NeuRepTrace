@@ -5,15 +5,30 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
+import pandas as pd
+
+
+def _missing_scalar_key(value: object) -> tuple[str, str] | None:
+    """Return a stable key for scalar missing-value sentinels."""
+
+    if isinstance(value, np.generic):
+        value = value.item()
+    if value is None or isinstance(value, (np.ndarray, list, tuple, dict)):
+        return None
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(missing, (bool, np.bool_)) or not bool(missing):
+        return None
+    return (type(value).__module__, type(value).__qualname__)
 
 
 def _both_nan(left: object, right: object) -> bool:
-    """Return whether both scalar labels are NaN sentinels."""
+    """Return whether both scalar labels are the same missing-value sentinel."""
 
-    try:
-        return bool(np.isscalar(left) and np.isscalar(right) and np.isnan(left) and np.isnan(right))
-    except (TypeError, ValueError):
-        return False
+    left_key = _missing_scalar_key(left)
+    return left_key is not None and left_key == _missing_scalar_key(right)
 
 
 def values_equal(left: object, right: object) -> bool:
