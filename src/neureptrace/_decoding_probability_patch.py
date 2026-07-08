@@ -120,14 +120,21 @@ def _patch_source_free_decision_fallback() -> None:
 
     @wraps(original)
     def _predict_source_probabilities(model, features, classes):
+        n_rows = _n_feature_rows(features)
         if hasattr(model, "predict_proba"):
             probabilities = np.asarray(model.predict_proba(features), dtype=float)
+            if probabilities.ndim != 2:
+                raise ValueError("source_model probabilities must be a two-dimensional matrix.")
+            if probabilities.shape[0] != n_rows:
+                raise ValueError("source_model probabilities must contain one row per feature row.")
         elif hasattr(model, "decision_function"):
             scores = np.asarray(model.decision_function(features), dtype=float)
             if scores.ndim == 1:
                 scores = _binary_decision_scores_to_logits(scores)
             elif scores.ndim != 2:
                 raise ValueError("source_model decision_function output must be one- or two-dimensional.")
+            if scores.shape[0] != n_rows:
+                raise ValueError("source_model decision_function output must contain one row per feature row.")
             probabilities = source_free._softmax_rows(scores)
         else:
             raise ValueError("source_model must expose predict_proba or decision_function.")
