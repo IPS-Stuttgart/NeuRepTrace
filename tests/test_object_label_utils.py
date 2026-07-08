@@ -17,6 +17,20 @@ def test_values_equal_treats_nan_labels_as_matching() -> None:
     assert not values_equal(np.array(["trial", np.nan], dtype=object), np.array(["trial", 1.0], dtype=object))
 
 
+def test_values_equal_keeps_numpy_nat_distinct_from_none() -> None:
+    for nat_value in (np.datetime64("NaT"), np.timedelta64("NaT")):
+        assert values_equal(nat_value, nat_value)
+        assert not values_equal(nat_value, None)
+        assert not values_equal(None, nat_value)
+
+    assert not values_equal(np.datetime64("NaT"), np.timedelta64("NaT"))
+
+
+def test_values_equal_preserves_numpy_nat_inside_array_labels() -> None:
+    assert values_equal(np.asarray(["NaT"], dtype="datetime64[D]"), np.asarray(["NaT"], dtype="datetime64[D]"))
+    assert not values_equal(np.asarray(["NaT"], dtype="datetime64[D]"), np.asarray([None], dtype=object))
+
+
 def test_label_helpers_match_and_count_nan_labels() -> None:
     labels = np.array([np.nan, 1.0, np.nan], dtype=object)
 
@@ -26,6 +40,28 @@ def test_label_helpers_match_and_count_nan_labels() -> None:
     assert counts.tolist() == [2, 1]
     assert values_equal(unique[0], np.nan)
     assert values_equal(unique[1], 1.0)
+
+
+def test_label_helpers_keep_none_and_numpy_nat_distinct() -> None:
+    labels = np.asarray([None, np.datetime64("NaT"), None], dtype=object)
+
+    assert label_equal_mask(labels, np.datetime64("NaT")).tolist() == [False, True, False]
+
+    unique, counts = label_counts(labels)
+    assert counts.tolist() == [2, 1]
+    assert unique[0] is None
+    assert np.isnat(unique[1])
+
+
+def test_label_helpers_preserve_numpy_datetime_nat_array_labels() -> None:
+    labels = np.asarray(["NaT", "2020-01-01", "NaT"], dtype="datetime64[D]")
+
+    assert label_equal_mask(labels, np.datetime64("NaT")).tolist() == [True, False, True]
+
+    unique, counts = label_counts(labels)
+    assert counts.tolist() == [2, 1]
+    assert np.isnat(unique[0])
+    assert unique[1] == np.datetime64("2020-01-01", "D")
 
 
 def test_label_helpers_match_and_count_numpy_array_labels() -> None:

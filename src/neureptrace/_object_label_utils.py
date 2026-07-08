@@ -8,9 +8,20 @@ import numpy as np
 import pandas as pd
 
 
+def _numpy_nat_key(value: object) -> tuple[str, str] | None:
+    """Return a stable key for NumPy temporal NaT scalars without coercing to None."""
+
+    if isinstance(value, (np.datetime64, np.timedelta64)) and bool(np.isnat(value)):
+        return (type(value).__module__, type(value).__qualname__)
+    return None
+
+
 def _missing_scalar_key(value: object) -> tuple[str, str] | None:
     """Return a stable key for scalar missing-value sentinels."""
 
+    numpy_nat_key = _numpy_nat_key(value)
+    if numpy_nat_key is not None:
+        return numpy_nat_key
     if isinstance(value, np.generic):
         value = value.item()
     if value is None or isinstance(value, (np.ndarray, list, tuple, dict)):
@@ -31,28 +42,66 @@ def _both_nan(left: object, right: object) -> bool:
     return left_key is not None and left_key == _missing_scalar_key(right)
 
 
+def _comparable_scalar(value: object) -> object:
+    """Return a scalar value suitable for equality while preserving NumPy NaT."""
+
+    if _numpy_nat_key(value) is not None:
+        return value
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _array_for_comparison(value: object) -> np.ndarray:
+    """Return an array view without converting temporal NaT scalars to None."""
+
+    if isinstance(value, np.ndarray):
+        return np.asarray(value)
+    return np.asarray(value, dtype=object)
+
+
+def _array_items(array: np.ndarray) -> list[object]:
+    """Return flattened array items while preserving NumPy scalar labels."""
+
+    if array.ndim == 0:
+        return [array[()]]
+    flat = array.reshape(-1)
+    return [flat[index] for index in range(flat.shape[0])]
+
+
+def _label_items(values: Sequence | np.ndarray) -> list[object]:
+    """Return top-level label atoms while preserving NumPy temporal scalars."""
+
+    if isinstance(values, (str, bytes)):
+        return [values]
+    if isinstance(values, np.ndarray):
+        array = np.asarray(values)
+        if array.ndim == 0:
+            return [array[()]]
+        return [array[index] for index in range(array.shape[0])]
+    return list(values)
+
+
 def values_equal(left: object, right: object) -> bool:
     """Compare labels without leaking tuple/list/array-valued equality."""
-
-    if isinstance(left, np.generic):
-        left = left.item()
-    if isinstance(right, np.generic):
-        right = right.item()
 
     if _both_nan(left, right):
         return True
 
+    left = _comparable_scalar(left)
+    right = _comparable_scalar(right)
+
     if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
         try:
-            left_array = np.asarray(left, dtype=object)
-            right_array = np.asarray(right, dtype=object)
+            left_array = _array_for_comparison(left)
+            right_array = _array_for_comparison(right)
         except (TypeError, ValueError):
             return False
         if left_array.shape != right_array.shape:
             return False
         return all(
             values_equal(left_item, right_item)
-            for left_item, right_item in zip(left_array.reshape(-1), right_array.reshape(-1), strict=True)
+            for left_item, right_item in zip(_array_items(left_array), _array_items(right_array), strict=True)
         )
 
     if isinstance(left, (list, tuple)) or isinstance(right, (list, tuple)):
@@ -77,8 +126,7 @@ def values_equal(left: object, right: object) -> bool:
 def label_equal_mask(values: Sequence | np.ndarray, label: object) -> np.ndarray:
     """Return an equality mask for arbitrary scalar or composite labels."""
 
-    array = np.asarray(values, dtype=object)
-    return np.asarray([values_equal(value, label) for value in array], dtype=bool)
+    return np.asarray([values_equal(value, label) for value in _label_items(values)], dtype=bool)
 
 
 def assign_masked(array: np.ndarray, mask: np.ndarray, value: object) -> None:
@@ -127,7 +175,7 @@ def label_counts(values: Sequence | np.ndarray) -> tuple[np.ndarray, np.ndarray]
 
     unique: list[object] = []
     counts: list[int] = []
-    for value in values:
+    for value in _label_items(values):
         for index, existing in enumerate(unique):
             if values_equal(value, existing):
                 counts[index] += 1
