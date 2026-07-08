@@ -60,6 +60,48 @@ def test_source_bagging_feature_fraction_subsamples_features() -> None:
     assert all(indices.size == 2 for indices in result.feature_indices)
 
 
+def test_source_bagging_rejects_boolean_source_feature_matrix() -> None:
+    source_features = np.asarray([[False], [False], [True], [True]], dtype=bool)
+    source_labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+    test_features = np.asarray([[-1.8], [1.8]], dtype=float)
+
+    with pytest.raises(ValueError, match="source_features.*boolean"):
+        fit_source_bagging_decoder(
+            source_features=source_features,
+            source_labels=source_labels,
+            test_features=test_features,
+            config={"n_estimators": 1},
+        )
+
+
+def test_source_bagging_rejects_object_array_boolean_source_feature() -> None:
+    source_features = np.asarray([[-2.0], [-1.0], [True], [2.0]], dtype=object)
+    source_labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+    test_features = np.asarray([[-1.8], [1.8]], dtype=float)
+
+    with pytest.raises(ValueError, match="source_features.*boolean"):
+        fit_source_bagging_decoder(
+            source_features=source_features,
+            source_labels=source_labels,
+            test_features=test_features,
+            config={"n_estimators": 1},
+        )
+
+
+def test_source_bagging_rejects_generator_boolean_test_feature_matrix() -> None:
+    source_features = np.asarray([[-2.0], [-1.0], [1.0], [2.0]], dtype=float)
+    source_labels = np.asarray(["left", "left", "right", "right"], dtype=object)
+    test_features = ([value] for value in [False, True])
+
+    with pytest.raises(ValueError, match="test_features.*boolean"):
+        fit_source_bagging_decoder(
+            source_features=source_features,
+            source_labels=source_labels,
+            test_features=test_features,
+            config={"n_estimators": 1},
+        )
+
+
 def test_source_bagging_config_validation() -> None:
     cfg = source_bagging_config(n_estimators="3", sample_fraction="0.75", feature_fraction="0.5")
     assert cfg.n_estimators == 3
