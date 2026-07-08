@@ -8,7 +8,7 @@ limiting magnitude is useful.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,9 +24,16 @@ DEFAULT_EPSILON = 1e-8
 class SourceSquashConfig:
     """Configuration for source-fitted bounded feature squashing."""
 
-    scale_mode: str = "mad"
-    multiplier: float = 1.0
-    epsilon: float = DEFAULT_EPSILON
+    scale_mode: str | None = "mad"
+    multiplier: float | str = 1.0
+    epsilon: float | str = DEFAULT_EPSILON
+
+    def __post_init__(self) -> None:
+        """Normalize and validate direct dataclass construction."""
+
+        object.__setattr__(self, "scale_mode", normalize_scale_mode(self.scale_mode))
+        object.__setattr__(self, "multiplier", _positive_float(self.multiplier, name="multiplier"))
+        object.__setattr__(self, "epsilon", _positive_float(self.epsilon, name="epsilon"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,9 +95,9 @@ def source_squash_config(
     """Normalize public squash-transform options."""
 
     return SourceSquashConfig(
-        scale_mode=normalize_scale_mode(scale_mode),
-        multiplier=_positive_float(multiplier, name="multiplier"),
-        epsilon=_positive_float(epsilon, name="epsilon"),
+        scale_mode=scale_mode,
+        multiplier=multiplier,
+        epsilon=epsilon,
     )
 
 
@@ -182,8 +189,54 @@ def _metadata(cfg: SourceSquashConfig, *, n_source_rows: int, n_test_rows: int, 
     }
 
 
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize generator-backed feature rows before NumPy conversion."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = [_materialize_one_pass_iterables(item) for item in value.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(value.shape)
+    if isinstance(value, (str, bytes)):
+        return value
+    if hasattr(value, "__array__"):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _contains_boolean_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (bool, np.bool_))
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_boolean_value(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -192,6 +245,8 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
