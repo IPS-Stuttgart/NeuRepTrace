@@ -260,9 +260,9 @@ def _resolve_classes(n_classes: int, classes, source_labels, source_validation_l
 def _resolve_source_prior(n_classes: int, *, source_prior, source_labels, source_validation_labels, classes: Sequence[Any], epsilon: float) -> np.ndarray:
     if source_prior is not None:
         if isinstance(source_prior, Mapping):
-            values = np.asarray([source_prior.get(label, 0.0) for label in classes], dtype=float)
+            values = [source_prior.get(label, 0.0) for label in classes]
         else:
-            values = np.asarray(source_prior, dtype=float).reshape(-1)
+            values = source_prior
         return _prior_vector(values, n_classes=n_classes, name="source_prior", epsilon=epsilon)
     labels = source_labels if source_labels is not None else source_validation_labels
     if labels is None:
@@ -279,14 +279,20 @@ def _format_vector(values: np.ndarray) -> str:
 
 
 def _prior_vector(values, *, n_classes: int, name: str, epsilon: float) -> np.ndarray:
-    vector = np.asarray(values, dtype=float).reshape(-1)
+    materialized = _materialize_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(f"{name} must contain numeric prior values, not boolean indicators.")
+    vector = np.asarray(materialized, dtype=float).reshape(-1)
     if vector.shape[0] != n_classes:
         raise ValueError(f"{name} must contain one value per class.")
     return _normalize_prior(vector, epsilon=epsilon)
 
 
 def _normalize_prior(values, *, epsilon: float) -> np.ndarray:
-    vector = np.asarray(values, dtype=float).reshape(-1)
+    materialized = _materialize_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError("Prior vectors must contain numeric values, not boolean indicators.")
+    vector = np.asarray(materialized, dtype=float).reshape(-1)
     if vector.size < 1 or not np.all(np.isfinite(vector)) or np.any(vector < 0.0):
         raise ValueError("Prior vectors must contain finite non-negative values.")
     total = float(np.sum(vector))
@@ -298,7 +304,10 @@ def _normalize_prior(values, *, epsilon: float) -> np.ndarray:
 
 def _probability_matrix(values, *, name: str, epsilon: float | str, expected_classes: int | None = None) -> np.ndarray:
     eps = _positive_float(epsilon, name="epsilon")
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(f"{name} must be numeric probability values, not boolean indicators.")
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError(f"{name} must be two-dimensional with at least two class columns.")
     if expected_classes is not None and matrix.shape[1] != expected_classes:
@@ -318,7 +327,10 @@ def _normalize_probability_rows(matrix: np.ndarray, *, epsilon: float) -> np.nda
 
 
 def _confusion_matrix(values, *, n_classes: int, epsilon: float | str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError("confusion_matrix must contain numeric values, not boolean indicators.")
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.shape != (n_classes, n_classes) or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("confusion_matrix must be a finite non-negative square class matrix.")
     return _column_normalize(matrix, epsilon=_positive_float(epsilon, name="epsilon"))
@@ -327,6 +339,34 @@ def _confusion_matrix(values, *, n_classes: int, epsilon: float | str) -> np.nda
 def _column_normalize(matrix: np.ndarray, *, epsilon: float) -> np.ndarray:
     clipped = np.maximum(matrix, epsilon)
     return clipped / np.sum(clipped, axis=0, keepdims=True)
+
+
+def _materialize_iterables(values: Any) -> Any:
+    if isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
+        return values
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return values
+    return [_materialize_iterables(item) for item in iterator]
+
+
+def _contains_boolean_value(values: Any) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_value(value) for value in values.flat)
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return False
+    return any(_contains_boolean_value(item) for item in iterator)
 
 
 def _object_vector(values, *, name: str) -> np.ndarray:
