@@ -100,7 +100,14 @@ def normalize_rows_l1(
 def _coerce_config(config: RowL1Config | Mapping[str, Any]) -> RowL1Config:
     if isinstance(config, RowL1Config):
         return config
-    return row_l1_config(**dict(config))
+    try:
+        options = dict(config)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Row L1 config must be a mapping or RowL1Config.") from exc
+    unknown = sorted(str(key) for key in options if key != "epsilon")
+    if unknown:
+        raise ValueError(f"Unknown row L1 config option(s): {', '.join(unknown)}.")
+    return row_l1_config(**options)
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
