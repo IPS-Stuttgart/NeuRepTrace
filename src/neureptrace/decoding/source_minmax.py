@@ -79,8 +79,29 @@ def _materialize_one_pass_iterables(value: object) -> object:
     return [_materialize_one_pass_iterables(item) for item in value]
 
 
+def _contains_boolean_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if value.dtype == np.bool_:
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (bool, np.bool_))
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
+
+
 def _matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
