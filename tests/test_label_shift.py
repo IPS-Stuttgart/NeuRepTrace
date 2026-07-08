@@ -93,6 +93,38 @@ def test_adjust_probabilities_to_prior_matches_requested_prior_direction() -> No
     assert np.allclose(adjusted.sum(axis=1), 1.0)
 
 
+def test_label_shift_accepts_one_pass_probability_and_prior_inputs() -> None:
+    target_probabilities = (row for row in ([0.9, 0.1], [0.8, 0.2], [0.2, 0.8]))
+    source_prior = (value for value in [0.5, 0.5])
+
+    result = adapt_label_shift_probabilities(
+        target_probabilities,
+        method="em",
+        source_prior=source_prior,
+        classes=["a", "b"],
+        max_iter=5,
+    )
+
+    assert result.probabilities.shape == (3, 2)
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
+
+    adjusted = adjust_probabilities_to_prior(
+        (row for row in ([0.5, 0.5], [0.25, 0.75])),
+        source_prior=(value for value in [0.5, 0.5]),
+        target_prior=(value for value in [0.75, 0.25]),
+    )
+    assert adjusted.shape == (2, 2)
+    assert np.allclose(adjusted.sum(axis=1), 1.0)
+
+
+def test_label_shift_rejects_one_pass_boolean_probability_inputs() -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        adapt_label_shift_probabilities(
+            (row for row in ([True, False], [False, True])),
+            source_prior=[0.5, 0.5],
+        )
+
+
 def test_standalone_em_and_bbse_estimators() -> None:
     target_probabilities = np.asarray([[0.9, 0.1], [0.8, 0.2], [0.1, 0.9]])
     em_prior, adjusted, iterations, converged = estimate_target_prior_em(
