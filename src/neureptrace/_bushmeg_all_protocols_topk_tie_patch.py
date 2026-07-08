@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_bushmeg_all_protocols_topk_tie_patch_installed"
+_COERCE_MARKER = "_neureptrace_bushmeg_protocol3_probability_validation_wrapped"
 _LABEL_INDEX_ERROR = "labels must contain finite integer class indices."
+_NEGATIVE_PROBABILITY_TOLERANCE = 1.0e-12
 
 
 def _normalize_k(k: Any) -> int:
@@ -173,6 +175,51 @@ def _label_only_metric_vectors(group: pd.DataFrame) -> tuple[np.ndarray, np.ndar
     return true_values.astype(str), predicted_values.astype(str)
 
 
+def _protocol3_output_probabilities(output: Any) -> tuple[Any, Any]:
+    probabilities: Any = None
+    predicted_labels: Any = None
+    if isinstance(output, Mapping):
+        probabilities = output.get("probabilities")
+        predicted_labels = output.get("predicted_labels")
+    elif isinstance(output, tuple) and len(output) == 2:
+        probabilities, predicted_labels = output
+    else:
+        probabilities = output
+    return probabilities, predicted_labels
+
+
+def _sanitize_protocol3_prediction_output(output: Any, *, n_evaluation_rows: int, classes: np.ndarray) -> Any:
+    """Reject invalid Protocol 3 probability entries before row normalization.
+
+    ``bushmeg_all_protocols._coerce_protocol3_prediction_output`` already checks
+    matrix shape, finiteness, and positive row mass.  It did not reject negative
+    entries, so a method could return rows such as ``[1.1, -0.1]`` and have them
+    propagated into metric computation.  Small roundoff negatives are clipped,
+    but material negative mass is treated as a malformed fit/predict result.
+    """
+
+    probabilities, predicted_labels = _protocol3_output_probabilities(output)
+    if probabilities is None:
+        return output
+
+    probability_matrix = np.asarray(probabilities, dtype=float)
+    expected_shape = (int(n_evaluation_rows), int(np.asarray(classes).size))
+    if probability_matrix.shape != expected_shape or np.any(~np.isfinite(probability_matrix)):
+        return output
+    if np.any(probability_matrix < -_NEGATIVE_PROBABILITY_TOLERANCE):
+        raise ValueError("Protocol 3 fit/predict returned negative probability entries.")
+    if np.any(probability_matrix < 0.0):
+        probability_matrix = np.where(probability_matrix < 0.0, 0.0, probability_matrix)
+
+    if isinstance(output, Mapping):
+        sanitized = dict(output)
+        sanitized["probabilities"] = probability_matrix
+        return sanitized
+    if isinstance(output, tuple) and len(output) == 2:
+        return probability_matrix, predicted_labels
+    return probability_matrix
+
+
 def install() -> None:
     """Patch all-protocol prediction metric recomputation edge cases."""
 
@@ -184,6 +231,20 @@ def install() -> None:
         return
 
     metric_patch = importlib.import_module("neureptrace._bushmeg_all_protocols_prediction_metric_patch")
+    original_coerce_protocol3_prediction_output = all_protocols._coerce_protocol3_prediction_output
+    if not getattr(original_coerce_protocol3_prediction_output, _COERCE_MARKER, False):
+
+        def _coerce_protocol3_prediction_output(output: Any, *, n_evaluation_rows: int, classes: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            sanitized_output = _sanitize_protocol3_prediction_output(output, n_evaluation_rows=n_evaluation_rows, classes=classes)
+            return original_coerce_protocol3_prediction_output(
+                sanitized_output,
+                n_evaluation_rows=n_evaluation_rows,
+                classes=classes,
+            )
+
+        setattr(_coerce_protocol3_prediction_output, _COERCE_MARKER, True)
+        all_protocols._coerce_protocol3_prediction_output = _coerce_protocol3_prediction_output
+
     metric_patch._top_k_accuracy = _top_k_accuracy
     metric_patch._labels_to_probability_positions = _labels_to_probability_positions
     metric_patch._label_only_metric_vectors = _label_only_metric_vectors
