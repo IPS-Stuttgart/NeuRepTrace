@@ -69,6 +69,34 @@ def test_source_feature_roll_can_return_only_synthetic_rows() -> None:
     assert result.labels.tolist().count(1) == 3
 
 
+def test_source_feature_roll_accepts_generator_backed_feature_rows() -> None:
+    features = ((float(value) for value in (row, row + 1)) for row in range(4))
+    labels = [0, 0, 1, 1]
+    domains = (f"source-{row % 2}" for row in range(4))
+
+    result = augment_source_with_feature_roll(
+        features,
+        labels,
+        source_domains=domains,
+        config={"synthetic_per_class": 1, "max_shift": 1, "preserve_original": False, "random_state": 0},
+    )
+
+    assert result.features.shape == (2, 2)
+    assert result.labels.tolist() == [0, 1]
+    assert result.metadata["source_feature_roll_n_source_domains"] == 2
+
+
+def test_source_feature_roll_rejects_boolean_feature_values() -> None:
+    with pytest.raises(ValueError, match="non-boolean"):
+        augment_source_with_feature_roll([[True, False], [False, True]], [0, 1])
+
+    with pytest.raises(ValueError, match="non-boolean"):
+        augment_source_with_feature_roll(((value for value in row) for row in [[1.0, False], [2.0, 3.0]]), [0, 1])
+
+    with pytest.raises(ValueError, match="non-boolean"):
+        roll_feature_row([True, False], shift=1)
+
+
 def test_source_feature_roll_disabled_returns_original_rows() -> None:
     features = np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=float)
     labels = np.asarray([0, 1])
