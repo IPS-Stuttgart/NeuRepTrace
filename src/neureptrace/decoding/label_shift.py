@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 LABEL_SHIFT_PROTOCOL = "unlabeled_target_label_shift_adaptation"
 LABEL_SHIFT_CATEGORY = "2_unlabeled_target_adaptive"
@@ -247,6 +248,8 @@ def _resolve_classes(n_classes: int, classes, source_labels, source_validation_l
         class_order = _object_vector(classes, name="classes")
         if class_order.shape[0] != n_classes:
             raise ValueError("classes length must match probability columns.")
+        if len(_unique_object_values(class_order)) != class_order.shape[0]:
+            raise ValueError("classes must be unique.")
         return tuple(class_order.tolist())
     labels = source_labels if source_labels is not None else source_validation_labels
     if labels is not None:
@@ -268,6 +271,9 @@ def _resolve_source_prior(n_classes: int, *, source_prior, source_labels, source
     if labels is None:
         raise ValueError("source_prior, source_labels, or source_validation_labels are required.")
     label_vector = _object_vector(labels, name="source_labels")
+    unknown = sorted((label for label in _unique_object_values(label_vector) if not any(_object_equal(label, class_label) for class_label in classes)), key=repr)
+    if unknown:
+        raise ValueError(f"source labels contain labels absent from classes: {unknown}.")
     counts = np.asarray([np.count_nonzero(_object_mask(label_vector, label)) for label in classes], dtype=float)
     if np.any(counts <= 0.0):
         raise ValueError("source labels must contain at least one row per class.")
@@ -416,7 +422,13 @@ def _unique_object_values(values: Sequence[Any] | np.ndarray) -> tuple[Any, ...]
 def _is_nan_scalar(value: Any) -> bool:
     if isinstance(value, np.generic):
         value = value.item()
-    return isinstance(value, float) and np.isnan(value)
+    if isinstance(value, (np.ndarray, list, tuple, dict)):
+        return False
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
 
 
 def _object_equal(left: object, right: object) -> bool:
