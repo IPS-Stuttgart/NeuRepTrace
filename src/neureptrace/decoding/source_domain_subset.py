@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,8 +59,47 @@ def apply_source_domain_subset(
     return matrix[result.selected_mask].astype(np.float32, copy=False), label_vector[result.selected_mask], result
 
 
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = [_materialize_one_pass_iterables(item) for item in value.ravel(order="C")]
+        return np.asarray(materialized, dtype=object).reshape(value.shape)
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _contains_boolean_feature(value: object) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.dtype == np.bool_:
+            return True
+        if value.dtype == object:
+            return any(_contains_boolean_feature(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_feature(item) for item in value)
+    return False
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_feature(materialized):
+        raise ValueError(f"{name} must contain numeric values, not booleans.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a numeric two-dimensional matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
