@@ -8,7 +8,7 @@ label and are generated without using held-out data.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -100,7 +100,7 @@ def augment_source_with_feature_roll(
     labels = _label_vector(source_labels, expected_length=features.shape[0], name="source_labels")
     domains = _domain_vector(source_domains, expected_length=features.shape[0])
     n_source_domains = _count_unique_hashable(domains)
-    classes = np.asarray(tuple(dict.fromkeys(labels.tolist())), dtype=labels.dtype if labels.dtype != object else object)
+    classes = _unique_labels_preserving_order(labels)
 
     if not cfg.enabled:
         metadata = _metadata(
@@ -125,8 +125,9 @@ def augment_source_with_feature_roll(
     synthetic_labels: list[Any] = []
     content_indices: list[int] = []
     shifts: list[int] = []
+    label_values = labels.tolist()
     for class_label in classes.tolist():
-        class_indices = np.flatnonzero(labels == class_label)
+        class_indices = np.flatnonzero([_labels_equal(label, class_label) for label in label_values])
         if class_indices.size == 0:
             continue
         for _ in range(cfg.synthetic_per_class):
@@ -138,7 +139,7 @@ def augment_source_with_feature_roll(
             shifts.append(shift)
 
     synthetic_features = np.vstack(synthetic_rows).astype(np.float32, copy=False) if synthetic_rows else np.empty((0, features.shape[1]), dtype=np.float32)
-    synthetic_labels_array = np.asarray(synthetic_labels, dtype=labels.dtype if labels.dtype != object else object)
+    synthetic_labels_array = _object_vector(synthetic_labels) if labels.dtype == object else np.asarray(synthetic_labels, dtype=labels.dtype)
     if cfg.preserve_original:
         output_features = np.vstack([features, synthetic_features]).astype(np.float32, copy=False)
         output_labels = np.concatenate([labels, synthetic_labels_array])
@@ -175,9 +176,7 @@ def roll_feature_row(
 ) -> np.ndarray:
     """Roll one feature row by ``shift`` columns."""
 
-    vector = np.asarray(row, dtype=float).reshape(-1)
-    if vector.shape[0] < 1:
-        raise ValueError("row must contain at least one feature.")
+    vector = _feature_vector(row, name="row")
     shift_value = _integer(shift, name="shift")
     normalized_mode = normalize_roll_mode(mode)
     if normalized_mode == "circular":
@@ -241,7 +240,15 @@ def normalize_roll_mode(value: Any) -> str:
 
 def _coerce_config(config: SourceFeatureRollConfig | Mapping[str, Any]) -> SourceFeatureRollConfig:
     if isinstance(config, SourceFeatureRollConfig):
-        return config
+        return source_feature_roll_config(
+            synthetic_per_class=config.synthetic_per_class,
+            max_shift=config.max_shift,
+            roll_mode=config.roll_mode,
+            fill_value=config.fill_value,
+            include_zero_shift=config.include_zero_shift,
+            preserve_original=config.preserve_original,
+            random_state=config.random_state,
+        )
     return source_feature_roll_config(**dict(config))
 
 
@@ -275,7 +282,10 @@ def _metadata(cfg: SourceFeatureRollConfig, *, n_source_rows: int, n_synthetic_r
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=object)
+    if _contains_boolean_values(matrix):
+        raise ValueError(f"{name} must contain numeric, non-boolean feature values.")
+    matrix = np.asarray(matrix, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -283,17 +293,32 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values).reshape(-1)
-    if vector.shape[0] != expected_length:
-        raise ValueError(f"{name} must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
+def _feature_vector(values: Sequence[float] | np.ndarray, *, name: str) -> np.ndarray:
+    vector = np.asarray(_materialize_one_pass_iterables(values), dtype=object)
+    if _contains_boolean_values(vector):
+        raise ValueError(f"{name} must contain numeric, non-boolean feature values.")
+    vector = np.asarray(vector, dtype=float).reshape(-1)
+    if vector.shape[0] < 1:
+        raise ValueError(f"{name} must contain at least one feature.")
+    if not np.all(np.isfinite(vector)):
+        raise ValueError(f"{name} must contain only finite values.")
     return vector
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
+    raw = np.asarray(_materialize_one_pass_iterables(values), dtype=object)
+    if raw.ndim == 0 or raw.shape[0] != expected_length:
+        actual = 0 if raw.ndim == 0 else raw.shape[0]
+        raise ValueError(f"{name} must contain one value per feature row: {actual} != {expected_length}.")
+    if raw.ndim == 1:
+        return _object_vector(raw.tolist())
+    return _object_vector(_freeze_label(row) for row in raw.tolist())
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = np.asarray(_materialize_one_pass_iterables(values), dtype=object).reshape(-1)
     if vector.shape[0] != expected_length:
         raise ValueError(f"source_domains must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
     for value in vector.tolist():
@@ -306,6 +331,90 @@ def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_l
 
 def _count_unique_hashable(values: np.ndarray) -> int:
     return len(dict.fromkeys(values.tolist()))
+
+
+def _materialize_one_pass_iterables(value: object) -> object:
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _contains_boolean_values(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_boolean_values(item) for item in value.flat)
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Mapping):
+        return any(_contains_boolean_values(item) for item in value.values())
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_values(item) for item in value)
+    return False
+
+
+def _object_vector(values: Iterable[Any]) -> np.ndarray:
+    items = list(values)
+    output = np.empty(len(items), dtype=object)
+    output[:] = items
+    return output
+
+
+def _freeze_label(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, list):
+        return tuple(_freeze_label(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_label(item) for item in value)
+    return value
+
+
+def _labels_equal(left: Any, right: Any) -> bool:
+    if _is_nan_scalar(left) and _is_nan_scalar(right):
+        return True
+    if isinstance(left, np.ndarray):
+        left = left.tolist()
+    if isinstance(right, np.ndarray):
+        right = right.tolist()
+    if isinstance(left, list):
+        left = tuple(left)
+    if isinstance(right, list):
+        right = tuple(right)
+    if isinstance(left, tuple) and isinstance(right, tuple):
+        return len(left) == len(right) and all(_labels_equal(l_item, r_item) for l_item, r_item in zip(left, right))
+    try:
+        result = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(result, np.ndarray):
+        return bool(result.shape == () and result.item())
+    try:
+        return bool(result)
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_nan_scalar(value: Any) -> bool:
+    return isinstance(value, (float, np.floating)) and bool(np.isnan(value))
+
+
+def _unique_labels_preserving_order(labels: np.ndarray) -> np.ndarray:
+    unique: list[Any] = []
+    for label in labels.tolist():
+        if not any(_labels_equal(label, existing) for existing in unique):
+            unique.append(label)
+    return _object_vector(unique)
 
 
 def _scalar_value(value: Any, *, name: str) -> Any:
