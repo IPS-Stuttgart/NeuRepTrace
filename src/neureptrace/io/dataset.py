@@ -28,6 +28,11 @@ class EpochDataset:
     provenance: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if _contains_boolean_values(self.data):
+            raise ValueError("EpochDataset.data must contain numeric signal values, not boolean flags.")
+        if _contains_boolean_values(self.times):
+            raise ValueError("EpochDataset.times must contain numeric time values, not boolean flags.")
+
         self.data = np.asarray(self.data, dtype=float)
         self.times = np.asarray(self.times, dtype=float)
         self.metadata = self.metadata.reset_index(drop=True).copy()
@@ -39,6 +44,9 @@ class EpochDataset:
             raise ValueError("EpochDataset.times must be one-dimensional.")
         if not np.all(np.isfinite(self.times)):
             raise ValueError("EpochDataset.times must contain only finite values.")
+        duplicate_channel = _find_duplicate_string(self.channel_names)
+        if duplicate_channel is not None:
+            raise ValueError(f"EpochDataset.channel_names must be unique; duplicate channel name {duplicate_channel!r} found.")
         if self.data.shape[2] != len(self.times):
             raise ValueError(
                 f"Data has {self.data.shape[2]} time points but times has {len(self.times)} entries."
@@ -61,6 +69,9 @@ class EpochDataset:
     def with_channels(self, channel_names: list[str]) -> Self:
         """Return a dataset view containing channels in the requested order."""
 
+        duplicate_requested_channel = _find_duplicate_string(channel_names)
+        if duplicate_requested_channel is not None:
+            raise ValueError(f"Requested channel names must be unique; duplicate channel name {duplicate_requested_channel!r} found.")
         index_by_name = {channel_name: index for index, channel_name in enumerate(self.channel_names)}
         missing = [channel_name for channel_name in channel_names if channel_name not in index_by_name]
         if missing:
@@ -177,3 +188,25 @@ class EpochDataset:
             metadata=self.metadata,
             verbose="error",
         )
+
+
+def _contains_boolean_values(values: object) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    try:
+        array = np.asarray(values, dtype=object)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim == 0:
+        return isinstance(array.item(), (bool, np.bool_))
+    return any(isinstance(value, (bool, np.bool_)) for value in array.ravel(order="C"))
+
+
+def _find_duplicate_string(values: list[str]) -> str | None:
+    seen: set[str] = set()
+    for value in values:
+        text = str(value)
+        if text in seen:
+            return text
+        seen.add(text)
+    return None
