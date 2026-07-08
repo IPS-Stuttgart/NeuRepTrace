@@ -127,8 +127,20 @@ def source_mad_config(
 
 def _coerce_config(config: SourceMADConfig | Mapping[str, Any]) -> SourceMADConfig:
     if isinstance(config, SourceMADConfig):
-        return config
-    return source_mad_config(**dict(config))
+        return source_mad_config(
+            center=config.center,
+            scale=config.scale,
+            normal_consistency=config.normal_consistency,
+            epsilon=config.epsilon,
+        )
+    if not isinstance(config, Mapping):
+        raise ValueError("source MAD config must be a mapping or SourceMADConfig.")
+    raw = dict(config)
+    allowed = {"center", "scale", "normal_consistency", "epsilon"}
+    unknown = sorted(str(key) for key in raw if key not in allowed)
+    if unknown:
+        raise ValueError(f"Unknown source MAD config key(s): {', '.join(unknown)}. Available keys: {', '.join(sorted(allowed))}.")
+    return source_mad_config(**raw)
 
 
 def _metadata(cfg: SourceMADConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int) -> dict[str, Any]:
