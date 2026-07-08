@@ -1,4 +1,4 @@
-"""Reject malformed Source Bagging numeric options and feature matrices."""
+"""Reject malformed Source Bagging numeric options, feature matrices, and estimator outputs."""
 
 from __future__ import annotations
 
@@ -26,6 +26,18 @@ def _positive_float_error(name: str) -> ValueError:
 
 def _feature_matrix_error(name: str) -> ValueError:
     return ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+
+
+def _estimator_row_count_error(source: str) -> ValueError:
+    return ValueError(f"source bagging estimator {source} must contain one row per test feature row.")
+
+
+def _estimator_probability_column_error() -> ValueError:
+    return ValueError("source bagging estimator classes_ length must match probability columns.")
+
+
+def _estimator_score_column_error() -> ValueError:
+    return ValueError("source bagging estimator decision_function output must contain one column per class.")
 
 
 def _positive_int(value: Any, *, name: str) -> int:
@@ -136,10 +148,63 @@ def _validate_config(cfg: Any) -> Any:
     return cfg
 
 
+def _install_aligned_probability_validation(source_bagging: Any) -> None:
+    original_aligned_probabilities = source_bagging._aligned_probabilities
+    if getattr(original_aligned_probabilities, _PATCH_MARKER, False):
+        return
+
+    @wraps(original_aligned_probabilities)
+    def _aligned_probabilities(model: Any, features: np.ndarray, *, classes: np.ndarray, epsilon: float) -> np.ndarray:
+        n_rows = int(features.shape[0])
+        if hasattr(model, "predict_proba"):
+            raw = np.asarray(model.predict_proba(features), dtype=float)
+            if raw.ndim != 2 or raw.shape[0] != n_rows:
+                raise _estimator_row_count_error("probabilities")
+            model_classes = np.asarray(getattr(model, "classes_", classes), dtype=object).reshape(-1)
+            if model_classes.shape[0] != raw.shape[1]:
+                raise _estimator_probability_column_error()
+            aligned = np.full((n_rows, classes.shape[0]), float(epsilon), dtype=float)
+            for column, class_label in enumerate(model_classes.tolist()):
+                class_index = source_bagging._label_index_or_none(class_label, classes)
+                if class_index is not None:
+                    aligned[:, class_index] = raw[:, column]
+            return source_bagging._normalize_probability_rows(aligned, epsilon=epsilon)
+        if hasattr(model, "decision_function"):
+            scores = np.asarray(model.decision_function(features), dtype=float)
+            if scores.ndim == 1:
+                if scores.shape[0] != n_rows:
+                    raise _estimator_row_count_error("decision_function output")
+                scores = np.column_stack([-scores, scores])
+            elif scores.ndim == 2 and scores.shape[1] == 1 and classes.shape[0] == 2:
+                if scores.shape[0] != n_rows:
+                    raise _estimator_row_count_error("decision_function output")
+                scores = np.column_stack([-scores[:, 0], scores[:, 0]])
+            elif scores.ndim != 2 or scores.shape[0] != n_rows:
+                raise _estimator_row_count_error("decision_function output")
+            if scores.shape[1] != classes.shape[0]:
+                raise _estimator_score_column_error()
+            logits = np.exp(np.clip(scores - np.max(scores, axis=1, keepdims=True), -50.0, 50.0))
+            return source_bagging._normalize_probability_rows(logits, epsilon=epsilon)
+        predictions = np.asarray(model.predict(features), dtype=object)
+        if predictions.ndim == 0 or predictions.shape[0] != n_rows:
+            raise _estimator_row_count_error("predictions")
+        output = np.full((n_rows, classes.shape[0]), float(epsilon), dtype=float)
+        for row, label in enumerate(predictions.tolist()):
+            class_index = source_bagging._label_index_or_none(label, classes)
+            if class_index is not None:
+                output[row, class_index] = 1.0
+        return source_bagging._normalize_probability_rows(output, epsilon=epsilon)
+
+    setattr(_aligned_probabilities, _PATCH_MARKER, True)
+    source_bagging._aligned_probabilities = _aligned_probabilities
+
+
 def install() -> None:
-    """Install source-bagging numeric-option and feature-matrix validation."""
+    """Install source-bagging numeric-option, feature-matrix, and estimator-output validation."""
 
     source_bagging = importlib.import_module("neureptrace.decoding.source_bagging")
+
+    _install_aligned_probability_validation(source_bagging)
 
     original_feature_matrix = source_bagging._feature_matrix
     if not getattr(original_feature_matrix, _PATCH_MARKER, False):
