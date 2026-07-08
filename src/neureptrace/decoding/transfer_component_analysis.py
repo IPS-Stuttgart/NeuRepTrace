@@ -8,7 +8,7 @@ space.  The public APIs in this module intentionally do not accept target labels
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -232,7 +232,8 @@ def fit_tca_transfer_classifier(
     source = _feature_matrix(source_features, name="source_features")
     if labels.shape[0] != source.shape[0]:
         raise ValueError(f"source_labels must contain one label per source row: {labels.shape[0]} != {source.shape[0]}.")
-    if np.unique(labels).shape[0] < 2:
+    classes = _unique_labels(labels)
+    if classes.shape[0] < 2:
         raise ValueError("source_labels must contain at least two classes.")
     weights = None if sample_weight is None else np.asarray(sample_weight, dtype=float).reshape(-1)
     if weights is not None:
@@ -260,9 +261,9 @@ def fit_tca_transfer_classifier(
     )
     fit_kwargs = {} if weights is None else {"sample_weight": weights}
     model.fit(tca.source_features, labels, **fit_kwargs)
-    predictions = np.asarray(model.predict(tca.target_features))
+    predictions = _label_vector(model.predict(tca.target_features))
     probabilities = _predict_probabilities_or_none(model, tca.target_features)
-    classes = np.asarray(getattr(model, "classes_", np.unique(labels)))
+    classes = _classes_from_model(model, fallback=classes)
     metadata = {
         **tca.metadata,
         "tca_classifier": type(model).__name__,
@@ -293,15 +294,84 @@ def normalize_tca_kernel(kernel: str | None) -> str:
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    if isinstance(values, (str, bytes)):
+        return _object_vector([values])
     try:
-        items = list(values)
-    except TypeError:
-        items = [values]
-    if any(isinstance(item, tuple) for item in items):
-        vector = np.empty(len(items), dtype=object)
-        vector[:] = items
-        return vector
-    return np.asarray(items).reshape(-1)
+        array = np.asarray(values)
+    except ValueError:
+        array = np.asarray(values, dtype=object)
+    if array.ndim == 0:
+        return np.asarray([_as_atomic_label(array.item())])
+    object_array = np.asarray(values, dtype=object)
+    if object_array.ndim == 1:
+        items = object_array.tolist()
+        if any(_is_composite_label(value) for value in items):
+            return _object_vector(_as_atomic_label(value) for value in items)
+        return np.asarray(items).reshape(-1)
+    rows = object_array.reshape(object_array.shape[0], -1)
+    if rows.shape[1] == 1:
+        items = rows[:, 0].tolist()
+        if any(_is_composite_label(value) for value in items):
+            return _object_vector(_as_atomic_label(value) for value in items)
+        return np.asarray(items).reshape(-1)
+    return _object_vector(tuple(_as_atomic_label(item) for item in row.tolist()) for row in rows)
+
+
+def _is_composite_label(value: Any) -> bool:
+    if isinstance(value, np.ndarray):
+        return value.ndim > 0
+    return isinstance(value, (list, tuple))
+
+
+def _as_atomic_label(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        array = np.asarray(value, dtype=object)
+        if array.ndim == 0:
+            return _as_atomic_label(array.item())
+        return tuple(_as_atomic_label(item) for item in array.reshape(-1).tolist())
+    if isinstance(value, list):
+        return tuple(_as_atomic_label(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_as_atomic_label(item) for item in value)
+    return value
+
+
+def _object_vector(values: Iterable[Any]) -> np.ndarray:
+    items = list(values)
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
+    return vector
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    try:
+        result = left == right
+    except (TypeError, ValueError):
+        return False
+    if isinstance(result, (bool, np.bool_)):
+        return bool(result)
+    try:
+        return bool(np.all(result))
+    except (TypeError, ValueError):
+        return False
+
+
+def _unique_labels(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+    unique: list[Any] = []
+    for value in values:
+        if not any(_values_equal(value, existing) for existing in unique):
+            unique.append(value)
+    return _object_vector(unique)
+
+
+def _classes_from_model(model: BaseEstimator, *, fallback: np.ndarray) -> np.ndarray:
+    classes = getattr(model, "classes_", None)
+    if classes is None:
+        return fallback
+    return _label_vector(classes)
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
