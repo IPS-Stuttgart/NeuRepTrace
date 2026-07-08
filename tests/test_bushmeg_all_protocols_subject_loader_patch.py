@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
+
+from neureptrace import _bushmeg_all_protocols_subject_loader_patch as subject_loader_patch
 import neureptrace.bushmeg_all_protocols as all_protocols
 import neureptrace.bushmeg_source_loso as source_loso
 
@@ -49,3 +52,50 @@ def test_protocol3_subject_loader_accepts_source_loader_without_progress_callbac
         assert progress_events == [("loading_subjects", {"cache_hit": True, "n_subject_files": 3})]
     finally:
         all_protocols._PROTOCOL3_SUBJECT_CACHE.clear()
+
+
+def test_profile_load_only_accepts_source_loader_without_progress_callback(tmp_path, monkeypatch) -> None:
+    calls = []
+    subjects = {
+        "s1": SimpleNamespace(
+            times=np.asarray([0.0, 0.1], dtype=float),
+            labels=np.asarray([0, 1], dtype=int),
+            data=np.zeros((2, 3, 2), dtype=np.float32),
+        ),
+        "s2": SimpleNamespace(
+            times=np.asarray([0.0, 0.1], dtype=float),
+            labels=np.asarray([1, 0], dtype=int),
+            data=np.ones((2, 3, 2), dtype=np.float32),
+        ),
+        "s3": SimpleNamespace(
+            times=np.asarray([0.0, 0.1], dtype=float),
+            labels=np.asarray([0, 1], dtype=int),
+            data=np.full((2, 3, 2), 2.0, dtype=np.float32),
+        ),
+    }
+    encoder = SimpleNamespace(classes_=np.asarray([0, 1], dtype=int))
+
+    def fake_load_subjects_from_config(config, *, config_dir):
+        calls.append((config, config_dir))
+        return subjects, encoder
+
+    monkeypatch.setattr(source_loso, "_load_subjects_from_config", fake_load_subjects_from_config)
+    subject_loader_patch.install()
+    config_path = tmp_path / "all_protocols.yml"
+    config_path.write_text(
+        "dataset:\n"
+        "  root: data\n"
+        "participants:\n"
+        "  ids: s1,s2,s3\n",
+        encoding="utf-8",
+    )
+
+    profile_path = all_protocols.profile_bushmeg_load_only(
+        config_path=config_path,
+        out_dir=tmp_path / "profile",
+    )
+
+    assert profile_path == tmp_path / "profile" / "load_profile.csv"
+    assert profile_path.exists()
+    assert len(calls) == 1
+    assert calls[0][1] == tmp_path

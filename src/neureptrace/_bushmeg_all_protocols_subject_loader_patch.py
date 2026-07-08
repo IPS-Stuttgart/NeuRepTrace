@@ -7,6 +7,9 @@ import inspect
 from pathlib import Path
 from typing import Any, Callable
 
+_SOURCE_LOADER_MARKER = "_subject_loader_progress_callback_patched"
+_PROTOCOL3_CACHE_MARKER = "_subject_loader_signature_patched"
+
 
 def _accepts_keyword(function: Callable[..., Any], name: str) -> bool:
     try:
@@ -18,12 +21,37 @@ def _accepts_keyword(function: Callable[..., Any], name: str) -> bool:
     return any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
 
 
+def _patch_source_loader(source_loso: Any) -> None:
+    """Make the shared BUSH-MEG subject loader tolerant to optional progress callbacks."""
+
+    loader = source_loso._load_subjects_from_config
+    if getattr(loader, _SOURCE_LOADER_MARKER, False):
+        return
+
+    def _load_subjects_from_config(
+        config: Mapping[str, Any],
+        *,
+        config_dir: Path,
+        progress_callback: Callable[..., None] | None = None,
+    ) -> tuple[Any, Any]:
+        kwargs: dict[str, Any] = {"config_dir": config_dir}
+        if _accepts_keyword(loader, "progress_callback"):
+            kwargs["progress_callback"] = progress_callback
+        return loader(config, **kwargs)
+
+    setattr(_load_subjects_from_config, _SOURCE_LOADER_MARKER, True)
+    setattr(_load_subjects_from_config, "__wrapped__", loader)
+    source_loso._load_subjects_from_config = _load_subjects_from_config
+
+
 def install() -> None:
-    """Install a Protocol 3 subject-loader wrapper that honors older loader signatures."""
+    """Install subject-loader wrappers that honor older loader signatures."""
     import neureptrace.bushmeg_all_protocols as all_protocols
     import neureptrace.bushmeg_source_loso as source_loso
 
-    if getattr(all_protocols._load_protocol3_subjects_cached, "_subject_loader_signature_patched", False):
+    _patch_source_loader(source_loso)
+
+    if getattr(all_protocols._load_protocol3_subjects_cached, _PROTOCOL3_CACHE_MARKER, False):
         return
 
     def _load_protocol3_subjects_cached(
@@ -47,7 +75,7 @@ def install() -> None:
         all_protocols._PROTOCOL3_SUBJECT_CACHE[key] = (subjects, encoder)
         return subjects, encoder
 
-    _load_protocol3_subjects_cached._subject_loader_signature_patched = True  # type: ignore[attr-defined]
+    setattr(_load_protocol3_subjects_cached, _PROTOCOL3_CACHE_MARKER, True)
     all_protocols._load_protocol3_subjects_cached = _load_protocol3_subjects_cached
 
 
