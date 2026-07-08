@@ -57,10 +57,7 @@ def _array_for_comparison(value: object) -> np.ndarray:
 
     if isinstance(value, np.ndarray):
         return np.asarray(value)
-    try:
-        return np.asarray(value, dtype=object)
-    except (TypeError, ValueError):
-        return np.asarray(value, dtype=object)
+    return np.asarray(value, dtype=object)
 
 
 def _array_items(array: np.ndarray) -> list[object]:
