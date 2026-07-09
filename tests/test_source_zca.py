@@ -67,6 +67,26 @@ def test_source_zca_accepts_object_arrays_with_one_pass_rows() -> None:
     assert result.test_features.shape == (1, 2)
 
 
+@pytest.mark.parametrize(
+    ("source_features", "test_features"),
+    [
+        (np.asarray([[True, False], [False, True]], dtype=bool), [[0.5, 0.5]]),
+        ([[0.0, 0.0], [1.0, 1.0]], np.asarray([[True, False]], dtype=bool)),
+        ((iter(row) for row in [[True, 0.0], [False, 1.0]]), [[0.5, 0.5]]),
+    ],
+)
+def test_source_zca_rejects_boolean_feature_values(source_features: object, test_features: object) -> None:
+    with pytest.raises(ValueError, match="numeric feature values"):
+        fit_source_zca_transform(source_features=source_features, test_features=test_features)  # type: ignore[arg-type]
+
+
+def test_source_zca_rejects_boolean_apply_features() -> None:
+    reference = fit_source_zca_reference([[0.0, 0.0], [1.0, 1.0]])
+
+    with pytest.raises(ValueError, match="numeric feature values"):
+        apply_source_zca_transform([[True, False]], reference)  # type: ignore[list-item]
+
+
 def test_source_zca_recolor_approximately_restores_centered_source() -> None:
     source = np.asarray([[0.0, 0.0], [1.0, 0.2], [0.2, 1.0], [1.0, 1.0]], dtype=float)
     result = fit_source_zca_transform(source_features=source, test_features=source, config={"recolor": True})
