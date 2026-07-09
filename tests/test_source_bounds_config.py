@@ -3,7 +3,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neureptrace.decoding.source_bounds import SourceBoundsConfig, source_bounds_config
+from neureptrace.decoding.source_bounds import (
+    SourceBoundsConfig,
+    apply_source_feature_bounds,
+    fit_source_feature_bound_values,
+    fit_source_feature_bounds,
+    source_bounds_config,
+)
 
 
 @pytest.mark.parametrize("value", [True, np.bool_(False), np.asarray(True)])
@@ -37,3 +43,53 @@ def test_source_bounds_dataclass_validates_and_normalizes_fields() -> None:
 
     with pytest.raises(ValueError, match="upper_quantile must be a numeric quantile"):
         SourceBoundsConfig(lower_quantile=0.1, upper_quantile=np.asarray(False))
+
+
+def test_source_bounds_materializes_one_pass_feature_iterables() -> None:
+    source_rows = ((value for value in row) for row in ((0.0, 2.0), (1.0, 3.0)))
+    test_rows = ((value for value in row) for row in ((-1.0, 4.0),))
+
+    result = fit_source_feature_bounds(
+        source_features=source_rows,
+        test_features=test_rows,
+        config={"lower_quantile": 0.0, "upper_quantile": 1.0},
+    )
+
+    np.testing.assert_allclose(result.train_features, np.asarray([[0.0, 2.0], [1.0, 3.0]], dtype=np.float32))
+    np.testing.assert_allclose(result.test_features, np.asarray([[0.0, 3.0]], dtype=np.float32))
+    assert result.metadata["source_feature_bounds_n_source_rows"] == 2
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        (
+            {"source_features": [[True, 0.0]], "test_features": [[0.0, 1.0]]},
+            "source_features must contain numeric feature values, not boolean flags",
+        ),
+        (
+            {"source_features": [[0.0, 1.0]], "test_features": [[False, 1.0]]},
+            "test_features must contain numeric feature values, not boolean flags",
+        ),
+    ],
+)
+def test_source_bounds_rejects_boolean_feature_values(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        fit_source_feature_bounds(**kwargs)
+
+
+def test_source_bounds_rejects_boolean_values_inside_one_pass_iterables() -> None:
+    source_rows = ((value for value in row) for row in ((True, 0.0), (1.0, 2.0)))
+
+    with pytest.raises(ValueError, match="source_features must contain numeric feature values, not boolean flags"):
+        fit_source_feature_bound_values(source_rows)
+
+
+def test_apply_source_bounds_rejects_boolean_feature_values() -> None:
+    bounds = fit_source_feature_bound_values(
+        [[0.0, 1.0], [1.0, 2.0]],
+        config={"lower_quantile": 0.0, "upper_quantile": 1.0},
+    )
+
+    with pytest.raises(ValueError, match="features must contain numeric feature values, not boolean flags"):
+        apply_source_feature_bounds([[False, 1.0]], bounds)
