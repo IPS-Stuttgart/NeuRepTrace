@@ -286,9 +286,10 @@ def _consensus_metadata(
 
 
 def _probability_tensor(probability_variants: Sequence[np.ndarray]) -> np.ndarray:
-    if not probability_variants:
+    variant_items = tuple(probability_variants)
+    if not variant_items:
         raise ValueError("At least one probability matrix is required.")
-    matrices = [_normalize_probability_rows(matrix) for matrix in probability_variants]
+    matrices = [_normalize_probability_rows(matrix) for matrix in variant_items]
     first_shape = matrices[0].shape
     for matrix in matrices:
         if matrix.shape != first_shape:
