@@ -258,6 +258,8 @@ def extract_phase(signal_values, sampling_rate, lowcut: float = 8.0, highcut: fl
 def circular_mean_phase(phases, *, axis=None) -> np.ndarray:
     """Return circular mean phase for phase values in radians."""
 
+    if _contains_bool_like(phases):
+        raise ValueError("phases must contain numeric phase values, not boolean values.")
     phase_array = np.asarray(phases, dtype=float)
     if phase_array.size == 0:
         raise ValueError("At least one phase value is required.")
@@ -269,7 +271,11 @@ def circular_mean_phase(phases, *, axis=None) -> np.ndarray:
 def average_phases(phases) -> np.ndarray:
     """Average a non-empty collection of equally shaped phase arrays."""
 
-    phase_list = [np.asarray(phase, dtype=float) for phase in phases]
+    phase_list = []
+    for phase in phases:
+        if _contains_bool_like(phase):
+            raise ValueError("phases must contain numeric phase values, not boolean values.")
+        phase_list.append(np.asarray(phase, dtype=float))
     if not phase_list:
         raise ValueError("At least one phase array is required.")
 
