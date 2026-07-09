@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 SOURCE_TEMPERATURE_PROTOCOL = "strict_source_only_probability_temperature"
 SOURCE_TEMPERATURE_CATEGORY = "1_strict_source_only"
@@ -239,20 +240,44 @@ def _unique_values(values: np.ndarray) -> np.ndarray:
     return vector
 
 
-def _value_key(value: Any) -> Any:
+def _is_numpy_nat_scalar(value: Any) -> bool:
+    return isinstance(value, (np.datetime64, np.timedelta64)) and bool(np.isnat(value))
+
+
+def _missing_value_key(value: Any) -> tuple[str] | None:
+    if _is_numpy_nat_scalar(value):
+        return ("missing",)
     if isinstance(value, np.generic):
         value = value.item()
+    if value is pd.NA or value is pd.NaT:
+        return ("missing",)
+    if isinstance(value, float) and np.isnan(value):
+        return ("missing",)
+    return None
+
+
+def _value_sort_key(value: Any) -> tuple[str, str, str]:
+    return (type(value).__module__, type(value).__qualname__, repr(value))
+
+
+def _value_key(value: Any) -> Any:
+    missing_key = _missing_value_key(value)
+    if missing_key is not None:
+        return missing_key
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, np.ndarray):
+        return ("sequence", tuple(_value_key(item) for item in value.tolist()))
+    if isinstance(value, (list, tuple)):
+        return ("sequence", tuple(_value_key(item) for item in value))
+    if isinstance(value, dict):
+        normalized_items = ((_value_key(key), _value_key(item)) for key, item in value.items())
+        return ("mapping", tuple(sorted(normalized_items, key=lambda pair: (_value_sort_key(pair[0]), _value_sort_key(pair[1])))))
     try:
         hash(value)
     except TypeError:
-        if isinstance(value, np.ndarray):
-            return tuple(_value_key(item) for item in value.tolist())
-        if isinstance(value, (list, tuple)):
-            return tuple(_value_key(item) for item in value)
-        if isinstance(value, dict):
-            return tuple(sorted((_value_key(key), _value_key(item)) for key, item in value.items()))
-        return repr(value)
-    return value
+        return ("repr", type(value).__module__, type(value).__qualname__, repr(value))
+    return ("scalar", type(value).__module__, type(value).__qualname__, value)
 
 
 def _contains_boolean(value: Any) -> bool:
