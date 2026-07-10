@@ -61,7 +61,7 @@ class SourceWhitenResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-# pylint: disable-next=too-many-arguments
+# pylint: disable-next=too-many-arguments)
 
 def fit_source_whiten(
     *,
@@ -168,8 +168,20 @@ def apply_source_whiten(features: Iterable[Iterable[float]] | np.ndarray, transf
 
 def _coerce_config(config: SourceWhitenConfig | Mapping[str, Any]) -> SourceWhitenConfig:
     if isinstance(config, SourceWhitenConfig):
-        return config
-    return source_whiten_config(**dict(config))
+        return source_whiten_config(
+            method=config.method,
+            n_components=config.n_components,
+            center=config.center,
+            regularization=config.regularization,
+        )
+    if not isinstance(config, Mapping):
+        raise ValueError("source whitening config must be a mapping or SourceWhitenConfig.")
+    raw = dict(config)
+    allowed = {"method", "n_components", "center", "regularization"}
+    unknown = sorted(str(key) for key in raw if key not in allowed)
+    if unknown:
+        raise ValueError(f"Unknown source whitening config option(s): {', '.join(unknown)}. Available options: {', '.join(sorted(allowed))}.")
+    return source_whiten_config(**raw)
 
 
 def _covariance(centered: np.ndarray) -> np.ndarray:
