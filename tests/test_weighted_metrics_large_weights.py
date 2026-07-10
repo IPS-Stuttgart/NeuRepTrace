@@ -31,23 +31,23 @@ def test_weighted_metrics_remain_finite_for_large_finite_weights() -> None:
     probabilities = np.asarray([[0.0, 1.0], [0.2, 0.8]])
     labels = np.asarray([0, 1])
     large = np.asarray([1e308, 1e307])
-    reference = np.asarray([10.0, 1.0])
+    scale_invariant_reference = np.asarray([1.0, 0.1])
 
     assert weighted_brier_score_multiclass(probabilities, labels, large) == pytest.approx(
-        weighted_brier_score_multiclass(probabilities, labels, reference)
+        weighted_brier_score_multiclass(probabilities, labels, scale_invariant_reference)
     )
     assert weighted_negative_log_likelihood(probabilities, labels, large) == pytest.approx(
-        weighted_negative_log_likelihood(probabilities, labels, reference)
+        weighted_negative_log_likelihood(probabilities, labels, scale_invariant_reference)
     )
     assert weighted_top_k_accuracy(probabilities, labels, large) == pytest.approx(
-        weighted_top_k_accuracy(probabilities, labels, reference)
+        weighted_top_k_accuracy(probabilities, labels, scale_invariant_reference)
     )
     assert weighted_expected_calibration_error(probabilities, labels, large, n_bins=2) == pytest.approx(
-        weighted_expected_calibration_error(probabilities, labels, reference, n_bins=2)
+        weighted_expected_calibration_error(probabilities, labels, scale_invariant_reference, n_bins=2)
     )
 
     rows = weighted_reliability_bins(probabilities, labels, large, n_bins=2)
-    reference_rows = weighted_reliability_bins(probabilities, labels, reference, n_bins=2)
+    reference_rows = weighted_reliability_bins(probabilities, labels, scale_invariant_reference, n_bins=2)
     for row, reference_row in zip(rows, reference_rows, strict=True):
         assert row["sample_weight"] == pytest.approx(reference_row["sample_weight"])
         assert row["sample_weight_fraction"] == pytest.approx(reference_row["sample_weight_fraction"])
