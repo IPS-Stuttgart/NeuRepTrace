@@ -60,8 +60,8 @@ def normalize_train_score_rows_maxabs(
     return RowMaxAbsResult(
         train_features=train_out.astype(np.float32, copy=False),
         score_features=score_out.astype(np.float32, copy=False),
-        train_scales=train_scales.astype(np.float32, copy=False),
-        score_scales=score_scales.astype(np.float32, copy=False),
+        train_scales=train_scales.astype(float, copy=False),
+        score_scales=score_scales.astype(float, copy=False),
         metadata={
             "row_maxabs_normalization": True,
             "row_maxabs_protocol": ROW_MAXABS_PROTOCOL,
