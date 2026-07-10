@@ -61,7 +61,7 @@ class SourceWhitenResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-# pylint: disable-next=too-many-arguments)
+# pylint: disable-next=too-many-arguments
 
 def fit_source_whiten(
     *,
