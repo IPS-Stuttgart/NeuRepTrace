@@ -41,6 +41,57 @@ def test_normalize_train_test_rows_l2_rejects_width_mismatch() -> None:
         normalize_train_test_rows_l2(train_features=[[1.0, 2.0]], test_features=[[1.0]])
 
 
+def test_row_l2_accepts_one_pass_feature_iterables() -> None:
+    train = ((value for value in row) for row in ([3.0, 4.0], [0.0, 5.0]))
+    test = ((value for value in row) for row in ([-8.0, 6.0],))
+
+    result = normalize_train_test_rows_l2(train_features=train, test_features=test)
+    normalized, norms = normalize_rows_l2(((value for value in row) for row in ([6.0, 8.0],)))
+
+    assert result.train_features.shape == (2, 2)
+    assert result.test_features.shape == (1, 2)
+    np.testing.assert_allclose(normalized, np.asarray([[0.6, 0.8]]))
+    np.testing.assert_allclose(norms, np.asarray([10.0]))
+
+
+@pytest.mark.parametrize(
+    "features",
+    [
+        [[True, False], [False, True]],
+        np.asarray([[True, False]], dtype=bool),
+        np.asarray([[True, 0.0]], dtype=object),
+        ((value for value in row) for row in ([True, 0.0],)),
+    ],
+)
+def test_normalize_rows_l2_rejects_boolean_features(features: object) -> None:
+    with pytest.raises(ValueError, match="features.*boolean flags"):
+        normalize_rows_l2(features)  # type: ignore[arg-type]
+
+
+def test_normalize_train_test_rows_l2_rejects_boolean_features() -> None:
+    with pytest.raises(ValueError, match="train_features.*boolean flags"):
+        normalize_train_test_rows_l2(train_features=[[True, False]], test_features=[[1.0, 2.0]])
+
+    with pytest.raises(ValueError, match="test_features.*boolean flags"):
+        normalize_train_test_rows_l2(train_features=[[1.0, 2.0]], test_features=[[False, True]])
+
+
+def test_row_l2_mapping_config_validation() -> None:
+    with pytest.raises(ValueError, match="Unknown row L2 config option"):
+        normalize_train_test_rows_l2(
+            train_features=[[1.0, 2.0]],
+            test_features=[[1.0, 2.0]],
+            config={"epislon": 1e-5},
+        )
+
+    with pytest.raises(ValueError, match="Row L2 config must be a mapping"):
+        normalize_train_test_rows_l2(
+            train_features=[[1.0, 2.0]],
+            test_features=[[1.0, 2.0]],
+            config=object(),  # type: ignore[arg-type]
+        )
+
+
 def test_row_l2_config_validation() -> None:
     assert row_l2_config(epsilon="1e-5").epsilon == 1e-5
 
