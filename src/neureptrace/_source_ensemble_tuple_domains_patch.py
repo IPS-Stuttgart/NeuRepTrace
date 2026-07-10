@@ -48,6 +48,18 @@ def install() -> None:
     if getattr(source_ensemble, _PATCH_MARKER, False):
         return
 
+    original_aligned_probabilities = source_ensemble._aligned_probabilities
+
+    def aligned_probabilities(model, features: np.ndarray, *, classes: np.ndarray, epsilon: float) -> np.ndarray:
+        """Validate prediction-only estimator outputs before probability alignment."""
+
+        if hasattr(model, "predict_proba") or hasattr(model, "decision_function"):
+            return original_aligned_probabilities(model, features, classes=classes, epsilon=epsilon)
+        predictions = np.asarray(model.predict(features), dtype=object)
+        if predictions.ndim != 1 or predictions.shape[0] != features.shape[0]:
+            raise ValueError("predict output must contain one label per feature row.")
+        return original_aligned_probabilities(model, features, classes=classes, epsilon=epsilon)
+
     def domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int) -> np.ndarray:
         vector = source_ensemble._label_vector(values, name="source_domains")
         if vector.shape[0] != expected_length:
@@ -169,6 +181,7 @@ def install() -> None:
             ),
         )
 
+    source_ensemble._aligned_probabilities = aligned_probabilities
     source_ensemble._domain_vector = domain_vector
     source_ensemble._unique_domain_values = unique_domain_values
     source_ensemble._domain_mask = domain_mask
