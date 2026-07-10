@@ -14,22 +14,24 @@ from neureptrace.metrics.weighted import (
 )
 
 
-def test_validate_sample_weight_rescales_only_when_total_would_overflow() -> None:
-    large = np.asarray([1e308, 1e308])
+def test_validate_sample_weight_rescales_only_when_reductions_risk_overflow() -> None:
+    overflowing_total = np.asarray([1e308, 1e308])
+    finite_total_large_numerator = np.asarray([1e308, 1e307])
 
-    validated = validate_sample_weight(large, 2)
-    exported = exported_validate_sample_weight(large, 2)
+    validated = validate_sample_weight(overflowing_total, 2)
+    exported = exported_validate_sample_weight(overflowing_total, 2)
 
     np.testing.assert_allclose(validated, [1.0, 1.0])
     np.testing.assert_allclose(exported, validated)
+    np.testing.assert_allclose(validate_sample_weight(finite_total_large_numerator, 2), [1.0, 0.1])
     np.testing.assert_allclose(validate_sample_weight([1.0, 2.0], 2), [1.0, 2.0])
 
 
 def test_weighted_metrics_remain_finite_for_large_finite_weights() -> None:
-    probabilities = np.asarray([[0.9, 0.1], [0.2, 0.8]])
+    probabilities = np.asarray([[0.0, 1.0], [0.2, 0.8]])
     labels = np.asarray([0, 1])
-    large = np.asarray([1e308, 1e308])
-    reference = np.asarray([1.0, 1.0])
+    large = np.asarray([1e308, 1e307])
+    reference = np.asarray([10.0, 1.0])
 
     assert weighted_brier_score_multiclass(probabilities, labels, large) == pytest.approx(
         weighted_brier_score_multiclass(probabilities, labels, reference)
