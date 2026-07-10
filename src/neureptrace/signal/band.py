@@ -99,7 +99,7 @@ sampling_rate_from_time_vector = sampling_rate_from_time_axis
 def validate_sampling_rate(sampling_rate) -> float:
     """Return a positive finite sampling rate in Hz."""
 
-    if _is_bool_like(sampling_rate):
+    if _contains_bool_like(sampling_rate):
         raise ValueError("sampling_rate must be a positive finite value, not boolean.")
     try:
         sampling_rate = float(sampling_rate)
@@ -135,7 +135,7 @@ def validate_band_hz(band_hz: Sequence[float], sampling_rate) -> BandHz:
     except (TypeError, ValueError) as exc:
         raise ValueError("band_hz must contain exactly two cutoff frequencies.") from exc
 
-    if _is_bool_like(lowcut) or _is_bool_like(highcut):
+    if _contains_bool_like(lowcut) or _contains_bool_like(highcut):
         raise ValueError("Cutoff frequencies must be finite numbers, not boolean.")
     lowcut = float(lowcut)
     highcut = float(highcut)
