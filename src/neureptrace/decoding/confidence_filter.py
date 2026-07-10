@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,8 +25,9 @@ class ConfidenceFilterResult:
 
 # pylint: disable-next=too-many-arguments
 
+
 def confidence_filter(
-    probabilities: Sequence[Sequence[float]] | np.ndarray,
+    probabilities: Iterable[Iterable[float]] | np.ndarray,
     *,
     min_confidence: float | str = 0.0,
     min_margin: float | str = 0.0,
@@ -81,7 +82,7 @@ def confidence_filter(
     )
 
 
-def probability_entropy(probabilities: Sequence[Sequence[float]] | np.ndarray, *, normalize: bool | str = True) -> np.ndarray:
+def probability_entropy(probabilities: Iterable[Iterable[float]] | np.ndarray, *, normalize: bool | str = True) -> np.ndarray:
     """Return entropy for each probability row."""
 
     matrix = _probability_matrix(probabilities)
@@ -91,7 +92,24 @@ def probability_entropy(probabilities: Sequence[Sequence[float]] | np.ndarray, *
     return entropy.astype(np.float32, copy=False)
 
 
-def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+def _materialize_probability_iterables(value: object) -> object:
+    """Materialize generator-backed probability rows before NumPy conversion."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_probability_iterables(value.tolist())
+    if hasattr(value, "__array__"):
+        return value
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_probability_iterables(item) for item in value]
+
+
+def _probability_matrix(values: Iterable[Iterable[float]] | np.ndarray) -> np.ndarray:
+    values = _materialize_probability_iterables(values)
     if _contains_boolean_value(values):
         raise ValueError("probabilities must contain numeric probability values, not booleans.")
     matrix = np.asarray(values, dtype=float)
