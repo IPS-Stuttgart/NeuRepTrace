@@ -24,6 +24,7 @@ import importlib.abc
 import importlib.machinery
 import sys
 from collections.abc import Hashable, Mapping
+from dataclasses import replace
 from functools import wraps
 from types import ModuleType
 from typing import Any
@@ -173,6 +174,14 @@ def _wrap_estimator(module: ModuleType, estimator: Any | None) -> _EncodedLabelE
     return _EncodedLabelEstimator(base_estimator)
 
 
+def _active_classes_for_result(module: ModuleType, labels: np.ndarray, source_domains: Any, result: Any) -> np.ndarray:
+    if result.source_domains.shape[0] == labels.shape[0]:
+        return module._unique_value_array(labels)
+    domains = module._domain_ids(labels.shape[0], source_domains, name="source_domains")
+    keep_mask = module._values_in(domains, result.selected_source_domains)
+    return module._unique_value_array(labels[keep_mask])
+
+
 def _patch_module(module: ModuleType) -> None:
     if getattr(module, _PATCH_MARKER, False):
         return
@@ -181,6 +190,7 @@ def _patch_module(module: ModuleType) -> None:
     original_transfer = module.mekt_transfer_features
     original_fit_predict = module.fit_predict_mekt_transfer
     original_scores = module.domain_transferability_scores
+    original_initial_pseudo_labels = module._initial_pseudo_labels
 
     def _domain_ids(n_rows: int, source_domains: Any, *, name: str) -> np.ndarray:
         if source_domains is None:
@@ -189,6 +199,26 @@ def _patch_module(module: ModuleType) -> None:
         if domains.shape[0] != n_rows:
             raise ValueError(f"{name} length must match source rows.")
         return domains
+
+    @wraps(original_initial_pseudo_labels)
+    def _initial_pseudo_labels(
+        source_features: Any,
+        source_labels: Any,
+        target_features: Any,
+        *,
+        classes: Any,
+        estimator: Any,
+        initial_pseudo_labels: Any,
+    ) -> np.ndarray:
+        active_classes = module._unique_value_array(source_labels)
+        return original_initial_pseudo_labels(
+            source_features,
+            source_labels,
+            target_features,
+            classes=active_classes,
+            estimator=estimator,
+            initial_pseudo_labels=initial_pseudo_labels,
+        )
 
     @wraps(original_centroid)
     def centroid_aligned_tangent_features(
@@ -213,7 +243,12 @@ def _patch_module(module: ModuleType) -> None:
         if kwargs.get("initial_pseudo_labels") is not None:
             kwargs["initial_pseudo_labels"] = _as_hashable_vector(kwargs["initial_pseudo_labels"], name="initial_pseudo_labels")
         kwargs["estimator"] = _wrap_estimator(module, kwargs.get("estimator"))
-        return original_transfer(source_covariances, _as_hashable_vector(source_labels, name="source_labels"), target_covariances, **kwargs)
+        labels = _as_hashable_vector(source_labels, name="source_labels")
+        result = original_transfer(source_covariances, labels, target_covariances, **kwargs)
+        active_classes = _active_classes_for_result(module, labels, kwargs.get("source_domains"), result)
+        if not np.array_equal(result.classes, active_classes):
+            result = replace(result, classes=active_classes)
+        return result
 
     @wraps(original_fit_predict)
     def fit_predict_mekt_transfer(source_covariances: Any, source_labels: Any, target_covariances: Any, **kwargs: Any) -> Any:
@@ -235,6 +270,7 @@ def _patch_module(module: ModuleType) -> None:
 
     module._domain_ids = _domain_ids
     module._select_top_domains = _select_top_domains
+    module._initial_pseudo_labels = _initial_pseudo_labels
     module.centroid_aligned_tangent_features = centroid_aligned_tangent_features
     module.mekt_transfer_features = mekt_transfer_features
     module.fit_predict_mekt_transfer = fit_predict_mekt_transfer
