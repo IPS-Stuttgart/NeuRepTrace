@@ -34,10 +34,10 @@ def column_stats(values: Sequence[Sequence[float]] | np.ndarray, *, scale_floor:
     minimum = np.min(matrix, axis=0)
     maximum = np.max(matrix, axis=0)
     return ArrayStatsResult(
-        mean=mean.astype(np.float32, copy=False),
-        scale=scale.astype(np.float32, copy=False),
-        minimum=minimum.astype(np.float32, copy=False),
-        maximum=maximum.astype(np.float32, copy=False),
+        mean=mean,
+        scale=scale,
+        minimum=minimum,
+        maximum=maximum,
         metadata={"array_stats_rows": int(matrix.shape[0]), "array_stats_columns": int(matrix.shape[1])},
     )
 
