@@ -92,3 +92,33 @@ def test_row_l1_rejects_array_epsilon_values(epsilon: object) -> None:
 
     with pytest.raises(ValueError, match="epsilon"):
         normalize_rows_l1([[1.0, 2.0]], epsilon=epsilon)  # type: ignore[arg-type]
+
+
+def test_row_l1_accepts_nested_one_pass_feature_iterables() -> None:
+    rows = ((value for value in row) for row in ([1.0, -2.0], [0.0, 3.0]))
+
+    normalized, norms = normalize_rows_l1(rows)
+
+    np.testing.assert_allclose(norms, np.asarray([3.0, 3.0]))
+    np.testing.assert_allclose(normalized, np.asarray([[1.0 / 3.0, -2.0 / 3.0], [0.0, 1.0]]))
+
+
+@pytest.mark.parametrize(
+    "features",
+    [
+        [[True, False]],
+        [[1.0, np.bool_(True)]],
+        np.asarray([[True, False]], dtype=bool),
+        np.asarray([[1.0, True]], dtype=object),
+    ],
+)
+def test_row_l1_rejects_boolean_feature_values(features: object) -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        normalize_rows_l1(features)  # type: ignore[arg-type]
+
+
+def test_row_l1_rejects_boolean_values_in_one_pass_iterables() -> None:
+    rows = ((value for value in row) for row in ([1.0, True],))
+
+    with pytest.raises(ValueError, match="boolean"):
+        normalize_rows_l1(rows)
