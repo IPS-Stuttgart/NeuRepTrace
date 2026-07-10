@@ -32,6 +32,30 @@ def test_load_reaction_time_csv_converts_one_based_trials(tmp_path: Path):
     ]
 
 
+def test_reaction_time_join_preserves_large_integer_keys(tmp_path: Path):
+    large = 2**53
+    csv_path = tmp_path / "rt.csv"
+    csv_path.write_text(
+        "participant,dataset,trial,rt\n"
+        f"{large},main,{large},0.41\n"
+        f"{large + 1},main,{large + 1},0.39\n",
+        encoding="utf-8",
+    )
+
+    reaction_rows = load_reaction_time_csv(csv_path)
+
+    assert [row["participant"] for row in reaction_rows] == [str(large), str(large + 1)]
+    assert [row["trial"] for row in reaction_rows] == [large, large + 1]
+
+    metric_rows = [
+        {"participant": large, "dataset": "main", "trial": large, "score": 1.0},
+        {"participant": large + 1, "dataset": "main", "trial": large + 1, "score": 2.0},
+    ]
+    joined = join_reaction_times(metric_rows, reaction_rows, detect_one_based_trials=False)
+
+    assert [row["reaction_time"] for row in joined] == [0.41, 0.39]
+
+
 @pytest.mark.parametrize("trial_index_base", [False, True])
 def test_load_reaction_time_csv_rejects_boolean_trial_index_base(tmp_path: Path, trial_index_base: bool):
     csv_path = tmp_path / "rt.csv"
