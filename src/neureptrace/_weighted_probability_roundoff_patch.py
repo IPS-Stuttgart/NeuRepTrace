@@ -10,6 +10,7 @@ import numpy as np
 
 _PATCH_MARKER = "_neureptrace_weighted_probability_roundoff_patch_installed"
 _PROBABILITY_NORMALIZATION_ATOL = 1e-6
+_WEIGHTED_REDUCTION_SAFETY_FACTOR = 1024.0
 
 
 def _label_input_array(labels: Any) -> np.ndarray:
@@ -66,19 +67,22 @@ def _overflow_safe_sample_weight_validator(original_validate):
         with np.errstate(over="ignore", invalid="ignore"):
             weights = original_validate(sample_weight, n_samples)
             total_weight = float(np.sum(weights))
-        if np.isfinite(total_weight):
+        safe_total = np.finfo(float).max / _WEIGHTED_REDUCTION_SAFETY_FACTOR
+        if np.isfinite(total_weight) and total_weight <= safe_total:
             return weights
 
         max_weight = float(np.max(weights))
         # The original validator guarantees non-negative weights and positive
         # total mass, so max_weight is finite and strictly positive here.
+        # A safety factor above the largest possible clipped float64 log-loss
+        # also protects weighted numerators when the denominator remains finite.
         return weights / max_weight
 
     return validate_sample_weight
 
 
 def install() -> None:
-    """Patch weighted metrics for probability roundoff and weight-sum overflow."""
+    """Patch weighted metrics for probability roundoff and weight-reduction overflow."""
 
     weighted = importlib.import_module("neureptrace.metrics.weighted")
     if getattr(weighted, _PATCH_MARKER, False):
