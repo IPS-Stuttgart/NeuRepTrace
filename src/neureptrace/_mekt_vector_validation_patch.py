@@ -12,6 +12,10 @@ selection materializes the top-k domain list.  Without that guard, NumPy can coe
 ``[(subject, run), ...]`` into a 2-D string array, causing matching and domain
 selection to operate on flattened scalar cells instead of per-row domain tuples.
 
+Hashable scalar labels are stored in object vectors and deduplicated with shared
+object-label equality.  This prevents heterogeneous values such as integer ``1``
+and string ``"1"`` from being silently coerced into the same NumPy string class.
+
 Finally, MEKT estimator fits are routed through a dense integer label wrapper.
 Valid tuple-valued source classes remain exposed in MEKT results and predictions,
 but scikit-learn estimators no longer see sequence-valued class labels as legacy
@@ -32,14 +36,14 @@ from typing import Any
 import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
 
+from neureptrace._object_label_utils import values_equal as _object_values_equal
+
 _TARGET_MODULE = "neureptrace.decoding.mekt"
 _PATCH_MARKER = "_neureptrace_mekt_vector_validation_patch_installed"
 _FINDER_MARKER = "_neureptrace_mekt_vector_validation_finder"
 
 
 def _object_array(items: list[Any]) -> np.ndarray:
-    if not any(isinstance(item, tuple) for item in items):
-        return np.asarray(items)
     vector = np.empty(len(items), dtype=object)
     for index, item in enumerate(items):
         vector[index] = item
@@ -192,6 +196,19 @@ def _patch_module(module: ModuleType) -> None:
     original_scores = module.domain_transferability_scores
     original_initial_pseudo_labels = module._initial_pseudo_labels
 
+    def _values_equal(left: Any, right: Any) -> bool:
+        return _object_values_equal(left, right)
+
+    def _unique_values(values: Any) -> list[Any]:
+        unique: list[Any] = []
+        for value in module._value_list(values):
+            if not any(_values_equal(value, existing) for existing in unique):
+                unique.append(value)
+        return unique
+
+    def _unique_value_array(values: Any) -> np.ndarray:
+        return _object_array(_unique_values(values))
+
     def _domain_ids(n_rows: int, source_domains: Any, *, name: str) -> np.ndarray:
         if source_domains is None:
             return np.zeros(n_rows, dtype=int)
@@ -268,6 +285,9 @@ def _patch_module(module: ModuleType) -> None:
             **kwargs,
         )
 
+    module._values_equal = _values_equal
+    module._unique_values = _unique_values
+    module._unique_value_array = _unique_value_array
     module._domain_ids = _domain_ids
     module._select_top_domains = _select_top_domains
     module._initial_pseudo_labels = _initial_pseudo_labels
