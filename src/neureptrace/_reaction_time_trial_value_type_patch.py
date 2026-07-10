@@ -49,10 +49,10 @@ def _to_float(value: object) -> float:
 def _to_int(value: object) -> int:
     """Parse an integer-valued trial key exactly, including large integers."""
 
-    text = "" if value is None else str(value).strip()
     try:
+        text = "" if value is None else str(value).strip()
         number = Decimal(text)
-    except InvalidOperation as exc:
+    except (TypeError, ValueError, InvalidOperation) as exc:
         raise _trial_error(value) from exc
     if not number.is_finite() or number != number.to_integral_value():
         raise _trial_error(value)
