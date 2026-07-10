@@ -34,6 +34,22 @@ def test_train_score_row_maxabs_metadata() -> None:
     assert result.metadata["row_maxabs_valid_for_strict_source_only"] is True
 
 
+def test_train_score_row_maxabs_preserves_large_finite_scales() -> None:
+    result = normalize_train_score_rows_maxabs(
+        train_features=[[1e100, -5e99]],
+        score_features=[[1e80, -1e80]],
+    )
+
+    assert result.train_scales.dtype == np.float64
+    assert result.score_scales.dtype == np.float64
+    assert np.all(np.isfinite(result.train_scales))
+    assert np.all(np.isfinite(result.score_scales))
+    np.testing.assert_allclose(result.train_scales, [1e100])
+    np.testing.assert_allclose(result.score_scales, [1e80])
+    np.testing.assert_allclose(result.train_features, [[1.0, -0.5]])
+    np.testing.assert_allclose(result.score_features, [[1.0, -1.0]])
+
+
 def test_train_score_row_maxabs_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         normalize_train_score_rows_maxabs(train_features=[[1.0, 2.0]], score_features=[[1.0]])
