@@ -60,8 +60,8 @@ def normalize_train_test_rows_l2(
     return RowL2Result(
         train_features=train_out.astype(np.float32, copy=False),
         test_features=test_out.astype(np.float32, copy=False),
-        train_norms=train_norms.astype(np.float32, copy=False),
-        test_norms=test_norms.astype(np.float32, copy=False),
+        train_norms=train_norms.astype(float, copy=False),
+        test_norms=test_norms.astype(float, copy=False),
         metadata={
             "row_l2_normalization": True,
             "row_l2_protocol": ROW_L2_PROTOCOL,
@@ -92,9 +92,24 @@ def normalize_rows_l2(
     """Normalize each row by its L2 norm and return original norms."""
 
     matrix = _feature_matrix(features, name="features")
-    norms = np.linalg.norm(matrix, axis=1)
+    norms = _stable_row_l2_norms(matrix)
     safe_norms = np.maximum(norms, _positive_float(epsilon, name="epsilon"))
     return matrix / safe_norms[:, None], norms
+
+
+def _stable_row_l2_norms(matrix: np.ndarray) -> np.ndarray:
+    """Return row L2 norms without overflowing on representable finite norms."""
+
+    scales = np.max(np.abs(matrix), axis=1)
+    norms = np.zeros(matrix.shape[0], dtype=float)
+    nonzero = scales > 0.0
+    if not np.any(nonzero):
+        return norms
+    scaled = matrix[nonzero] / scales[nonzero, None]
+    scaled_norms = np.sqrt(np.sum(scaled * scaled, axis=1))
+    with np.errstate(over="ignore"):
+        norms[nonzero] = scales[nonzero] * scaled_norms
+    return norms
 
 
 def _coerce_config(config: RowL2Config | Mapping[str, Any]) -> RowL2Config:
