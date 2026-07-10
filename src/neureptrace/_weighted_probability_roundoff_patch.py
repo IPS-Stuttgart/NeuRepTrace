@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from functools import wraps
 from typing import Any
 
 import numpy as np
@@ -57,13 +58,40 @@ def _validate_probability_inputs(probabilities: Any, labels: Any) -> tuple[np.nd
     return probabilities, labels
 
 
+def _overflow_safe_sample_weight_validator(original_validate):
+    """Wrap sample-weight validation with scale-invariant overflow protection."""
+
+    @wraps(original_validate)
+    def validate_sample_weight(sample_weight: Any, n_samples: int) -> np.ndarray:
+        with np.errstate(over="ignore", invalid="ignore"):
+            weights = original_validate(sample_weight, n_samples)
+            total_weight = float(np.sum(weights))
+        if np.isfinite(total_weight):
+            return weights
+
+        max_weight = float(np.max(weights))
+        # The original validator guarantees non-negative weights and positive
+        # total mass, so max_weight is finite and strictly positive here.
+        return weights / max_weight
+
+    return validate_sample_weight
+
+
 def install() -> None:
-    """Patch weighted probability metrics to tolerate tiny floating-point roundoff."""
+    """Patch weighted metrics for probability roundoff and weight-sum overflow."""
 
     weighted = importlib.import_module("neureptrace.metrics.weighted")
     if getattr(weighted, _PATCH_MARKER, False):
         return
+
     weighted._validate_probability_inputs = _validate_probability_inputs
+    validate_sample_weight = _overflow_safe_sample_weight_validator(weighted.validate_sample_weight)
+    weighted.validate_sample_weight = validate_sample_weight
+
+    # ``neureptrace.metrics`` binds the public helper before installing this
+    # compatibility patch, so keep that export aligned with the patched module.
+    metrics = importlib.import_module("neureptrace.metrics")
+    metrics.validate_sample_weight = validate_sample_weight
     setattr(weighted, _PATCH_MARKER, True)
 
 
