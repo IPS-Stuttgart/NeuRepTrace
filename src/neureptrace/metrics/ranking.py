@@ -4,6 +4,8 @@ from collections.abc import Iterable, Sequence
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 
 def rank_class_scores(
     scores: Sequence[Sequence[float]] | np.ndarray | None,
@@ -177,14 +179,15 @@ def _materialize_reusable_label_input(values: object) -> object:
 
 def _label_vector(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
     if isinstance(values, np.ndarray):
-        vector = values.astype(object, copy=False)
-        if vector.ndim == 0:
-            return vector.reshape(1)
-        if vector.ndim == 1:
-            return vector
-        if vector.ndim == 2 and vector.shape[1] == 1:
+        array = np.asarray(values)
+        if array.ndim == 0:
+            return _object_vector([array[()]])
+        if array.ndim == 1:
+            return _object_vector([array[index] for index in range(array.shape[0])])
+        if array.ndim == 2 and array.shape[1] == 1:
             raise ValueError(f"{name} must be one-dimensional.")
-        rows = [tuple(row.tolist()) for row in vector.reshape(vector.shape[0], -1)]
+        flat_rows = array.reshape(array.shape[0], -1)
+        rows = [tuple(flat_rows[row, column] for column in range(flat_rows.shape[1])) for row in range(flat_rows.shape[0])]
         return _object_vector(rows)
 
     if isinstance(values, (str, bytes)):
@@ -284,47 +287,10 @@ def _find_duplicate_class_label(class_order: np.ndarray):
 
 
 def _class_labels_equal(left, right) -> bool:
-    return _labels_equal(_as_comparable_label(left), _as_comparable_label(right))
-
-
-def _labels_equal(left, right) -> bool:
-    if isinstance(left, tuple) and isinstance(right, tuple):
-        if len(left) != len(right):
-            return False
-        return all(_labels_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
-    try:
-        comparison = left == right
-    except (TypeError, ValueError):
-        comparison = False
-    if isinstance(comparison, np.ndarray):
-        try:
-            return bool(np.all(comparison))
-        except (TypeError, ValueError):
-            return False
-    try:
-        if bool(comparison):
-            return True
-    except (TypeError, ValueError):
-        pass
-    try:
-        return bool(np.isscalar(left) and np.isscalar(right) and np.isnan(left) and np.isnan(right))
-    except (TypeError, ValueError):
-        return False
-
-
-def _as_comparable_label(value):
-    value = _as_python_scalar(value)
-    if isinstance(value, np.ndarray):
-        if value.ndim == 0:
-            return _as_comparable_label(value.item())
-        return tuple(_as_comparable_label(item) for item in value.tolist())
-    if isinstance(value, (list, tuple)):
-        return tuple(_as_comparable_label(item) for item in value)
-    if isinstance(value, dict):
-        pairs = [(_as_comparable_label(key), _as_comparable_label(item)) for key, item in value.items()]
-        return tuple(sorted(pairs, key=repr))
-    return value
+    return values_equal(left, right)
 
 
 def _as_python_scalar(value):
+    if isinstance(value, (np.datetime64, np.timedelta64)) and bool(np.isnat(value)):
+        return value
     return value.item() if isinstance(value, np.generic) else value
