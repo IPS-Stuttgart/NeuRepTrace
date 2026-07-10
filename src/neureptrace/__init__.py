@@ -153,6 +153,7 @@ from . import (  # noqa: E402
     _source_jitter_boolean_config_patch,
     _source_label_vector_patch,
     _source_mixup_boolean_config_patch,
+    _source_mixup_lambda_patch,
     _source_mixup_random_state_patch,
     _source_mixstyle_direct_config_patch,
     _source_mixstyle_tuple_labels_patch,
@@ -334,6 +335,7 @@ _source_numpy_string_alias_config_patch.install()
 _source_outlier_nan_labels_patch.install()
 _source_roll_label_patch.install()
 _source_mixup_boolean_config_patch.install()
+_source_mixup_lambda_patch.install()
 _source_mixup_random_state_patch.install()
 _source_mixstyle_direct_config_patch.install()
 _source_mixstyle_tuple_labels_patch.install()
