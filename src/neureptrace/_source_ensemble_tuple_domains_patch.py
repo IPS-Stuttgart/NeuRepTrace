@@ -58,7 +58,12 @@ def install() -> None:
         predictions = np.asarray(model.predict(features), dtype=object)
         if predictions.ndim != 1 or predictions.shape[0] != features.shape[0]:
             raise ValueError("predict output must contain one label per feature row.")
-        return original_aligned_probabilities(model, features, classes=classes, epsilon=epsilon)
+        output = np.full((features.shape[0], classes.shape[0]), epsilon, dtype=float)
+        class_to_column = {class_label: index for index, class_label in enumerate(classes.tolist())}
+        for row, label in enumerate(predictions.tolist()):
+            if label in class_to_column:
+                output[row, class_to_column[label]] = 1.0
+        return source_ensemble._normalize_probability_rows(output, epsilon=epsilon)
 
     def domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int) -> np.ndarray:
         vector = source_ensemble._label_vector(values, name="source_domains")
