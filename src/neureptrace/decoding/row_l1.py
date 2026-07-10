@@ -111,12 +111,46 @@ def _coerce_config(config: RowL1Config | Mapping[str, Any]) -> RowL1Config:
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(f"{name} must not contain boolean values.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-empty two-dimensional numeric matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain only finite values.")
     return matrix
+
+
+def _materialize_iterables(values: Any) -> Any:
+    if isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
+        return values
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return values
+    return [_materialize_iterables(item) for item in iterator]
+
+
+def _contains_boolean_value(values: Any) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_value(item) for item in values.flat)
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return False
+    return any(_contains_boolean_value(item) for item in iterator)
 
 
 def _is_boolean_scalar(value: Any) -> bool:
