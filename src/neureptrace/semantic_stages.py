@@ -72,6 +72,20 @@ def _normalize_stage_controls(
     )
 
 
+def _markdown_table_cell(value: object) -> str:
+    """Return a single Markdown table cell safe for generated reports."""
+
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = str(value).replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    return text.replace("|", r"\|")
+
+
 def _state_names(frame: pd.DataFrame, columns: list[str]) -> list[str]:
     names = []
     for index, column in enumerate(columns):
@@ -373,8 +387,11 @@ def build_stage_report(
         )
         for row in stages.itertuples(index=False):
             n_subjects_min = row.n_subjects_min if hasattr(row, "n_subjects_min") else 0
+            decoder = _markdown_table_cell(row.decoder)
+            emission_mode = _markdown_table_cell(row.emission_mode)
+            semantic_class = _markdown_table_cell(row.semantic_class)
             lines.append(
-                f"| {row.decoder} | {row.emission_mode} | {row.semantic_class} | {row.start_time:.3f} | {row.stop_time:.3f} | "
+                f"| {decoder} | {emission_mode} | {semantic_class} | {row.start_time:.3f} | {row.stop_time:.3f} | "
                 f"{row.duration:.3f} | {row.mean_posterior_true_class:.3f} | {row.mean_viterbi_match_rate:.3f} | {row.peak_time:.3f} | {n_subjects_min} |"
             )
 
@@ -394,7 +411,10 @@ def build_stage_report(
             ]
         )
         for row in peaks.itertuples(index=False):
-            lines.append(f"| {row.decoder} | {row.emission_mode} | {row.true_class} | {row.time:.3f} | {row.posterior_true_class_mean:.3f} | {row.viterbi_match_rate:.3f} |")
+            decoder = _markdown_table_cell(row.decoder)
+            emission_mode = _markdown_table_cell(row.emission_mode)
+            semantic_class = _markdown_table_cell(row.true_class)
+            lines.append(f"| {decoder} | {emission_mode} | {semantic_class} | {row.time:.3f} | {row.posterior_true_class_mean:.3f} | {row.viterbi_match_rate:.3f} |")
 
     lines.extend(
         [
