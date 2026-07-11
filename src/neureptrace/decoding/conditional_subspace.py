@@ -98,8 +98,8 @@ def fit_jda(
         latent[n_source:].astype(np.float32),
         pseudo,
         projection.astype(np.float32),
-        mean.astype(np.float32),
-        scale.astype(np.float32),
+        mean.astype(float, copy=False),
+        scale.astype(float, copy=False),
         metadata,
     )
 
