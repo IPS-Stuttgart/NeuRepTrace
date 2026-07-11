@@ -84,6 +84,38 @@ def test_balanced_resampling_accepts_one_pass_feature_label_and_domain_iterables
     }
 
 
+def test_balanced_resampling_accepts_nested_one_pass_feature_rows() -> None:
+    features = ((value for value in row) for row in [[0.0, 0.5], [1.0, 1.5], [10.0, 10.5]])
+    labels = (label for label in ["a", "a", "b"])
+
+    result = resample_source_rows_balanced(
+        features,
+        labels,
+        config={"strategy": "class", "target": "max", "random_state": 1},
+    )
+
+    assert result.features.shape == (4, 2)
+    assert result.features.dtype == np.float32
+    assert result.labels.tolist().count("a") == 2
+    assert result.labels.tolist().count("b") == 2
+
+
+def test_balanced_resampling_rejects_boolean_feature_values() -> None:
+    with pytest.raises(ValueError, match="boolean flags"):
+        resample_source_rows_balanced(
+            [[0.0, True], [1.0, False]],
+            ["a", "b"],
+            config={"strategy": "none"},
+        )
+
+    with pytest.raises(ValueError, match="boolean flags"):
+        resample_source_rows_balanced(
+            np.asarray([[True], [False]], dtype=bool),
+            ["a", "b"],
+            config={"strategy": "none"},
+        )
+
+
 def test_balanced_resampling_can_undersample_to_smallest_group() -> None:
     features = np.asarray([[0.0], [1.0], [2.0], [10.0]], dtype=float)
     labels = np.asarray(["a", "a", "a", "b"], dtype=object)
