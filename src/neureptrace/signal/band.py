@@ -8,7 +8,7 @@ feature extractors.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 import scipy.signal
@@ -36,6 +36,22 @@ def _contains_bool_like(value: object) -> bool:
     return False
 
 
+def _materialize_numeric_input(value: object) -> object:
+    """Recursively materialize one-pass numeric iterables before validation."""
+
+    if isinstance(value, (str, bytes)):
+        return value
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_numeric_input(value.tolist())
+    if hasattr(value, "__array__"):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_numeric_input(item) for item in value]
+
+
 def _normalize_axis(axis: int, ndim: int) -> int:
     if _is_bool_like(axis):
         raise ValueError("axis must be an integer, not boolean.")
@@ -54,9 +70,13 @@ def _normalize_axis(axis: int, ndim: int) -> int:
 def validate_time_axis(time_vector) -> np.ndarray:
     """Return a validated, one-dimensional, uniformly sampled time axis."""
 
+    time_vector = _materialize_numeric_input(time_vector)
     if _contains_bool_like(time_vector):
         raise ValueError("time_vector must contain numeric time values, not boolean values.")
-    time_vector = np.asarray(time_vector, dtype=float)
+    try:
+        time_vector = np.asarray(time_vector, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("time_vector must contain numeric time values.") from exc
     if time_vector.ndim == 0:
         raise ValueError("time_vector must contain at least two samples.")
     if time_vector.ndim != 1:
@@ -113,9 +133,13 @@ def validate_sampling_rate(sampling_rate) -> float:
 def validate_signal_values(signal_values, *, axis: int = -1) -> np.ndarray:
     """Return finite real-valued signal samples with at least two time samples."""
 
+    signal_values = _materialize_numeric_input(signal_values)
     if _contains_bool_like(signal_values):
         raise ValueError("signal_values must contain real-valued samples, not boolean values.")
-    signal_values = np.asarray(signal_values, dtype=float)
+    try:
+        signal_values = np.asarray(signal_values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("signal_values must contain real-valued samples.") from exc
     if signal_values.ndim == 0:
         raise ValueError("signal_values must have at least one sample dimension.")
     axis = _normalize_axis(axis, signal_values.ndim)
@@ -258,9 +282,13 @@ def extract_phase(signal_values, sampling_rate, lowcut: float = 8.0, highcut: fl
 def circular_mean_phase(phases, *, axis=None) -> np.ndarray:
     """Return circular mean phase for phase values in radians."""
 
+    phases = _materialize_numeric_input(phases)
     if _contains_bool_like(phases):
         raise ValueError("phases must contain numeric phase values, not boolean values.")
-    phase_array = np.asarray(phases, dtype=float)
+    try:
+        phase_array = np.asarray(phases, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("phases must contain numeric phase values.") from exc
     if phase_array.size == 0:
         raise ValueError("At least one phase value is required.")
     if not np.all(np.isfinite(phase_array)):
@@ -273,9 +301,13 @@ def average_phases(phases) -> np.ndarray:
 
     phase_list = []
     for phase in phases:
+        phase = _materialize_numeric_input(phase)
         if _contains_bool_like(phase):
             raise ValueError("phases must contain numeric phase values, not boolean values.")
-        phase_list.append(np.asarray(phase, dtype=float))
+        try:
+            phase_list.append(np.asarray(phase, dtype=float))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("phases must contain numeric phase values.") from exc
     if not phase_list:
         raise ValueError("At least one phase array is required.")
 
