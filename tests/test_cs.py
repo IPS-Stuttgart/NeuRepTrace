@@ -56,3 +56,24 @@ def test_transform_jda_rejects_feature_width_mismatch() -> None:
 
     with pytest.raises(ValueError, match="features width"):
         transform_jda(np.ones((2, 3)), result)
+
+
+def test_fit_jda_preserves_large_transform_state() -> None:
+    source_features = np.asarray([[0.0], [1e40], [3e40], [4e40]], dtype=float)
+    source_labels = np.asarray([0, 0, 1, 1], dtype=object)
+    target_features = np.asarray([[0.5e40], [3.5e40]], dtype=float)
+
+    result = fit_jda(
+        source_features,
+        source_labels,
+        target_features,
+        n_components=1,
+        max_iterations=3,
+    )
+
+    assert result.mean.dtype == np.float64
+    assert result.scale.dtype == np.float64
+    assert np.all(np.isfinite(result.mean))
+    assert np.all(np.isfinite(result.scale))
+    assert np.allclose(transform_jda(source_features, result), result.source_features)
+    assert np.allclose(transform_jda(target_features, result), result.target_features)
