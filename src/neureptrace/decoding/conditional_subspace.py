@@ -9,12 +9,12 @@ from typing import Any
 import numpy as np
 from scipy.linalg import eigh
 
+from neureptrace.decoding._domain_ids import ordered_unique, values_equal
 from neureptrace.decoding.subspace_adaptation import (
     MIN_SCALE,
     _canonicalize_projection,
     _effective_components,
     _feature_matrix,
-    _object_mask,
 )
 
 
@@ -46,7 +46,7 @@ def fit_jda(
     if source.shape[1] != target.shape[1]:
         raise ValueError("source and target feature widths differ")
     labels = _label_vector(source_labels, expected_length=source.shape[0], name="source_labels")
-    classes = tuple(dict.fromkeys(labels.tolist()))
+    classes = ordered_unique(labels)
     if len(classes) < 2:
         raise ValueError("JDA requires at least two source classes")
     iterations = _positive_int(max_iterations, "max_iterations")
@@ -169,15 +169,12 @@ def _hashable_composite_label(value: Any, *, name: str) -> tuple[Any, ...]:
     return label
 
 
+def _object_mask(values: np.ndarray, target: Any) -> np.ndarray:
+    return np.asarray([values_equal(value, target) for value in values.tolist()], dtype=bool)
+
+
 def _same(left: np.ndarray, right: np.ndarray) -> bool:
-    return left.shape == right.shape and all(_object_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
-
-
-def _object_equal(left: Any, right: Any) -> bool:
-    result = left == right
-    if isinstance(result, np.ndarray):
-        return bool(np.array_equal(left, right))
-    return bool(result)
+    return left.shape == right.shape and all(values_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
 
 
 def _positive_int(value: int | str, name: str) -> int:
