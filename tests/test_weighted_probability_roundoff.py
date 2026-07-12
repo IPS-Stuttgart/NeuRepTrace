@@ -31,3 +31,12 @@ def test_weighted_probability_metrics_reject_substantive_negative_probabilities(
 
     with pytest.raises(ValueError, match="non-negative"):
         weighted_top_k_accuracy(probabilities, labels, sample_weight)
+
+
+def test_weighted_probability_metrics_reject_overflowing_row_sums_as_value_error() -> None:
+    probabilities = np.array([[1e308, 1e308]])
+    labels = np.array([0])
+    sample_weight = np.array([1.0])
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"), pytest.raises(ValueError, match="sum to one"):
+        weighted_top_k_accuracy(probabilities, labels, sample_weight)
