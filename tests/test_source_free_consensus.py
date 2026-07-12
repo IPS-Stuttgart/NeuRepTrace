@@ -59,6 +59,41 @@ def test_combine_probability_variants_accepts_one_pass_probabilities_and_weights
     np.testing.assert_allclose(combined[1], np.asarray([0.25, 0.75]))
 
 
+def test_combine_probability_variants_normalizes_extreme_finite_rows() -> None:
+    first = np.array([[1.0e308, 1.0e308], [1.0e308, 1.0]], dtype=float)
+    second = np.array([[1.0e308, 1.0e308], [1.0, 1.0e308]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        combined = combine_probability_variants([first, second], weights=[1.0, 1.0], mode="arithmetic_mean")
+
+    np.testing.assert_allclose(combined.sum(axis=1), 1.0)
+    np.testing.assert_allclose(combined[0], np.asarray([0.5, 0.5]))
+    np.testing.assert_allclose(combined[1], np.asarray([0.5, 0.5]))
+
+
+def test_combine_probability_variants_normalizes_extreme_finite_weights() -> None:
+    first = np.array([[0.80, 0.20], [0.40, 0.60]], dtype=float)
+    second = np.array([[0.60, 0.40], [0.20, 0.80]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        combined = combine_probability_variants([first, second], weights=[1.0e308, 1.0e308], mode="arithmetic_mean")
+
+    np.testing.assert_allclose(combined.sum(axis=1), 1.0)
+    np.testing.assert_allclose(combined[0], np.asarray([0.70, 0.30]))
+    np.testing.assert_allclose(combined[1], np.asarray([0.30, 0.70]))
+
+
+def test_estimate_consensus_variant_weights_accepts_extreme_finite_rows() -> None:
+    first = np.array([[1.0e308, 1.0e308], [1.0e308, 1.0]], dtype=float)
+    second = np.array([[1.0e308, 1.0e308], [1.0, 1.0e308]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        weights = estimate_consensus_variant_weights([first, second])
+
+    np.testing.assert_allclose(weights.sum(), 1.0)
+    assert np.all(np.isfinite(weights))
+
+
 def test_combine_probability_variants_rejects_empty_one_pass_variant_sequence() -> None:
     with pytest.raises(ValueError, match="At least one probability matrix"):
         combine_probability_variants((matrix for matrix in []))
