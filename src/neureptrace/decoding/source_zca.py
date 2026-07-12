@@ -17,7 +17,6 @@ import numpy as np
 SOURCE_ZCA_PROTOCOL = "strict_source_only_zca_whitening"
 SOURCE_ZCA_CATEGORY = "1_strict_source_only"
 DEFAULT_REGULARIZATION = 1e-5
-_FLOAT32_MAX = float(np.finfo(np.float32).max)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,12 +134,16 @@ def _covariance(centered: np.ndarray) -> np.ndarray:
 
 
 def _float32_if_safe(values: np.ndarray) -> np.ndarray:
-    """Use float32 when representable, otherwise retain finite float64 values."""
+    """Use float32 unless conversion overflows or erases nonzero values."""
 
     array = np.asarray(values, dtype=float)
-    if array.size and bool(np.any(np.abs(array) > _FLOAT32_MAX)):
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    lost_finite = np.isfinite(array) & ~np.isfinite(compact)
+    lost_nonzero = (array != 0.0) & (compact == 0.0)
+    if bool(np.any(lost_finite | lost_nonzero)):
         return array
-    return array.astype(np.float32, copy=False)
+    return compact
 
 
 def _metadata(cfg: SourceZCAConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int) -> dict[str, Any]:
