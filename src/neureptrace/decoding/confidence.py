@@ -132,10 +132,11 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.nd
         raise ValueError("probabilities must be a two-dimensional matrix with at least two columns.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must contain finite non-negative values.")
-    row_sums = np.sum(matrix, axis=1, keepdims=True)
-    if np.any(row_sums <= 0.0):
+    row_maxima = np.max(matrix, axis=1, keepdims=True)
+    if np.any(row_maxima <= 0.0):
         raise ValueError("probability rows must have positive mass.")
-    return matrix / row_sums
+    scaled = matrix / row_maxima
+    return scaled / np.sum(scaled, axis=1, keepdims=True)
 
 
 def _scalar_value(value: Any, *, name: str) -> Any:
