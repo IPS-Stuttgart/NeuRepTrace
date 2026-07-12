@@ -47,6 +47,19 @@ def test_confidence_scores_accept_one_pass_probability_iterables() -> None:
     assert np.all(entropy <= 1.0)
 
 
+def test_confidence_scores_normalize_large_finite_rows_without_overflow() -> None:
+    probabilities = np.asarray([[1e308, 1e308], [1e308, 5e307]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise"):
+        confidence, margin, entropy, predicted = confidence_scores(probabilities)
+
+    np.testing.assert_allclose(confidence, [0.5, 2.0 / 3.0])
+    np.testing.assert_allclose(margin, [0.0, 1.0 / 3.0])
+    assert predicted.tolist() == [0, 0]
+    assert np.all(np.isfinite(entropy))
+    assert np.all((entropy >= 0.0) & (entropy <= 1.0))
+
+
 def test_select_confident_rows_accepts_one_pass_probability_iterables() -> None:
     probabilities = (row for row in ([0.9, 0.1], [0.55, 0.45], [0.1, 0.9]))
 
@@ -77,6 +90,18 @@ def test_accepted_probability_rows_returns_normalized_subset() -> None:
     assert accepted.shape == (2, 2)
     assert np.allclose(accepted.sum(axis=1), 1.0)
     assert np.allclose(accepted, [[1.0, 0.0], [0.0, 1.0]])
+
+
+def test_accepted_probability_rows_preserve_large_finite_score_ratios() -> None:
+    probabilities = np.asarray([[1e308, 5e307], [5e307, 1e308]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise"):
+        selection = select_confident_rows(probabilities, min_confidence=0.6)
+        accepted = accepted_probability_rows(probabilities, selection=selection)
+
+    expected = np.asarray([[2.0 / 3.0, 1.0 / 3.0], [1.0 / 3.0, 2.0 / 3.0]])
+    np.testing.assert_allclose(accepted, expected)
+    np.testing.assert_allclose(accepted.sum(axis=1), 1.0)
 
 
 def test_confidence_guardrails() -> None:
