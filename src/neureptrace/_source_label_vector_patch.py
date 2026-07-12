@@ -94,6 +94,7 @@ def install() -> None:
     source_centroid_patch = importlib.import_module("neureptrace._source_centroid_numeric_config_patch")
     source_centroid_patch.install()
     _install_source_prototype_class_patch()
+    importlib.import_module("neureptrace._prior_probability_normalization_patch").install()
     importlib.import_module("neureptrace._source_outlier_nan_labels_patch").install()
     importlib.import_module("neureptrace._source_roll_label_patch").install()
 
