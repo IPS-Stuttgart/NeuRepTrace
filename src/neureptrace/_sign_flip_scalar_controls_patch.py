@@ -1,4 +1,4 @@
-"""Runtime patch for sign-flip scalar control validation."""
+"""Runtime patch for sign-flip scalar controls and zero-variance statistics."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ _PERMUTATION_COUNT_ERROR = "n_permutations must be a positive integer."
 _RANDOM_STATE_ERROR = "random_state must be a non-negative integer seed."
 _CLUSTER_ALPHA_ERROR = "cluster_alpha must be between 0 and 1."
 _PATCH_MARKER = "_sign_flip_scalar_controls_patched"
+_ZERO_VARIANCE_PATCH_MARKER = "_sign_flip_zero_variance_patched"
 
 
 def _scalar_float(value: object, error_message: str) -> float:
@@ -52,6 +53,47 @@ def _validate_cluster_alpha(cluster_alpha: float) -> float:
     return float(numeric)
 
 
+def _finite_t_ratio(means: np.ndarray, sem: np.ndarray) -> np.ndarray:
+    """Return mean/SEM while preserving deterministic nonzero effects.
+
+    A zero SEM with a nonzero mean is an effectively infinite t statistic, not
+    a zero statistic. Use a finite cap so quantiles and cluster-mass sums stay
+    numerically defined. Dividing the floating-point maximum by the number of
+    time points prevents a full-width cluster sum from overflowing.
+    """
+    means = np.asarray(means, dtype=float)
+    sem = np.asarray(sem, dtype=float)
+    statistics = np.divide(means, sem, out=np.zeros_like(means, dtype=float), where=sem > 0)
+    zero_sem = sem == 0
+    if bool(np.any(zero_sem)):
+        n_timepoints = means.shape[-1] if means.ndim else 1
+        cap = np.finfo(float).max / max(1, n_timepoints)
+        statistics[zero_sem & (means > 0)] = cap
+        statistics[zero_sem & (means < 0)] = -cap
+    return statistics
+
+
+def _t_statistic(effects: np.ndarray) -> np.ndarray:
+    if effects.shape[0] < 2:
+        raise ValueError("Need at least two subjects for subject-level inference.")
+    means = effects.mean(axis=0)
+    sem = effects.std(axis=0, ddof=1) / np.sqrt(effects.shape[0])
+    return _finite_t_ratio(means, sem)
+
+
+def _sign_flip_t_statistics(effects: np.ndarray, *, n_permutations: int, random_state: int) -> np.ndarray:
+    n_permutations = _validate_positive_permutation_count(n_permutations)
+    random_state = _validate_random_state(random_state)
+    rng = np.random.default_rng(random_state)
+    n_subjects = effects.shape[0]
+    signs = rng.choice(np.array([-1.0, 1.0]), size=(n_permutations, n_subjects))
+    means = signs @ effects / n_subjects
+    sum_squares = np.sum(effects**2, axis=0)
+    variances = (sum_squares[None, :] - n_subjects * means**2) / (n_subjects - 1)
+    sem = np.sqrt(np.maximum(variances, 0.0) / n_subjects)
+    return _finite_t_ratio(means, sem)
+
+
 def _patch_inference() -> None:
     import neureptrace.inference as inference
 
@@ -59,18 +101,13 @@ def _patch_inference() -> None:
         _validate_positive_permutation_count._sign_flip_scalar_controls_patched = True  # type: ignore[attr-defined]
         inference._validate_positive_permutation_count = _validate_positive_permutation_count
 
-    if not getattr(inference._sign_flip_t_statistics, _PATCH_MARKER, False):
-        original_sign_flip_t_statistics = inference._sign_flip_t_statistics
+    if not getattr(inference._t_statistic, _ZERO_VARIANCE_PATCH_MARKER, False):
+        _t_statistic._sign_flip_zero_variance_patched = True  # type: ignore[attr-defined]
+        inference._t_statistic = _t_statistic
 
-        @wraps(original_sign_flip_t_statistics)
-        def _sign_flip_t_statistics(effects: np.ndarray, *, n_permutations: int, random_state: int) -> np.ndarray:
-            return original_sign_flip_t_statistics(
-                effects,
-                n_permutations=_validate_positive_permutation_count(n_permutations),
-                random_state=_validate_random_state(random_state),
-            )
-
+    if not getattr(inference._sign_flip_t_statistics, _ZERO_VARIANCE_PATCH_MARKER, False):
         _sign_flip_t_statistics._sign_flip_scalar_controls_patched = True  # type: ignore[attr-defined]
+        _sign_flip_t_statistics._sign_flip_zero_variance_patched = True  # type: ignore[attr-defined]
         inference._sign_flip_t_statistics = _sign_flip_t_statistics
 
     if not getattr(inference.sign_flip_time_inference, _PATCH_MARKER, False):
@@ -103,7 +140,7 @@ def _patch_paired_stats() -> None:
 
 
 def install() -> None:
-    """Install strict scalar control validators for sign-flip inference APIs."""
+    """Install strict sign-flip controls and zero-variance t-statistic handling."""
     _patch_inference()
     _patch_paired_stats()
 
