@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace.decoding._domain_ids import ordered_unique, values_equal
 from neureptrace.decoding.joint_distribution_adaptation import (
     JointDistributionAdaptationResult,
     fit_joint_distribution_adaptation,
@@ -43,7 +44,7 @@ def class_balanced_source_indices(
     """Return deterministic class-balanced source-row indices."""
 
     labels = _object_vector(source_labels, name="source_labels")
-    classes = tuple(dict.fromkeys(labels.tolist()))
+    classes = ordered_unique(labels)
     if len(classes) < 2:
         raise ValueError("class balancing requires at least two source classes")
     mode = normalize_class_balance_strategy(strategy)
@@ -99,12 +100,16 @@ def fit_class_balanced_jda(
         strategy=balance_strategy,
         random_state=balance_random_state,
     )
+    options = dict(jda_kwargs)
+    class_order = _resolve_class_order(resample.classes, options.pop("classes", None))
+    encoded_labels = _encode_labels(labels[resample.indices], class_order)
     result = fit_joint_distribution_adaptation(
         features[resample.indices],
-        labels[resample.indices],
+        encoded_labels,
         target_features,
         target_probabilities=target_probabilities,
-        **jda_kwargs,
+        classes=tuple(range(len(class_order))),
+        **options,
     )
     metadata = dict(result.metadata)
     metadata.update(
@@ -125,7 +130,12 @@ def fit_class_balanced_jda(
             "class_balanced_jda_valid_for_unlabeled_target_adaptation": True,
         }
     )
-    return replace(result, metadata=metadata)
+    return replace(
+        result,
+        target_pseudo_labels=_decode_labels(result.target_pseudo_labels, class_order),
+        classes=class_order,
+        metadata=metadata,
+    )
 
 
 def normalize_class_balance_strategy(value: str | None) -> str:
@@ -217,16 +227,36 @@ def _hashable_composite_label(value: Any, *, name: str) -> tuple[Any, ...]:
     return label
 
 
+def _resolve_class_order(inferred: tuple[Any, ...], supplied: Sequence[Any] | np.ndarray | None) -> tuple[Any, ...]:
+    if supplied is None:
+        return inferred
+    classes = tuple(_object_vector(supplied, name="classes").tolist())
+    for index, value in enumerate(classes):
+        if any(values_equal(value, previous) for previous in classes[:index]):
+            raise ValueError("classes must be unique")
+    missing = [value for value in inferred if not any(values_equal(value, supplied_value) for supplied_value in classes)]
+    if missing:
+        raise ValueError(f"classes omit source label(s): {missing!r}")
+    return classes
+
+
+def _encode_labels(labels: np.ndarray, classes: tuple[Any, ...]) -> np.ndarray:
+    encoded = np.empty(labels.shape[0], dtype=int)
+    for row, value in enumerate(labels.tolist()):
+        encoded[row] = next(index for index, class_label in enumerate(classes) if values_equal(value, class_label))
+    return encoded
+
+
+def _decode_labels(labels: np.ndarray, classes: tuple[Any, ...]) -> np.ndarray:
+    decoded = np.empty(labels.shape[0], dtype=object)
+    for index, value in enumerate(labels.tolist()):
+        decoded[index] = classes[int(value)]
+    return decoded
+
+
 def _object_mask(values: np.ndarray, target: Any) -> np.ndarray:
-    return np.asarray([_object_equal(value, target) for value in values.tolist()], dtype=bool)
+    return np.asarray([values_equal(value, target) for value in values.tolist()], dtype=bool)
 
 
 def _matching_indices(values: np.ndarray, target: Any) -> np.ndarray:
     return np.flatnonzero(_object_mask(values, target))
-
-
-def _object_equal(left: Any, right: Any) -> bool:
-    result = left == right
-    if isinstance(result, np.ndarray):
-        return bool(np.array_equal(left, right))
-    return bool(result)
