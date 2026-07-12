@@ -84,7 +84,7 @@ def fit_source_knn_decoder(
         predictions=predictions,
         classes=reference.classes,
         neighbor_indices=neighbor_indices,
-        neighbor_distances=neighbor_distances.astype(np.float32, copy=False),
+        neighbor_distances=neighbor_distances.astype(float, copy=False),
         reference=reference,
         metadata=_metadata(reference, n_test_rows=test.shape[0]),
     )
@@ -112,7 +112,7 @@ def fit_source_knn_reference(
         mean = np.zeros(features.shape[1], dtype=float)
         scale = np.ones(features.shape[1], dtype=float)
     return SourceKNNReference(
-        features=((features - mean) / scale).astype(np.float32, copy=False),
+        features=((features - mean) / scale).astype(float, copy=False),
         labels=labels,
         classes=classes,
         mean=mean.astype(float, copy=False),
@@ -134,8 +134,7 @@ def predict_source_knn_probabilities(
             f"{reference.features.shape[1]} != {test.shape[1]}."
         )
     prepared = (test - reference.mean) / reference.scale
-    squared = _squared_euclidean(prepared, reference.features)
-    distances = np.sqrt(np.maximum(squared, 0.0))
+    distances = _euclidean_distances(prepared, reference.features)
     k = min(_resolve_k(reference.config.k, n_source=reference.features.shape[0]), reference.features.shape[0])
     neighbor_indices = np.argsort(distances, axis=1, kind="mergesort")[:, :k]
     neighbor_distances = np.take_along_axis(distances, neighbor_indices, axis=1)
@@ -244,10 +243,18 @@ def _normalize_k_request(value: Any) -> int | str:
     return int(parsed)
 
 
-def _squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    left_norm = np.sum(left * left, axis=1, keepdims=True)
-    right_norm = np.sum(right * right, axis=1, keepdims=True).T
-    return np.maximum(left_norm + right_norm - 2.0 * (left @ right.T), 0.0)
+def _euclidean_distances(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    distances = np.empty((left.shape[0], right.shape[0]), dtype=float)
+    for row_index, left_row in enumerate(left):
+        diff = right - left_row
+        scales = np.max(np.abs(diff), axis=1)
+        row_distances = np.zeros(right.shape[0], dtype=float)
+        nonzero = scales > 0.0
+        if np.any(nonzero):
+            scaled = diff[nonzero] / scales[nonzero, None]
+            row_distances[nonzero] = scales[nonzero] * np.sqrt(np.sum(scaled * scaled, axis=1))
+        distances[row_index] = row_distances
+    return distances
 
 
 def _materialize_one_pass_iterables(value: object) -> object:
