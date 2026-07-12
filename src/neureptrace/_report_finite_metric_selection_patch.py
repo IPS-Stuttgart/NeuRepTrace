@@ -31,11 +31,16 @@ def _best_metric_row(frame: pd.DataFrame, selection_metric: str, column: str) ->
         raise ValueError(f"Frame is missing selection metric column '{column}'.")
 
     values = _finite_numeric_values(frame, column)
-    if values.notna().sum() == 0:
+    finite_positions = np.flatnonzero(values.notna().to_numpy())
+    if finite_positions.size == 0:
         raise ValueError(f"Selection metric column '{column}' contains no finite values.")
 
-    index = values.idxmax() if report.METRIC_HIGHER_IS_BETTER[selection_metric] else values.idxmin()
-    return frame.loc[index]
+    finite_values = values.iloc[finite_positions].to_numpy(dtype=float)
+    if report.METRIC_HIGHER_IS_BETTER[selection_metric]:
+        selected_offset = int(np.argmax(finite_values))
+    else:
+        selected_offset = int(np.argmin(finite_values))
+    return frame.iloc[int(finite_positions[selected_offset])]
 
 
 def install() -> None:
