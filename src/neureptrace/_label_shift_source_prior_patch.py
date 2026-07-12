@@ -14,6 +14,7 @@ _PROBABILITY_MATRIX_PATCH_MARKER = "_neureptrace_label_shift_probability_matrix_
 _SCALAR_CONFIG_PATCH_MARKER = "_neureptrace_label_shift_scalar_config_patch_installed"
 _CLASSES_PATCH_MARKER = "_neureptrace_label_shift_classes_patch_installed"
 _SOFT_CONFUSION_LABEL_PATCH_MARKER = "_neureptrace_label_shift_soft_confusion_label_patch_installed"
+_SOURCE_PRIOR_NORMALIZATION_PATCH_MARKER = "_neureptrace_source_prior_normalization_patch_installed"
 _SCALAR_ERROR_SUFFIXES = {
     "_positive_int": "must be a positive integer.",
     "_positive_float": "must be positive and finite.",
@@ -96,6 +97,32 @@ def _install_scalar_config_guards(label_shift: Any) -> None:
         if getattr(original, _SCALAR_CONFIG_PATCH_MARKER, False):
             continue
         setattr(label_shift, helper_name, _guarded_scalar_helper(original, error_suffix))
+
+
+def _install_source_prior_normalization_guard() -> None:
+    source_prior = importlib.import_module("neureptrace.decoding.source_prior")
+    original = source_prior._normalize_probability_rows
+    if getattr(original, _SOURCE_PRIOR_NORMALIZATION_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.ndarray:
+        del epsilon
+        materialized = source_prior._materialize_iterables(values)
+        if source_prior._contains_boolean_value(materialized):
+            raise ValueError("probability rows must not contain boolean values.")
+        matrix = np.asarray(materialized, dtype=float)
+        if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
+            raise ValueError("probability rows must be finite and non-negative.")
+        row_maxima = np.max(matrix, axis=1, keepdims=True)
+        if np.any(row_maxima <= 0.0):
+            raise ValueError("probability rows must have positive mass.")
+        scaled = matrix / row_maxima
+        return scaled / np.sum(scaled, axis=1, keepdims=True)
+
+    setattr(_normalize_probability_rows, _SOURCE_PRIOR_NORMALIZATION_PATCH_MARKER, True)
+    _normalize_probability_rows.__wrapped__ = original
+    source_prior._normalize_probability_rows = _normalize_probability_rows
 
 
 def install() -> None:
@@ -186,6 +213,7 @@ def install() -> None:
         label_shift.soft_confusion_matrix = soft_confusion_matrix
 
     _install_scalar_config_guards(label_shift)
+    _install_source_prior_normalization_guard()
 
 
 __all__ = ["install"]
