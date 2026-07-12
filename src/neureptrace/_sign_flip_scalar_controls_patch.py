@@ -58,8 +58,8 @@ def _finite_t_ratio(means: np.ndarray, sem: np.ndarray) -> np.ndarray:
 
     A zero SEM with a nonzero mean is an effectively infinite t statistic, not
     a zero statistic. Use a finite cap so quantiles and cluster-mass sums stay
-    numerically defined. Dividing the floating-point maximum by the number of
-    time points prevents a full-width cluster sum from overflowing.
+    numerically defined. Dividing half the floating-point maximum by the number
+    of time points leaves rounding headroom for a full-width cluster sum.
     """
     means = np.asarray(means, dtype=float)
     sem = np.asarray(sem, dtype=float)
@@ -67,7 +67,7 @@ def _finite_t_ratio(means: np.ndarray, sem: np.ndarray) -> np.ndarray:
     zero_sem = sem == 0
     if bool(np.any(zero_sem)):
         n_timepoints = means.shape[-1] if means.ndim else 1
-        cap = np.finfo(float).max / max(1, n_timepoints)
+        cap = np.finfo(float).max / (2.0 * max(1, n_timepoints))
         statistics[zero_sem & (means > 0)] = cap
         statistics[zero_sem & (means < 0)] = -cap
     return statistics
