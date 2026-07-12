@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from neureptrace.inference import sign_flip_time_inference
+from neureptrace.inference import _sign_flip_t_statistics, _t_statistic, sign_flip_time_inference
 from neureptrace.paired_stats import sign_flip_p_value
 
 
@@ -63,3 +63,42 @@ def test_paired_sign_flip_rejects_array_valued_scalar_controls():
         params.update(kwargs)
         with pytest.raises(ValueError, match=match):
             sign_flip_p_value(differences, **params)
+
+
+def test_zero_variance_nonzero_effects_get_extreme_observed_statistics():
+    effects = np.asarray(
+        [
+            [1.0, -1.0, 0.0],
+            [1.0, -1.0, 0.0],
+            [1.0, -1.0, 0.0],
+        ]
+    )
+
+    statistics = _t_statistic(effects)
+
+    assert np.isfinite(statistics).all()
+    assert statistics[0] > 1e300
+    assert statistics[1] < -1e300
+    assert statistics[2] == 0.0
+
+
+def test_zero_variance_sign_flip_statistics_preserve_effect_direction(monkeypatch: pytest.MonkeyPatch):
+    class FixedGenerator:
+        def choice(self, values: np.ndarray, *, size: tuple[int, int]) -> np.ndarray:
+            assert values.tolist() == [-1.0, 1.0]
+            assert size == (3, 3)
+            return np.asarray(
+                [
+                    [1.0, 1.0, 1.0],
+                    [-1.0, -1.0, -1.0],
+                    [1.0, 1.0, -1.0],
+                ]
+            )
+
+    monkeypatch.setattr(np.random, "default_rng", lambda _seed: FixedGenerator())
+    statistics = _sign_flip_t_statistics(np.ones((3, 2)), n_permutations=3, random_state=7)
+
+    assert np.isfinite(statistics).all()
+    assert np.all(statistics[0] > 1e300)
+    assert np.all(statistics[1] < -1e300)
+    assert statistics[2] == pytest.approx([0.5, 0.5])
