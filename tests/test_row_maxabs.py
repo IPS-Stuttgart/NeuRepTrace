@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import pytest
 
@@ -12,12 +14,23 @@ from neureptrace.decoding.row_maxabs import (
 )
 
 
+def _nested_generator_rows(rows: list[list[object]]) -> object:
+    return ((value for value in row) for row in rows)
+
+
 def test_normalize_rows_maxabs_returns_scaled_rows_and_scales() -> None:
     normalized, scales = normalize_rows_maxabs([[2.0, -4.0], [0.0, 0.0]], epsilon=1e-6)
 
     assert np.allclose(scales, np.asarray([4.0, 0.0]))
     assert np.allclose(normalized[0], np.asarray([0.5, -1.0]))
     assert np.allclose(normalized[1], np.asarray([0.0, 0.0]))
+
+
+def test_normalize_rows_maxabs_materializes_nested_generators() -> None:
+    normalized, scales = normalize_rows_maxabs(_nested_generator_rows([[2.0, -4.0], [1.0, 2.0]]))
+
+    assert np.allclose(scales, np.asarray([4.0, 2.0]))
+    assert np.allclose(normalized, np.asarray([[0.5, -1.0], [0.5, 1.0]]))
 
 
 def test_train_score_row_maxabs_metadata() -> None:
@@ -32,6 +45,16 @@ def test_train_score_row_maxabs_metadata() -> None:
     assert result.metadata["row_maxabs_has_fitted_parameters"] is False
     assert result.metadata["row_maxabs_uses_labels"] is False
     assert result.metadata["row_maxabs_valid_for_strict_source_only"] is True
+
+
+def test_train_score_row_maxabs_materializes_nested_generators() -> None:
+    result = normalize_train_score_rows_maxabs(
+        train_features=_nested_generator_rows([[2.0, -4.0], [1.0, 2.0]]),
+        score_features=_nested_generator_rows([[5.0, -10.0]]),
+    )
+
+    np.testing.assert_allclose(result.train_features, [[0.5, -1.0], [0.5, 1.0]])
+    np.testing.assert_allclose(result.score_features, [[0.5, -1.0]])
 
 
 def test_train_score_row_maxabs_preserves_large_finite_scales() -> None:
@@ -53,6 +76,25 @@ def test_train_score_row_maxabs_preserves_large_finite_scales() -> None:
 def test_train_score_row_maxabs_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         normalize_train_score_rows_maxabs(train_features=[[1.0, 2.0]], score_features=[[1.0]])
+
+
+@pytest.mark.parametrize(
+    "features_factory",
+    [
+        lambda: [[True, 0.0]],
+        lambda: np.asarray([[True, False]]),
+        lambda: np.asarray([[1.0, True]], dtype=object),
+        lambda: _nested_generator_rows([[1.0, True]]),
+    ],
+)
+def test_row_maxabs_rejects_boolean_feature_values(features_factory: Callable[[], object]) -> None:
+    with pytest.raises(ValueError, match="non-boolean feature values"):
+        normalize_rows_maxabs(features_factory())  # type: ignore[arg-type]
+
+
+def test_row_maxabs_rejects_malformed_numeric_features_stably() -> None:
+    with pytest.raises(ValueError, match="numeric, non-boolean feature values"):
+        normalize_rows_maxabs(object())  # type: ignore[arg-type]
 
 
 def test_row_maxabs_config_validation() -> None:
