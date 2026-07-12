@@ -18,6 +18,8 @@ def _object_label_vector(labels: Sequence[object]) -> np.ndarray:
 
 
 def _as_python_scalar(value: object) -> object:
+    if isinstance(value, (np.datetime64, np.timedelta64)) and bool(np.isnat(value)):
+        return value
     return value.item() if isinstance(value, np.generic) else value
 
 
@@ -29,11 +31,11 @@ def _coerce_composite_label(label: object) -> object:
     """Canonicalize sequence-valued labels without splitting them into classes."""
 
     if isinstance(label, np.generic):
-        return label.item()
+        return _as_python_scalar(label)
     if isinstance(label, np.ndarray):
         array = label.astype(object, copy=False)
         if array.ndim == 0:
-            return _as_python_scalar(array.item())
+            return _as_python_scalar(array[()])
         flat = array.reshape(-1)
         if flat.size == 1:
             return _as_python_scalar(flat[0])
@@ -48,7 +50,7 @@ def _coerce_composite_label(label: object) -> object:
 def _row_label_vector(labels: np.ndarray) -> np.ndarray:
     array = labels.astype(object, copy=False)
     if array.ndim == 0:
-        return _object_label_vector([_coerce_composite_label(array.item())])
+        return _object_label_vector([_coerce_composite_label(array[()])])
     if array.ndim == 1:
         values = array.tolist()
         if any(_is_composite_label(value) for value in values):
