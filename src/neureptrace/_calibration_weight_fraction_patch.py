@@ -17,18 +17,25 @@ def _weight_fraction_group_columns(frame) -> list[str]:
 
 
 def _per_group_weight_fractions(frame, weight_column: str, group_columns: list[str]) -> np.ndarray:
-    weights = frame[weight_column].astype(float)
-    if group_columns:
-        totals = frame.groupby(group_columns, sort=False)[weight_column].transform("sum").astype(float)
-    else:
-        totals = np.full(len(frame), float(weights.sum()), dtype=float)
-
-    weight_values = weights.to_numpy(dtype=float)
-    total_values = np.asarray(totals, dtype=float)
+    weight_values = frame[weight_column].to_numpy(dtype=float)
     fractions = np.zeros(len(frame), dtype=float)
-    positive = total_values > 0.0
-    if np.any(positive):
-        fractions[positive] = weight_values[positive] / total_values[positive]
+
+    if group_columns:
+        grouped_positions = frame.groupby(group_columns, sort=False, dropna=False).indices.values()
+    else:
+        grouped_positions = (np.arange(len(frame), dtype=int),)
+
+    for positions in grouped_positions:
+        positions = np.asarray(positions, dtype=int)
+        group_weights = weight_values[positions]
+        max_weight = float(group_weights.max())
+        if max_weight <= 0.0:
+            continue
+
+        scaled_weights = group_weights / max_weight
+        scaled_total = float(scaled_weights.sum())
+        fractions[positions] = scaled_weights / scaled_total
+
     return fractions
 
 
@@ -72,7 +79,12 @@ def install() -> None:
 
         @wraps(original_aggregate_reliability_bins)
         def aggregate_reliability_bins(csv_paths):
-            aggregated = original_aggregate_reliability_bins(csv_paths)
+            # The original implementation computes a global weight fraction that
+            # this patch replaces below. Suppress overflow from that discarded
+            # intermediate when individually finite per-bin weights have a total
+            # above the float64 range.
+            with np.errstate(over="ignore", invalid="ignore"):
+                aggregated = original_aggregate_reliability_bins(csv_paths)
             weight_column = calibration.RELIABILITY_BIN_WEIGHT_COLUMN
             if aggregated.empty or weight_column not in aggregated.columns:
                 return aggregated
