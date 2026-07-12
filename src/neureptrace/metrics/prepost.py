@@ -96,9 +96,14 @@ def _normalize_columns(columns: Sequence[str] | str | None) -> list[str]:
 
 
 def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
-    missing = [column for column in columns if column not in frame.columns]
+    required = list(dict.fromkeys(columns))
+    missing = [column for column in required if column not in frame.columns]
     if missing:
         raise ValueError(f"Data frame is missing required columns: {missing}")
+    frame_columns = frame.columns.tolist()
+    ambiguous = [column for column in required if frame_columns.count(column) > 1]
+    if ambiguous:
+        raise ValueError(f"Data frame has ambiguous duplicate required columns: {ambiguous}")
 
 
 def _validate_window(window: Window) -> Window:
