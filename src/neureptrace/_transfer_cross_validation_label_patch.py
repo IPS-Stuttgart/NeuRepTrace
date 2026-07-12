@@ -110,9 +110,19 @@ def install() -> None:
 
     from neureptrace.decoding import transfer
 
+    original_sequential_fold_ids = transfer.sequential_fold_ids
     _ORIGINAL_CROSS_VALIDATE_FEATURE_DECODING = transfer.cross_validate_feature_decoding
     _ORIGINAL_LABEL_VECTOR = transfer._label_vector
     transfer._label_vector = _atomic_label_vector
+
+    def _sequential_fold_ids(n_trials: int, n_folds: int) -> np.ndarray:
+        if n_folds > n_trials:
+            raise ValueError("n_folds must not exceed n_trials.")
+        return original_sequential_fold_ids(n_trials, n_folds)
+
+    _sequential_fold_ids.__name__ = original_sequential_fold_ids.__name__
+    _sequential_fold_ids.__doc__ = original_sequential_fold_ids.__doc__
+    transfer.sequential_fold_ids = _sequential_fold_ids
 
     def _one_vs_rest_predictions_object(
         train_features: np.ndarray,
