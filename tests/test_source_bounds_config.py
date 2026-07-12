@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_bounds import (
     SourceBoundsConfig,
+    SourceFeatureBounds,
     apply_source_feature_bounds,
     fit_source_feature_bound_values,
     fit_source_feature_bounds,
@@ -60,6 +61,20 @@ def test_source_bounds_materializes_one_pass_feature_iterables() -> None:
     assert result.metadata["source_feature_bounds_n_source_rows"] == 2
 
 
+def test_source_bounds_accepts_object_arrays_containing_generator_rows() -> None:
+    source_rows = np.asarray([iter([0.0, 2.0]), iter([1.0, 3.0])], dtype=object)
+    test_rows = np.asarray([iter([-1.0, 4.0])], dtype=object)
+
+    result = fit_source_feature_bounds(
+        source_features=source_rows,
+        test_features=test_rows,
+        config={"lower_quantile": 0.0, "upper_quantile": 1.0},
+    )
+
+    np.testing.assert_allclose(result.train_features, np.asarray([[0.0, 2.0], [1.0, 3.0]], dtype=np.float32))
+    np.testing.assert_allclose(result.test_features, np.asarray([[0.0, 3.0]], dtype=np.float32))
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -93,3 +108,31 @@ def test_apply_source_bounds_rejects_boolean_feature_values() -> None:
 
     with pytest.raises(ValueError, match="features must contain numeric feature values, not boolean flags"):
         apply_source_feature_bounds([[False, 1.0]], bounds)
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        SourceFeatureBounds(lower=[0.0], upper=[np.inf], center=[0.0], n_source_rows=2),
+        SourceFeatureBounds(lower=[[0.0, 1.0]], upper=[1.0, 2.0], center=[0.0, 0.0], n_source_rows=2),
+        SourceFeatureBounds(lower=[False, 0.0], upper=[True, 1.0], center=[0.0, 0.0], n_source_rows=2),
+        SourceFeatureBounds(lower=[1.0], upper=[0.0], center=[0.0], n_source_rows=2),
+    ],
+)
+def test_apply_source_bounds_rejects_invalid_reused_bounds(bounds: SourceFeatureBounds) -> None:
+    with pytest.raises(ValueError, match="source feature bounds"):
+        apply_source_feature_bounds([[0.5]], bounds)
+
+
+def test_apply_source_bounds_accepts_one_pass_reused_bound_vectors() -> None:
+    bounds = SourceFeatureBounds(
+        lower=(value for value in [0.0, 1.0]),
+        upper=(value for value in [1.0, 3.0]),
+        center=[0.0, 0.0],
+        n_source_rows=2,
+    )
+
+    bounded, changed = apply_source_feature_bounds([[-1.0, 2.0]], bounds)
+
+    np.testing.assert_allclose(bounded, np.asarray([[0.0, 2.0]]))
+    np.testing.assert_array_equal(changed, np.asarray([[True, False]]))
