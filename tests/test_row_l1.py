@@ -20,6 +20,19 @@ def test_normalize_rows_l1_returns_unit_l1_rows_and_original_norms() -> None:
     assert np.allclose(normalized[1], np.asarray([0.0, 0.0]))
 
 
+def test_normalize_rows_l1_avoids_overflow_for_large_finite_rows() -> None:
+    features = np.asarray([[1e308, -1e308], [0.0, 0.0]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise"):
+        normalized, norms = normalize_rows_l1(features)
+
+    assert np.isinf(norms[0])
+    assert norms[1] == 0.0
+    assert np.all(np.isfinite(normalized))
+    np.testing.assert_allclose(normalized[0], [0.5, -0.5])
+    np.testing.assert_allclose(normalized[1], [0.0, 0.0])
+
+
 def test_normalize_train_test_rows_l1_metadata() -> None:
     result = normalize_train_test_rows_l1(
         train_features=[[1.0, -2.0], [3.0, 0.0]],
@@ -34,6 +47,22 @@ def test_normalize_train_test_rows_l1_metadata() -> None:
     assert result.metadata["row_l1_has_fitted_parameters"] is False
     assert result.metadata["row_l1_uses_labels"] is False
     assert result.metadata["row_l1_valid_for_strict_source_only"] is True
+
+
+def test_normalize_train_test_rows_l1_preserves_large_finite_norms() -> None:
+    result = normalize_train_test_rows_l1(
+        train_features=[[1e100, -5e99]],
+        test_features=[[1e80, -1e80]],
+    )
+
+    assert result.train_norms.dtype == np.float64
+    assert result.test_norms.dtype == np.float64
+    assert np.all(np.isfinite(result.train_norms))
+    assert np.all(np.isfinite(result.test_norms))
+    np.testing.assert_allclose(result.train_norms, [1.5e100])
+    np.testing.assert_allclose(result.test_norms, [2e80])
+    np.testing.assert_allclose(result.train_features, [[2.0 / 3.0, -1.0 / 3.0]])
+    np.testing.assert_allclose(result.test_features, [[0.5, -0.5]])
 
 
 def test_normalize_train_test_rows_l1_rejects_width_mismatch() -> None:
