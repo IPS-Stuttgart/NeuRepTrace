@@ -117,3 +117,16 @@ def test_probability_shape_score_prefers_active_classes_when_other_terms_match()
 
     assert terms["active_fraction"] == 1.0
     assert active_score > inactive_score
+
+
+def test_probability_shape_score_preserves_large_finite_ratios_under_strict_overflow():
+    probabilities = np.array([[1e308, 1e308], [1e308, 1.0]], dtype=float)
+    scaled = np.array([[1.0, 1.0], [1.0, 1e-308]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise"):
+        score, terms = score_probability_shape(probabilities, active_classes=2)
+
+    expected_score, expected_terms = score_probability_shape(scaled, active_classes=2)
+    assert score == pytest.approx(expected_score)
+    for key, expected in expected_terms.items():
+        assert terms[key] == pytest.approx(expected)
