@@ -1,9 +1,9 @@
-"""Validate VREx numeric hyperparameters, fit features, and batch sampling."""
+"""Validate VREx numeric hyperparameters, fit features, identifiers, and batch sampling."""
 
 from __future__ import annotations
 
 import importlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from functools import wraps
 from typing import Any
 
@@ -14,6 +14,7 @@ _DANN_NUMERIC_PATCH_MARKER = "_neureptrace_dann_bool_array_numeric_config_patch_
 _SOURCE_VREX_FEATURE_PATCH_MARKER = "_neureptrace_source_vrex_finite_fit_feature_patch_installed"
 _SOURCE_VREX_DOMAIN_BATCH_PATCH_MARKER = "_neureptrace_source_vrex_domain_batch_patch_installed"
 _LINEAR_VREX_FEATURE_MATRIX_PATCH_MARKER = "_neureptrace_linear_vrex_feature_matrix_iterable_patch_installed"
+_LINEAR_VREX_IDENTIFIER_PATCH_MARKER = "_neureptrace_linear_vrex_identifier_patch_installed"
 
 
 def _is_boolean_scalar_like(value: Any) -> bool:
@@ -223,6 +224,72 @@ def _install_linear_vrex_feature_matrix() -> None:
     vrex._feature_matrix = _linear_vrex_feature_matrix
 
 
+def _install_linear_vrex_identifier_encoding() -> None:
+    """Encode labels/domains with missing-aware equality before fitting VREx."""
+
+    from neureptrace.decoding._domain_ids import ordered_unique, values_equal
+
+    vrex = importlib.import_module("neureptrace.decoding.vrex")
+    original_fit = vrex.LinearVRExClassifier.fit
+    if getattr(original_fit, _LINEAR_VREX_IDENTIFIER_PATCH_MARKER, False):
+        return
+
+    def _encode(values: np.ndarray, unique_values: tuple[object, ...]) -> np.ndarray:
+        return np.asarray(
+            [
+                next(index for index, unique_value in enumerate(unique_values) if values_equal(value, unique_value))
+                for value in values.tolist()
+            ],
+            dtype=int,
+        )
+
+    def _encoded_class_weight(class_weight: Mapping[Any, Any], classes: tuple[object, ...]) -> dict[int, Any]:
+        encoded: dict[int, Any] = {}
+        entries = tuple(class_weight.items())
+        for index, class_label in enumerate(classes):
+            encoded[index] = next(
+                (weight for key, weight in entries if values_equal(key, class_label)),
+                1.0,
+            )
+        return encoded
+
+    @wraps(original_fit)
+    def fit(self, source_features, source_labels, *, source_domains):
+        features = vrex._feature_matrix(source_features, name="source_features")
+        labels = vrex._object_vector(source_labels, expected_length=features.shape[0], name="source_labels")
+        domains = vrex._object_vector(source_domains, expected_length=features.shape[0], name="source_domains")
+        vrex._validate_hashable(domains, name="source_domains")
+
+        classes = ordered_unique(labels)
+        domain_values = ordered_unique(domains)
+        encoded_labels = _encode(labels, classes)
+        encoded_domains = _encode(domains, domain_values)
+
+        original_class_weight = self.class_weight
+        if isinstance(original_class_weight, Mapping):
+            self.class_weight = _encoded_class_weight(original_class_weight, classes)
+        try:
+            result = original_fit(
+                self,
+                features,
+                encoded_labels,
+                source_domains=encoded_domains,
+            )
+        finally:
+            self.class_weight = original_class_weight
+
+        self.classes_ = vrex._object_vector(classes, expected_length=len(classes), name="classes")
+        self.source_domains_ = vrex._object_vector(
+            domain_values,
+            expected_length=len(domain_values),
+            name="source_domains",
+        )
+        return result
+
+    setattr(fit, _LINEAR_VREX_IDENTIFIER_PATCH_MARKER, True)
+    vrex.LinearVRExClassifier.fit = fit
+
+
 def _install_source_vrex_fit_feature_validator() -> None:
     source_vrex = importlib.import_module("neureptrace.decoding.source_vrex")
     original_fit = source_vrex.TorchVRExClassifier.fit
@@ -248,11 +315,12 @@ def _install_source_vrex_domain_balanced_batch() -> None:
 
 
 def install() -> None:
-    """Install VREx hyperparameter, fit-feature, and batch-sampling validators."""
+    """Install VREx hyperparameter, fit-input, identifier, and batch validators."""
 
     _install_dann_numeric_validators()
     _install_linear_vrex_numeric_validators()
     _install_linear_vrex_feature_matrix()
+    _install_linear_vrex_identifier_encoding()
     _install_source_vrex_fit_feature_validator()
     _install_source_vrex_domain_balanced_batch()
 
