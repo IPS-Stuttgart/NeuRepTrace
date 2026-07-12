@@ -150,12 +150,30 @@ def row_normalize(matrix: Sequence[Sequence[float]] | np.ndarray, *, epsilon: fl
         raise ValueError("matrix must be square.")
     if not np.all(np.isfinite(values)) or np.any(values < 0.0):
         raise ValueError("matrix must contain finite non-negative values.")
-    row_sums = values.sum(axis=1, keepdims=True)
-    output = np.divide(values, row_sums, out=np.zeros_like(values), where=row_sums > float(epsilon))
-    isolated = np.ravel(row_sums <= float(epsilon))
+    if values.shape[0] == 0:
+        return values.copy()
+    output, row_maxima, scaled_sums = _scaled_row_normalize(values)
+    maximum_for_epsilon_mass = np.divide(
+        float(epsilon),
+        scaled_sums,
+        out=np.full_like(scaled_sums, np.inf),
+        where=scaled_sums > 0.0,
+    )
+    isolated = np.ravel(row_maxima <= maximum_for_epsilon_mass)
     if np.any(isolated):
+        output[isolated] = 0.0
         output[isolated, isolated] = 1.0
     return output
+
+
+def _scaled_row_normalize(values: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Normalize non-negative rows without overflowing their raw sums."""
+
+    row_maxima = np.max(values, axis=1, keepdims=True)
+    scaled = np.divide(values, row_maxima, out=np.zeros_like(values), where=row_maxima > 0.0)
+    scaled_sums = scaled.sum(axis=1, keepdims=True)
+    normalized = np.divide(scaled, scaled_sums, out=np.zeros_like(values), where=scaled_sums > 0.0)
+    return normalized, row_maxima, scaled_sums
 
 
 def _iterate(transition: np.ndarray, initial: np.ndarray, *, alpha: float, max_iter: int, tol: float, epsilon: float) -> tuple[np.ndarray, int, bool]:
@@ -206,11 +224,11 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must be finite and non-negative.")
-    row_sums = matrix.sum(axis=1, keepdims=True)
-    if np.any(row_sums <= 0.0):
+    if matrix.shape[1] < 1 or np.any(~np.any(matrix > 0.0, axis=1)):
         raise ValueError("probability rows must have positive probability mass.")
     clipped = np.maximum(matrix, float(epsilon))
-    return clipped / clipped.sum(axis=1, keepdims=True)
+    normalized, _, _ = _scaled_row_normalize(clipped)
+    return normalized
 
 
 def _auto_gamma(squared_distances: np.ndarray, *, epsilon: float) -> float:
