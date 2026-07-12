@@ -82,10 +82,13 @@ def add_binary_label(
 
     if source_column not in metadata.columns:
         raise ValueError(f"Source column '{source_column}' not found in metadata.")
+    source = metadata[source_column]
+    if isinstance(source, pd.DataFrame):
+        raise ValueError(f"Source column '{source_column}' must identify exactly one metadata column.")
     if label_column in metadata.columns:
         raise ValueError(f"Label column '{label_column}' already exists.")
 
-    source = metadata[source_column].astype("string")
+    source = source.astype("string")
     positive = source.str.contains(positive_regex, regex=True, na=False)
     if negative_regex is None:
         negative = source.notna() & ~positive
