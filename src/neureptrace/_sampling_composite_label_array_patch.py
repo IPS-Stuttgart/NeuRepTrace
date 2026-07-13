@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 _PATCH_MARKER = "_neureptrace_sampling_composite_label_array_patch_installed"
 _INTEGER_PATCH_MARKER = "_neureptrace_sampling_integer_array_patch_installed"
 
@@ -65,16 +67,7 @@ def _label_vector(labels) -> np.ndarray:
 
 
 def _labels_equal(left: object, right: object) -> bool:
-    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
-        return bool(np.array_equal(left, right))
-    try:
-        equal = left == right
-    except (TypeError, ValueError):
-        return False
-    try:
-        return bool(equal)
-    except (TypeError, ValueError):
-        return False
+    return values_equal(left, right)
 
 
 def _normalize_integer(value, *, name: str, minimum: int | None = None) -> int:
