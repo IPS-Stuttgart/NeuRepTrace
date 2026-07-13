@@ -227,10 +227,15 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
 
 
 def _normalize_rows(matrix: np.ndarray, *, epsilon: float) -> np.ndarray:
-    row_sums = np.sum(np.maximum(matrix, 0.0), axis=1, keepdims=True)
-    if np.any(row_sums <= epsilon):
+    nonnegative = np.maximum(np.asarray(matrix, dtype=float), 0.0)
+    row_maxima = np.max(nonnegative, axis=1, keepdims=True)
+    if np.any(row_maxima == 0.0):
         raise ValueError("Each probability row must have positive mass.")
-    return np.maximum(matrix, 0.0) / row_sums
+    scaled = nonnegative / row_maxima
+    scaled_row_sums = np.sum(scaled, axis=1, keepdims=True)
+    if np.any(row_maxima <= epsilon / scaled_row_sums):
+        raise ValueError("Each probability row must have positive mass.")
+    return scaled / scaled_row_sums
 
 
 def _prior(values: Sequence[float] | np.ndarray | None, *, n_classes: int, default: str, name: str, epsilon: float) -> np.ndarray:
@@ -247,10 +252,16 @@ def _prior(values: Sequence[float] | np.ndarray | None, *, n_classes: int, defau
 
 def _normalize_prior(values: np.ndarray, *, epsilon: float) -> np.ndarray:
     vector = np.maximum(np.asarray(values, dtype=float).reshape(-1), 0.0)
-    total = float(np.sum(vector))
-    if total <= epsilon:
+    if vector.size == 0:
         raise ValueError("Prior vector must have positive mass.")
-    return vector / total
+    maximum = float(np.max(vector))
+    if maximum == 0.0:
+        raise ValueError("Prior vector must have positive mass.")
+    scaled = vector / maximum
+    scaled_total = float(np.sum(scaled))
+    if maximum <= epsilon / scaled_total:
+        raise ValueError("Prior vector must have positive mass.")
+    return scaled / scaled_total
 
 
 def _smooth(values: np.ndarray, smoothing: float, epsilon: float) -> np.ndarray:
