@@ -18,6 +18,11 @@ def summarize_window_metric(
 ) -> pd.DataFrame:
     """Summarize one metric inside an inclusive time window."""
     group_columns = _normalize_columns(group_columns)
+    _validate_group_output_columns(
+        group_columns,
+        _summary_output_columns(metric_column),
+        operation="summary",
+    )
     _require_columns(frame, [time_column, metric_column, *group_columns])
     window_start, window_stop = _validate_window(window)
     time_values = _finite_numeric_series(frame[time_column], name=time_column)
@@ -55,6 +60,11 @@ def compare_prepost_windows(
 ) -> pd.DataFrame:
     """Compare a metric between inclusive pre and post time windows."""
     group_columns = _normalize_columns(group_columns)
+    _validate_group_output_columns(
+        group_columns,
+        _comparison_output_columns(metric_column),
+        operation="comparison",
+    )
     pre_summary = summarize_window_metric(frame, metric_column, pre_window, time_column=time_column, group_columns=group_columns)
     post_summary = summarize_window_metric(frame, metric_column, post_window, time_column=time_column, group_columns=group_columns)
 
@@ -93,6 +103,48 @@ def _normalize_columns(columns: Sequence[str] | str | None) -> list[str]:
     if isinstance(columns, str):
         return [columns]
     return list(dict.fromkeys(columns))
+
+
+def _summary_output_columns(metric_column: str) -> set[str]:
+    return {
+        "window_start",
+        "window_stop",
+        "n_rows",
+        f"{metric_column}_mean",
+        f"{metric_column}_std",
+        f"{metric_column}_sem",
+    }
+
+
+def _comparison_output_columns(metric_column: str) -> set[str]:
+    return {
+        "pre_window_start",
+        "pre_window_stop",
+        "n_pre_rows",
+        f"{metric_column}_pre_mean",
+        f"{metric_column}_pre_std",
+        f"{metric_column}_pre_sem",
+        "post_window_start",
+        "post_window_stop",
+        "n_post_rows",
+        f"{metric_column}_post_mean",
+        f"{metric_column}_post_std",
+        f"{metric_column}_post_sem",
+        f"{metric_column}_post_minus_pre",
+    }
+
+
+def _validate_group_output_columns(
+    group_columns: Sequence[str],
+    output_columns: set[str],
+    *,
+    operation: str,
+) -> None:
+    collisions = sorted(set(group_columns).intersection(output_columns))
+    if collisions:
+        raise ValueError(
+            f"group_columns overlap generated {operation} columns: {collisions}"
+        )
 
 
 def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
