@@ -66,6 +66,34 @@ def test_apply_temperature_rejects_zero_mass_rows() -> None:
         apply_temperature_to_probabilities([[0.0, 0.0]], temperature=1.0)
 
 
+def test_target_temperature_normalizes_extreme_finite_rows_without_overflow() -> None:
+    probabilities = np.asarray(
+        [
+            [1.0e308, 1.0e308],
+            [1.0e308, 1.0e307],
+        ],
+        dtype=float,
+    )
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        transformed = apply_temperature_to_probabilities(probabilities, temperature=1.0)
+        fitted = fit_target_temperature_scaling(
+            calibration_probabilities=probabilities,
+            calibration_labels=[0, 1],
+            probabilities=probabilities,
+            classes=[0, 1],
+            config={"temperature_grid": [1.0]},
+        )
+        nll = negative_log_likelihood(probabilities, [0, 1], classes=[0, 1])
+
+    expected = np.asarray([[0.5, 0.5], [10.0 / 11.0, 1.0 / 11.0]])
+    np.testing.assert_allclose(transformed, expected)
+    np.testing.assert_allclose(fitted.probabilities, expected, rtol=1.0e-6)
+    assert fitted.temperature == 1.0
+    assert np.isfinite(nll)
+    assert np.isfinite(fitted.calibration_nll_by_temperature[1.0])
+
+
 def test_negative_log_likelihood_matches_manual_value() -> None:
     probabilities = np.asarray([[0.8, 0.2], [0.25, 0.75]], dtype=float)
 
