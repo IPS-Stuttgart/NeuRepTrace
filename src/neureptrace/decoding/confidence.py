@@ -140,11 +140,9 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.nd
 
 def _scalar_value(value: Any, *, name: str) -> Any:
     if isinstance(value, np.ndarray):
-        if value.shape == ():
-            return value.item()
-        if value.size == 1:
-            return value.reshape(-1)[0].item()
-        raise ValueError(f"{name} must be a scalar in [0, 1].")
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a scalar in [0, 1].")
+        return value.item()
     return value
 
 
