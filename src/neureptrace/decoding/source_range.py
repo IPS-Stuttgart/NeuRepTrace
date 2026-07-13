@@ -28,7 +28,7 @@ def apply_source_range_clip(features, lower, upper):
     if np.any(lo > hi):
         raise ValueError("lower bounds must not exceed upper bounds.")
     clipped = np.minimum(np.maximum(matrix, lo), hi)
-    return clipped.astype(np.float32, copy=False), clipped != matrix
+    return _compact_float32(clipped), clipped != matrix
 
 
 def source_range_clip(*, source_features, test_features):
@@ -55,6 +55,18 @@ def source_range_clip(*, source_features, test_features):
         "source_range_test_values_clipped": int(np.count_nonzero(test_mask)),
     }
     return train, test_out, lower, upper, train_mask, test_mask, metadata
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _materialize_one_pass_iterables(value):
