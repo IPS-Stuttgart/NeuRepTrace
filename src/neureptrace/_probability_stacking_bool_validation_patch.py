@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -14,6 +15,11 @@ from . import _group_completion_patch
 _OBSERVATIONS_MODULE = __package__ + ".observations"
 _STACKING_MODULE = __package__ + ".probability_stacking"
 _PATCH_MARKER = "_nrt_probability_stacking_bool_validation_patch_installed"
+_MAX_EXACT_FLOAT_INTEGER = 2**53
+_INT64_MIN = int(np.iinfo(np.int64).min)
+_INT64_MAX = int(np.iinfo(np.int64).max)
+_INT64_MIN_DECIMAL = Decimal(_INT64_MIN)
+_INT64_MAX_DECIMAL = Decimal(_INT64_MAX)
 
 
 def _probability_columns(observations: pd.DataFrame):
@@ -70,6 +76,70 @@ def _reject_boolean_probability_columns(observations: pd.DataFrame, *, context: 
         _reject_boolean_probabilities(observations.loc[:, list(prob_columns)], context=context)
 
 
+def _is_missing_scalar(value: Any) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
+def _exact_integer_label(value: Any, *, name: str, row: Any) -> int:
+    """Parse one exact signed-64-bit label without routing integers through float64."""
+
+    if _is_missing_scalar(value):
+        raise ValueError(f"{name} values must be numeric.")
+
+    if isinstance(value, (int, np.integer)):
+        integer = int(value)
+    elif isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if not np.isfinite(numeric):
+            raise ValueError(f"{name} values must be finite.")
+        if not numeric.is_integer():
+            raise ValueError(f"{name} values must be integer-valued; fractional values at row(s) [{row}].")
+        if abs(numeric) > _MAX_EXACT_FLOAT_INTEGER:
+            raise ValueError(
+                f"{name} values must use exact integer representations; values above 2**53 "
+                "must be supplied as integers or decimal strings."
+            )
+        integer = int(numeric)
+    else:
+        text = str(value).strip()
+        if not text:
+            raise ValueError(f"{name} values must be numeric.")
+        try:
+            numeric = Decimal(text)
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError(f"{name} values must be numeric.") from exc
+        if not numeric.is_finite():
+            if numeric.is_nan():
+                raise ValueError(f"{name} values must be numeric.")
+            raise ValueError(f"{name} values must be finite.")
+        integral = numeric.to_integral_value()
+        if numeric != integral:
+            raise ValueError(f"{name} values must be integer-valued; fractional values at row(s) [{row}].")
+        integer = int(integral)
+
+    if integer < _INT64_MIN or integer > _INT64_MAX:
+        raise ValueError(f"{name} values must fit signed 64-bit integers.")
+    return integer
+
+
+def _exact_integer_label_array(labels: Any, *, name: str) -> np.ndarray:
+    """Return an exact signed-64-bit label vector while preserving decimal strings."""
+
+    try:
+        series = pd.Series(labels)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} values must be numeric.") from exc
+    parsed = [
+        _exact_integer_label(value, name=name, row=row)
+        for row, value in series.items()
+    ]
+    return np.asarray(parsed, dtype=np.int64)
+
+
 def _rescale_finite_weights_if_sum_overflows(weights: Any) -> Any:
     """Rescale non-negative finite weights when their reduction overflows."""
 
@@ -103,7 +173,7 @@ def install() -> None:
     @wraps(original_integer_label_array)
     def _integer_label_array(labels: Any, *, name: str):
         _reject_boolean_label_values(labels, name=name)
-        return original_integer_label_array(labels, name=name)
+        return _exact_integer_label_array(labels, name=name)
 
     original_validate_positive_integer = ps._validate_positive_integer
 
