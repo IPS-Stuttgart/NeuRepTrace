@@ -8,6 +8,7 @@ from . import _source_numpy_string_alias_config_patch
 
 _PATCH_ATTR = "_neureptrace_rejects_boolean_source_selection_temperature"
 _SOURCE_TEMPERATURE_CLASS_INDEX_PATCH_ATTR = "_neureptrace_source_temperature_sparse_integer_indices_patch"
+_SOURCE_TEMPERATURE_NORMALIZATION_PATCH_ATTR = "_neureptrace_source_temperature_stable_probability_normalization_patch"
 
 
 def _integer_index_classes_with_sparse_support(labels: np.ndarray, *, n_classes: int) -> np.ndarray | None:
@@ -63,6 +64,43 @@ def _install_source_temperature_class_index_patch() -> None:
     source_temperature._integer_index_classes = _integer_index_classes
 
 
+def _install_source_temperature_probability_normalization_patch() -> None:
+    """Normalize finite source-temperature score rows without overflowing."""
+
+    from neureptrace.decoding import source_temperature
+
+    original = source_temperature._probability_matrix
+    if getattr(original, _SOURCE_TEMPERATURE_NORMALIZATION_PATCH_ATTR, False):
+        return
+
+    def _probability_matrix(values, *, name: str, epsilon: float) -> np.ndarray:
+        eps = source_temperature._probability_epsilon(epsilon)
+        materialized = source_temperature._materialize_one_pass_iterable(values)
+        if source_temperature._contains_boolean(materialized):
+            raise ValueError(f"{name} must contain numeric probabilities, not boolean values.")
+        try:
+            matrix = np.asarray(materialized, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain numeric probabilities.") from exc
+        if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
+            raise ValueError(f"{name} must be a non-empty two-dimensional matrix with at least two columns.")
+        if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
+            raise ValueError(f"{name} must contain finite non-negative values.")
+
+        row_maxima = np.max(matrix, axis=1, keepdims=True)
+        if np.any(row_maxima <= 0.0):
+            raise ValueError(f"{name} rows must have positive probability mass.")
+        scaled = matrix / row_maxima
+        scaled_sums = np.sum(scaled, axis=1, keepdims=True)
+        if np.any(row_maxima <= eps / scaled_sums):
+            raise ValueError(f"{name} rows must have positive probability mass.")
+        return scaled / scaled_sums
+
+    setattr(_probability_matrix, _SOURCE_TEMPERATURE_NORMALIZATION_PATCH_ATTR, True)
+    _probability_matrix.__wrapped__ = original
+    source_temperature._probability_matrix = _probability_matrix
+
+
 def install() -> None:
     """Reject boolean softmax temperatures and install source temperature guards."""
 
@@ -83,3 +121,4 @@ def install() -> None:
         source_selection._resolve_temperature = _resolve_temperature_checked
 
     _install_source_temperature_class_index_patch()
+    _install_source_temperature_probability_normalization_patch()
