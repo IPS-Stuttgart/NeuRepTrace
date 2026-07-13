@@ -12,8 +12,8 @@ _CLUSTER_ALPHA_ERROR = "cluster_alpha must be between 0 and 1."
 _PATCH_MARKER = "_sign_flip_scalar_controls_patched"
 
 
-def _scalar_float(value: object, error_message: str) -> float:
-    """Return a float from a scalar-like numeric value, rejecting arrays and booleans."""
+def _scalar_value(value: object, error_message: str) -> object:
+    """Return a zero-dimensional scalar value, rejecting arrays and booleans."""
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(error_message)
     try:
@@ -25,24 +25,44 @@ def _scalar_float(value: object, error_message: str) -> float:
     scalar = array.item()
     if isinstance(scalar, (bool, np.bool_)):
         raise ValueError(error_message)
+    return scalar
+
+
+def _scalar_float(value: object, error_message: str) -> float:
+    """Return a float from a scalar-like numeric value, rejecting arrays and booleans."""
+    scalar = _scalar_value(value, error_message)
     try:
         return float(scalar)
     except (TypeError, ValueError) as exc:
         raise ValueError(error_message) from exc
 
 
-def _validate_positive_permutation_count(n_permutations: int) -> int:
-    numeric = _scalar_float(n_permutations, _PERMUTATION_COUNT_ERROR)
-    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 1.0:
-        raise ValueError(_PERMUTATION_COUNT_ERROR)
+def _scalar_integer(value: object, error_message: str) -> int:
+    """Return an exact integer when the supplied scalar already has integer type."""
+    scalar = _scalar_value(value, error_message)
+    if isinstance(scalar, (int, np.integer)):
+        return int(scalar)
+    try:
+        numeric = float(scalar)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(error_message) from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError(error_message)
     return int(numeric)
+
+
+def _validate_positive_permutation_count(n_permutations: int) -> int:
+    integer = _scalar_integer(n_permutations, _PERMUTATION_COUNT_ERROR)
+    if integer < 1:
+        raise ValueError(_PERMUTATION_COUNT_ERROR)
+    return integer
 
 
 def _validate_random_state(random_state: int) -> int:
-    numeric = _scalar_float(random_state, _RANDOM_STATE_ERROR)
-    if not np.isfinite(numeric) or numeric % 1.0 != 0.0 or numeric < 0.0:
+    integer = _scalar_integer(random_state, _RANDOM_STATE_ERROR)
+    if integer < 0:
         raise ValueError(_RANDOM_STATE_ERROR)
-    return int(numeric)
+    return integer
 
 
 def _validate_cluster_alpha(cluster_alpha: float) -> float:
