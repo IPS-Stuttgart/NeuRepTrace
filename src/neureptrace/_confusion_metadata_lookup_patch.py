@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from functools import wraps
+
 import numpy as np
+import pandas as pd
+
+from neureptrace._object_label_utils import label_counts, label_equal_mask, values_equal
 
 _PATCH_MARKER = "_neureptrace_confusion_metadata_lookup_patch_installed"
 _MISSING = object()
@@ -61,7 +67,8 @@ def _integer_like_metadata_key(label: object) -> int | None:
 
 
 def install() -> None:
-    """Install metadata lookup guards for fractional and composite labels."""
+    """Install metadata lookup and missing-aware accuracy guards."""
+    import neureptrace.metrics as metrics
     import neureptrace.metrics.confusion as confusion_metrics
 
     if getattr(confusion_metrics, _PATCH_MARKER, False):
@@ -69,6 +76,7 @@ def install() -> None:
 
     original_prediction_frame = confusion_metrics._prediction_frame
     original_metadata_label_id = confusion_metrics._metadata_label_id
+    original_per_class_accuracy = confusion_metrics.per_class_accuracy
 
     def _prediction_frame(frame, *, true_column: str, predicted_column: str, group_columns, participant_column: str | None):
         working = original_prediction_frame(
@@ -110,9 +118,54 @@ def install() -> None:
             return int_match
         return {}
 
+    @wraps(original_per_class_accuracy)
+    def per_class_accuracy(
+        frame: pd.DataFrame,
+        true_column: str = "true_label",
+        predicted_column: str = "predicted_label",
+        participant_column: str | None = None,
+        group_columns: Sequence[str] = (),
+    ) -> pd.DataFrame:
+        group_columns = confusion_metrics._normalize_columns(group_columns)
+        required_columns = [true_column, predicted_column, *group_columns]
+        if participant_column is not None:
+            required_columns.append(participant_column)
+        confusion_metrics._require_columns(frame, required_columns)
+
+        working_columns = [*group_columns, true_column, predicted_column]
+        if participant_column is not None:
+            working_columns.append(participant_column)
+        working = frame[working_columns].rename(columns={true_column: "true_label", predicted_column: "predicted_label"})
+        working["_correct"] = [
+            values_equal(true_label, predicted_label)
+            for true_label, predicted_label in zip(working["true_label"].tolist(), working["predicted_label"].tolist(), strict=True)
+        ]
+
+        rows: list[dict[str, object]] = []
+        for group_key, group in confusion_metrics._iter_frame_groups(working, group_columns):
+            group_values = confusion_metrics._group_row(group_columns, group_key)
+            class_labels, _ = label_counts(group["true_label"].tolist())
+            for class_label in sorted(class_labels.tolist(), key=confusion_metrics._label_sort_key):
+                class_mask = label_equal_mask(group["true_label"].tolist(), class_label)
+                class_group = group.loc[class_mask]
+                row: dict[str, object] = {
+                    **group_values,
+                    "true_label": class_label,
+                    "n_trials": int(len(class_group)),
+                    "n_correct": int(class_group["_correct"].sum()),
+                    "accuracy": float(class_group["_correct"].mean()),
+                }
+                if participant_column is not None:
+                    row["n_participants"] = int(class_group[participant_column].nunique(dropna=True))
+                rows.append(row)
+
+        return pd.DataFrame(rows).reset_index(drop=True)
+
     confusion_metrics._prediction_frame = _prediction_frame
     confusion_metrics._metadata_by_label = _metadata_by_label
     confusion_metrics._lookup_label_metadata = _lookup_label_metadata
+    confusion_metrics.per_class_accuracy = per_class_accuracy
+    metrics.per_class_accuracy = per_class_accuracy
     setattr(confusion_metrics, _PATCH_MARKER, True)
 
 
