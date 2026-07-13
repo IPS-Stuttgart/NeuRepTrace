@@ -26,6 +26,24 @@ class _NanLabel:
 _NAN = _NanLabel()
 
 
+class _TemporalNaTLabel:
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+
+    def __hash__(self) -> int:
+        return hash(("neureptrace-temporal-nat", self.kind))
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, _TemporalNaTLabel) and self.kind == other.kind
+
+    def __repr__(self) -> str:
+        return f"{self.kind}('NaT')"
+
+
+_DATETIME_NAT = _TemporalNaTLabel("datetime64")
+_TIMEDELTA_NAT = _TemporalNaTLabel("timedelta64")
+
+
 class _CompositeLabel:
     def __init__(self, values: tuple[Any, ...]) -> None:
         self.values = values
@@ -46,6 +64,14 @@ def _is_nan(value: Any) -> bool:
     return isinstance(value, (float, np.floating)) and bool(np.isnan(value))
 
 
+def _temporal_nat_label(value: Any) -> _TemporalNaTLabel | None:
+    if isinstance(value, np.datetime64) and bool(np.isnat(value)):
+        return _DATETIME_NAT
+    if isinstance(value, np.timedelta64) and bool(np.isnat(value)):
+        return _TIMEDELTA_NAT
+    return None
+
+
 def _object_vector(values: Iterable[Any]) -> np.ndarray:
     items = list(values)
     out = np.empty(len(items), dtype=object)
@@ -60,6 +86,9 @@ def _dict_key(item: tuple[Any, Any]) -> tuple[str, str, str]:
 
 
 def _normalize_label(value: Any) -> Any:
+    temporal_nat = _temporal_nat_label(value)
+    if temporal_nat is not None:
+        return temporal_nat
     if _is_nan(value):
         return _NAN
     if isinstance(value, np.generic):
@@ -81,6 +110,10 @@ def _normalize_label(value: Any) -> Any:
 def _restore_label(value: Any) -> Any:
     if value is _NAN:
         return np.nan
+    if value is _DATETIME_NAT:
+        return np.datetime64("NaT")
+    if value is _TIMEDELTA_NAT:
+        return np.timedelta64("NaT")
     if isinstance(value, _CompositeLabel):
         return tuple(_restore_label(item) for item in value.values)
     return value
