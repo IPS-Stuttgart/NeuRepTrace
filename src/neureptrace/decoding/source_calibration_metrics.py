@@ -86,10 +86,14 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
         raise ValueError("probabilities must be a non-empty two-dimensional matrix with at least two columns.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must contain finite non-negative values.")
-    row_sums = np.sum(matrix, axis=1, keepdims=True)
-    if np.any(row_sums <= epsilon):
+    row_maxima = np.max(matrix, axis=1, keepdims=True)
+    if np.any(row_maxima == 0.0):
         raise ValueError("probability rows must have positive mass.")
-    return matrix / row_sums
+    scaled = matrix / row_maxima
+    scaled_row_sums = np.sum(scaled, axis=1, keepdims=True)
+    if np.any(row_maxima <= epsilon / scaled_row_sums):
+        raise ValueError("probability rows must have positive mass.")
+    return scaled / scaled_row_sums
 
 
 def _label_indices(values: Sequence[int] | np.ndarray, *, n_rows: int, n_classes: int) -> np.ndarray:
