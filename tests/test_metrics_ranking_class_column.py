@@ -20,3 +20,15 @@ def test_rank_class_scores_rejects_invalid_class_column_names(bad_class_column: 
             row_top_k=1,
             class_column=bad_class_column,
         )
+
+
+def test_rank_class_scores_rejects_class_column_that_overwrites_score_output() -> None:
+    with pytest.raises(ValueError, match="conflicts with generated rank.*score columns"):
+        rank_class_scores(
+            [[0.8, 0.2]],
+            ["target", "distractor"],
+            ["target"],
+            top_k=(1,),
+            row_top_k=1,
+            class_column="score",
+        )
