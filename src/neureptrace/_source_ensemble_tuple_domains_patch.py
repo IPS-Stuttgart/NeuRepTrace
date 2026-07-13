@@ -1,4 +1,4 @@
-"""Source-domain ensemble compatibility patches for composite domain IDs."""
+"""Source-domain ensemble compatibility patches for composite and missing IDs."""
 
 from __future__ import annotations
 
@@ -11,7 +11,45 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_source_ensemble_tuple_domains_patch_installed"
 
 
+def _temporal_nat_key(value: Any) -> tuple[str, str] | None:
+    if isinstance(value, (np.datetime64, np.timedelta64)) and bool(np.isnat(value)):
+        return (type(value).__module__, type(value).__qualname__)
+    return None
+
+
+def _scalar_label_value(value: Any) -> Any:
+    if _temporal_nat_key(value) is not None:
+        return value
+    return value.item() if isinstance(value, np.generic) else value
+
+
+def _sequence_label_from_row(row: np.ndarray) -> Any:
+    values = [_scalar_label_value(value) for value in row.reshape(-1)]
+    return values[0] if len(values) == 1 else tuple(values)
+
+
+def _label_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            raise ValueError(f"{name} must contain one value per source row.")
+        if values.ndim == 1:
+            items = [_scalar_label_value(values[index]) for index in range(values.shape[0])]
+        else:
+            items = [_sequence_label_from_row(row) for row in values.reshape(values.shape[0], -1)]
+    else:
+        try:
+            items = list(values)
+        except TypeError as exc:
+            raise ValueError(f"{name} must contain one value per source row.") from exc
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
+    return vector
+
+
 def _canonical_domain_value(value: Any) -> Hashable:
+    temporal_nat_key = _temporal_nat_key(value)
+    if temporal_nat_key is not None:
+        return value
     if isinstance(value, np.generic):
         value = value.item()
     if isinstance(value, np.ndarray):
@@ -49,6 +87,13 @@ def install() -> None:
         return
 
     original_aligned_probabilities = source_ensemble._aligned_probabilities
+    original_label_key = source_ensemble._label_key
+
+    def label_key(label: Any) -> tuple[Any, ...]:
+        temporal_nat_key = _temporal_nat_key(label)
+        if temporal_nat_key is not None:
+            return ("numpy_nat", *temporal_nat_key)
+        return original_label_key(label)
 
     def aligned_probabilities(model, features: np.ndarray, *, classes: np.ndarray, epsilon: float) -> np.ndarray:
         """Validate prediction-only estimator outputs before probability alignment."""
@@ -186,6 +231,9 @@ def install() -> None:
             ),
         )
 
+    source_ensemble._label_vector = _label_vector
+    source_ensemble._sequence_label_from_row = _sequence_label_from_row
+    source_ensemble._label_key = label_key
     source_ensemble._aligned_probabilities = aligned_probabilities
     source_ensemble._domain_vector = domain_vector
     source_ensemble._unique_domain_values = unique_domain_values
