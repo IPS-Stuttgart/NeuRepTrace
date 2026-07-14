@@ -11,6 +11,7 @@ import numpy as np
 
 _INTERPOLATION_PATCH_MARKER = "_neureptrace_source_interpolation_one_pass_patch_installed"
 _MASKING_PATCH_MARKER = "_neureptrace_source_masking_feature_input_patch_installed"
+_SMOTE_INTERPOLATION_PATCH_MARKER = "_neureptrace_source_smote_stable_interpolation_patch_installed"
 
 
 def _materialize_one_pass_iterable(value: Any) -> Any:
@@ -91,11 +92,36 @@ def _install_source_masking_patch() -> None:
     setattr(module, _MASKING_PATCH_MARKER, True)
 
 
+def _install_source_smote_interpolation_patch() -> None:
+    module = importlib.import_module("neureptrace.decoding.source_smote")
+    original_interpolate_rows = module.interpolate_rows
+    if getattr(original_interpolate_rows, _SMOTE_INTERPOLATION_PATCH_MARKER, False):
+        return
+
+    @wraps(original_interpolate_rows)
+    def interpolate_rows(content_row: Any, partner_row: Any, lam: Any) -> np.ndarray:
+        left = np.asarray(content_row, dtype=float).reshape(-1)
+        right = np.asarray(partner_row, dtype=float).reshape(-1)
+        if left.shape != right.shape or left.size == 0:
+            raise ValueError("content_row and partner_row must be non-empty vectors with the same shape.")
+        weight = module._unit_interval_float(lam, name="lam")
+
+        same_sign = np.signbit(left) == np.signbit(right)
+        row = np.empty_like(left)
+        row[same_sign] = left[same_sign] + weight * (right[same_sign] - left[same_sign])
+        row[~same_sign] = (1.0 - weight) * left[~same_sign] + weight * right[~same_sign]
+        return row.astype(np.float32, copy=False)
+
+    setattr(interpolate_rows, _SMOTE_INTERPOLATION_PATCH_MARKER, True)
+    module.interpolate_rows = interpolate_rows
+
+
 def install() -> None:
-    """Patch source interpolation and masking feature-input normalization."""
+    """Patch source interpolation, masking, and SMOTE numeric behavior."""
 
     _install_source_interpolation_patch()
     _install_source_masking_patch()
+    _install_source_smote_interpolation_patch()
 
 
 __all__ = ["install"]
