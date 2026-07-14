@@ -7,7 +7,7 @@ is safe to compose with strict source-only decoders.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,8 +60,8 @@ def normalize_train_test_rows_l2(
     return RowL2Result(
         train_features=train_out.astype(np.float32, copy=False),
         test_features=test_out.astype(np.float32, copy=False),
-        train_norms=train_norms.astype(np.float32, copy=False),
-        test_norms=test_norms.astype(np.float32, copy=False),
+        train_norms=train_norms.astype(float, copy=False),
+        test_norms=test_norms.astype(float, copy=False),
         metadata={
             "row_l2_normalization": True,
             "row_l2_protocol": ROW_L2_PROTOCOL,
@@ -92,19 +92,80 @@ def normalize_rows_l2(
     """Normalize each row by its L2 norm and return original norms."""
 
     matrix = _feature_matrix(features, name="features")
-    norms = np.linalg.norm(matrix, axis=1)
+    norms = _stable_row_l2_norms(matrix)
     safe_norms = np.maximum(norms, _positive_float(epsilon, name="epsilon"))
     return matrix / safe_norms[:, None], norms
+
+
+def _stable_row_l2_norms(matrix: np.ndarray) -> np.ndarray:
+    """Return row L2 norms without overflowing on representable finite norms."""
+
+    scales = np.max(np.abs(matrix), axis=1)
+    norms = np.zeros(matrix.shape[0], dtype=float)
+    nonzero = scales > 0.0
+    if not np.any(nonzero):
+        return norms
+    scaled = matrix[nonzero] / scales[nonzero, None]
+    scaled_norms = np.sqrt(np.sum(scaled * scaled, axis=1))
+    with np.errstate(over="ignore"):
+        norms[nonzero] = scales[nonzero] * scaled_norms
+    return norms
 
 
 def _coerce_config(config: RowL2Config | Mapping[str, Any]) -> RowL2Config:
     if isinstance(config, RowL2Config):
         return config
-    return row_l2_config(**dict(config))
+    if not isinstance(config, Mapping):
+        raise ValueError("Row L2 config must be a mapping or RowL2Config.")
+    options = dict(config)
+    unknown = sorted(str(key) for key in options if key != "epsilon")
+    if unknown:
+        raise ValueError(f"Unknown row L2 config option(s): {', '.join(unknown)}.")
+    return row_l2_config(**options)
+
+
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass feature iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes, Mapping)):
+        return value
+    if isinstance(value, Iterable):
+        return [_materialize_one_pass_iterables(item) for item in value]
+    return value
+
+
+def _contains_boolean_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_boolean_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (bool, np.bool_))
+    if isinstance(value, Mapping):
+        return any(_contains_boolean_value(item) for item in value.values())
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):

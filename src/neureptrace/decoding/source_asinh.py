@@ -7,7 +7,7 @@ fold-local preprocessing baseline when feature magnitudes are heavy-tailed.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -181,10 +181,13 @@ def _metadata(cfg: SourceAsinhConfig, *, n_source_rows: int, n_test_rows: int, f
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
     try:
-        matrix = np.asarray(values, dtype=float)
-    except (TypeError, ValueError):
-        matrix = np.asarray(_materialize_feature_rows(values), dtype=float)
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a two-dimensional numeric matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -192,28 +195,47 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
-def _materialize_feature_rows(values: Sequence[Sequence[float]] | np.ndarray) -> list[Any]:
-    if isinstance(values, np.ndarray):
-        return values.tolist()
-    try:
-        rows = list(values)
-    except TypeError as exc:
-        raise ValueError("feature values must be a two-dimensional matrix-like object.") from exc
-    return [_materialize_feature_row(row) for row in rows]
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
 
 
-def _materialize_feature_row(row: Any) -> Any:
-    if isinstance(row, np.ndarray):
-        return row.tolist()
-    if isinstance(row, (str, bytes)):
-        return row
-    try:
-        return list(row)
-    except TypeError:
-        return row
+def _contains_boolean_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if value.dtype == np.bool_:
+            return value.size > 0
+        if value.dtype == object:
+            return any(_contains_boolean_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (bool, np.bool_))
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
+    if isinstance(value, np.ndarray):
+        if value.shape != ():
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:

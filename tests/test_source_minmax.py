@@ -157,6 +157,33 @@ def test_source_minmax_rejects_invalid_reused_reference(reference: SourceMinMaxR
         apply_source_minmax_transform([[0.5]], reference)
 
 
+@pytest.mark.parametrize(
+    "reference",
+    [
+        SourceMinMaxReference(minimum=[[0.0, 1.0]], maximum=[[1.0, 2.0]], feature_range=(0.0, 1.0), n_fit_rows=2),
+        SourceMinMaxReference(minimum=np.asarray([[0.0], [1.0]]), maximum=[1.0, 2.0], feature_range=(0.0, 1.0), n_fit_rows=2),
+        SourceMinMaxReference(minimum=[False, 0.0], maximum=[True, 1.0], feature_range=(0.0, 1.0), n_fit_rows=2),
+        SourceMinMaxReference(minimum=[0.0, 1.0], maximum=np.asarray([1.0, True], dtype=object), feature_range=(0.0, 1.0), n_fit_rows=2),
+    ],
+)
+def test_source_minmax_rejects_nonvector_or_boolean_reference_bounds(reference: SourceMinMaxReference) -> None:
+    with pytest.raises(ValueError, match="source minmax reference bounds"):
+        apply_source_minmax_transform([[0.5, 1.5]], reference)
+
+
+def test_source_minmax_accepts_one_pass_reference_bounds() -> None:
+    reference = SourceMinMaxReference(
+        minimum=(value for value in [0.0, 1.0]),
+        maximum=(value for value in [1.0, 3.0]),
+        feature_range=(0.0, 1.0),
+        n_fit_rows=2,
+    )
+
+    transformed = apply_source_minmax_transform([[0.5, 2.0]], reference)
+
+    assert np.allclose(transformed, np.asarray([[0.5, 0.5]], dtype=np.float32))
+
+
 def test_source_minmax_rejects_reused_reference_bad_range() -> None:
     reference = SourceMinMaxReference(minimum=[0.0], maximum=[1.0], feature_range=(1.0, 0.0), n_fit_rows=2)
 

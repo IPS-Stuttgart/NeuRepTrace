@@ -222,7 +222,14 @@ def _metadata(cfg: SourcePolynomialConfig, *, n_source_rows: int, n_test_rows: i
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    if isinstance(values, np.ndarray):
+        matrix = values.astype(float, copy=False)
+    else:
+        try:
+            values = list(values)
+        except TypeError:
+            pass
+        matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):

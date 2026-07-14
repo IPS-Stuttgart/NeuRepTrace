@@ -103,6 +103,14 @@ def test_source_mad_config_validation() -> None:
         source_mad_config(epsilon=0.0)
 
 
+def test_source_mad_mapping_config_validation_raises_value_error() -> None:
+    with pytest.raises(ValueError, match="Unknown source MAD config key"):
+        fit_source_mad_reference([[0.0], [1.0]], config={"normal_consistncy": False})
+
+    with pytest.raises(ValueError, match="source MAD config must be a mapping"):
+        fit_source_mad_transform(source_features=[[0.0], [1.0]], test_features=[[0.5]], config=object())  # type: ignore[arg-type]
+
+
 def test_source_mad_config_accepts_numpy_scalar_controls() -> None:
     cfg = source_mad_config(
         center=np.asarray(True),

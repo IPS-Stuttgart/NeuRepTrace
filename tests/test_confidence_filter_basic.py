@@ -93,6 +93,32 @@ def test_confidence_filter_rejects_boolean_probability_values(rows: object) -> N
         probability_entropy(rows)
 
 
+def _one_pass_probability_rows():
+    return (iter(row) for row in ((3.0, 1.0), (1.0, 3.0)))
+
+
+def _one_pass_boolean_probability_rows():
+    return (iter(row) for row in ((True, False), (False, True)))
+
+
+def test_confidence_filter_accepts_one_pass_probability_iterables() -> None:
+    result = confidence_filter(_one_pass_probability_rows(), min_confidence=0.7)
+    entropy = probability_entropy(_one_pass_probability_rows())
+
+    assert result.predicted_index.tolist() == [0, 1]
+    assert np.allclose(result.confidence, [0.75, 0.75])
+    assert result.accepted_mask.tolist() == [True, True]
+    assert entropy.shape == (2,)
+    assert np.all(np.isfinite(entropy))
+
+
+def test_confidence_filter_rejects_one_pass_boolean_probability_iterables() -> None:
+    with pytest.raises(ValueError, match="probabilities"):
+        confidence_filter(_one_pass_boolean_probability_rows())
+    with pytest.raises(ValueError, match="probabilities"):
+        probability_entropy(_one_pass_boolean_probability_rows())
+
+
 def test_entropy_normalization_rejects_invalid_boolean_config() -> None:
     rows = np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype=float)
 

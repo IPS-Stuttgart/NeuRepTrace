@@ -18,6 +18,19 @@ def test_summarize_features_returns_column_statistics() -> None:
     assert result.metadata["feature_summary_n_features"] == 2
 
 
+def test_summarize_features_preserves_large_finite_statistics() -> None:
+    x = np.asarray([[1e100, -1e100], [2e100, -2e100]], dtype=float)
+
+    result = summarize_features(x)
+
+    for values in (result.mean, result.scale, result.minimum, result.maximum):
+        assert values.dtype == np.float64
+        assert np.all(np.isfinite(values))
+    np.testing.assert_allclose(result.mean, [1.5e100, -1.5e100])
+    np.testing.assert_allclose(result.minimum, [1e100, -2e100])
+    np.testing.assert_allclose(result.maximum, [2e100, -1e100])
+
+
 def test_summarize_features_ddof_guardrail() -> None:
     result = summarize_features([[1.0, 2.0]], ddof=5)
     assert result.metadata["feature_summary_ddof"] == 0

@@ -124,6 +124,8 @@ def _materialize_one_pass_iterables(value: object) -> object:
         return np.asarray(materialized, dtype=object).reshape(value.shape)
     if isinstance(value, (str, bytes)):
         return value
+    if hasattr(value, "__array__"):
+        return value
     if not isinstance(value, Iterable):
         return value
     return [_materialize_one_pass_iterables(item) for item in value]

@@ -40,10 +40,10 @@ def summarize_features(features: Sequence[Sequence[float]] | np.ndarray, *, ddof
         "feature_summary_global_scale": float(np.std(matrix, ddof=parsed_ddof)) if matrix.size > parsed_ddof else 0.0,
     }
     return FeatureSummaryResult(
-        mean=mean.astype(np.float32, copy=False),
-        scale=scale.astype(np.float32, copy=False),
-        minimum=minimum.astype(np.float32, copy=False),
-        maximum=maximum.astype(np.float32, copy=False),
+        mean=mean,
+        scale=scale,
+        minimum=minimum,
+        maximum=maximum,
         metadata=metadata,
     )
 

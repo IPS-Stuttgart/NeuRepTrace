@@ -111,6 +111,40 @@ def test_source_knn_accepts_one_pass_feature_iterables() -> None:
     assert distances.shape == (2, 1)
 
 
+@pytest.mark.parametrize(
+    "source_features",
+    [
+        [[True, False], [False, True], [True, True]],
+        np.asarray([[True, False], [False, True], [True, True]], dtype=bool),
+        np.asarray([[True, 0.0], [False, 1.0], [1.0, 1.0]], dtype=object),
+        ((value for value in row) for row in ([True, 0.0], [False, 1.0], [1.0, 1.0])),
+    ],
+)
+def test_source_knn_rejects_boolean_source_features(source_features) -> None:
+    with pytest.raises(ValueError, match="source_features.*boolean flags"):
+        fit_source_knn_reference(source_features=source_features, source_labels=["left", "right", "left"])
+
+
+@pytest.mark.parametrize(
+    "test_features",
+    [
+        [[True, False]],
+        np.asarray([[True, False]], dtype=bool),
+        np.asarray([[True, 0.0]], dtype=object),
+        ((value for value in row) for row in ([True, 0.0],)),
+    ],
+)
+def test_source_knn_rejects_boolean_test_features(test_features) -> None:
+    reference = fit_source_knn_reference(
+        source_features=[[0.0, 0.0], [1.0, 1.0]],
+        source_labels=["left", "right"],
+        config={"k": 1, "standardize": False},
+    )
+
+    with pytest.raises(ValueError, match="test_features.*boolean flags"):
+        predict_source_knn_probabilities(test_features, reference)
+
+
 def test_k_all_uses_all_source_rows() -> None:
     result = fit_source_knn_decoder(
         source_features=[[0.0], [1.0], [2.0], [3.0]],

@@ -8,8 +8,11 @@ from functools import wraps
 from numbers import Real
 from typing import Any
 
+import numpy as np
+
 _BOOL_PATCH_MARKER = "_neureptrace_config_workflow_float_bool_patch_installed"
 _FLOAT_PAIR_PATCH_MARKER = "_neureptrace_config_workflow_string_pair_patch_installed"
+_FLOAT_VALUE_PATCH_MARKER = "_neureptrace_config_workflow_float_value_patch_installed"
 _BENCHMARK_BOOL_PATCH_MARKER = "_neureptrace_benchmark_manifest_bool_patch_installed"
 _BENCHMARK_MISSING_PATCH_MARKER = "_neureptrace_benchmark_manifest_missing_scalar_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
@@ -73,6 +76,17 @@ def _string_pair_values(value: str) -> list[str] | None:
     return [part.strip() for comma_part in text.split(",") for part in comma_part.split() if part.strip()]
 
 
+def _contains_boolean_scalar(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return True
+        if value.dtype == object and value.size == 1:
+            return _contains_boolean_scalar(value.reshape(-1)[0])
+    return False
+
+
 def install() -> None:
     """Install tolerant parsing for generated dataset workflow configs."""
 
@@ -97,6 +111,18 @@ def install() -> None:
 
         setattr(_as_bool, _BOOL_PATCH_MARKER, True)
         config_workflow._as_bool = _as_bool
+
+    original_float_value = config_workflow._as_finite_float
+    if not getattr(original_float_value, _FLOAT_VALUE_PATCH_MARKER, False):
+
+        @wraps(original_float_value)
+        def _as_finite_float(value: Any, *, name: str) -> float:
+            if _contains_boolean_scalar(value):
+                raise config_workflow.DatasetConfigError(f"'{name}' must contain finite numeric values.")
+            return original_float_value(value, name=name)
+
+        setattr(_as_finite_float, _FLOAT_VALUE_PATCH_MARKER, True)
+        config_workflow._as_finite_float = _as_finite_float
 
     original_float_pair = config_workflow._as_float_pair
     if not getattr(original_float_pair, _FLOAT_PAIR_PATCH_MARKER, False):

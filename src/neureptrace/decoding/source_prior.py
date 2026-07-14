@@ -227,14 +227,7 @@ def _metadata(cfg: SourcePriorConfig, *, n_rows: int, n_classes: int) -> dict[st
 
 def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarray:
     if isinstance(values, np.ndarray):
-        array = np.asarray(values, dtype=object)
-        if array.ndim == 0:
-            items = [array.item()]
-        elif array.ndim == 1:
-            items = array.tolist()
-        else:
-            rows = array.reshape(array.shape[0], -1)
-            items = [row[0] if rows.shape[1] == 1 else tuple(row.tolist()) for row in rows]
+        items = _ndarray_label_items(values)
     elif isinstance(values, (str, bytes)):
         items = [values]
     else:
@@ -247,6 +240,16 @@ def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> np.ndarr
     return _object_array(_hashable_object_value(item) for item in items)
 
 
+def _ndarray_label_items(values: np.ndarray) -> list[Any]:
+    array = np.asarray(values)
+    if array.ndim == 0:
+        return [array[()]]
+    if array.ndim == 1:
+        return [array[index] for index in range(array.shape[0])]
+    rows = array.reshape(array.shape[0], -1)
+    return [row[0] if rows.shape[1] == 1 else tuple(row[column] for column in range(rows.shape[1])) for row in rows]
+
+
 def _object_array(values: Sequence[Any]) -> np.ndarray:
     items = list(values)
     vector = np.empty(len(items), dtype=object)
@@ -257,10 +260,10 @@ def _object_array(values: Sequence[Any]) -> np.ndarray:
 
 def _hashable_object_value(value: Any) -> Any:
     if isinstance(value, np.ndarray):
-        array = np.asarray(value, dtype=object)
+        array = np.asarray(value)
         if array.ndim == 0:
-            return _hashable_object_value(array.item())
-        return tuple(_hashable_object_value(item) for item in array.tolist())
+            return _hashable_object_value(array[()])
+        return tuple(_hashable_object_value(array[index]) for index in range(array.shape[0]))
     if isinstance(value, list):
         return tuple(_hashable_object_value(item) for item in value)
     if isinstance(value, tuple):
@@ -287,29 +290,35 @@ def _object_contains(values: Sequence[Any] | np.ndarray, target: Any) -> bool:
     return any(_object_equal(value, target) for value in _object_vector(values, name="values").tolist())
 
 
-def _is_nan_scalar(value: Any) -> bool:
+def _is_numpy_nat_scalar(value: Any) -> bool:
+    return isinstance(value, (np.datetime64, np.timedelta64)) and bool(np.isnat(value))
+
+
+def _is_missing_label_scalar(value: Any) -> bool:
+    if _is_numpy_nat_scalar(value):
+        return True
     if isinstance(value, np.generic):
         value = value.item()
-    if isinstance(value, (np.ndarray, list, tuple, dict)):
-        return False
-    try:
-        missing = pd.isna(value)
-    except (TypeError, ValueError):
-        return False
-    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+    if value is pd.NA or value is pd.NaT:
+        return True
+    return isinstance(value, float) and np.isnan(value)
+
+
+def _comparable_object_scalar(value: Any) -> Any:
+    if isinstance(value, np.generic) and not isinstance(value, (np.datetime64, np.timedelta64)):
+        return value.item()
+    return value
 
 
 def _object_equal(left: Any, right: Any) -> bool:
-    if _is_nan_scalar(left) and _is_nan_scalar(right):
+    if _is_missing_label_scalar(left) and _is_missing_label_scalar(right):
         return True
-    if isinstance(left, np.generic):
-        left = left.item()
-    if isinstance(right, np.generic):
-        right = right.item()
+    left = _comparable_object_scalar(left)
+    right = _comparable_object_scalar(right)
     if isinstance(left, (np.ndarray, list, tuple, dict)) or isinstance(right, (np.ndarray, list, tuple, dict)):
         left = _hashable_object_value(left)
         right = _hashable_object_value(right)
-        if _is_nan_scalar(left) and _is_nan_scalar(right):
+        if _is_missing_label_scalar(left) and _is_missing_label_scalar(right):
             return True
         if isinstance(left, tuple) or isinstance(right, tuple):
             if not isinstance(left, tuple) or not isinstance(right, tuple) or len(left) != len(right):
