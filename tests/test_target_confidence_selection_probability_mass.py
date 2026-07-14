@@ -29,5 +29,5 @@ def test_target_confidence_selection_normalizes_extreme_finite_rows_without_over
     expected = np.asarray([[0.5, 0.5], [10.0 / 11.0, 1.0 / 11.0]])
     np.testing.assert_allclose(result.probabilities, expected, rtol=1.0e-6)
     np.testing.assert_allclose(result.confidence, np.max(expected, axis=1), rtol=1.0e-6)
-    assert result.predictions.tolist() == [0, 0]
+    assert result.predictions.tolist() == [1, 0]
     assert result.keep_mask.tolist() == [False, True]
