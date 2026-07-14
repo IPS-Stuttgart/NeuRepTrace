@@ -318,14 +318,20 @@ def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, n
 def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
     if values is None:
         return np.full(expected_length, "source", dtype=object)
-    vector = np.asarray(_materialize_one_pass_iterables(values), dtype=object).reshape(-1)
+    if isinstance(values, np.ndarray):
+        raw_values = values.tolist()
+    elif isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+        raw_values = [values]
+    else:
+        raw_values = list(values)
+    vector = _object_vector(_freeze_label(value) for value in raw_values)
     if vector.shape[0] != expected_length:
         raise ValueError(f"source_domains must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
     for value in vector.tolist():
         try:
-            hash(value)
+  hash(value)
         except TypeError as exc:
-            raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
+  raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
     return vector
 
 
