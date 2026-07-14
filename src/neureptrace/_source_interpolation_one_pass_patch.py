@@ -56,8 +56,24 @@ def _install_source_interpolation_patch() -> None:
     if getattr(module, _INTERPOLATION_PATCH_MARKER, False):
         return
 
+    original_augment_source_with_interpolation = module.augment_source_with_interpolation
     original_feature_matrix = module._feature_matrix
     original_value_vector = module._value_vector
+
+    @wraps(original_augment_source_with_interpolation)
+    def augment_source_with_interpolation(*args: Any, **kwargs: Any) -> Any:
+        result = original_augment_source_with_interpolation(*args, **kwargs)
+        if result.metadata["source_interpolation"] or result.metadata["source_interpolation_preserve_original"]:
+            return result
+        return module.SourceInterpolationResult(
+            features=result.features[:0].copy(),
+            labels=result.labels[:0].copy(),
+            synthetic_mask=result.synthetic_mask[:0].copy(),
+            content_indices=result.content_indices,
+            partner_indices=result.partner_indices,
+            lambdas=result.lambdas,
+            metadata=result.metadata,
+        )
 
     @wraps(original_feature_matrix)
     def _feature_matrix(values: Any, *, name: str) -> np.ndarray:
@@ -68,6 +84,7 @@ def _install_source_interpolation_patch() -> None:
         materialized = values if isinstance(values, (str, bytes)) else _materialize_one_pass_iterable(values)
         return original_value_vector(materialized, expected_length=expected_length, name=name)
 
+    module.augment_source_with_interpolation = augment_source_with_interpolation
     module._feature_matrix = _feature_matrix
     module._value_vector = _value_vector
     setattr(module, _INTERPOLATION_PATCH_MARKER, True)
