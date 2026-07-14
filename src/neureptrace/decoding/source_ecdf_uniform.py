@@ -95,7 +95,7 @@ def fit_source_ecdf_map(source_features: Sequence[Sequence[float]] | np.ndarray,
     source = _feature_matrix(source_features, name="source_features")
     n_quantiles = min(cfg.n_quantiles, source.shape[0])
     references = np.linspace(0.0, 1.0, n_quantiles, dtype=float)
-    quantiles = np.quantile(source, references, axis=0)
+    quantiles = _stable_feature_quantiles(source, references)
     return SourceEcdfMap(references=references, quantiles=quantiles, epsilon=float(cfg.epsilon), n_source_rows=int(source.shape[0]))
 
 
@@ -117,12 +117,46 @@ def _coerce_config(config: SourceEcdfConfig | Mapping[str, Any]) -> SourceEcdfCo
     return source_ecdf_config(**dict(config))
 
 
+def _stable_feature_quantiles(source: np.ndarray, references: np.ndarray) -> np.ndarray:
+    """Compute feature quantiles without overflowing between finite endpoints."""
+
+    scale = np.max(np.abs(source), axis=0)
+    safe_scale = np.where(scale > 0.0, scale, 1.0)
+    scaled_source = source / safe_scale
+    scaled_quantiles = np.quantile(scaled_source, references, axis=0)
+    scaled_quantiles = np.clip(
+        scaled_quantiles,
+        scaled_source.min(axis=0),
+        scaled_source.max(axis=0),
+    )
+    quantiles = scaled_quantiles * safe_scale
+    if not np.all(np.isfinite(quantiles)):
+        raise ValueError("source_features quantiles must remain finite.")
+    return quantiles
+
+
 def _interp_unique(values: np.ndarray, knots: np.ndarray, references: np.ndarray) -> np.ndarray:
     unique_knots, unique_indices = np.unique(knots, return_index=True)
     unique_refs = references[unique_indices]
     if unique_knots.shape[0] == 1:
         return np.full(values.shape[0], 0.5, dtype=float)
-    return np.interp(values, unique_knots, unique_refs, left=0.0, right=1.0)
+
+    transformed = np.empty(values.shape[0], dtype=float)
+    left = values < unique_knots[0]
+    right = values > unique_knots[-1]
+    interior = ~(left | right)
+    transformed[left] = 0.0
+    transformed[right] = 1.0
+
+    if np.any(interior):
+        scale = float(np.max(np.abs(unique_knots)))
+        if scale == 0.0:
+            scale = 1.0
+        scaled_knots = unique_knots / scale
+        clipped_values = np.clip(values[interior], unique_knots[0], unique_knots[-1])
+        transformed[interior] = np.interp(clipped_values / scale, scaled_knots, unique_refs)
+
+    return transformed
 
 
 def _metadata(cfg: SourceEcdfConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int, n_quantiles: int) -> dict[str, Any]:
