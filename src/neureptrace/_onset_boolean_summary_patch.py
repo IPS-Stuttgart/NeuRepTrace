@@ -1,4 +1,4 @@
-"""Robust boolean parsing and missing-group preservation for onset tables.
+"""Robust parsing, grouping, and exact label matching for onset tables.
 
 Onset events and thresholded observations are commonly written to CSV before
 being summarized again. Pandas may preserve boolean-looking columns as strings
@@ -11,11 +11,17 @@ The onset helpers also group by optional metadata columns such as ``subject``,
 default, which can silently remove whole sequences whose metadata is missing.
 This patch maps missing group keys to a private sentinel while the original
 helper runs, then restores missing values in the returned table.
+
+Finally, onset correctness originally converted integer-like class identifiers
+through ``float``. IEEE-754 double precision cannot distinguish every adjacent
+integer above ``2**53``, so a wrong prediction could be reported as correct.
+This patch parses signed-64-bit integer labels without a lossy float round-trip.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any, TypeVar
 
@@ -27,6 +33,11 @@ _FALSE_BOOL_TEXT = {"0", "false", "f", "no", "n", "off", ""}
 _PATCH_MARKER = "_neureptrace_onset_boolean_summary_patch_installed"
 _PARSED_ABOVE_THRESHOLD_COLUMN = "_neureptrace_parsed_above_threshold"
 _MISSING_GROUP_SENTINEL = object()
+_MAX_EXACT_FLOAT_INTEGER = 2**53
+_INT64_MIN = int(np.iinfo(np.int64).min)
+_INT64_MAX = int(np.iinfo(np.int64).max)
+_INT64_MIN_DECIMAL = Decimal(_INT64_MIN)
+_INT64_MAX_DECIMAL = Decimal(_INT64_MAX)
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
@@ -65,6 +76,53 @@ def _bool_series(values: Any, *, name: str) -> pd.Series:
     series = pd.Series(values, copy=False)
     parsed_values = [_parse_bool(value, name=name) for value in series.to_numpy(dtype=object)]
     return pd.Series(parsed_values, index=series.index, dtype=bool)
+
+
+def _exact_integer_label(value: object) -> int | None:
+    """Parse one exact signed-64-bit integer label, or return ``None``."""
+
+    if _is_missing(value) or isinstance(value, (bool, np.bool_)):
+        return None
+    if isinstance(value, (int, np.integer)):
+        integer = int(value)
+        return integer if _INT64_MIN <= integer <= _INT64_MAX else None
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            return None
+        if abs(numeric) > _MAX_EXACT_FLOAT_INTEGER:
+            return None
+        integer = int(numeric)
+        return integer if _INT64_MIN <= integer <= _INT64_MAX else None
+
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+    if not numeric.is_finite():
+        return None
+    integral = numeric.to_integral_value()
+    if numeric != integral or integral < _INT64_MIN_DECIMAL or integral > _INT64_MAX_DECIMAL:
+        return None
+    return int(integral)
+
+
+def _exact_integer_labels(values: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+    """Parse a label vector without routing exact integers through ``float64``."""
+
+    items = pd.Series(values, copy=False).to_numpy(dtype=object)
+    labels = np.zeros(len(items), dtype=np.int64)
+    valid = np.zeros(len(items), dtype=bool)
+    for index, value in enumerate(items):
+        parsed = _exact_integer_label(value)
+        if parsed is None:
+            continue
+        labels[index] = parsed
+        valid[index] = True
+    return labels, valid
 
 
 def _sentinelize_missing_group_values(
@@ -167,7 +225,7 @@ def _window_threshold_stats(
 
 
 def install() -> None:
-    """Install robust boolean parsing and missing-group preservation for onset helpers."""
+    """Install robust onset parsing, grouping, and exact label matching."""
 
     import neureptrace.onset_detection as onset_detection
 
@@ -233,6 +291,8 @@ def install() -> None:
     ) -> dict[str, float | int]:
         return _window_threshold_stats(onset_detection, frame, window, sequence_columns)
 
+    onset_detection._integer_label = _exact_integer_label
+    onset_detection._integer_labels = _exact_integer_labels
     onset_detection._window_threshold_stats = patched_window_threshold_stats
     onset_detection.annotate_threshold_crossings = _wrap_grouped_dataframe_helper(
         onset_detection,
