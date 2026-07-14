@@ -20,6 +20,19 @@ def test_normalize_rows_l2_returns_unit_l2_rows_and_original_norms() -> None:
     assert np.allclose(normalized[1], np.asarray([0.0, 0.0]))
 
 
+def test_normalize_rows_l2_preserves_direction_when_norm_exceeds_float64() -> None:
+    maximum = np.finfo(float).max
+    features = np.asarray([[maximum, maximum], [maximum, -maximum]])
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        normalized, norms = normalize_rows_l2(features)
+
+    expected = np.asarray([[1.0, 1.0], [1.0, -1.0]]) / np.sqrt(2.0)
+    assert np.isinf(norms).all()
+    np.testing.assert_allclose(normalized, expected)
+    np.testing.assert_allclose(np.linalg.norm(normalized, axis=1), 1.0)
+
+
 def test_normalize_train_test_rows_l2_metadata() -> None:
     result = normalize_train_test_rows_l2(
         train_features=[[3.0, 4.0], [0.0, 5.0]],
@@ -34,6 +47,22 @@ def test_normalize_train_test_rows_l2_metadata() -> None:
     assert result.metadata["row_l2_has_fitted_parameters"] is False
     assert result.metadata["row_l2_uses_labels"] is False
     assert result.metadata["row_l2_valid_for_strict_source_only"] is True
+
+
+def test_normalize_train_test_rows_l2_preserves_unrepresentable_norm_rows() -> None:
+    maximum = np.finfo(float).max
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        result = normalize_train_test_rows_l2(
+            train_features=[[maximum, maximum]],
+            test_features=[[maximum, -maximum]],
+        )
+
+    expected = np.asarray([[1.0, 1.0], [1.0, -1.0]], dtype=np.float32) / np.float32(np.sqrt(2.0))
+    np.testing.assert_allclose(result.train_features, expected[:1])
+    np.testing.assert_allclose(result.test_features, expected[1:])
+    assert np.isinf(result.train_norms).all()
+    assert np.isinf(result.test_norms).all()
 
 
 def test_normalize_train_test_rows_l2_rejects_width_mismatch() -> None:
