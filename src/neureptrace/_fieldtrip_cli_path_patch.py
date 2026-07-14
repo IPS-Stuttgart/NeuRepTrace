@@ -18,6 +18,7 @@ _PATH_TOKEN_ERROR = "path tokens must be strings or integer indices, not boolean
 _LABEL_BASE_ERROR = "label_base must be a finite numeric scalar or None, not a boolean value."
 _LABEL_BASE_PARSE_ERROR = "label-base must be finite numeric or 'none'."
 _TRIALINFO_COLUMN_ERROR = "trialinfo_column must be an integer column index, not a boolean value."
+_OUTPUT_PATH_ERROR = "FieldTrip epochs and metadata output paths must be distinct."
 
 
 def _format_path_default(tokens: Sequence[Any] | None) -> str:
@@ -123,6 +124,23 @@ def _parse_label_base(value: str | int | float | None) -> float | None:
         return _coerce_label_base(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(_LABEL_BASE_PARSE_ERROR) from exc
+
+
+def _writer_output_paths(
+    epochs_out: Path | str,
+    metadata_out: Path | str | None,
+) -> tuple[Path, Path]:
+    """Normalize writer paths and reject aliases that would overwrite epochs."""
+
+    epochs_path = Path(epochs_out)
+    metadata_path = (
+        epochs_path.with_name(f"{epochs_path.stem}_metadata.csv")
+        if metadata_out is None
+        else Path(metadata_out)
+    )
+    if epochs_path.resolve(strict=False) == metadata_path.resolve(strict=False):
+        raise ValueError(_OUTPUT_PATH_ERROR)
+    return epochs_path, metadata_path
 
 
 def _build_parser(fieldtrip_mat: Any, prog: str | None = None) -> argparse.ArgumentParser:
@@ -243,7 +261,7 @@ def _install_label_config_patch(fieldtrip_mat: Any) -> None:
 
 
 def _install_writer_path_patch(fieldtrip_mat: Any) -> None:
-    """Normalize public writer output paths before the original writer touches them."""
+    """Normalize public writer paths and reject colliding outputs."""
 
     if getattr(fieldtrip_mat.write_fieldtrip_raw_mat_epochs, _WRITER_PATCH_MARKER, False):
         return
@@ -258,10 +276,10 @@ def _install_writer_path_patch(fieldtrip_mat: Any) -> None:
         overwrite: bool = False,
         **kwargs: Any,
     ):
-        metadata_path = None if metadata_out is None else Path(metadata_out)
+        epochs_path, metadata_path = _writer_output_paths(epochs_out, metadata_out)
         return original_writer(
             mat_path,
-            epochs_out=Path(epochs_out),
+            epochs_out=epochs_path,
             metadata_out=metadata_path,
             overwrite=overwrite,
             **kwargs,
