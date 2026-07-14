@@ -94,7 +94,16 @@ def normalize_rows_l2(
     matrix = _feature_matrix(features, name="features")
     norms = _stable_row_l2_norms(matrix)
     safe_norms = np.maximum(norms, _positive_float(epsilon, name="epsilon"))
-    return matrix / safe_norms[:, None], norms
+    normalized = matrix / safe_norms[:, None]
+
+    overflowing = np.isinf(norms)
+    if np.any(overflowing):
+        scales = np.max(np.abs(matrix[overflowing]), axis=1)
+        scaled = matrix[overflowing] / scales[:, None]
+        scaled_norms = np.sqrt(np.sum(scaled * scaled, axis=1))
+        normalized[overflowing] = scaled / scaled_norms[:, None]
+
+    return normalized, norms
 
 
 def _stable_row_l2_norms(matrix: np.ndarray) -> np.ndarray:
