@@ -94,7 +94,7 @@ def validate_time_axis(time_vector) -> np.ndarray:
         raise ValueError("time_vector must be strictly increasing.")
 
     sample_interval = float(np.median(diffs))
-    if not np.allclose(diffs, sample_interval, rtol=1e-6, atol=1e-12):
+    if not np.allclose(diffs, sample_interval, rtol=1e-6, atol=0.0):
         raise ValueError("time_vector must be uniformly sampled.")
     return time_vector
 
