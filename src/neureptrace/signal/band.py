@@ -52,6 +52,19 @@ def _materialize_numeric_input(value: object) -> object:
     return [_materialize_numeric_input(item) for item in value]
 
 
+def _is_non_scalar_array_like(value: object) -> bool:
+    """Return whether an array-like value has one or more dimensions."""
+
+    if isinstance(value, np.ndarray):
+        return value.ndim != 0
+    if not hasattr(value, "__array__"):
+        return False
+    try:
+        return np.asarray(value).ndim != 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _normalize_axis(axis: int, ndim: int) -> int:
     if _is_bool_like(axis):
         raise ValueError("axis must be an integer, not boolean.")
@@ -121,6 +134,8 @@ def validate_sampling_rate(sampling_rate) -> float:
 
     if _contains_bool_like(sampling_rate):
         raise ValueError("sampling_rate must be a positive finite value, not boolean.")
+    if _is_non_scalar_array_like(sampling_rate):
+        raise ValueError("sampling_rate must be a scalar positive finite value.")
     try:
         sampling_rate = float(sampling_rate)
     except (TypeError, ValueError) as exc:
@@ -161,8 +176,13 @@ def validate_band_hz(band_hz: Sequence[float], sampling_rate) -> BandHz:
 
     if _contains_bool_like(lowcut) or _contains_bool_like(highcut):
         raise ValueError("Cutoff frequencies must be finite numbers, not boolean.")
-    lowcut = float(lowcut)
-    highcut = float(highcut)
+    if _is_non_scalar_array_like(lowcut) or _is_non_scalar_array_like(highcut):
+        raise ValueError("Cutoff frequencies must be scalar finite numbers.")
+    try:
+        lowcut = float(lowcut)
+        highcut = float(highcut)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Cutoff frequencies must be finite numbers.") from exc
     if not np.isfinite(lowcut) or not np.isfinite(highcut):
         raise ValueError("Cutoff frequencies must be finite.")
     if lowcut <= 0 or highcut <= 0:

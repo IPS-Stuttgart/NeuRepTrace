@@ -24,6 +24,16 @@ def test_validate_sampling_rate_rejects_boolean_scalars(sampling_rate):
         validate_sampling_rate(sampling_rate)
 
 
+@pytest.mark.parametrize("sampling_rate", [np.asarray([200.0]), np.asarray([[200.0]])])
+def test_validate_sampling_rate_rejects_non_scalar_arrays(sampling_rate):
+    with pytest.raises(ValueError, match="scalar positive finite value"):
+        validate_sampling_rate(sampling_rate)
+
+
+def test_validate_sampling_rate_accepts_zero_dimensional_array():
+    assert validate_sampling_rate(np.asarray(200.0)) == 200.0
+
+
 @pytest.mark.parametrize(
     "band_hz",
     [
@@ -42,6 +52,29 @@ def test_validate_sampling_rate_rejects_boolean_scalars(sampling_rate):
 def test_validate_band_hz_rejects_boolean_cutoffs(band_hz):
     with pytest.raises(ValueError, match="finite numbers, not boolean"):
         validate_band_hz(band_hz, 200.0)
+
+
+@pytest.mark.parametrize(
+    "band_hz",
+    [
+        (np.asarray([8.0]), 12.0),
+        (np.asarray([[8.0]]), 12.0),
+        (8.0, np.asarray([12.0])),
+        (8.0, np.asarray([[12.0]])),
+    ],
+)
+def test_validate_band_hz_rejects_non_scalar_arrays(band_hz):
+    with pytest.raises(ValueError, match="scalar finite numbers"):
+        validate_band_hz(band_hz, 200.0)
+
+
+def test_validate_band_hz_accepts_zero_dimensional_arrays():
+    assert validate_band_hz((np.asarray(8.0), np.asarray(12.0)), np.asarray(200.0)) == (8.0, 12.0)
+
+
+def test_validate_band_hz_normalizes_invalid_cutoff_conversion():
+    with pytest.raises(ValueError, match="finite numbers"):
+        validate_band_hz(([8.0], 12.0), 200.0)
 
 
 @pytest.mark.parametrize("order", [True, False, np.bool_(True), np.bool_(False)])
