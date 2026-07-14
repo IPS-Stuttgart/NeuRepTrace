@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib
 import math
 from collections.abc import Iterable, Mapping
+from decimal import Decimal, InvalidOperation
+from numbers import Integral, Real
 from typing import Any
 
 import pandas as pd
@@ -12,6 +14,7 @@ import pandas as pd
 _PATCH_MARKER = "_neureptrace_bushmeg_all_protocols_audit_list_values_patch_installed"
 _TRUE_TOKENS = {"1", "true", "yes", "y", "on"}
 _FALSE_TOKENS = {"0", "false", "no", "n", "off"}
+_MAX_UNAMBIGUOUS_FLOAT_INTEGER = 2**53 - 1
 
 
 def _is_nonstring_iterable(value: Any) -> bool:
@@ -164,6 +167,44 @@ def _class_count_from_row(row: pd.Series) -> float:
     return float("nan")
 
 
+def _exact_integer_or_none(value: Any) -> int | None:
+    """Return an exact integer index, rejecting lossy or non-integral values."""
+
+    value = _coerce_repeated_scalar(value)
+    if _is_missing_scalar(value) or isinstance(value, Mapping) or _is_nonstring_iterable(value):
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, Integral):
+        return int(value)
+    if isinstance(value, Real):
+        numeric = float(value)
+        if (
+            not math.isfinite(numeric)
+            or not numeric.is_integer()
+            or abs(numeric) > _MAX_UNAMBIGUOUS_FLOAT_INTEGER
+        ):
+            return None
+        return int(numeric)
+
+    if isinstance(value, bytes):
+        text = value.decode(errors="replace").strip()
+    else:
+        text = str(value).strip()
+    if not text:
+        return None
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+    if not numeric.is_finite():
+        return None
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        return None
+    return int(integral)
+
+
 def _parse_index_set(value: Any) -> set[int]:
     value = _coerce_repeated_scalar(value)
     if _is_missing_scalar(value):
@@ -184,24 +225,14 @@ def _parse_index_set(value: Any) -> set[int]:
         text = text.replace(separator, " ")
     indices: set[int] = set()
     for token in text.split():
-        try:
-            indices.add(int(float(str(token))))
-        except ValueError:
-            continue
+        index = _exact_integer_or_none(token)
+        if index is not None:
+            indices.add(index)
     return indices
 
 
 def _integer_index_or_none(value: Any) -> int | None:
-    value = _coerce_repeated_scalar(value)
-    if _is_missing_scalar(value) or isinstance(value, Mapping) or _is_nonstring_iterable(value):
-        return None
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if not math.isfinite(numeric) or numeric % 1.0 != 0.0:
-        return None
-    return int(numeric)
+    return _exact_integer_or_none(value)
 
 
 def _protocol3_prediction_overlap_failures(summary: pd.DataFrame, predictions: pd.DataFrame) -> list[str]:
