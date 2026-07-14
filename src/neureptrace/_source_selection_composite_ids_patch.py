@@ -1,4 +1,4 @@
-"""Preserve composite source-selection domain ids and labels."""
+"""Preserve composite and missing-valued source-selection identifiers."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from functools import wraps
 from typing import Any
 
 import numpy as np
+
+from neureptrace._object_label_utils import label_counts, label_equal_mask, values_equal
 
 _PATCH_MARKER = "_neureptrace_source_selection_composite_ids_patch_installed"
 
@@ -54,30 +56,27 @@ def _atomic_object_vector(values: Sequence[Any] | np.ndarray, *, name: str) -> n
 
 
 def _values_equal(left: Any, right: Any) -> bool:
-    try:
-        result = left == right
-    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
-        return False
-    if isinstance(result, (bool, np.bool_)):
-        return bool(result)
-    try:
-        return bool(np.all(result))
-    except Exception:  # pragma: no cover - defensive fallback for unusual metadata objects
-        return False
+    """Compare identifiers with the package-wide missing-aware semantics."""
+
+    return values_equal(left, right)
 
 
 def _object_equal_mask(vector: np.ndarray, value: Any) -> np.ndarray:
-    """Compare object vectors item-wise so tuple values are atomic."""
+    """Compare object vectors item-wise so composite and missing values are atomic."""
 
-    return np.asarray([_values_equal(item, value) for item in vector.tolist()], dtype=bool)
+    return label_equal_mask(vector, value)
 
 
 def _unique_values(vector: np.ndarray) -> tuple[Any, ...]:
-    unique: list[Any] = []
-    for value in vector.tolist():
-        if not any(_values_equal(value, existing) for existing in unique):
-            unique.append(value)
-    return tuple(unique)
+    unique, _counts = label_counts(vector)
+    return tuple(unique.tolist())
+
+
+def _unique_domains(domain_vector: np.ndarray) -> tuple[Hashable, ...]:
+    domains = _unique_values(domain_vector)
+    if not domains:
+        raise ValueError("At least one source domain is required.")
+    return domains
 
 
 def _domain_vector(values: Sequence[Hashable] | np.ndarray, *, expected_length: int) -> np.ndarray:
@@ -118,7 +117,7 @@ def _class_balanced_weights(sample_weights: np.ndarray, source_labels: Sequence[
 
 
 def install() -> None:
-    """Patch source-domain selection to preserve tuple/list row identifiers."""
+    """Patch source-domain selection to preserve composite and missing identifiers."""
 
     source_selection = importlib.import_module("neureptrace.decoding.source_selection")
     original_select = source_selection.select_source_domains_by_target_similarity
@@ -147,7 +146,7 @@ def install() -> None:
                 f"{source_matrix.shape[1]} != {target_matrix.shape[1]}."
             )
         domain_vector = _domain_vector(source_domains, expected_length=source_matrix.shape[0])
-        domains = source_selection._unique_domains(domain_vector)
+        domains = _unique_domains(domain_vector)
         selected_min = source_selection._normalize_positive_int(min_selected_domains, name="min_selected_domains")
         if selected_min > len(domains):
             raise ValueError(f"min_selected_domains={selected_min} exceeds the number of available source domains ({len(domains)}).")
@@ -160,7 +159,11 @@ def install() -> None:
         normalized_metric = source_selection.normalize_source_selection_metric(metric)
 
         distances = {
-            domain: source_selection._domain_distance(source_matrix[_object_equal_mask(domain_vector, domain)], target_matrix, metric=normalized_metric)
+            domain: source_selection._domain_distance(
+                source_matrix[_object_equal_mask(domain_vector, domain)],
+                target_matrix,
+                metric=normalized_metric,
+            )
             for domain in domains
         }
         ordered_domains = tuple(sorted(domains, key=lambda domain: (distances[domain], repr(domain))))
@@ -172,8 +175,13 @@ def install() -> None:
             min_selected_domains=selected_min,
         )
         scores = source_selection._distance_scores(distances, temperature=softmax_temperature)
-        selected_set = set(selected)
-        selected_mask = np.asarray([domain in selected_set for domain in domain_vector.tolist()], dtype=bool)
+        selected_mask = np.asarray(
+            [
+                any(_values_equal(domain, selected_domain) for selected_domain in selected)
+                for domain in domain_vector.tolist()
+            ],
+            dtype=bool,
+        )
         sample_weights = np.zeros(source_matrix.shape[0], dtype=float)
         for domain in selected:
             sample_weights[_object_equal_mask(domain_vector, domain)] = scores[domain]
@@ -210,6 +218,8 @@ def install() -> None:
     setattr(select_source_domains_by_target_similarity, _PATCH_MARKER, True)
     source_selection._domain_vector = _domain_vector
     source_selection._label_vector = _label_vector
+    source_selection._object_equal_mask = _object_equal_mask
+    source_selection._unique_domains = _unique_domains
     source_selection._class_balanced_weights = _class_balanced_weights
     source_selection.select_source_domains_by_target_similarity = select_source_domains_by_target_similarity
 
