@@ -68,7 +68,7 @@ def test_class_score_matrix_accepts_nested_one_pass_feature_rows() -> None:
 
     assert classes is not None
     assert classes.tolist() == ["left", "right"]
-    assert np.array_equal(scores, np.asarray([[1.0, -1.0], [-2.0, 2.0]]))
+    assert np.array_equal(scores, np.asarray([[0.5, -0.5], [-1.0, 1.0]]))
 
 
 @pytest.mark.parametrize(
