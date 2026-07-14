@@ -111,6 +111,8 @@ def _label_indices(values: Sequence[int] | np.ndarray, *, n_rows: int, n_classes
 
 
 def _positive_int(value: int | str, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer.")
     parsed = float(value)
     if not np.isfinite(parsed) or parsed % 1.0 != 0.0 or parsed < 1:
         raise ValueError(f"{name} must be a positive integer.")
