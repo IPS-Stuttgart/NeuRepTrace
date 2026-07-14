@@ -163,10 +163,11 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probability rows must be finite and non-negative.")
-    row_sums = np.sum(matrix, axis=1, keepdims=True)
-    if np.any(row_sums <= 0.0):
+    row_maxima = np.max(matrix, axis=1, keepdims=True)
+    if np.any(row_maxima <= 0.0):
         raise ValueError("probability rows must have positive mass.")
-    return matrix / row_sums
+    scaled = matrix / row_maxima
+    return scaled / np.sum(scaled, axis=1, keepdims=True)
 
 
 def _materialize_iterables(values: Any) -> Any:
@@ -204,7 +205,8 @@ def _normalize_probability_vector(values: np.ndarray, *, epsilon: float) -> np.n
     if vector.shape[0] < 1 or not np.all(np.isfinite(vector)) or np.any(vector < 0.0):
         raise ValueError("prior values must be finite and non-negative.")
     vector = np.maximum(vector, float(epsilon))
-    return vector / float(np.sum(vector))
+    scaled = vector / float(np.max(vector))
+    return scaled / float(np.sum(scaled))
 
 
 def _metadata(cfg: SourcePriorConfig, *, n_rows: int, n_classes: int) -> dict[str, Any]:
