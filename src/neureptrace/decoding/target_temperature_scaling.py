@@ -269,11 +269,12 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must be finite and non-negative.")
-    row_sums = np.sum(matrix, axis=1, keepdims=True)
-    if np.any(row_sums <= 0.0):
+    row_maxima = np.max(matrix, axis=1, keepdims=True)
+    if np.any(row_maxima <= 0.0):
         raise ValueError("probability rows must have positive mass.")
-    matrix = np.maximum(matrix, eps)
-    return matrix / np.sum(matrix, axis=1, keepdims=True)
+    floored = np.maximum(matrix, eps)
+    scaled = floored / np.max(floored, axis=1, keepdims=True)
+    return scaled / np.sum(scaled, axis=1, keepdims=True)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
