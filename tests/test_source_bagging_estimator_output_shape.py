@@ -42,7 +42,7 @@ def test_source_bagging_rejects_estimator_outputs_with_wrong_row_count(estimator
     source_labels = np.asarray(["left", "left", "right", "right"], dtype=object)
     test_features = np.asarray([[-1.8], [1.8]], dtype=float)
 
-    with pytest.raises(ValueError, match="one row per test feature row"):
+    with pytest.raises(ValueError, match=r"one row per (?:test )?feature row"):
         fit_source_bagging_decoder(
             source_features=source_features,
             source_labels=source_labels,
