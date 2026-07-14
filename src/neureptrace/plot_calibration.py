@@ -41,8 +41,12 @@ def summarize_reliability_curve(
     bins = _window(reliability_bins.copy(), time_window)
     if "decoder" not in bins.columns:
         bins["decoder"] = "overall"
+    else:
+        bins["decoder"] = bins["decoder"].astype("object").where(bins["decoder"].notna(), "overall")
     if "emission_mode" not in bins.columns:
         bins["emission_mode"] = "calibrated"
+    else:
+        bins["emission_mode"] = bins["emission_mode"].astype("object").where(bins["emission_mode"].notna(), "calibrated")
 
     rows = []
     group_columns = ["decoder", "emission_mode", "bin", "bin_left", "bin_right"]
