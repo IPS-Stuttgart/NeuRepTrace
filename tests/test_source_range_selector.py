@@ -33,6 +33,24 @@ def test_source_range_selector_accepts_string_scalar_controls() -> None:
     assert selected.tolist() == [1, 2]
 
 
+def test_source_range_selector_accepts_one_pass_feature_iterables() -> None:
+    source_rows = (iter(row) for row in ([1.0, 0.0, 5.0], [1.0, 2.0, 9.0]))
+    test_rows = (iter(row) for row in ([99.0, 3.0, 11.0],))
+
+    result = fit_source_range_selector(source_features=source_rows, test_features=test_rows)
+
+    assert result.selected_indices.tolist() == [1, 2]
+    np.testing.assert_allclose(result.test_features, [[3.0, 11.0]])
+
+
+def test_source_range_selector_accepts_one_pass_manual_ranges() -> None:
+    ranges = (value for value in [0.0, 2.0, 4.0])
+
+    selected = select_source_range_features(ranges, min_range=1.0)
+
+    assert selected.tolist() == [1, 2]
+
+
 def test_source_range_selector_validation() -> None:
     with pytest.raises(ValueError):
         select_source_range_features([1.0], min_range=-0.1)
@@ -53,3 +71,27 @@ def test_source_range_selector_rejects_ambiguous_scalar_controls() -> None:
 
     with pytest.raises(ValueError, match="min_range"):
         select_source_range_features([1.0, 2.0], min_range=[0.0, 1.0])
+
+
+@pytest.mark.parametrize(
+    "bad_source_features",
+    [
+        [[True, False], [False, True]],
+        np.asarray([[True, False], [False, True]], dtype=bool),
+        np.asarray([[True, 0.0], [False, 1.0]], dtype=object),
+        (iter(row) for row in ([True, 0.0], [False, 1.0])),
+    ],
+)
+def test_source_range_selector_rejects_boolean_source_features(bad_source_features) -> None:
+    with pytest.raises(ValueError, match="source_features.*boolean"):
+        fit_source_range_selector(source_features=bad_source_features, test_features=[[0.0, 1.0]])
+
+
+def test_source_range_selector_rejects_boolean_test_features() -> None:
+    with pytest.raises(ValueError, match="test_features.*boolean"):
+        fit_source_range_selector(source_features=[[0.0, 1.0]], test_features=[[True, False]])
+
+
+def test_select_source_range_features_rejects_boolean_ranges() -> None:
+    with pytest.raises(ValueError, match="ranges.*non-boolean"):
+        select_source_range_features([False, True])

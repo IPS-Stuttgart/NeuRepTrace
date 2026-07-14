@@ -153,7 +153,14 @@ def _coerce_config(config: SourceFeatureScaleConfig | Mapping[str, Any]) -> Sour
             scale=config.scale,
             epsilon=config.epsilon,
         )
-    return source_feature_scale_config(**dict(config))
+    if not isinstance(config, Mapping):
+        raise ValueError("source scale config must be a mapping or SourceFeatureScaleConfig.")
+    raw = dict(config)
+    allowed = {"method", "center", "scale", "epsilon"}
+    unknown = sorted(str(key) for key in raw if key not in allowed)
+    if unknown:
+        raise ValueError(f"Unknown source scale config option(s): {', '.join(unknown)}. Available options: {', '.join(sorted(allowed))}.")
+    return source_feature_scale_config(**raw)
 
 
 def _metadata(cfg: SourceFeatureScaleConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int) -> dict[str, Any]:

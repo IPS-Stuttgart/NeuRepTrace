@@ -30,6 +30,20 @@ def test_polynomial_transform_shapes_and_metadata() -> None:
     assert result.metadata["source_polynomial_valid_for_strict_source_only"] is True
 
 
+def test_polynomial_accepts_one_pass_iterable_feature_rows() -> None:
+    source_rows = (row for row in [[1.0, 2.0], [3.0, 4.0]])
+    test_rows = (row for row in [[5.0, 6.0]])
+
+    result = fit_source_polynomial_transform(source_features=source_rows, test_features=test_rows)
+    reused = apply_source_polynomial_transform((row for row in [[7.0, 8.0]]), result.reference)
+
+    assert result.train_features.shape == (2, 5)
+    assert result.test_features.shape == (1, 5)
+    assert np.allclose(result.test_features[0], np.asarray([5.0, 6.0, 25.0, 36.0, 30.0]))
+    assert reused.shape == (1, 5)
+    assert np.allclose(reused[0], np.asarray([7.0, 8.0, 49.0, 64.0, 56.0]))
+
+
 def test_polynomial_reference_can_be_reused() -> None:
     reference = fit_source_polynomial_reference(3, config={"include_bias": True, "max_interactions": 1})
     rows = np.asarray([[2.0, 3.0, 4.0]], dtype=float)

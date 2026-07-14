@@ -22,16 +22,31 @@ _DECODED_FOLD_PATCH_MARKER = "_neureptrace_from_decoded_fold_probability_patch_i
 
 
 def _contains_boolean_values(values: Any) -> bool:
-    """Return whether an array-like value contains Python or NumPy booleans."""
+    """Return whether an array-like value contains Python or NumPy booleans.
 
-    try:
-        array = np.asarray(values)
-    except (TypeError, ValueError):
-        return False
-    if np.issubdtype(array.dtype, np.bool_):
+    Object arrays can contain zero-dimensional NumPy arrays or nested arrays as
+    cells.  NumPy can coerce those boolean cells to 0/1 during a later
+    ``astype(float)``/``astype(int)`` conversion, so inspect them recursively
+    instead of only checking the top-level object-array elements.
+    """
+
+    if isinstance(values, (bool, np.bool_)):
         return True
-    if array.dtype == object:
-        return any(isinstance(value, (bool, np.bool_)) for value in array.ravel())
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_contains_boolean_values(value) for value in values.ravel(order="C"))
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, (list, tuple)):
+        return any(_contains_boolean_values(value) for value in values)
+    if hasattr(values, "__array__"):
+        try:
+            return _contains_boolean_values(np.asarray(values))
+        except (TypeError, ValueError):
+            return False
     return False
 
 

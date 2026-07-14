@@ -4,7 +4,21 @@ import pytest
 from neureptrace.signal.band import bandpass_sos, validate_band_hz, validate_sampling_rate, validate_signal_values
 
 
-@pytest.mark.parametrize("sampling_rate", [True, False, np.bool_(True), np.bool_(False)])
+@pytest.mark.parametrize(
+    "sampling_rate",
+    [
+        True,
+        False,
+        np.bool_(True),
+        np.bool_(False),
+        np.asarray(True),
+        np.asarray(False),
+        np.asarray([True]),
+        np.asarray([False]),
+        np.asarray(True, dtype=object),
+        np.asarray([False], dtype=object),
+    ],
+)
 def test_validate_sampling_rate_rejects_boolean_scalars(sampling_rate):
     with pytest.raises(ValueError, match="positive finite value, not boolean"):
         validate_sampling_rate(sampling_rate)
@@ -15,8 +29,14 @@ def test_validate_sampling_rate_rejects_boolean_scalars(sampling_rate):
     [
         (True, 12.0),
         (np.bool_(True), 12.0),
+        (np.asarray(True), 12.0),
+        (np.asarray([True]), 12.0),
+        (np.asarray(True, dtype=object), 12.0),
         (8.0, True),
         (8.0, np.bool_(True)),
+        (8.0, np.asarray(True)),
+        (8.0, np.asarray([True])),
+        (8.0, np.asarray(False, dtype=object)),
     ],
 )
 def test_validate_band_hz_rejects_boolean_cutoffs(band_hz):

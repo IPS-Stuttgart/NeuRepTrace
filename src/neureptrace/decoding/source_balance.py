@@ -292,16 +292,33 @@ def _metadata(cfg: SourceBalanceConfig, *, n_source_rows: int, n_groups: int, gr
 
 
 def _materialize_array(values: object, *, dtype: type | str | None = None) -> np.ndarray:
-    if isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
-        return np.asarray(values, dtype=dtype)
-    if isinstance(values, Iterable):
-        return np.asarray(list(values), dtype=dtype)
-    return np.asarray(values, dtype=dtype)
+    return np.asarray(_materialize_nested_iterables(values), dtype=dtype)
+
+
+def _materialize_nested_iterables(value: object) -> object:
+    """Return an array-like object that can be inspected after one-pass inputs."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype == object:
+            return _materialize_nested_iterables(value.tolist())
+        return value
+    if isinstance(value, (str, bytes)):
+        return value
+    if isinstance(value, Mapping):
+        return value
+    if hasattr(value, "__array__"):
+        return value
+    if isinstance(value, Iterable):
+        return [_materialize_nested_iterables(item) for item in value]
+    return value
 
 
 def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    materialized = _materialize_nested_iterables(values)
+    if _feature_values_contain_boolean(materialized):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
     try:
-        matrix = _materialize_array(values, dtype=float)
+        matrix = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
@@ -309,6 +326,24 @@ def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain only finite values.")
     return matrix
+
+
+def _feature_values_contain_boolean(values: object) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_feature_values_contain_boolean(value) for value in values.ravel(order="C"))
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, Mapping):
+        return False
+    if not isinstance(values, Iterable):
+        return False
+    return any(_feature_values_contain_boolean(value) for value in values)
 
 
 def _vector(values: Iterable[Any] | np.ndarray, *, name: str, expected_length: int | None = None) -> np.ndarray:

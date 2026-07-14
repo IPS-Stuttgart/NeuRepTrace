@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from neureptrace.config_workflow import validate_dataset_config
+from neureptrace.config_workflow import DatasetConfigError, _as_float_pair, validate_dataset_config
 
 
 def _write_workflow_config(tmp_path: Path, *, preprocessing: dict) -> Path:
@@ -40,3 +41,17 @@ def test_validate_dataset_config_rejects_malformed_float_windows(tmp_path: Path,
     assert problems
     assert "baseline_window" in problems[0]
     assert "finite numeric values" in problems[0]
+
+
+@pytest.mark.parametrize(
+    "window_value",
+    [
+        [np.bool_(False), 0.0],
+        [np.asarray(False), 0.0],
+        [np.asarray(False, dtype=object), 0.0],
+        [np.asarray([False]), 0.0],
+    ],
+)
+def test_config_workflow_rejects_numpy_boolean_float_windows(window_value: list[object]) -> None:
+    with pytest.raises(DatasetConfigError, match="finite numeric values"):
+        _as_float_pair(window_value, name="baseline_window")

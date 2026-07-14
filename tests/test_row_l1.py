@@ -41,6 +41,24 @@ def test_normalize_train_test_rows_l1_rejects_width_mismatch() -> None:
         normalize_train_test_rows_l1(train_features=[[1.0, 2.0]], test_features=[[1.0]])
 
 
+def test_normalize_train_test_rows_l1_rejects_unknown_config_options() -> None:
+    with pytest.raises(ValueError, match="Unknown row L1 config option"):
+        normalize_train_test_rows_l1(
+            train_features=[[1.0, 2.0]],
+            test_features=[[1.0, 2.0]],
+            config={"epsilon": 1e-6, "epislon": 1e-5},
+        )
+
+
+def test_normalize_train_test_rows_l1_rejects_non_mapping_config() -> None:
+    with pytest.raises(ValueError, match="Row L1 config must be a mapping"):
+        normalize_train_test_rows_l1(
+            train_features=[[1.0, 2.0]],
+            test_features=[[1.0, 2.0]],
+            config=object(),  # type: ignore[arg-type]
+        )
+
+
 def test_row_l1_config_validation() -> None:
     assert row_l1_config(epsilon="1e-5").epsilon == 1e-5
 

@@ -88,6 +88,7 @@ def _empty_confusion_pair_summary_frame(
 def install() -> None:
     """Install stable schemas for no-error confusion-pair summaries."""
     importlib.import_module("neureptrace._ranking_score_iterables_patch").install()
+    importlib.import_module("neureptrace._confusion_missing_label_patch").install()
     import neureptrace.metrics.confusion as confusion
 
     if getattr(confusion.confusion_pair_summary, _PATCH_MARKER, False):

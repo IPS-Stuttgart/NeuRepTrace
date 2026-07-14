@@ -31,6 +31,10 @@ class _CompositeToySourceModel:
         return probabilities
 
 
+def _one_pass_matrix(rows):
+    return ((value for value in row) for row in rows)
+
+
 def test_combine_probability_variants_logit_mean_normalizes_rows() -> None:
     first = np.array([[0.80, 0.20], [0.40, 0.60]], dtype=float)
     second = np.array([[0.60, 0.40], [0.20, 0.80]], dtype=float)
@@ -41,6 +45,23 @@ def test_combine_probability_variants_logit_mean_normalizes_rows() -> None:
     assert np.allclose(combined.sum(axis=1), 1.0)
     assert combined[0, 0] > combined[0, 1]
     assert combined[1, 1] > combined[1, 0]
+
+
+def test_combine_probability_variants_accepts_one_pass_probabilities_and_weights() -> None:
+    first = _one_pass_matrix([[0.80, 0.20], [0.40, 0.60]])
+    second = np.array([[0.60, 0.40], [0.20, 0.80]], dtype=float)
+    weights = (weight for weight in [0.25, 0.75])
+
+    combined = combine_probability_variants([first, second], weights=weights, mode="arithmetic_mean")
+
+    np.testing.assert_allclose(combined.sum(axis=1), 1.0)
+    np.testing.assert_allclose(combined[0], np.asarray([0.65, 0.35]))
+    np.testing.assert_allclose(combined[1], np.asarray([0.25, 0.75]))
+
+
+def test_combine_probability_variants_rejects_empty_one_pass_variant_sequence() -> None:
+    with pytest.raises(ValueError, match="At least one probability matrix"):
+        combine_probability_variants((matrix for matrix in []))
 
 
 def test_consensus_weights_can_penalize_collapsed_confident_variant() -> None:
@@ -105,6 +126,19 @@ def test_fit_source_free_consensus_returns_protocol_metadata() -> None:
     assert result.metadata["source_free_consensus_uses_source_rows_during_adaptation"] is False
     assert result.metadata["source_free_consensus_valid_for_protocol_2_5"] is True
     assert result.metadata["source_free_consensus_variants"] == "raw|prior"
+
+
+def test_fit_source_free_consensus_accepts_one_pass_target_features() -> None:
+    target_features = _one_pass_matrix([[-1.0], [0.5], [1.0]])
+
+    result = fit_source_free_consensus_predict_proba(
+        source_model=_ToySourceModel(),
+        target_features=target_features,
+        variants=[SourceFreeConsensusVariant("raw", {"max_iterations": 0, "target_prior_correction": "none"})],
+    )
+
+    assert result.probabilities.shape == (3, 2)
+    assert np.allclose(result.probabilities.sum(axis=1), 1.0)
 
 
 def test_fit_source_free_consensus_preserves_explicit_composite_classes() -> None:

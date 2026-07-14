@@ -120,6 +120,34 @@ def test_source_prior_treats_composite_pandas_missing_labels_as_matching_class_v
     np.testing.assert_allclose(prior, np.asarray([2.0 / 3.0, 1.0 / 3.0]))
 
 
+def test_source_prior_keeps_none_and_missing_labels_distinct() -> None:
+    prior, inferred_classes = estimate_source_class_prior([None, pd.NA, None], classes=[None, pd.NA])
+
+    assert inferred_classes[0] is None
+    assert pd.isna(inferred_classes[1])
+    np.testing.assert_allclose(prior, np.asarray([2.0 / 3.0, 1.0 / 3.0]))
+
+
+@pytest.mark.parametrize("nat_value", [np.datetime64("NaT"), np.timedelta64("NaT")])
+def test_source_prior_keeps_none_and_numpy_nat_labels_distinct(nat_value) -> None:
+    prior, inferred_classes = estimate_source_class_prior([None, nat_value, None], classes=[None, nat_value])
+
+    assert inferred_classes[0] is None
+    assert np.isnat(inferred_classes[1])
+    np.testing.assert_allclose(prior, np.asarray([2.0 / 3.0, 1.0 / 3.0]))
+
+
+def test_source_prior_preserves_numpy_datetime64_nat_array_labels() -> None:
+    source_labels = np.asarray(["NaT", "2020-01-01", "NaT"], dtype="datetime64[D]")
+    classes = np.asarray(["NaT", "2020-01-01"], dtype="datetime64[D]")
+
+    prior, inferred_classes = estimate_source_class_prior(source_labels, classes=classes)
+
+    assert np.isnat(inferred_classes[0])
+    assert inferred_classes[1] == np.datetime64("2020-01-01", "D")
+    np.testing.assert_allclose(prior, np.asarray([2.0 / 3.0, 1.0 / 3.0]))
+
+
 def test_source_prior_target_source_is_identity_after_normalization() -> None:
     probabilities = np.asarray([[0.2, 0.8], [0.7, 0.3]], dtype=float)
 

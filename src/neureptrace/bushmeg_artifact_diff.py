@@ -154,6 +154,22 @@ def _label_columns(frame: pd.DataFrame) -> tuple[str, str]:
     return true_column, pred_column
 
 
+def _same_label_value(left: object, right: object) -> bool:
+    """Compare class labels without letting numeric dtype coercion change equality."""
+
+    left_missing = _is_scalar_missing(left)
+    right_missing = _is_scalar_missing(right)
+    if left_missing or right_missing:
+        return left_missing and right_missing
+    try:
+        equal = left == right
+    except (TypeError, ValueError):
+        equal = False
+    if isinstance(equal, (bool, np.bool_)) and bool(equal):
+        return True
+    return str(left) == str(right)
+
+
 def _class_join_key(value: object) -> str:
     """Return a dtype-stable key for matching class labels across CSV artifacts."""
 
@@ -191,7 +207,10 @@ def per_class_recall_frame(predictions: pd.DataFrame, *, group_columns: Sequence
     true_column, predicted_column = _label_columns(predictions)
     group_columns = _existing_columns(predictions, group_columns)
     frame = predictions.copy()
-    frame["__correct"] = frame[true_column].astype(str) == frame[predicted_column].astype(str)
+    frame["__correct"] = [
+        _same_label_value(true_label, predicted_label)
+        for true_label, predicted_label in zip(frame[true_column].tolist(), frame[predicted_column].tolist(), strict=True)
+    ]
     rows: list[dict[str, object]] = []
     grouped = frame.groupby([*group_columns, true_column], dropna=False) if group_columns else frame.groupby(true_column, dropna=False)
     for key, group in grouped:
