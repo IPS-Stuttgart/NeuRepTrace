@@ -11,21 +11,15 @@ import pandas as pd
 
 def _non_empty_text(value: object, *, name: str) -> str:
     message = f"{name} must be a non-empty string."
-    try:
-        missing = pd.isna(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(message) from exc
-    if getattr(missing, "ndim", 0) != 0:
-        raise ValueError(message)
-    try:
-        if bool(missing):
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
             raise ValueError(message)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(message) from exc
-    text = str(value)
-    if text.strip() == "":
+        value = value.item()
+    if not isinstance(value, str):
         raise ValueError(message)
-    return text
+    if value.strip() == "":
+        raise ValueError(message)
+    return value
 
 
 def _boolean(value: object, *, name: str) -> bool:
