@@ -78,6 +78,33 @@ class DownloadNodeegDataTests(unittest.TestCase):
 
         self.assertEqual(fake_run.calls, [])
 
+    def test_invalid_required_subject_count_fails_before_rclone(self) -> None:
+        maximum = len(download_nodeeg_data.EXPECTED_NODEEG_SUBJECTS)
+        for value in ("-1", str(maximum + 1)):
+            with self.subTest(value=value):
+                fake_run = _FakeRclone()
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    with patch.dict(os.environ, _TEST_ENV, clear=False), patch.object(
+                        download_nodeeg_data.subprocess,
+                        "run",
+                        side_effect=fake_run,
+                    ):
+                        with self.assertRaises(SystemExit):
+                            download_nodeeg_data.main(
+                                [
+                                    "--data-root",
+                                    str(Path(tmp_dir) / "nod"),
+                                    "--require-subject-count",
+                                    value,
+                                ]
+                            )
+
+                self.assertEqual(fake_run.calls, [])
+
+    def test_zero_required_subject_count_remains_supported(self) -> None:
+        args = download_nodeeg_data.build_parser().parse_args(["--require-subject-count", "0"])
+        self.assertEqual(args.require_subject_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

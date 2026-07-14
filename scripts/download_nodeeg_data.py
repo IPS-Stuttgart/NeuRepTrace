@@ -38,6 +38,17 @@ def _split_csv(value: str | None) -> list[str]:
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
+def _required_subject_count(value: str) -> int:
+    maximum = len(EXPECTED_NODEEG_SUBJECTS)
+    try:
+        count = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(f"subject count must be an integer between 0 and {maximum}") from exc
+    if count < 0 or count > maximum:
+        raise argparse.ArgumentTypeError(f"subject count must be between 0 and {maximum}")
+    return count
+
+
 def _required_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
@@ -140,7 +151,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-root", type=Path, default=Path("data/nod"), help="Local flat NOD-EEG staging directory.")
     parser.add_argument("--remote-path", default="", help="Optional path below the WebDAV share root.")
     parser.add_argument("--include", default=",".join(DEFAULT_INCLUDE_PATTERNS), help="Comma-separated rclone include patterns.")
-    parser.add_argument("--require-subject-count", type=int, default=len(EXPECTED_NODEEG_SUBJECTS), help="Minimum staged subject count required after download.")
+    parser.add_argument(
+        "--require-subject-count",
+        type=_required_subject_count,
+        default=len(EXPECTED_NODEEG_SUBJECTS),
+        help=f"Minimum staged subject count required after download (0 disables; maximum {len(EXPECTED_NODEEG_SUBJECTS)}).",
+    )
     parser.add_argument("--rclone-binary", default="rclone")
     return parser
 
