@@ -50,6 +50,25 @@ def test_source_component_scaling_normalizes_feature_scale_before_projection() -
     assert result.metadata["source_component_scale"] is True
 
 
+def test_source_component_explained_variance_handles_extreme_finite_values() -> None:
+    source = np.asarray(
+        [
+            [1e200, 0.0],
+            [-1e200, 0.0],
+            [0.0, 1e200],
+            [0.0, -1e200],
+        ],
+        dtype=float,
+    )
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        projector = fit_source_component_projector(source, config={"n_components": "all", "scale": False})
+
+    assert np.all(np.isfinite(projector.explained_variance_ratio))
+    assert np.allclose(projector.explained_variance_ratio, [0.5, 0.5])
+    assert np.isclose(np.sum(projector.explained_variance_ratio), 1.0)
+
+
 def test_source_component_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         fit_source_component_projection(source_features=[[0.0, 1.0]], test_features=[[0.0]])

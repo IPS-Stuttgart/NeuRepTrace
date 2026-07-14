@@ -119,8 +119,13 @@ def fit_source_component_projector(
     _u, singular_values, vt = np.linalg.svd(prepared, full_matrices=False)
     components = _canonicalize_rows(vt[:n_components])
     selected = singular_values[:n_components]
-    total_energy = float(np.sum(singular_values**2))
-    explained = np.zeros(n_components, dtype=float) if total_energy <= 0.0 else (selected**2) / total_energy
+    singular_scale = float(np.max(singular_values))
+    if singular_scale <= 0.0:
+        explained = np.zeros(n_components, dtype=float)
+    else:
+        scaled_singular_values = singular_values / singular_scale
+        scaled_total_energy = float(np.sum(scaled_singular_values**2))
+        explained = (scaled_singular_values[:n_components] ** 2) / scaled_total_energy
     return SourceComponentProjector(
         mean=mean.astype(float, copy=False),
         scale=scale.astype(float, copy=False),
