@@ -18,6 +18,26 @@ def test_confidence_scores_return_expected_values() -> None:
     assert np.all(entropy <= 1.0)
 
 
+def test_confidence_scores_normalize_extreme_finite_rows_without_overflow() -> None:
+    scores = np.asarray(
+        [
+            [1.0e308, 1.0e308],
+            [1.0e308, 1.0e307],
+        ],
+        dtype=float,
+    )
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        confidence, margin, entropy, predicted = confidence_scores(scores)
+        selection = select_confident_rows(scores, min_confidence=0.8)
+
+    assert predicted.tolist() == [0, 0]
+    np.testing.assert_allclose(confidence, [0.5, 10.0 / 11.0], rtol=1.0e-6)
+    np.testing.assert_allclose(margin, [0.0, 9.0 / 11.0], rtol=1.0e-6)
+    assert np.all(np.isfinite(entropy))
+    assert selection.accepted_mask.tolist() == [False, True]
+
+
 def test_confidence_scores_break_probability_ties_by_lowest_index() -> None:
     probabilities = np.asarray(
         [
