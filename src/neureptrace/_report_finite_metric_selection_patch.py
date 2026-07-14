@@ -1,9 +1,14 @@
-"""Runtime patch for finite metric selection in time-decoding reports."""
+"""Runtime patches for finite and positional metric selection."""
 
 from __future__ import annotations
 
+from functools import wraps
+
 import numpy as np
 import pandas as pd
+
+_REPORT_PATCH_MARKER = "_report_finite_metric_selection_patched"
+_SEMANTIC_STAGE_PATCH_MARKER = "_semantic_stage_positional_selection_patched"
 
 
 def _finite_numeric_values(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -31,24 +36,81 @@ def _best_metric_row(frame: pd.DataFrame, selection_metric: str, column: str) ->
         raise ValueError(f"Frame is missing selection metric column '{column}'.")
 
     values = _finite_numeric_values(frame, column)
-    if values.notna().sum() == 0:
+    finite_positions = np.flatnonzero(values.notna().to_numpy())
+    if finite_positions.size == 0:
         raise ValueError(f"Selection metric column '{column}' contains no finite values.")
 
-    index = values.idxmax() if report.METRIC_HIGHER_IS_BETTER[selection_metric] else values.idxmin()
-    return frame.loc[index]
+    finite_values = values.iloc[finite_positions].to_numpy(dtype=float)
+    if report.METRIC_HIGHER_IS_BETTER[selection_metric]:
+        selected_offset = int(np.argmax(finite_values))
+    else:
+        selected_offset = int(np.argmin(finite_values))
+    return frame.iloc[int(finite_positions[selected_offset])]
+
+
+def _install_report_patch() -> None:
+    import neureptrace.report as report
+
+    if getattr(report._best_metric_row, _REPORT_PATCH_MARKER, False):
+        return
+
+    setattr(_best_metric_row, _REPORT_PATCH_MARKER, True)
+    setattr(_window_mean, _REPORT_PATCH_MARKER, True)
+    report._best_metric_row = _best_metric_row
+    report._window_mean = _window_mean
+
+
+def _install_semantic_stage_patch() -> None:
+    import neureptrace.semantic_stages as semantic_stages
+
+    original_detect_stable_stages = semantic_stages.detect_stable_stages
+    if getattr(original_detect_stable_stages, _SEMANTIC_STAGE_PATCH_MARKER, False):
+        return
+    original_build_stage_report = semantic_stages.build_stage_report
+
+    @wraps(original_detect_stable_stages)
+    def detect_stable_stages(
+        time_summary: pd.DataFrame,
+        *,
+        posterior_threshold: float = 0.6,
+        match_threshold: float = 0.6,
+        min_duration: float = 0.04,
+    ) -> pd.DataFrame:
+        return original_detect_stable_stages(
+            time_summary.reset_index(drop=True),
+            posterior_threshold=posterior_threshold,
+            match_threshold=match_threshold,
+            min_duration=min_duration,
+        )
+
+    @wraps(original_build_stage_report)
+    def build_stage_report(
+        time_summary: pd.DataFrame,
+        stages: pd.DataFrame,
+        *,
+        posterior_threshold: float,
+        match_threshold: float,
+        min_duration: float,
+    ) -> str:
+        return original_build_stage_report(
+            time_summary.reset_index(drop=True),
+            stages,
+            posterior_threshold=posterior_threshold,
+            match_threshold=match_threshold,
+            min_duration=min_duration,
+        )
+
+    setattr(detect_stable_stages, _SEMANTIC_STAGE_PATCH_MARKER, True)
+    setattr(build_stage_report, _SEMANTIC_STAGE_PATCH_MARKER, True)
+    semantic_stages.detect_stable_stages = detect_stable_stages
+    semantic_stages.build_stage_report = build_stage_report
 
 
 def install() -> None:
-    """Install finite-value guards for report metric selection and window means."""
-    import neureptrace.report as report
+    """Install finite-value and positional-selection report guards."""
 
-    if getattr(report._best_metric_row, "_report_finite_metric_selection_patched", False):
-        return
-
-    _best_metric_row._report_finite_metric_selection_patched = True  # type: ignore[attr-defined]
-    _window_mean._report_finite_metric_selection_patched = True  # type: ignore[attr-defined]
-    report._best_metric_row = _best_metric_row
-    report._window_mean = _window_mean
+    _install_report_patch()
+    _install_semantic_stage_patch()
 
 
 __all__ = ["install"]
