@@ -22,23 +22,11 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("src/neureptrace/decoding/source_roll.py")
           text = path.read_text(encoding="utf-8")
-          old = '''def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
-              if values is None:
-                  return np.full(expected_length, "source", dtype=object)
-              vector = np.asarray(_materialize_one_pass_iterables(values), dtype=object).reshape(-1)
-              if vector.shape[0] != expected_length:
-                  raise ValueError(f"source_domains must contain one value per feature row: {vector.shape[0]} != {expected_length}.")
-              for value in vector.tolist():
-                  try:
-                      hash(value)
-                  except TypeError as exc:
-                      raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
-              return vector
-          '''.replace("          ", "")
-          new = '''def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
+          replacement = '''def _domain_vector(values: Sequence[Hashable] | np.ndarray | None, *, expected_length: int) -> np.ndarray:
               if values is None:
                   return np.full(expected_length, "source", dtype=object)
               if isinstance(values, np.ndarray):
@@ -56,10 +44,17 @@ jobs:
                   except TypeError as exc:
                       raise ValueError(f"source_domains must be hashable; got {value!r}.") from exc
               return vector
-          '''.replace("          ", "")
-          if text.count(old) != 1:
-              raise SystemExit(f"expected one domain-vector block, found {text.count(old)}")
-          path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+          def _count_unique_hashable'''.replace("          ", "")
+          pattern = re.compile(
+              r"def _domain_vector\(.*?\n\n\ndef _count_unique_hashable",
+              re.DOTALL,
+          )
+          updated, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"expected one domain-vector function, found {count}")
+          path.write_text(updated, encoding="utf-8")
           Path(".github/workflows/fix-source-roll-domain-tuples.yml").unlink()
           PY
       - name: Commit focused repair
