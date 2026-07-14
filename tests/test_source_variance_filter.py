@@ -41,6 +41,19 @@ def test_select_variance_features_falls_back_to_highest_variance() -> None:
     assert select_variance_features([0.0, 0.0, 2.0], variance_threshold=10.0).tolist() == [2]
 
 
+@pytest.mark.parametrize(
+    "variances",
+    [
+        1.0,
+        np.asarray([[0.0, 2.0]]),
+        np.asarray([[[0.0], [2.0]]]),
+    ],
+)
+def test_select_variance_features_rejects_non_vector_inputs(variances: object) -> None:
+    with pytest.raises(ValueError, match="one-dimensional"):
+        select_variance_features(variances)
+
+
 def test_source_feature_variances_uses_ddof_zero_for_too_few_rows() -> None:
     assert np.allclose(source_feature_variances([[1.0, 2.0]], ddof=1), np.asarray([0.0, 0.0]))
 
