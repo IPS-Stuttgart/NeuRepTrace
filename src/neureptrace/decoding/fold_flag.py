@@ -50,6 +50,11 @@ def absolute_value_features(features):
         raise ValueError("features must be two-dimensional")
     if not np.all(np.isfinite(matrix)):
         raise ValueError("features must be finite")
+
+    absolute_matrix = np.abs(matrix)
+    if np.any(absolute_matrix > np.finfo(np.float32).max):
+        raise ValueError("features must be representable as finite float32 values")
+
     metadata = {
         "abs_feature_protocol": ABS_FEATURE_PROTOCOL,
         "abs_feature_protocol_category": ABS_FEATURE_CATEGORY,
@@ -59,4 +64,4 @@ def absolute_value_features(features):
         "abs_feature_n_rows": int(matrix.shape[0]),
         "abs_feature_dim": int(matrix.shape[1]),
     }
-    return np.abs(matrix).astype(np.float32, copy=False), metadata
+    return absolute_matrix.astype(np.float32, copy=False), metadata
