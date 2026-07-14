@@ -218,7 +218,21 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
 def _class_vector(values: Sequence[Any] | np.ndarray | None, *, n_classes: int) -> np.ndarray:
     if values is None:
         return np.arange(n_classes, dtype=int)
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    if isinstance(values, (str, bytes)):
+        items = [values]
+    elif isinstance(values, np.ndarray):
+        if values.ndim == 0:
+            items = [values[()]]
+        else:
+            items = [values[index] for index in range(values.shape[0])]
+    else:
+        try:
+            items = list(values)
+        except TypeError:
+            items = [values]
+    vector = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        vector[index] = value
     if vector.shape[0] != n_classes:
         raise ValueError(f"classes must contain one value per probability column: {vector.shape[0]} != {n_classes}.")
     return vector
