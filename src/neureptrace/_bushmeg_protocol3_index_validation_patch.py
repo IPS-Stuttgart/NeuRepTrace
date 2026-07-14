@@ -8,9 +8,10 @@ normalizes only genuine one-dimensional integer index vectors before the
 disjointness check runs.
 
 The same bool-is-int pitfall also applies to the Protocol 3 split-size options:
-``per_class=True`` silently meant one calibration row per class. For YAML-backed
-experimental configs that should be rejected explicitly rather than interpreted
-as a numeric count or seed.
+``per_class=True`` or ``per_class=np.array([True])`` silently meant one
+calibration row per class. For YAML-backed or programmatic experimental configs
+that should be rejected explicitly rather than interpreted as a numeric count or
+seed.
 
 The split selector must also preserve one logical label per row. A target label
 vector containing tuple/list composite labels otherwise becomes a two-dimensional
@@ -64,16 +65,18 @@ def _as_index_vector(values: Any, *, name: str) -> np.ndarray:
     return numeric.astype(int, copy=False)
 
 
-def _is_boolean_scalar(value: Any) -> bool:
+def _is_boolean_integer_option(value: Any) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return True
-    if isinstance(value, np.ndarray) and value.shape == () and np.issubdtype(value.dtype, np.bool_):
-        return True
-    return False
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    return bool(np.issubdtype(array.dtype, np.bool_))
 
 
 def _reject_boolean_integer_option(value: Any, *, name: str) -> None:
-    if _is_boolean_scalar(value):
+    if _is_boolean_integer_option(value):
         raise ValueError(f"{name} must be an integer value, not a boolean value.")
 
 

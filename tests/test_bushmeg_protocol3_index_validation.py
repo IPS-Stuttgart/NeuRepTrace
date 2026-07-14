@@ -36,6 +36,26 @@ def test_protocol3_rejects_non_integer_split_indices() -> None:
         validate_disjoint_calibration_evaluation([0, 1], [False, True])
 
 
+@pytest.mark.parametrize(
+    ("option_name", "option_value"),
+    [
+        ("per_class", np.asarray([True])),
+        ("seed", [np.bool_(False)]),
+        ("min_evaluation_per_class", np.asarray([[True]])),
+    ],
+)
+def test_protocol3_target_split_rejects_boolean_array_split_options(option_name: str, option_value: object) -> None:
+    kwargs = {
+        "per_class": 1,
+        "seed": 7,
+        "min_evaluation_per_class": 1,
+    }
+    kwargs[option_name] = option_value
+
+    with pytest.raises(ValueError, match=f"{option_name} must be an integer value, not a boolean value"):
+        select_bushmeg_target_calibration_split(["a", "a", "b", "b"], **kwargs)
+
+
 def test_protocol3_target_split_preserves_composite_tuple_labels() -> None:
     labels = [
         ("face", "left"),
