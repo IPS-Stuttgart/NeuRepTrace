@@ -1,4 +1,4 @@
-"""Runtime patch for MEKT label, domain, and pseudo-label vector validation.
+"""Runtime patch for MEKT label, domain, pseudo-label, and scalar validation.
 
 The MEKT implementation historically normalized several public vector-like inputs
 with ``reshape(-1)`` or by checking only the first array dimension.  That could
@@ -19,7 +19,9 @@ and string ``"1"`` from being silently coerced into the same NumPy string class.
 Finally, MEKT estimator fits are routed through a dense integer label wrapper.
 Valid tuple-valued source classes remain exposed in MEKT results and predictions,
 but scikit-learn estimators no longer see sequence-valued class labels as legacy
-multilabel targets.
+multilabel targets. Numeric controls are normalized separately so one-element
+NumPy vectors cannot masquerade as scalars and conversion failures consistently
+follow the public ``ValueError`` contract.
 """
 
 from __future__ import annotations
@@ -116,6 +118,56 @@ def _normalize_optional_vector(value: Any, *, name: str) -> np.ndarray | None:
 
 def _normalize_optional_domain_vector(value: Any, *, name: str) -> np.ndarray | None:
     return None if value is None else _as_domain_vector(value, name=name)
+
+
+def _scalar_control_value(value: Any, *, message: str) -> Any:
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
+    return value
+
+
+def _positive_int(value: Any, *, name: str) -> int:
+    message = f"{name} must be a positive integer."
+    scalar = _scalar_control_value(value, message=message)
+    try:
+        number = int(scalar)
+        numeric = float(scalar)
+        integer_numeric = float(number)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(numeric) or integer_numeric != numeric or number <= 0:
+        raise ValueError(message)
+    return number
+
+
+def _positive_float(value: Any, *, name: str) -> float:
+    message = f"{name} must be a positive finite value."
+    scalar = _scalar_control_value(value, message=message)
+    try:
+        number = float(scalar)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(number) or number <= 0.0:
+        raise ValueError(message)
+    return number
+
+
+def _nonnegative_float(value: Any, *, name: str) -> float:
+    message = f"{name} must be a non-negative finite value."
+    scalar = _scalar_control_value(value, message=message)
+    try:
+        number = float(scalar)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(number) or number < 0.0:
+        raise ValueError(message)
+    return number
 
 
 def _select_top_domains(scores: Mapping[Any, float], top_k: int) -> np.ndarray:
@@ -289,6 +341,9 @@ def _patch_module(module: ModuleType) -> None:
     module._unique_values = _unique_values
     module._unique_value_array = _unique_value_array
     module._domain_ids = _domain_ids
+    module._positive_int = _positive_int
+    module._positive_float = _positive_float
+    module._nonnegative_float = _nonnegative_float
     module._select_top_domains = _select_top_domains
     module._initial_pseudo_labels = _initial_pseudo_labels
     module.centroid_aligned_tangent_features = centroid_aligned_tangent_features
@@ -350,7 +405,7 @@ class _MektVectorValidationPatchFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Install MEKT input-vector validation."""
+    """Install MEKT input-vector and scalar validation."""
 
     loaded = sys.modules.get(_TARGET_MODULE)
     if loaded is not None:
