@@ -180,7 +180,22 @@ def confidence_threshold_for_coverage(confidence: Sequence[float] | np.ndarray, 
 def _classes(classes: Sequence[Any] | np.ndarray | None, *, n_classes: int) -> np.ndarray:
     if classes is None:
         return np.arange(n_classes)
-    values = np.asarray(classes, dtype=object).reshape(-1)
+    if isinstance(classes, (str, bytes)):
+        items = [classes]
+    elif isinstance(classes, np.ndarray):
+        array = np.asarray(classes)
+        if array.ndim == 0:
+            items = [array[()]]
+        else:
+            items = [array[index] for index in range(array.shape[0])]
+    else:
+        try:
+            items = list(classes)
+        except TypeError:
+            items = [classes]
+    values = np.empty(len(items), dtype=object)
+    for index, value in enumerate(items):
+        values[index] = value
     if values.shape[0] != n_classes:
         raise ValueError(f"classes must contain one label per probability column: {values.shape[0]} != {n_classes}.")
     return values
