@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from neureptrace.signal.band import (
     average_phases,
     band_analytic_signal,
@@ -19,6 +18,13 @@ def test_sampling_rate_from_time_axis_validates_uniform_axis() -> None:
 
     with pytest.raises(ValueError, match="uniformly sampled"):
         sampling_rate_from_time_axis([0.0, 0.01, 0.03])
+
+
+def test_validate_time_axis_rejects_nonuniform_tiny_intervals() -> None:
+    np.testing.assert_allclose(validate_time_axis([0.0, 1e-15, 2e-15]), [0.0, 1e-15, 2e-15])
+
+    with pytest.raises(ValueError, match="uniformly sampled"):
+        validate_time_axis([0.0, 1e-15, 4e-15])
 
 
 def test_validate_time_axis_accepts_one_pass_iterables() -> None:
