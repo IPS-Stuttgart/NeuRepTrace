@@ -56,7 +56,8 @@ def apply_source_domain_subset(
     result = source_domain_subset_mask(source_domains, **kwargs)
     if result.selected_mask.shape[0] != matrix.shape[0]:
         raise ValueError("source_domains must contain one value per feature row.")
-    return matrix[result.selected_mask].astype(np.float32, copy=False), label_vector[result.selected_mask], result
+    selected_features = _compact_float32(matrix[result.selected_mask])
+    return selected_features, label_vector[result.selected_mask], result
 
 
 def _materialize_one_pass_iterables(value: object) -> object:
@@ -105,6 +106,18 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain finite values.")
     return matrix
+
+
+def _compact_float32(matrix: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion keeps every finite nonzero value usable."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = matrix.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return matrix
+    if np.any((matrix != 0.0) & (compact == 0.0)):
+        return matrix
+    return compact
 
 
 def _object_vector(values: Sequence[Any] | np.ndarray, *, name: str = "values") -> np.ndarray:
