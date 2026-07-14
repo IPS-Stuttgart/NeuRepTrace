@@ -54,7 +54,9 @@ def select_source_range_features(ranges, *, min_range: float = 0.0, top_k: int |
     materialized = _materialize_one_pass_iterables(ranges)
     if _contains_boolean_value(materialized):
         raise ValueError("ranges must contain finite non-negative numeric, non-boolean values.")
-    values = np.asarray(materialized, dtype=float).reshape(-1)
+    values = np.asarray(materialized, dtype=float)
+    if values.ndim != 1:
+        raise ValueError("ranges must be one-dimensional.")
     if values.size == 0 or not np.all(np.isfinite(values)) or np.any(values < 0.0):
         raise ValueError("bad ranges")
     threshold = _nonnegative_float(min_range, name="min_range")
