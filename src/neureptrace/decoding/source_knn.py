@@ -13,6 +13,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 SOURCE_KNN_PROTOCOL = "strict_source_only_knn_decoder"
 SOURCE_KNN_CATEGORY = "1_strict_source_only"
 WEIGHT_MODES = ("uniform", "distance")
@@ -336,16 +338,7 @@ def _as_label_vector(values: Iterable[Any] | np.ndarray, *, name: str) -> np.nda
 
 
 def _labels_equal(left: Any, right: Any) -> bool:
-    try:
-        equal = left == right
-    except Exception:
-        return False
-    if isinstance(equal, np.ndarray):
-        return bool(np.array_equal(left, right))
-    try:
-        return bool(equal)
-    except (TypeError, ValueError):
-        return False
+    return values_equal(left, right)
 
 
 def _unique_labels_in_order(labels: np.ndarray) -> list[Any]:
