@@ -158,11 +158,12 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
         raise ValueError("probabilities must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must contain finite non-negative values.")
-    row_sums = np.sum(matrix, axis=1, keepdims=True)
-    if np.any(row_sums <= 0.0):
+    row_maxima = np.max(matrix, axis=1, keepdims=True)
+    if np.any(row_maxima <= 0.0):
         raise ValueError("probability rows must have positive total mass.")
-    matrix = np.maximum(matrix, float(epsilon))
-    return matrix / np.sum(matrix, axis=1, keepdims=True)
+    floored = np.maximum(matrix, float(epsilon))
+    scaled = floored / np.max(floored, axis=1, keepdims=True)
+    return scaled / np.sum(scaled, axis=1, keepdims=True)
 
 
 def _contains_boolean_probability_value(values: Any) -> bool:
