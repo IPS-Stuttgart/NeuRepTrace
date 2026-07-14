@@ -58,11 +58,36 @@ def apply_source_minmax_transform(features: Iterable[Iterable[float]] | np.ndarr
     minimum, maximum, feature_range = _reference_parts(reference)
     if matrix.shape[1] != minimum.shape[0]:
         raise ValueError("features width must match source minmax reference.")
-    data_range = maximum - minimum
-    denom = np.where(data_range > 0.0, data_range, 1.0)
+    scaled = _normalized_offsets(matrix, minimum, maximum)
     low, high = feature_range
-    scaled = (matrix - minimum) / denom
     return (scaled * (high - low) + low).astype(np.float32, copy=False)
+
+
+def _normalized_offsets(matrix: np.ndarray, minimum: np.ndarray, maximum: np.ndarray) -> np.ndarray:
+    variable = maximum > minimum
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        data_range = maximum - minimum
+        denominator = np.where(variable, data_range, 1.0)
+        scaled = (matrix - minimum) / denominator
+
+    overflow_columns = variable & ~np.isfinite(data_range)
+    if np.any(overflow_columns):
+        values = matrix[:, overflow_columns]
+        lower = minimum[overflow_columns]
+        upper = maximum[overflow_columns]
+        magnitude = np.maximum(np.abs(values), np.maximum(np.abs(lower), np.abs(upper)))
+        normalized_values = values / magnitude
+        normalized_lower = lower / magnitude
+        normalized_upper = upper / magnitude
+        scaled[:, overflow_columns] = (normalized_values - normalized_lower) / (normalized_upper - normalized_lower)
+
+    unstable = variable[np.newaxis, :] & ~np.isfinite(scaled)
+    if np.any(unstable):
+        rows, columns = np.nonzero(unstable)
+        with np.errstate(over="ignore", invalid="ignore"):
+            scaled[rows, columns] = matrix[rows, columns] / data_range[columns] - minimum[columns] / data_range[columns]
+
+    return scaled
 
 
 def _materialize_one_pass_iterables(value: object) -> object:
