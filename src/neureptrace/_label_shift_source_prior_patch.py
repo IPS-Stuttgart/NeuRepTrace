@@ -1,4 +1,4 @@
-"""Validate label-shift source priors, probability matrices, and scalar controls."""
+"""Validate label-shift inputs and preserve source-prior label semantics."""
 
 from __future__ import annotations
 
@@ -9,11 +9,14 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 _SOURCE_PRIOR_PATCH_MARKER = "_neureptrace_label_shift_source_prior_patch_installed"
 _PROBABILITY_MATRIX_PATCH_MARKER = "_neureptrace_label_shift_probability_matrix_patch_installed"
 _SCALAR_CONFIG_PATCH_MARKER = "_neureptrace_label_shift_scalar_config_patch_installed"
 _CLASSES_PATCH_MARKER = "_neureptrace_label_shift_classes_patch_installed"
 _SOFT_CONFUSION_LABEL_PATCH_MARKER = "_neureptrace_label_shift_soft_confusion_label_patch_installed"
+_SOURCE_PRIOR_LABEL_EQUALITY_PATCH_MARKER = "_neureptrace_source_prior_missing_label_kind_patch_installed"
 _SCALAR_ERROR_SUFFIXES = {
     "_positive_int": "must be a positive integer.",
     "_positive_float": "must be positive and finite.",
@@ -98,8 +101,27 @@ def _install_scalar_config_guards(label_shift: Any) -> None:
         setattr(label_shift, helper_name, _guarded_scalar_helper(original, error_suffix))
 
 
+def _install_source_prior_label_equality() -> None:
+    """Keep distinct missing-value sentinel types as distinct source classes."""
+
+    source_prior = importlib.import_module("neureptrace.decoding.source_prior")
+    original = source_prior._object_equal
+    if getattr(original, _SOURCE_PRIOR_LABEL_EQUALITY_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def _object_equal(left: Any, right: Any) -> bool:
+        if source_prior._is_missing_label_scalar(left) or source_prior._is_missing_label_scalar(right):
+            return values_equal(left, right)
+        return original(left, right)
+
+    setattr(_object_equal, _SOURCE_PRIOR_LABEL_EQUALITY_PATCH_MARKER, True)
+    _object_equal.__wrapped__ = original
+    source_prior._object_equal = _object_equal
+
+
 def install() -> None:
-    """Reject malformed label-shift priors, probabilities, labels, and scalar config values."""
+    """Reject malformed label-shift inputs and install source-prior label guards."""
 
     label_shift = importlib.import_module("neureptrace.decoding.label_shift")
 
@@ -186,6 +208,7 @@ def install() -> None:
         label_shift.soft_confusion_matrix = soft_confusion_matrix
 
     _install_scalar_config_guards(label_shift)
+    _install_source_prior_label_equality()
 
 
 __all__ = ["install"]
