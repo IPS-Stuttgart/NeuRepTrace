@@ -33,6 +33,23 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
     return paths
 
 
+def _output_paths(
+    out_summary: Path | str | None,
+    out_states: Path | str | None,
+) -> tuple[Path | None, Path | None]:
+    """Normalize temporal-model outputs and reject destinations that alias."""
+
+    summary_path = None if out_summary is None else Path(out_summary)
+    states_path = None if out_states is None else Path(out_states)
+    if (
+        summary_path is not None
+        and states_path is not None
+        and summary_path.resolve(strict=False) == states_path.resolve(strict=False)
+    ):
+        raise ValueError("Temporal model summary and state output paths must be distinct.")
+    return summary_path, states_path
+
+
 def probability_columns(frame: pd.DataFrame) -> list[str]:
     """Return probability-vector columns in class-index order."""
     columns = [column for column in frame.columns if column.startswith("prob_class_")]
@@ -509,6 +526,7 @@ def fit_temporal_models(
     n_permutations = _validate_non_negative_integer(n_permutations, name="n_permutations")
     random_seed = _validate_non_negative_integer(random_seed, name="random_seed")
     stay_grid_size = _validate_integer(stay_grid_size, name="stay_grid_size", minimum=2)
+    out_summary, out_states = _output_paths(out_summary, out_states)
     observations = read_probability_observations(observation_csvs)
     prob_columns = probability_columns(observations)
     rows = []
