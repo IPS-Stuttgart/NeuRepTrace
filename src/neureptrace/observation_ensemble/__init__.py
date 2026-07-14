@@ -8,6 +8,8 @@ from importlib import util
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from neureptrace._observation_ensemble_source_debias_bool_patch import normalize_source_baseline_debiasing
 
 _IMPL_NAME = "neureptrace._observation_ensemble_impl"
@@ -34,6 +36,26 @@ for _name in dir(_impl):
         continue
     globals()[_name] = getattr(_impl, _name)
 
+
+@wraps(_impl._normalize_weights)
+def _normalize_weights(weights: Any, n_decoders: int) -> np.ndarray:
+    """Normalize finite non-negative ensemble weights without overflowing their sum."""
+
+    if len(weights) != n_decoders:
+        raise ValueError(f"Expected {n_decoders} ensemble weights, got {len(weights)}.")
+    if any(isinstance(weight, (bool, np.bool_)) for weight in weights):
+        raise ValueError("Ensemble weights must be finite non-negative values with positive sum.")
+    values = np.asarray(weights, dtype=float)
+    if values.size == 0 or not np.isfinite(values).all() or (values < 0).any():
+        raise ValueError("Ensemble weights must be finite non-negative values with positive sum.")
+    maximum = float(np.max(values))
+    if maximum <= 0.0:
+        raise ValueError("Ensemble weights must be finite non-negative values with positive sum.")
+    scaled = values / maximum
+    return scaled / scaled.sum()
+
+
+_impl._normalize_weights = _normalize_weights
 _original_ensemble_probability_observations = _impl.ensemble_probability_observations
 
 
