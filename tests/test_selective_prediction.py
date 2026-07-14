@@ -61,6 +61,15 @@ def test_probability_rows_are_normalized_defensively() -> None:
     assert result.confidence.tolist() == pytest.approx([0.9, 0.5])
 
 
+def test_composite_class_labels_remain_atomic() -> None:
+    classes = [("animal", "cat"), ("animal", "dog")]
+
+    result = selective_predict([[0.9, 0.1], [0.1, 0.9]], classes=classes)
+
+    assert result.predictions.shape == (2,)
+    assert result.predictions.tolist() == classes
+
+
 def test_entropy_and_margin_helpers() -> None:
     probabilities = [[0.8, 0.2], [0.5, 0.5]]
 
