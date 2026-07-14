@@ -43,3 +43,20 @@ def test_absolute_value_features_rejects_boolean_features(features) -> None:
 def test_absolute_value_features_rejects_non_matrix() -> None:
     with pytest.raises(ValueError, match="two-dimensional"):
         absolute_value_features([1.0, -2.0])
+
+
+def test_absolute_value_features_rejects_float32_overflow() -> None:
+    too_large = np.nextafter(float(np.finfo(np.float32).max), np.inf)
+
+    with np.errstate(over="raise"):
+        with pytest.raises(ValueError, match="finite float32"):
+            absolute_value_features([[too_large, -too_large]])
+
+
+def test_absolute_value_features_accepts_float32_boundary() -> None:
+    limit = np.finfo(np.float32).max
+
+    transformed, _ = absolute_value_features([[limit, -limit]])
+
+    assert np.array_equal(transformed, np.asarray([[limit, limit]], dtype=np.float32))
+    assert np.all(np.isfinite(transformed))
