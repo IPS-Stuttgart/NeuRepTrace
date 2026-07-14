@@ -172,8 +172,8 @@ def validate_probability_inputs(
     if np.any(probabilities < 0.0):
         probabilities = np.maximum(probabilities, 0.0)
 
-    row_sums = probabilities.sum(axis=1)
     if require_normalized:
+        row_sums = probabilities.sum(axis=1)
         if not np.allclose(row_sums, 1.0, atol=normalization_atol, rtol=0.0):
             raise ValueError("probability rows must sum to one")
         probabilities = probabilities / row_sums[:, None]
