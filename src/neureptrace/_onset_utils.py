@@ -37,7 +37,14 @@ def window_mask(frame: pd.DataFrame, window: tuple[float, float]) -> pd.Series:
 
 
 def _is_boolean_label(value: object) -> bool:
-    return isinstance(value, (bool, np.bool_))
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_is_boolean_label(item) for item in value.ravel(order="C"))
+    return False
 
 
 def _integer_labels(values: pd.Series) -> tuple[np.ndarray, np.ndarray]:
