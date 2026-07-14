@@ -85,12 +85,17 @@ def install() -> None:
         require_normalized: bool = True,
         normalization_atol: float = 1e-6,
     ) -> tuple[np.ndarray, np.ndarray | None]:
-        return original_validate_probability_inputs(
-            probabilities,
-            labels,
-            require_normalized=require_normalized,
-            normalization_atol=_validate_non_negative_finite_float(normalization_atol, "normalization_atol"),
-        )
+        validated_atol = _validate_non_negative_finite_float(normalization_atol, "normalization_atol")
+        with np.errstate(divide="ignore", invalid="ignore"):
+            validated_probabilities, validated_labels = original_validate_probability_inputs(
+                probabilities,
+                labels,
+                require_normalized=require_normalized,
+                normalization_atol=validated_atol,
+            )
+        if require_normalized and not np.all(np.isfinite(validated_probabilities)):
+            raise ValueError("probability rows must sum to one")
+        return validated_probabilities, validated_labels
 
     @wraps(original_expected_calibration_error)
     def expected_calibration_error(probabilities: np.ndarray, labels: np.ndarray, *, n_bins: int = 10) -> float:
