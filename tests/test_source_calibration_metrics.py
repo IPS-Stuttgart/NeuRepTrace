@@ -46,3 +46,9 @@ def test_source_calibration_metrics_rejects_invalid_controls() -> None:
 
     with pytest.raises(ValueError, match="epsilon"):
         source_calibration_metrics([[0.5, 0.5]], [0], epsilon=1.0)
+
+
+@pytest.mark.parametrize("n_bins", [True, np.bool_(True)])
+def test_source_calibration_metrics_rejects_boolean_bin_counts(n_bins: object) -> None:
+    with pytest.raises(ValueError, match="n_bins"):
+        source_calibration_metrics([[0.5, 0.5]], [0], n_bins=n_bins)
