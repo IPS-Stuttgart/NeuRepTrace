@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -14,10 +15,76 @@ _READ_PATCH_ATTR = "_neureptrace_results_observation_condition_attrs"
 _EXPLICIT_COLUMNS_ATTR = "_neureptrace_explicit_observation_columns"
 _POSITIVE_INTEGER_ARRAYLIKE_ATTR = "_neureptrace_results_rejects_arraylike_positive_integer_controls"
 _FINITE_SCALAR_ARRAYLIKE_ATTR = "_neureptrace_results_rejects_arraylike_finite_numeric_scalar_controls"
+_EXACT_OBSERVATION_LABEL_ATTR = "_neureptrace_results_exact_probability_observation_labels"
+_MAX_EXACT_FLOAT_INTEGER = 2**53
 
 
 def _is_arraylike_scalar_control(value: object) -> bool:
     return isinstance(value, (np.ndarray, pd.Series, pd.Index, pd.api.extensions.ExtensionArray))
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return isinstance(value.item(), (bool, np.bool_))
+    return False
+
+
+def _boolean_rows(values: pd.Series) -> list[object]:
+    mask = values.map(_is_boolean_scalar).fillna(False).astype(bool)
+    return mask[mask].index.tolist()[:5]
+
+
+def _exact_integer_label(value: object, *, name: str) -> int:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} values must be scalar integer labels.")
+        value = value.item()
+
+    if _is_boolean_scalar(value):
+        raise ValueError(f"{name} must not contain booleans.")
+
+    if value is None:
+        raise ValueError(f"{name} must be numeric and non-missing.")
+
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+
+    if isinstance(value, (float, np.floating)):
+        numeric = float(value)
+        if not np.isfinite(numeric):
+            raise ValueError(f"{name} must be numeric and non-missing.")
+        if not numeric.is_integer():
+            raise ValueError("Probability-observation true_label values must be integer-valued.")
+        if abs(numeric) > _MAX_EXACT_FLOAT_INTEGER:
+            raise ValueError(
+                "Probability-observation true_label values must be exact integer labels; "
+                "values above 2**53 must be supplied as integers or decimal strings."
+            )
+        return int(numeric)
+
+    text = str(value).strip()
+    if not text:
+        raise ValueError(f"{name} must be numeric and non-missing.")
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{name} must be numeric and non-missing.") from exc
+    if not numeric.is_finite():
+        raise ValueError(f"{name} must be numeric and non-missing.")
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError("Probability-observation true_label values must be integer-valued.")
+    return int(integral)
+
+
+def _exact_integer_labels(values: pd.Series) -> np.ndarray:
+    name = "Probability-observation column 'true_label'"
+    labels = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values.tolist()):
+        labels[index] = _exact_integer_label(value, name=name)
+    return labels
 
 
 def _explicit_unique_values(values: pd.Series) -> list[object]:
@@ -76,6 +143,63 @@ def _prepare_observations_for_subject_time(
     return prepared
 
 
+def _probability_ece_by_group_exact(
+    observations: pd.DataFrame,
+    group_columns: list[str],
+    *,
+    n_bins: int,
+) -> pd.DataFrame:
+    """Compute grouped ECE without routing exact integer labels through float64."""
+
+    results = importlib.import_module("neureptrace.results")
+    prob_columns = list(results.probability_columns(observations))
+    missing = [column for column in (*group_columns, "true_label") if column not in observations.columns]
+    if not prob_columns:
+        missing.append("prob_class_*")
+    if missing:
+        raise ValueError(f"Probability observations are missing required columns: {missing}")
+
+    for column in ("time", "true_label", *prob_columns):
+        if column not in observations.columns:
+            continue
+        rows = _boolean_rows(observations[column])
+        if rows:
+            raise ValueError(f"Probability-observation column '{column}' must not contain booleans; bad row(s): {rows}.")
+
+    working = observations.copy()
+    working["time"] = pd.to_numeric(working["time"], errors="coerce")
+    if working["time"].isna().any():
+        raise ValueError("Probability-observation column 'time' must be numeric and non-missing.")
+
+    labels = _exact_integer_labels(working["true_label"])
+    working["true_label"] = pd.Series(labels.tolist(), index=working.index, dtype=object)
+
+    for column in prob_columns:
+        working[column] = pd.to_numeric(working[column], errors="coerce")
+    if working[prob_columns].isna().any().any():
+        raise ValueError("Probability-observation columns must be numeric and non-missing.")
+
+    probability_label_values = results._label_values_from_probability_columns(prob_columns)
+    results._label_positions(labels, probability_label_values)
+    probabilities = working[prob_columns].to_numpy(dtype=float)
+    if not np.isfinite(probabilities).all():
+        raise ValueError("Probability-observation columns must be finite.")
+
+    rows: list[dict[str, object]] = []
+    for group_key, group in working.groupby(group_columns, dropna=False, sort=True):
+        if len(group_columns) == 1 and not isinstance(group_key, tuple):
+            group_key = (group_key,)
+        row = dict(zip(group_columns, group_key))
+        probabilities = group[prob_columns].to_numpy(dtype=float)
+        group_labels = np.asarray(group["true_label"].tolist(), dtype=object)
+        label_positions = results._label_positions(group_labels, probability_label_values)
+        row["n_observations"] = int(len(group))
+        row["ece"] = results.expected_calibration_error(probabilities, label_positions, n_bins=n_bins)
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
 def _install_scalar_arraylike_guards() -> None:
     results = importlib.import_module("neureptrace.results")
     tables = importlib.import_module("neureptrace.results.tables")
@@ -105,10 +229,22 @@ def _install_scalar_arraylike_guards() -> None:
         tables._finite_numeric_scalar = _finite_numeric_scalar_checked
 
 
+def _install_exact_probability_observation_labels() -> None:
+    results = importlib.import_module("neureptrace.results")
+    original = results._probability_ece_by_group
+    if getattr(original, _EXACT_OBSERVATION_LABEL_ATTR, False):
+        return
+
+    setattr(_probability_ece_by_group_exact, _EXACT_OBSERVATION_LABEL_ATTR, True)
+    _probability_ece_by_group_exact.__wrapped__ = original
+    results._probability_ece_by_group = _probability_ece_by_group_exact
+
+
 def install() -> None:
     """Install singleton-aware condition alignment and result scalar guards."""
 
     _install_scalar_arraylike_guards()
+    _install_exact_probability_observation_labels()
 
     results = importlib.import_module("neureptrace.results")
     original_prepare = results._prepare_observations_for_subject_time
