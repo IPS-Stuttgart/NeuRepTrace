@@ -102,7 +102,10 @@ def validate_time_axis(time_vector) -> np.ndarray:
     if not np.all(np.isfinite(time_vector)):
         raise ValueError("time_vector must contain only finite values.")
 
-    diffs = np.diff(time_vector)
+    with np.errstate(over="ignore", invalid="ignore"):
+        diffs = np.diff(time_vector)
+    if not np.all(np.isfinite(diffs)):
+        raise ValueError("time_vector sample intervals must be finite.")
     if np.any(diffs <= 0):
         raise ValueError("time_vector must be strictly increasing.")
 
