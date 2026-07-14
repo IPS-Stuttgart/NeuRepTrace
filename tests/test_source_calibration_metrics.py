@@ -32,6 +32,23 @@ def test_source_calibration_metrics_normalizes_probability_rows() -> None:
     assert result.accuracy == 1.0
 
 
+def test_source_calibration_metrics_normalizes_extreme_finite_rows() -> None:
+    probabilities = np.asarray([[1e308, 1e308], [1e308, 1e307]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        result = source_calibration_metrics(probabilities, [0, 0], n_bins=2)
+
+    expected_nll = -np.mean(np.log([0.5, 10.0 / 11.0]))
+    assert np.isclose(result.nll, expected_nll)
+    assert result.accuracy == 1.0
+    assert np.all(np.isfinite([result.nll, result.brier, result.ece]))
+
+
+def test_source_calibration_metrics_preserves_positive_mass_floor() -> None:
+    with pytest.raises(ValueError, match="positive mass"):
+        source_calibration_metrics([[1e-13, 1e-13]], [0], epsilon=1e-12)
+
+
 def test_source_calibration_metrics_rejects_bad_labels() -> None:
     with pytest.raises(ValueError, match="outside"):
         source_calibration_metrics([[0.5, 0.5]], [2])
