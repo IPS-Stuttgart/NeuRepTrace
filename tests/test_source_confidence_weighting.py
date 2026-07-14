@@ -82,6 +82,28 @@ def test_source_confidence_weighting_rejects_zero_mass_rows() -> None:
         confidence_scores([[0.0, 0.0]], mode="confidence")
 
 
+def test_source_confidence_weighting_normalizes_extreme_finite_rows_without_overflow() -> None:
+    max_float = np.finfo(np.float64).max
+    probabilities = np.asarray(
+        [
+            [max_float, max_float],
+            [max_float, max_float / 9.0],
+        ],
+        dtype=np.float64,
+    )
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        scores = confidence_scores(probabilities, mode="confidence")
+        result = compute_source_confidence_weights(
+            probabilities,
+            config={"mode": "confidence", "min_weight": 0.0, "normalize_weights": False},
+        )
+
+    assert scores.tolist() == pytest.approx([0.5, 0.9])
+    assert result.scores.tolist() == pytest.approx([0.5, 0.9])
+    assert result.sample_weights.tolist() == pytest.approx([0.5, 0.9])
+
+
 @pytest.mark.parametrize(
     "bad_probabilities",
     [
