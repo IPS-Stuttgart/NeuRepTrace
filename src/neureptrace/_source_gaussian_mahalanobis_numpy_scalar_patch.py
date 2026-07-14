@@ -1,7 +1,7 @@
 """Patch Gaussian/Mahalanobis source-decoder numeric validation edge cases.
 
 This module keeps strict source-only Gaussian and Mahalanobis helpers robust for
-configuration scalars and feature-matrix validation.
+configuration scalars, feature-matrix validation, and Gaussian result precision.
 """
 
 from __future__ import annotations
@@ -79,8 +79,20 @@ def _reject_boolean_feature_values(values: Any, *, name: str) -> None:
         raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
 
 
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion keeps every finite nonzero value usable."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
+
+
 def install() -> None:
-    """Install scalar config and boolean feature validation for source decoders."""
+    """Install scalar, feature, and Gaussian result-precision guards."""
 
     global _INSTALLED
     if _INSTALLED:
@@ -92,6 +104,7 @@ def install() -> None:
 
     original_gaussian_feature_matrix = source_gaussian._feature_matrix
     original_mahalanobis_feature_matrix = source_mahalanobis._feature_matrix
+    original_fit_source_gaussian_decoder = source_gaussian.fit_source_gaussian_decoder
 
     @wraps(original_gaussian_feature_matrix)
     def _gaussian_feature_matrix(values: Any, *, name: str) -> np.ndarray:
@@ -103,8 +116,74 @@ def install() -> None:
         _reject_boolean_feature_values(values, name=name)
         return original_mahalanobis_feature_matrix(values, name=name)
 
+    @wraps(original_fit_source_gaussian_decoder)
+    def _fit_source_gaussian_decoder(
+        *,
+        source_features: Any,
+        source_labels: Any,
+        test_features: Any,
+        config: Any = None,
+    ) -> Any:
+        cfg = source_gaussian.source_gaussian_config() if config is None else source_gaussian._coerce_config(config)
+        source = source_gaussian._feature_matrix(source_features, name="source_features")
+        test = source_gaussian._feature_matrix(test_features, name="test_features")
+        if source.shape[1] != test.shape[1]:
+            raise ValueError(
+                "source_features and test_features must have the same feature width: "
+                f"{source.shape[1]} != {test.shape[1]}."
+            )
+        labels = source_gaussian._label_vector(
+            source_labels,
+            expected_length=source.shape[0],
+            name="source_labels",
+        )
+        classes, _ = source_gaussian.label_counts(labels)
+        if classes.shape[0] < 2:
+            raise ValueError("At least two source classes are required.")
+
+        means, class_variances, counts = source_gaussian._class_gaussian_stats(
+            source,
+            labels,
+            classes=classes,
+            variance_floor=cfg.variance_floor,
+        )
+        variances = source_gaussian._apply_covariance_type(
+            class_variances,
+            counts=counts,
+            covariance_type=cfg.covariance_type,
+            variance_floor=cfg.variance_floor,
+        )
+        priors = source_gaussian._class_priors(counts, mode=cfg.prior)
+        log_likelihoods = source_gaussian.gaussian_log_likelihoods(
+            test,
+            means=means,
+            variances=variances,
+        )
+        log_posteriors = (log_likelihoods + np.log(priors)[None, :]) / cfg.temperature
+        probabilities = source_gaussian._softmax(log_posteriors)
+        predictions = classes[np.argmax(probabilities, axis=1)]
+        metadata = source_gaussian._metadata(
+            cfg,
+            n_source_rows=source.shape[0],
+            n_test_rows=test.shape[0],
+            feature_dim=source.shape[1],
+            classes=classes,
+            counts=counts,
+        )
+        return source_gaussian.SourceGaussianResult(
+            probabilities=probabilities.astype(np.float32, copy=False),
+            predictions=predictions,
+            classes=classes,
+            means=_compact_float32(means),
+            variances=_compact_float32(variances),
+            priors=priors.astype(np.float32, copy=False),
+            log_likelihoods=_compact_float32(log_likelihoods),
+            metadata=metadata,
+        )
+
     source_gaussian._positive_float = _positive_float
     source_gaussian._feature_matrix = _gaussian_feature_matrix
+    source_gaussian.fit_source_gaussian_decoder = _fit_source_gaussian_decoder
     source_mahalanobis._positive_float = _positive_float
     source_mahalanobis._nonnegative_float = _nonnegative_float
     source_mahalanobis._feature_matrix = _mahalanobis_feature_matrix
