@@ -16,6 +16,8 @@ from typing import Any
 import numpy as np
 from scipy.linalg import eigh
 
+from neureptrace.decoding._domain_ids import ordered_unique, values_equal
+
 SUBSPACE_ADAPTATION_PROTOCOL = "unlabeled_target_subspace_adaptation"
 SUBSPACE_ADAPTATION_CATEGORY = "2_unlabeled_target_adaptive"
 SUBSPACE_METHODS = ("tca", "balanced_tca")
@@ -262,10 +264,10 @@ def _source_weights(n_rows: int, *, labels: np.ndarray | None, class_balance: bo
         return np.full(n_rows, 1.0 / float(n_rows), dtype=float)
     if labels is None:
         raise ValueError("class-balanced source weights require source labels.")
-    classes = tuple(dict.fromkeys(labels.tolist()))
+    classes = ordered_unique(labels)
     weights = np.zeros(n_rows, dtype=float)
     for class_label in classes:
-        mask = _object_mask(labels, class_label)
+        mask = np.asarray([values_equal(value, class_label) for value in labels.tolist()], dtype=bool)
         weights[mask] = 1.0 / (float(len(classes)) * float(np.count_nonzero(mask)))
     return weights / float(np.sum(weights))
 
