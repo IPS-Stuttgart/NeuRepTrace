@@ -88,6 +88,25 @@ def test_apply_source_range_clip_accepts_one_pass_bounds() -> None:
     assert mask.tolist() == [[True, False], [True, True]]
 
 
+def test_apply_source_range_clip_keeps_float32_for_representable_values() -> None:
+    clipped, mask = apply_source_range_clip([[0.0, 1.0]], lower=[0.0, 0.0], upper=[1.0, 1.0])
+
+    assert clipped.dtype == np.float32
+    assert not np.any(mask)
+
+
+def test_apply_source_range_clip_preserves_values_outside_float32_range() -> None:
+    values = np.asarray([[1e100, -1e100, 1e-100, -1e-100]], dtype=np.float64)
+
+    with np.errstate(over="raise", under="raise", invalid="raise"):
+        clipped, mask = apply_source_range_clip(values, lower=values[0], upper=values[0])
+
+    assert clipped.dtype == np.float64
+    assert np.all(np.isfinite(clipped))
+    np.testing.assert_array_equal(clipped, values)
+    assert not np.any(mask)
+
+
 def test_apply_source_range_clip_validates_width() -> None:
     with pytest.raises(ValueError, match="width"):
         apply_source_range_clip([[0.0, 1.0]], lower=[0.0], upper=[1.0])
