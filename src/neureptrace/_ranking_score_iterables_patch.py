@@ -12,6 +12,7 @@ _PATCHED = False
 
 
 _SCORE_BOOLEAN_ERROR = "scores must contain numeric score values, not boolean flags."
+_CLASS_COLUMN_COLLISION_ERROR = "class_column='score' conflicts with generated rank*_score columns."
 
 
 def _materialize_score_iterables(value: object) -> object:
@@ -49,6 +50,8 @@ def _rank_class_scores_with_score_iterables(
     row_top_k: int = 3,
     class_column: str = "class",
 ) -> dict[str, object]:
+    if isinstance(class_column, str) and class_column == "score":
+        raise ValueError(_CLASS_COLUMN_COLLISION_ERROR)
     if scores is not None:
         scores = _coerce_score_matrix(scores)
     return _ORIGINAL_RANK_CLASS_SCORES(scores, classes, y_true, top_k=top_k, row_top_k=row_top_k, class_column=class_column)
