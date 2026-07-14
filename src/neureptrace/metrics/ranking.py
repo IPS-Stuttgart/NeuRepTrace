@@ -39,6 +39,8 @@ def rank_class_scores(
     scores = _materialize_reusable_score_input(scores)
     if _scores_contain_boolean(scores):
         raise ValueError("scores must contain numeric score values, not boolean flags.")
+    if _scores_contain_complex(scores):
+        raise ValueError("scores must contain real-valued scores, not complex values.")
     try:
         score_matrix = np.asarray(scores, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -164,6 +166,27 @@ def _scores_contain_boolean(values: object) -> bool:
     if not isinstance(values, Iterable):
         return False
     return any(_scores_contain_boolean(value) for value in values)
+
+
+def _scores_contain_complex(values: object) -> bool:
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return True
+        if values.dtype == object:
+            return any(_scores_contain_complex(value) for value in values.ravel(order="C"))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _scores_contain_complex(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if not isinstance(values, Iterable):
+        return False
+    return any(_scores_contain_complex(value) for value in values)
 
 
 def _materialize_reusable_label_input(values: object) -> object:
