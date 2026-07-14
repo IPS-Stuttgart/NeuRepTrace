@@ -10,6 +10,18 @@ from typing import Any
 _PATCH_ATTR = "_neureptrace_oscillatory_single_window"
 
 
+def _materialize_window_iterables(value: Any, window_cls: type) -> Any:
+    """Recursively materialize one-pass window iterables before inspecting them."""
+
+    if isinstance(value, (window_cls, Mapping, str, bytes)):
+        return value
+    try:
+        iterator = iter(value)
+    except TypeError:
+        return value
+    return tuple(_materialize_window_iterables(item, window_cls) for item in iterator)
+
+
 def _is_single_window_sequence(value: Any, window_cls: type) -> bool:
     """Return True when ``value`` is one window spec, not a list of specs."""
 
@@ -41,9 +53,10 @@ def install() -> None:
 
     @functools.wraps(original)
     def _normalize_windows(windows: Any):
-        if _is_single_window_sequence(windows, window_cls):
-            return (oscillatory._normalize_window(windows),)
-        return original(windows)
+        materialized = _materialize_window_iterables(windows, window_cls)
+        if _is_single_window_sequence(materialized, window_cls):
+            return (oscillatory._normalize_window(materialized),)
+        return original(materialized)
 
     setattr(_normalize_windows, _PATCH_ATTR, True)
     oscillatory._normalize_windows = _normalize_windows
