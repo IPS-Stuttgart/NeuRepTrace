@@ -27,14 +27,16 @@ def install() -> None:
 
 
 def _install_source_centroid_patch() -> None:
-    """Reject array-valued numeric source-centroid config controls."""
+    """Patch source-centroid config validation and missing-aware label equality."""
     global _ORIGINAL_COERCE_CONFIG
 
+    from neureptrace._object_label_utils import values_equal
     from neureptrace.decoding import source_centroid as module
 
     _ORIGINAL_COERCE_CONFIG = module._coerce_config
     module.source_centroid_config = _patched_source_centroid_config
     module._coerce_config = _patched_coerce_config
+    module._labels_equal = values_equal
 
 
 def _install_source_knn_patch() -> None:
