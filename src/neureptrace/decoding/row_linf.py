@@ -63,8 +63,8 @@ def normalize_train_test_rows_linf(
     return RowLinfResult(
         train_features=train_out.astype(np.float32, copy=False),
         test_features=test_out.astype(np.float32, copy=False),
-        train_norms=train_norms.astype(np.float32, copy=False),
-        test_norms=test_norms.astype(np.float32, copy=False),
+        train_norms=train_norms.astype(float, copy=False),
+        test_norms=test_norms.astype(float, copy=False),
         metadata={
             "row_linf_normalization": True,
             "row_linf_protocol": ROW_LINF_PROTOCOL,

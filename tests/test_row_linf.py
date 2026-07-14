@@ -35,6 +35,23 @@ def test_normalize_train_test_rows_linf_metadata() -> None:
     assert result.metadata["row_linf_valid_for_strict_source_only"] is True
 
 
+def test_normalize_train_test_rows_linf_preserves_large_finite_norms() -> None:
+    with np.errstate(over="raise", invalid="raise"):
+        result = normalize_train_test_rows_linf(
+            train_features=[[1.0e100, -5.0e99]],
+            test_features=[[1.0e80, -1.0e80]],
+        )
+
+    assert result.train_norms.dtype == np.float64
+    assert result.test_norms.dtype == np.float64
+    assert np.all(np.isfinite(result.train_norms))
+    assert np.all(np.isfinite(result.test_norms))
+    np.testing.assert_allclose(result.train_norms, [1.0e100])
+    np.testing.assert_allclose(result.test_norms, [1.0e80])
+    np.testing.assert_allclose(result.train_features, [[1.0, -0.5]])
+    np.testing.assert_allclose(result.test_features, [[1.0, -1.0]])
+
+
 def test_normalize_train_test_rows_linf_rejects_width_mismatch() -> None:
     with pytest.raises(ValueError, match="same feature width"):
         normalize_train_test_rows_linf(train_features=[[1.0, 2.0]], test_features=[[1.0]])
