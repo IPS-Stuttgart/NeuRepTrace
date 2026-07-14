@@ -29,7 +29,7 @@ def summarize_window_metric(
     rows: list[dict[str, object]] = []
     for group_key, group in _iter_groups(window_frame, group_columns):
         row = _group_row(group_columns, group_key)
-        values = pd.to_numeric(group[metric_column], errors="coerce")
+        values = _finite_numeric_or_missing_series(group[metric_column], name=metric_column)
         row.update(
             {
                 "window_start": window_start,
@@ -137,6 +137,19 @@ def _finite_numeric_series(values: object, *, name: str) -> pd.Series:
     numeric = parsed.to_numpy(dtype=float)
     if not np.all(np.isfinite(numeric)):
         raise ValueError(f"{name} must contain only finite numeric values")
+    return parsed
+
+
+def _finite_numeric_or_missing_series(values: object, *, name: str) -> pd.Series:
+    series = pd.Series(values)
+    message = f"{name} must contain only finite numeric values or missing values"
+    if series.map(_is_boolean_scalar).any():
+        raise ValueError(message)
+    parsed = pd.to_numeric(series, errors="coerce")
+    invalid = series.notna() & parsed.isna()
+    numeric = parsed.dropna().to_numpy(dtype=float)
+    if bool(invalid.any()) or not np.all(np.isfinite(numeric)):
+        raise ValueError(message)
     return parsed
 
 
