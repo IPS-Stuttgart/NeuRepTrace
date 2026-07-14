@@ -128,6 +128,7 @@ from . import (  # noqa: E402
     _riemannian_vector_validation_patch,
     _sample_weight_validation_patch,
     _sampling_composite_label_array_patch,
+    _semantic_stage_output_path_patch,
     _semi_supervised_lora_tuple_labels_patch,
     _sign_flip_scalar_controls_patch,
     _source_alignment_anchor_patch,
@@ -300,6 +301,7 @@ _calibration_bool_numeric_patch.install()
 _calibration_weight_fraction_patch.install()
 _sample_weight_validation_patch.install()
 _sampling_composite_label_array_patch.install()
+_semantic_stage_output_path_patch.install()
 _semi_supervised_lora_tuple_labels_patch.install()
 _report_finite_metric_selection_patch.install()
 _results_metric_boolean_patch.install()
