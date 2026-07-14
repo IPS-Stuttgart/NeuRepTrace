@@ -125,9 +125,9 @@ def select_variance_features(
 ) -> np.ndarray:
     """Return selected feature indices sorted in original feature order."""
 
-    values = np.asarray(variances, dtype=float).reshape(-1)
-    if values.size < 1 or not np.all(np.isfinite(values)) or np.any(values < 0.0):
-        raise ValueError("variances must be a non-empty finite non-negative vector.")
+    values = np.asarray(variances, dtype=float)
+    if values.ndim != 1 or values.size < 1 or not np.all(np.isfinite(values)) or np.any(values < 0.0):
+        raise ValueError("variances must be a non-empty one-dimensional finite non-negative vector.")
     threshold = _nonnegative_float(variance_threshold, name="variance_threshold")
     selected = np.flatnonzero(values > threshold)
     if top_k is not None:
