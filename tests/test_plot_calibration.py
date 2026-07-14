@@ -28,6 +28,31 @@ def test_summarize_reliability_curve_weights_by_samples():
     assert first_bin["confidence"] == pytest.approx(0.35)
 
 
+def test_summarize_reliability_curve_preserves_rows_with_missing_group_labels():
+    bins = pd.DataFrame(
+        {
+            "decoder": [pd.NA],
+            "emission_mode": [pd.NA],
+            "time": [0.1],
+            "bin": [1],
+            "bin_left": [0.0],
+            "bin_right": [0.5],
+            "n_samples": [4],
+            "accuracy": [0.75],
+            "confidence": [0.6],
+        }
+    )
+
+    curve = summarize_reliability_curve(bins)
+
+    assert curve[["decoder", "emission_mode"]].to_dict("records") == [
+        {"decoder": "overall", "emission_mode": "calibrated"}
+    ]
+    assert curve.loc[0, "n_samples"] == 4
+    assert curve.loc[0, "accuracy"] == 0.75
+    assert curve.loc[0, "confidence"] == 0.6
+
+
 def test_plot_reliability_diagram_writes_png(tmp_path: Path):
     bins_csv = tmp_path / "reliability_bins.csv"
     out_path = tmp_path / "reliability.png"
