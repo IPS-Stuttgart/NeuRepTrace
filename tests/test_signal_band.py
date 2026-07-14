@@ -7,6 +7,7 @@ from neureptrace.signal.band import (
     average_phases,
     band_analytic_signal,
     bandpass_filter,
+    circular_mean_phase,
     extract_alpha_signal_and_phase,
     sampling_rate_from_time_axis,
     validate_time_axis,
@@ -20,6 +21,12 @@ def test_sampling_rate_from_time_axis_validates_uniform_axis() -> None:
         sampling_rate_from_time_axis([0.0, 0.01, 0.03])
 
 
+def test_validate_time_axis_accepts_one_pass_iterables() -> None:
+    axis = validate_time_axis(value for value in (0.0, 0.01, 0.02))
+
+    np.testing.assert_allclose(axis, [0.0, 0.01, 0.02])
+
+
 def test_validate_time_axis_rejects_multidimensional_axes() -> None:
     with pytest.raises(ValueError, match="one-dimensional"):
         validate_time_axis(np.array([[0.0, 0.01], [0.02, 0.03]]))
@@ -31,6 +38,9 @@ def test_validate_time_axis_rejects_boolean_values() -> None:
 
     with pytest.raises(ValueError, match="not boolean"):
         validate_time_axis([0.0, True])
+
+    with pytest.raises(ValueError, match="not boolean"):
+        validate_time_axis(value for value in (0.0, True))
 
 
 def test_bandpass_filter_and_hilbert_keep_shape() -> None:
@@ -53,6 +63,23 @@ def test_bandpass_filter_and_hilbert_keep_shape() -> None:
     assert np.iscomplexobj(analytic)
 
 
+def test_bandpass_filter_accepts_nested_one_pass_signal_rows() -> None:
+    sampling_rate = 200.0
+    time = np.arange(400, dtype=float) / sampling_rate
+    signal = np.vstack(
+        [
+            np.sin(2 * np.pi * 10.0 * time),
+            np.sin(2 * np.pi * 10.0 * time + 0.2),
+        ]
+    )
+    one_pass_signal = ((float(value) for value in row) for row in signal)
+
+    filtered = bandpass_filter(one_pass_signal, sampling_rate, (8.0, 12.0))
+
+    assert filtered.shape == signal.shape
+    assert np.all(np.isfinite(filtered))
+
+
 def test_bandpass_filter_rejects_too_short_signal_with_clear_error() -> None:
     sampling_rate = 200.0
     time = np.arange(10, dtype=float) / sampling_rate
@@ -69,6 +96,14 @@ def test_average_phases_matches_circular_mean() -> None:
 
     with pytest.raises(ValueError, match="At least one"):
         average_phases([])
+
+
+def test_phase_helpers_accept_one_pass_iterables() -> None:
+    mean_phase = circular_mean_phase(value for value in (0.0, np.pi / 2.0))
+    phase_rows = ((value for value in row) for row in ([0.0, np.pi], [0.0, np.pi]))
+
+    assert mean_phase == pytest.approx(np.pi / 4.0)
+    np.testing.assert_allclose(average_phases(phase_rows), [0.0, np.pi])
 
 
 def test_average_phases_preserves_multidimensional_shape() -> None:

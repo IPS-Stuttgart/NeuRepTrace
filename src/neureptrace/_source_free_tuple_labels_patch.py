@@ -16,9 +16,9 @@ def _as_label_vector(labels: Any, *, name: str) -> np.ndarray:
         raise ValueError(f"{name} must be supplied.")
     if isinstance(labels, np.ndarray):
         if labels.ndim == 0:
-            values = [labels.item()]
+            values = [_as_python_scalar(labels[()])]
         elif labels.ndim == 1:
-            values = labels.tolist()
+            values = [_as_python_scalar(labels[index]) for index in range(labels.shape[0])]
         else:
             flattened = labels.reshape(labels.shape[0], -1)
             values = [_sequence_label_from_row(row) for row in flattened]
@@ -34,16 +34,23 @@ def _as_label_vector(labels: Any, *, name: str) -> np.ndarray:
 
 def _sequence_label_from_row(row: np.ndarray) -> Any:
     if row.size == 1:
-        value = row[0]
-        return value.item() if isinstance(value, np.generic) else value
-    return tuple(value.item() if isinstance(value, np.generic) else value for value in row.tolist())
+        return _as_python_scalar(row[0])
+    return tuple(_as_python_scalar(row[index]) for index in range(row.size))
+
+
+def _is_numpy_nat_scalar(value: Any) -> bool:
+    return isinstance(value, (np.datetime64, np.timedelta64)) and bool(np.isnat(value))
 
 
 def _as_python_scalar(value: Any) -> Any:
+    if _is_numpy_nat_scalar(value):
+        return value
     return value.item() if isinstance(value, np.generic) else value
 
 
 def _is_nan_scalar(value: Any) -> bool:
+    if _is_numpy_nat_scalar(value):
+        return True
     value = _as_python_scalar(value)
     try:
         return bool(np.isscalar(value) and np.isnan(value))

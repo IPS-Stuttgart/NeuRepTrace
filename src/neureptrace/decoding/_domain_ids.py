@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 
 def _object_vector(values: Sequence[Any]) -> np.ndarray:
@@ -29,8 +30,40 @@ def atomic_domain_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
     return _object_vector(rows)
 
 
+def _is_missing_scalar(value: object) -> bool:
+    if value is pd.NA or value is pd.NaT:
+        return True
+    if isinstance(value, (np.datetime64, np.timedelta64)):
+        return bool(np.isnat(value))
+    if isinstance(value, np.generic):
+        value = value.item()
+    return isinstance(value, float) and np.isnan(value)
+
+
+def _composite_items(value: object) -> list[object] | None:
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return None
+        return value.reshape(-1).tolist()
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return None
+
+
 def values_equal(left: object, right: object) -> bool:
     """Compare scalar or composite domain ids without ambiguous ndarray truth values."""
+
+    left_missing = _is_missing_scalar(left)
+    right_missing = _is_missing_scalar(right)
+    if left_missing or right_missing:
+        return left_missing and right_missing
+
+    left_items = _composite_items(left)
+    right_items = _composite_items(right)
+    if left_items is not None or right_items is not None:
+        if left_items is None or right_items is None or len(left_items) != len(right_items):
+            return False
+        return all(values_equal(left_item, right_item) for left_item, right_item in zip(left_items, right_items, strict=True))
 
     try:
         equal = left == right

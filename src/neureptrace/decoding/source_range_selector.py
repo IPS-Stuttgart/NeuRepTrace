@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,8 +22,8 @@ class SourceRangeSelectorResult:
 
 
 def fit_source_range_selector(*, source_features, test_features, min_range: float = 0.0, top_k: int | None = None) -> SourceRangeSelectorResult:
-    source = _matrix(source_features)
-    test = _matrix(test_features)
+    source = _matrix(source_features, name="source_features")
+    test = _matrix(test_features, name="test_features")
     if source.shape[1] != test.shape[1]:
         raise ValueError("feature widths differ")
     min_range_value = _nonnegative_float(min_range, name="min_range")
@@ -50,7 +51,10 @@ def fit_source_range_selector(*, source_features, test_features, min_range: floa
 
 
 def select_source_range_features(ranges, *, min_range: float = 0.0, top_k: int | None = None) -> np.ndarray:
-    values = np.asarray(ranges, dtype=float).reshape(-1)
+    materialized = _materialize_one_pass_iterables(ranges)
+    if _contains_boolean_value(materialized):
+        raise ValueError("ranges must contain finite non-negative numeric, non-boolean values.")
+    values = np.asarray(materialized, dtype=float).reshape(-1)
     if values.size == 0 or not np.all(np.isfinite(values)) or np.any(values < 0.0):
         raise ValueError("bad ranges")
     threshold = _nonnegative_float(min_range, name="min_range")
@@ -64,10 +68,45 @@ def select_source_range_features(ranges, *, min_range: float = 0.0, top_k: int |
     return np.sort(selected).astype(int, copy=False)
 
 
-def _matrix(values) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _contains_boolean_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if value.dtype == np.bool_:
+            return value.size > 0
+        if value.dtype == object:
+            return any(_contains_boolean_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (bool, np.bool_))
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
+
+
+def _matrix(values, *, name: str) -> np.ndarray:
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] == 0 or matrix.shape[1] == 0 or not np.all(np.isfinite(matrix)):
-        raise ValueError("expected finite non-empty matrix")
+        raise ValueError(f"{name} must be a finite non-empty matrix.")
     return matrix
 
 

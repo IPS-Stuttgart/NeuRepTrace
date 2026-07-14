@@ -98,6 +98,12 @@ def _format_float(value: float, digits: int = 3) -> str:
     return f"{value:.{digits}f}"
 
 
+def _markdown_cell(value: object) -> str:
+    """Return a single escaped Markdown-table cell value."""
+
+    return str(value).replace("\r\n", " ").replace("\r", " ").replace("\n", " ").replace("|", r"\|")
+
+
 def _reject_boolean_numeric_values(values: pd.Series, column: str, *, source: str) -> None:
     boolean_values = values.map(_is_boolean_like_numeric).fillna(False).astype(bool)
     if boolean_values.any():
@@ -374,7 +380,11 @@ def build_calibration_report(
             ]
         )
     for row in summary.itertuples(index=False):
-        emission_prefix = f"| {row.decoder} | {row.emission_mode} |" if has_emission_mode else f"| {row.decoder} |"
+        decoder = _markdown_cell(row.decoder)
+        if has_emission_mode:
+            emission_prefix = f"| {decoder} | {_markdown_cell(row.emission_mode)} |"
+        else:
+            emission_prefix = f"| {decoder} |"
         lines.append(
             f"{emission_prefix} {row.n_subjects} | {_format_float(row.effect_ece_mean)} | {_format_float(row.effect_brier_mean)} | "
             f"{_format_float(row.effect_log_loss_mean)} | {_format_float(row.effect_accuracy_mean)} | {_format_float(row.baseline_accuracy_mean)} | "

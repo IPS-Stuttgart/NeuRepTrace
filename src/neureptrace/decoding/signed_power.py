@@ -7,7 +7,7 @@ is safe to compose with strict source-only decoders.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -87,12 +87,12 @@ def signed_power_transform(features: Sequence[Sequence[float]] | np.ndarray, *, 
 
 def _coerce_config(config: SignedPowerConfig | Mapping[str, Any]) -> SignedPowerConfig:
     if isinstance(config, SignedPowerConfig):
-        return config
+        return signed_power_config(power=config.power)
     return signed_power_config(**dict(config))
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(_materialize_one_pass_iterable(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -100,7 +100,21 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     return matrix
 
 
+def _materialize_one_pass_iterable(values: Any) -> Any:
+    if isinstance(values, np.ndarray):
+        return values
+    if isinstance(values, (str, bytes, Mapping)):
+        return values
+    if hasattr(values, "__array__"):
+        return values
+    if isinstance(values, Iterable) and not isinstance(values, Sequence):
+        return list(values)
+    return values
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+        raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:

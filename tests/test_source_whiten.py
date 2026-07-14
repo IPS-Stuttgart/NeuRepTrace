@@ -80,6 +80,14 @@ def test_source_whiten_aliases_and_validation() -> None:
         fit_source_whiten_transform([[0.0, 0.0], [1.0, 1.0]], config={"method": "zca", "n_components": 1})
 
 
+def test_source_whiten_mapping_config_validation_raises_value_error() -> None:
+    with pytest.raises(ValueError, match="Unknown source whitening config option"):
+        fit_source_whiten_transform([[0.0], [1.0]], config={"methd": "pca"})
+
+    with pytest.raises(ValueError, match="source whitening config must be a mapping"):
+        fit_source_whiten(source_features=[[0.0], [1.0]], test_features=[[0.5]], config=[("method", "pca")])  # type: ignore[arg-type]
+
+
 def test_source_whiten_direct_config_is_normalized_and_validated() -> None:
     source = np.asarray([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]], dtype=float)
     cfg = SourceWhitenConfig(method="pca-whiten", n_components=np.asarray(1), center="false", regularization="0")

@@ -7,7 +7,7 @@ labels only.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -219,6 +219,24 @@ def _coerce_config(config: SourceOutlierConfig | Mapping[str, Any]) -> SourceOut
     return source_outlier_config(**dict(config))
 
 
+def _materialize_feature_values(values: Any) -> Any:
+    """Preserve array inputs but materialize one-pass row iterables."""
+
+    if isinstance(values, np.ndarray) or isinstance(values, (str, bytes, Mapping)):
+        return values
+    if not isinstance(values, Iterable):
+        return values
+    return [_materialize_feature_row(row) for row in values]
+
+
+def _materialize_feature_row(row: Any) -> Any:
+    if isinstance(row, np.ndarray) or isinstance(row, (str, bytes, Mapping)):
+        return row
+    if not isinstance(row, Iterable):
+        return row
+    return list(row)
+
+
 def _contains_boolean_feature_value(value: Any) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return True
@@ -236,9 +254,10 @@ def _contains_boolean_feature_value(value: Any) -> bool:
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    if _contains_boolean_feature_value(values):
+    materialized_values = _materialize_feature_values(values)
+    if _contains_boolean_feature_value(materialized_values):
         raise ValueError(f"{name} must contain numeric, non-boolean values.")
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(materialized_values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
