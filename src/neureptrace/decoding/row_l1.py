@@ -13,6 +13,9 @@ from typing import Any
 
 import numpy as np
 
+from ._row_normalization_validation import feature_matrix as _feature_matrix
+from ._row_normalization_validation import positive_float as _positive_float
+
 ROW_L1_PROTOCOL = "fixed_row_l1_normalization"
 ROW_L1_CATEGORY = "1_strict_source_only_compatible"
 DEFAULT_EPSILON = 1e-12
@@ -108,38 +111,3 @@ def _coerce_config(config: RowL1Config | Mapping[str, Any]) -> RowL1Config:
     if unknown:
         raise ValueError(f"Unknown row L1 config option(s): {', '.join(unknown)}.")
     return row_l1_config(**options)
-
-
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
-    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
-        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
-    if not np.all(np.isfinite(matrix)):
-        raise ValueError(f"{name} must contain only finite values.")
-    return matrix
-
-
-def _is_boolean_scalar(value: Any) -> bool:
-    if isinstance(value, (bool, np.bool_)):
-        return True
-    if isinstance(value, np.ndarray) and value.shape == ():
-        return isinstance(value.item(), (bool, np.bool_))
-    return False
-
-
-def _positive_float(value: float | str, *, name: str) -> float:
-    if _is_boolean_scalar(value):
-        raise ValueError(f"{name} must be positive and finite.")
-    if isinstance(value, np.ndarray):
-        if value.ndim != 0:
-            raise ValueError(f"{name} must be positive and finite.")
-        value = value.item()
-        if _is_boolean_scalar(value):
-            raise ValueError(f"{name} must be positive and finite.")
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive and finite.") from exc
-    if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
-    return parsed

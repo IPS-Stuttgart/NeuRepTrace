@@ -48,3 +48,33 @@ def test_row_linf_config_validation() -> None:
 
     with pytest.raises(ValueError, match="epsilon"):
         row_linf_config(epsilon=True)  # type: ignore[arg-type]
+
+
+def test_row_linf_accepts_nested_one_pass_feature_iterables() -> None:
+    rows = ((value for value in row) for row in ([3.0, -6.0], [0.0, 4.0]))
+
+    normalized, norms = normalize_rows_linf(rows)
+
+    np.testing.assert_allclose(norms, np.asarray([6.0, 4.0]))
+    np.testing.assert_allclose(normalized, np.asarray([[0.5, -1.0], [0.0, 1.0]]))
+
+
+@pytest.mark.parametrize(
+    "features",
+    [
+        [[True, False]],
+        [[1.0, np.bool_(True)]],
+        np.asarray([[True, False]], dtype=bool),
+        np.asarray([[1.0, True]], dtype=object),
+    ],
+)
+def test_row_linf_rejects_boolean_feature_values(features: object) -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        normalize_rows_linf(features)  # type: ignore[arg-type]
+
+
+def test_row_linf_rejects_boolean_values_in_one_pass_iterables() -> None:
+    rows = ((value for value in row) for row in ([1.0, True],))
+
+    with pytest.raises(ValueError, match="boolean"):
+        normalize_rows_linf(rows)
