@@ -98,6 +98,51 @@ def test_apply_source_domain_subset_filters_features_and_labels() -> None:
     assert all(domain in result.selected_domains for domain in np.asarray(domains, dtype=object)[result.selected_mask])
 
 
+def test_apply_source_domain_subset_preserves_large_finite_features() -> None:
+    features = np.asarray([[1.0e40], [2.0e40]], dtype=float)
+
+    with np.errstate(over="raise", under="raise", invalid="raise", divide="raise"):
+        selected_features, selected_labels, result = apply_source_domain_subset(
+            features,
+            [0, 1],
+            ["a", "b"],
+            omit_fraction=0.0,
+        )
+
+    assert selected_features.dtype == np.float64
+    assert selected_labels.tolist() == [0, 1]
+    assert result.selected_mask.tolist() == [True, True]
+    assert np.all(np.isfinite(selected_features))
+    np.testing.assert_allclose(selected_features, features)
+
+
+def test_apply_source_domain_subset_preserves_tiny_nonzero_features() -> None:
+    features = np.asarray([[1.0e-100], [2.0e-100]], dtype=float)
+
+    with np.errstate(over="raise", under="raise", invalid="raise", divide="raise"):
+        selected_features, _, _ = apply_source_domain_subset(
+            features,
+            [0, 1],
+            ["a", "b"],
+            omit_fraction=0.0,
+        )
+
+    assert selected_features.dtype == np.float64
+    assert np.all(selected_features > 0.0)
+    np.testing.assert_allclose(selected_features, features)
+
+
+def test_apply_source_domain_subset_keeps_float32_for_representable_features() -> None:
+    selected_features, _, _ = apply_source_domain_subset(
+        [[1.0], [2.0]],
+        [0, 1],
+        ["a", "b"],
+        omit_fraction=0.0,
+    )
+
+    assert selected_features.dtype == np.float32
+
+
 def test_apply_source_domain_subset_preserves_matrix_composite_domains() -> None:
     features = np.asarray([[0.0], [1.0], [2.0], [3.0]])
     labels = ["a", "a", "b", "b"]
