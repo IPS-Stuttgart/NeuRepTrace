@@ -71,6 +71,28 @@ def test_balanced_tca_uses_source_labels_only() -> None:
     assert result.source_features.shape[1] == 2
 
 
+def test_balanced_tca_accepts_nonhashable_composite_source_labels() -> None:
+    source = np.asarray([[0.0, 0.0], [0.1, 0.0], [0.2, 0.1], [3.0, 3.0], [3.2, 3.1]])
+    target = source + np.asarray([1.0, -0.5])
+    labels = [["major", 1], ["major", 1], ["major", 1], ["minor", 2], ["minor", 2]]
+
+    result = fit_subspace_adaptation(source, target, source_labels=labels, method="balanced_tca", n_components="all")
+
+    assert np.isclose(result.source_weights[:3].sum(), 0.5)
+    assert np.isclose(result.source_weights[3:].sum(), 0.5)
+
+
+def test_balanced_tca_groups_missing_source_labels() -> None:
+    source = np.asarray([[0.0, 0.0], [0.1, 0.0], [0.2, 0.1], [3.0, 3.0], [3.2, 3.1]])
+    target = source + np.asarray([1.0, -0.5])
+    labels = [float("nan"), float("nan"), float("nan"), "minor", "minor"]
+
+    result = fit_subspace_adaptation(source, target, source_labels=labels, method="balanced_tca", n_components="all")
+
+    assert np.isclose(result.source_weights[:3].sum(), 0.5)
+    assert np.isclose(result.source_weights[3:].sum(), 0.5)
+
+
 def test_balanced_tca_requires_source_labels() -> None:
     source, target, _labels = _shifted_domains()
 
