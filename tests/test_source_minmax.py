@@ -49,6 +49,19 @@ def test_source_minmax_zero_source_range_uses_unit_denominator() -> None:
     assert np.all(np.isfinite(result.test_features))
 
 
+def test_source_minmax_handles_extreme_finite_spans_without_overflow() -> None:
+    limit = np.finfo(np.float64).max
+
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        result = fit_source_minmax_transform(
+            source_features=[[-limit], [limit]],
+            test_features=[[0.0]],
+        )
+
+    assert np.allclose(result.train_features.ravel(), np.asarray([0.0, 1.0]))
+    assert np.allclose(result.test_features.ravel(), np.asarray([0.5]))
+
+
 def test_source_minmax_accepts_numpy_vector_range() -> None:
     reference = fit_source_minmax_reference([[0.0], [2.0]], feature_range=np.asarray([-1.0, 1.0]))
 
