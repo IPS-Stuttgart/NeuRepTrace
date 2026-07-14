@@ -70,6 +70,25 @@ def _reject_boolean_probability_columns(observations: pd.DataFrame, *, context: 
         _reject_boolean_probabilities(observations.loc[:, list(prob_columns)], context=context)
 
 
+def _rescale_finite_weights_if_sum_overflows(weights: Any) -> Any:
+    """Rescale non-negative finite weights when their reduction overflows."""
+
+    try:
+        array = np.asarray(weights, dtype=float).reshape(-1)
+    except (TypeError, ValueError):
+        return weights
+    if array.size == 0 or not np.isfinite(array).all() or np.any(array < 0.0):
+        return weights
+    with np.errstate(over="ignore", invalid="ignore"):
+        total = float(np.sum(array))
+    if np.isfinite(total):
+        return weights
+    maximum = float(np.max(array))
+    if maximum <= 0.0:
+        return weights
+    return array / maximum
+
+
 def install() -> None:
     """Install boolean and scalar guards on probability-stacking public numeric paths."""
 
@@ -169,7 +188,8 @@ def install() -> None:
     def combine_probability_cube(probability_cube: Any, weights: Any, *args: Any, **kwargs: Any):
         _reject_boolean_probabilities(probability_cube)
         _reject_boolean_values(weights, message="weights must be numeric, not boolean.")
-        return original_combine_probability_cube(probability_cube, weights, *args, **kwargs)
+        safe_weights = _rescale_finite_weights_if_sum_overflows(weights)
+        return original_combine_probability_cube(probability_cube, safe_weights, *args, **kwargs)
 
     original_summarize_stacked_metrics = ps.summarize_stacked_metrics
 

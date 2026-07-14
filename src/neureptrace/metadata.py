@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Pattern
 
+import numpy as np
 import pandas as pd
 
 
@@ -25,6 +26,16 @@ def _non_empty_text(value: object, *, name: str) -> str:
     if text.strip() == "":
         raise ValueError(message)
     return text
+
+
+def _boolean(value: object, *, name: str) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        scalar = value.item()
+        if isinstance(scalar, (bool, np.bool_)):
+            return bool(scalar)
+    raise ValueError(f"{name} must be a boolean.")
 
 
 def _compile_pattern(pattern: str, *, name: str, case_sensitive: bool) -> Pattern[str]:
@@ -64,6 +75,7 @@ def add_binary_label(
     """
     source_column = _non_empty_text(source_column, name="source_column")
     label_column = _non_empty_text(label_column, name="label_column")
+    case_sensitive = _boolean(case_sensitive, name="case_sensitive")
     positive_regex = _compile_pattern(positive_pattern, name="positive_pattern", case_sensitive=case_sensitive)
     negative_regex = None if negative_pattern is None else _compile_pattern(negative_pattern, name="negative_pattern", case_sensitive=case_sensitive)
     positive_label, negative_label = _validate_binary_labels(positive_label, negative_label)

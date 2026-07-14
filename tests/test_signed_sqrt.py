@@ -26,6 +26,35 @@ def test_signed_sqrt_transform_accepts_one_pass_feature_iterables() -> None:
     assert np.allclose(transformed, np.asarray([[-2.0, -1.0, 0.0, 1.0, 3.0]]))
 
 
+def test_signed_sqrt_transform_accepts_nested_one_pass_feature_iterables() -> None:
+    values = ((value for value in row) for row in ([-4.0, 9.0], [16.0, -25.0]))
+
+    transformed = signed_sqrt_transform(values)
+
+    np.testing.assert_allclose(transformed, np.asarray([[-2.0, 3.0], [4.0, -5.0]]))
+
+
+@pytest.mark.parametrize(
+    "features",
+    [
+        [[True, False]],
+        [[1.0, np.bool_(True)]],
+        np.asarray([[True, False]], dtype=bool),
+        np.asarray([[1.0, True]], dtype=object),
+    ],
+)
+def test_signed_sqrt_rejects_boolean_feature_values(features: object) -> None:
+    with pytest.raises(ValueError, match="boolean flags"):
+        signed_sqrt_transform(features)  # type: ignore[arg-type]
+
+
+def test_signed_sqrt_rejects_boolean_values_in_nested_one_pass_iterables() -> None:
+    values = ((value for value in row) for row in ([1.0, True],))
+
+    with pytest.raises(ValueError, match="boolean flags"):
+        signed_sqrt_transform(values)
+
+
 def test_signed_sqrt_scale_changes_output() -> None:
     transformed = signed_sqrt_transform([[4.0, -4.0]], scale=4.0)
 

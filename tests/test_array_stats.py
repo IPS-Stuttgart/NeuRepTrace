@@ -14,6 +14,20 @@ def test_column_stats_computes_column_summaries():
     assert result.metadata == {"array_stats_rows": 2, "array_stats_columns": 2}
 
 
+def test_column_stats_preserves_large_finite_statistics():
+    values = np.asarray([[1e100, -1e100], [2e100, -2e100]], dtype=float)
+
+    result = column_stats(values)
+
+    for summary in (result.mean, result.scale, result.minimum, result.maximum):
+        assert summary.dtype == np.float64
+        assert np.all(np.isfinite(summary))
+    np.testing.assert_allclose(result.mean, [1.5e100, -1.5e100])
+    np.testing.assert_allclose(result.scale, [np.sqrt(0.5) * 1e100, np.sqrt(0.5) * 1e100])
+    np.testing.assert_allclose(result.minimum, [1e100, -2e100])
+    np.testing.assert_allclose(result.maximum, [2e100, -1e100])
+
+
 def test_column_stats_accepts_scalar_array_scale_floor():
     result = column_stats([[1.0], [1.0]], scale_floor=np.asarray(0.25))
 

@@ -120,6 +120,30 @@ def test_source_scale_rejects_non_numeric_epsilon_values(value: object) -> None:
         source_feature_scale_config(epsilon=value)  # type: ignore[arg-type]
 
 
+def test_source_scale_rejects_unknown_mapping_config_keys() -> None:
+    with pytest.raises(ValueError, match="Unknown source scale config option"):
+        fit_source_feature_scale_stats([[0.0], [1.0]], config={"methd": "standard"})
+
+    with pytest.raises(ValueError, match="Unknown source scale config option"):
+        fit_source_feature_scale(
+            source_features=[[0.0], [1.0]],
+            test_features=[[0.5]],
+            config={"normal_consistncy": True},
+        )
+
+
+def test_source_scale_rejects_non_mapping_config_objects() -> None:
+    with pytest.raises(ValueError, match="mapping or SourceFeatureScaleConfig"):
+        fit_source_feature_scale_stats([[0.0], [1.0]], config=object())  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="mapping or SourceFeatureScaleConfig"):
+        fit_source_feature_scale(
+            source_features=[[0.0], [1.0]],
+            test_features=[[0.5]],
+            config=[("method", "standard")],
+        )  # type: ignore[arg-type]
+
+
 def test_source_scale_accepts_one_pass_feature_iterables() -> None:
     source = (iter(row) for row in ([1.0, 10.0], [3.0, 12.0], [5.0, 14.0]))
     test = (iter(row) for row in ([7.0, 16.0],))

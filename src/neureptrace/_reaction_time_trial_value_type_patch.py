@@ -4,16 +4,35 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Iterable, Mapping
+from decimal import Decimal, InvalidOperation
 
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_reaction_time_trial_value_type_patch_installed"
+_CLEAN_ID_PATCH_MARKER = "_neureptrace_reaction_time_clean_id_patch_installed"
 _FLOAT_PATCH_MARKER = "_neureptrace_reaction_time_float_missing_patch_installed"
 _VALUES_PATCH_MARKER = "_neureptrace_reaction_time_values_missing_patch_installed"
 
 
 def _trial_error(value: object) -> ValueError:
     return ValueError(f"trial values must be finite integers, got {value!r}.")
+
+
+def _clean_id(value: object) -> str:
+    """Normalize integer-like identifiers without lossy float conversion."""
+
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        number = Decimal(text)
+    except InvalidOperation:
+        return text
+    if number.is_finite() and number == number.to_integral_value():
+        return str(int(number))
+    return text
 
 
 def _to_float(value: object) -> float:
@@ -25,6 +44,19 @@ def _to_float(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return np.nan
+
+
+def _to_int(value: object) -> int:
+    """Parse an integer-valued trial key exactly, including large integers."""
+
+    try:
+        text = "" if value is None else str(value).strip()
+        number = Decimal(text)
+    except (TypeError, ValueError, InvalidOperation) as exc:
+        raise _trial_error(value) from exc
+    if not number.is_finite() or number != number.to_integral_value():
+        raise _trial_error(value)
+    return int(number)
 
 
 def _materialize_value_sequence(values: object) -> object:
@@ -48,19 +80,14 @@ def install() -> None:
     """Ensure invalid trial objects and missing RT scalars are handled explicitly."""
 
     module = importlib.import_module("neureptrace.behavior.reaction_time")
+
+    original_clean_id = module._clean_id
+    if not getattr(original_clean_id, _CLEAN_ID_PATCH_MARKER, False):
+        setattr(_clean_id, _CLEAN_ID_PATCH_MARKER, True)
+        module._clean_id = _clean_id
+
     original_to_int = module._to_int
     if not getattr(original_to_int, _PATCH_MARKER, False):
-
-        def _to_int(value: object) -> int:
-            try:
-                text = "" if value is None else str(value).strip()
-                number = float(text)
-            except (TypeError, ValueError) as exc:
-                raise _trial_error(value) from exc
-            if not np.isfinite(number) or not number.is_integer():
-                raise _trial_error(value)
-            return int(number)
-
         setattr(_to_int, _PATCH_MARKER, True)
         module._to_int = _to_int
 

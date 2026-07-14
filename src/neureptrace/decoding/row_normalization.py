@@ -107,12 +107,27 @@ def row_norms(features: Sequence[Sequence[float]] | np.ndarray, *, norm: str = "
     matrix = _feature_matrix(features, name="features")
     mode = normalize_norm_mode(norm)
     if mode == "l2":
-        return np.sqrt(np.sum(matrix * matrix, axis=1))
+        return _stable_row_l2_norms(matrix)
     if mode == "l1":
         return np.sum(np.abs(matrix), axis=1)
     if mode == "max":
         return np.max(np.abs(matrix), axis=1)
     raise ValueError(f"Unhandled row norm mode {mode!r}.")
+
+
+def _stable_row_l2_norms(matrix: np.ndarray) -> np.ndarray:
+    """Return row L2 norms without overflowing when the norm is representable."""
+
+    scales = np.max(np.abs(matrix), axis=1)
+    norms = np.zeros(matrix.shape[0], dtype=float)
+    nonzero = scales > 0.0
+    if not np.any(nonzero):
+        return norms
+    scaled = matrix[nonzero] / scales[nonzero, None]
+    scaled_norms = np.sqrt(np.sum(scaled * scaled, axis=1))
+    with np.errstate(over="ignore"):
+        norms[nonzero] = scales[nonzero] * scaled_norms
+    return norms
 
 
 def row_normalization_config(

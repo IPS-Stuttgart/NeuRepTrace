@@ -43,6 +43,17 @@ def test_l1_and_max_norms() -> None:
     assert np.allclose(np.max(np.abs(max_rows), axis=1), 1.0)
 
 
+def test_l2_norms_avoid_intermediate_overflow() -> None:
+    features = np.asarray([[1e200, -1e200]], dtype=float)
+
+    normalized, norms = normalize_rows(features)
+
+    assert np.all(np.isfinite(norms))
+    np.testing.assert_allclose(norms, [np.sqrt(2.0) * 1e200])
+    np.testing.assert_allclose(normalized, [[1.0 / np.sqrt(2.0), -1.0 / np.sqrt(2.0)]])
+    np.testing.assert_allclose(row_norms(normalized), [1.0])
+
+
 def test_center_rows_before_normalizing() -> None:
     features = np.asarray([[1.0, 2.0, 3.0]], dtype=float)
 

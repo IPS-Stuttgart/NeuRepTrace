@@ -8,7 +8,7 @@ while another variant is better balanced but less confident.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -286,9 +286,10 @@ def _consensus_metadata(
 
 
 def _probability_tensor(probability_variants: Sequence[np.ndarray]) -> np.ndarray:
-    if not probability_variants:
+    variant_items = tuple(probability_variants)
+    if not variant_items:
         raise ValueError("At least one probability matrix is required.")
-    matrices = [_normalize_probability_rows(matrix) for matrix in probability_variants]
+    matrices = [_normalize_probability_rows(matrix) for matrix in variant_items]
     first_shape = matrices[0].shape
     for matrix in matrices:
         if matrix.shape != first_shape:
@@ -296,10 +297,23 @@ def _probability_tensor(probability_variants: Sequence[np.ndarray]) -> np.ndarra
     return np.stack(matrices, axis=0)
 
 
+def _materialize_iterables(values: Any) -> Any:
+    """Recursively materialize one-pass iterables before validation consumes them."""
+
+    if isinstance(values, np.ndarray) or isinstance(values, np.generic):
+        return values
+    if isinstance(values, (str, bytes, bytearray, Mapping)):
+        return values
+    if isinstance(values, Iterable):
+        return [_materialize_iterables(value) for value in values]
+    return values
+
+
 def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
-    if _contains_boolean_values(probabilities):
+    materialized = _materialize_iterables(probabilities)
+    if _contains_boolean_values(materialized):
         raise ValueError("probabilities must be numeric, not boolean.")
-    matrix = np.asarray(probabilities, dtype=float)
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a non-empty 2D matrix with at least two classes.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
@@ -311,9 +325,10 @@ def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
 
 
 def _normalize_weights(weights: Sequence[float] | np.ndarray, *, n_variants: int) -> np.ndarray:
-    if _contains_boolean_values(weights):
+    materialized = _materialize_iterables(weights)
+    if _contains_boolean_values(materialized):
         raise ValueError("weights must be numeric, not boolean.")
-    vector = np.asarray(weights, dtype=float).reshape(-1)
+    vector = np.asarray(materialized, dtype=float).reshape(-1)
     if vector.shape[0] != int(n_variants):
         raise ValueError("weights must contain one entry per probability variant.")
     if not np.all(np.isfinite(vector)) or np.any(vector < 0.0):
@@ -342,7 +357,7 @@ def _contains_boolean_values(values: Any) -> bool:
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(_materialize_iterables(values), dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty 2D feature matrix.")
     if not np.all(np.isfinite(matrix)):

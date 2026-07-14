@@ -7,7 +7,7 @@ labels, so it is safe to compose with strict source-only decoders.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,8 +60,8 @@ def normalize_train_score_rows_maxabs(
     return RowMaxAbsResult(
         train_features=train_out.astype(np.float32, copy=False),
         score_features=score_out.astype(np.float32, copy=False),
-        train_scales=train_scales.astype(np.float32, copy=False),
-        score_scales=score_scales.astype(np.float32, copy=False),
+        train_scales=train_scales.astype(float, copy=False),
+        score_scales=score_scales.astype(float, copy=False),
         metadata={
             "row_maxabs_normalization": True,
             "row_maxabs_protocol": ROW_MAXABS_PROTOCOL,
@@ -103,8 +103,48 @@ def _coerce_config(config: RowMaxAbsConfig | Mapping[str, Any]) -> RowMaxAbsConf
     return row_maxabs_config(**dict(config))
 
 
+def _materialize_one_pass_iterables(value: object) -> object:
+    """Materialize nested one-pass iterables before NumPy consumes them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_one_pass_iterables(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_one_pass_iterables(item) for item in value]
+
+
+def _contains_boolean(value: object) -> bool:
+    """Return whether a materialized feature container contains boolean values."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_boolean(item) for item in value.flat)
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Mapping):
+        return any(_contains_boolean(item) for item in value.values())
+    if isinstance(value, Iterable):
+        return any(_contains_boolean(item) for item in value)
+    return False
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean(materialized):
+        raise ValueError(f"{name} must contain numeric, non-boolean feature values.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain numeric, non-boolean feature values.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):

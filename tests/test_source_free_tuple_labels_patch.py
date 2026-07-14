@@ -36,6 +36,23 @@ class _NumericMatrixLabelProbabilityModel:
         return probabilities[: np.asarray(features).shape[0]]
 
 
+class _NaTAndNoneLabelProbabilityModel:
+    def __init__(self):
+        self.classes_ = np.empty(2, dtype=object)
+        self.classes_[0] = None
+        self.classes_[1] = np.datetime64("NaT")
+
+    def predict_proba(self, features):
+        probabilities = np.asarray(
+            [
+                [0.70, 0.30],
+                [0.20, 0.80],
+            ],
+            dtype=float,
+        )
+        return probabilities[: np.asarray(features).shape[0]]
+
+
 def test_source_free_adapter_preserves_tuple_labels_and_aligns_columns():
     requested_classes = [("face", "early"), ("house", "late")]
     target_features = np.asarray(
@@ -90,3 +107,35 @@ def test_source_free_adapter_preserves_numeric_matrix_labels_and_aligns_columns(
         ),
     )
     assert adapter.predict(target_features).tolist() == [(0, 1), (1, 2)]
+
+
+def test_source_free_adapter_keeps_numpy_nat_distinct_from_none():
+    requested_classes = np.empty(2, dtype=object)
+    requested_classes[0] = np.datetime64("NaT")
+    requested_classes[1] = None
+    target_features = np.asarray(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+    adapter = SourceFreeSubjectAdapter(source_model=_NaTAndNoneLabelProbabilityModel(), max_iterations=0).fit(
+        target_features,
+        classes=requested_classes,
+    )
+
+    assert isinstance(adapter.classes_[0], np.datetime64)
+    assert np.isnat(adapter.classes_[0])
+    assert adapter.classes_[1] is None
+    np.testing.assert_allclose(
+        adapter.probabilities_,
+        np.asarray(
+            [
+                [0.30, 0.70],
+                [0.80, 0.20],
+            ],
+            dtype=float,
+        ),
+    )

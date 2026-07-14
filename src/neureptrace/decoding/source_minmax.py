@@ -11,7 +11,7 @@ import numpy as np
 SOURCE_MINMAX_PROTOCOL = "strict_source_only_minmax_scaling"
 SOURCE_MINMAX_CATEGORY = "1_strict_source_only"
 _RANGE_ERROR = "feature_range must contain exactly two finite numeric non-boolean values with low < high."
-_REFERENCE_ERROR = "source minmax reference bounds must be one-dimensional finite arrays with matching widths."
+_REFERENCE_ERROR = "source minmax reference bounds must be one-dimensional finite numeric non-boolean arrays with matching widths."
 SourceMinMaxReference = namedtuple("SourceMinMaxReference", ("minimum", "maximum", "feature_range", "n_fit_rows"))
 SourceMinMaxResult = namedtuple("SourceMinMaxResult", ("train_features", "test_features", "reference", "metadata"))
 
@@ -110,16 +110,25 @@ def _matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.
 
 
 def _reference_parts(reference) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
-    minimum = np.asarray(reference.minimum, dtype=float).reshape(-1)
-    maximum = np.asarray(reference.maximum, dtype=float).reshape(-1)
-    if minimum.shape[0] < 1 or maximum.shape[0] != minimum.shape[0]:
-        raise ValueError(_REFERENCE_ERROR)
-    if not np.all(np.isfinite(minimum)) or not np.all(np.isfinite(maximum)):
-        raise ValueError(_REFERENCE_ERROR)
-    if np.any(maximum < minimum):
+    minimum = _reference_bound(reference.minimum)
+    maximum = _reference_bound(reference.maximum)
+    if maximum.shape[0] != minimum.shape[0] or np.any(maximum < minimum):
         raise ValueError(_REFERENCE_ERROR)
     feature_range = _range(reference.feature_range)
     return minimum, maximum, feature_range
+
+
+def _reference_bound(values) -> np.ndarray:
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(_REFERENCE_ERROR)
+    try:
+        bound = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_REFERENCE_ERROR) from exc
+    if bound.ndim != 1 or bound.shape[0] < 1 or not np.all(np.isfinite(bound)):
+        raise ValueError(_REFERENCE_ERROR)
+    return bound
 
 
 def _range(values) -> tuple[float, float]:
