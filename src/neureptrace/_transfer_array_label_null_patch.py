@@ -6,7 +6,10 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from neureptrace._object_label_utils import replace_null_class_predictions as _replace_object_label_null_predictions
+from neureptrace._object_label_utils import (
+    replace_null_class_predictions as _replace_object_label_null_predictions,
+    values_equal,
+)
 
 _INSTALLED = False
 _ORIGINAL_APPEND_NULL_CLASS_FEATURES = None
@@ -34,9 +37,12 @@ def _constant_label_vector(length: int, label: object, dtype: np.dtype) -> np.nd
     if dtype == _OBJECT_DTYPE or _is_composite_label(label):
         return _object_label_vector(length, label)
     try:
-        return np.full(int(length), label, dtype=dtype)
+        labels = np.full(int(length), label, dtype=dtype)
     except (TypeError, ValueError, OverflowError):
         return _object_label_vector(length, label)
+    if labels.size and not values_equal(labels[0], label):
+        return _object_label_vector(length, label)
+    return labels
 
 
 def install() -> None:
