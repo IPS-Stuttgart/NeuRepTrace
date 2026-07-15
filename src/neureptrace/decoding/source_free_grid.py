@@ -150,10 +150,16 @@ def _normalize(probabilities: np.ndarray) -> np.ndarray:
     if p.ndim != 2 or p.shape[0] < 1 or p.shape[1] < 2:
         raise ValueError("probabilities must be a two-dimensional matrix with at least two classes")
     p = np.clip(p, 0.0, None)
-    row_sums = p.sum(axis=1, keepdims=True)
-    if np.any(row_sums <= 0.0) or not np.all(np.isfinite(p)):
+    if not np.all(np.isfinite(p)):
         raise ValueError("probabilities must be finite with positive row mass")
-    return p / row_sums
+    row_maxima = p.max(axis=1, keepdims=True)
+    if np.any(row_maxima <= 0.0):
+        raise ValueError("probabilities must be finite with positive row mass")
+    scaled = p / row_maxima
+    row_sums = scaled.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0) or not np.all(np.isfinite(row_sums)):
+        raise ValueError("probabilities must be finite with positive row mass")
+    return scaled / row_sums
 
 
 def _entropy(probabilities: np.ndarray) -> float:
