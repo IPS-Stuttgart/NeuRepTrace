@@ -109,9 +109,6 @@ check_untyped_defs = true
 [tool.ruff]
 line-length = 180
 
-[tool.ruff.lint.per-file-ignores]
-"src/neureptrace/decoding/source_smote.py" = ["F811"]
-
 [tool.isort]
 profile = "black"
 
