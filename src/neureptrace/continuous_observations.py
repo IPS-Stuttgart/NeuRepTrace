@@ -73,7 +73,11 @@ def standardize_continuous_observations(
     """Return continuous stream observations with canonical probability-observation columns."""
     standardized = observations.copy()
     if "sequence_id" not in standardized.columns and {"stream_id", "sample_index"}.issubset(standardized.columns):
-        standardized["sequence_id"] = standardized["stream_id"].astype(str) + ":" + standardized["sample_index"].astype(str)
+        standardized["sequence_id"] = pd.Series(
+            list(zip(standardized["stream_id"], standardized["sample_index"], strict=True)),
+            index=standardized.index,
+            dtype=object,
+        )
     return ProbabilityObservationTable(standardized).standardized(
         defaults={
             "subject": "" if subject is None else subject,
