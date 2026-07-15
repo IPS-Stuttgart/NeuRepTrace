@@ -105,7 +105,7 @@ def compute_source_distance_weights(
     )
     return SourceDistanceWeightResult(
         sample_weights=raw_weights.astype(np.float32, copy=False),
-        distance_scores=scores.astype(np.float32, copy=False),
+        distance_scores=scores.astype(np.float64, copy=False),
         group_keys=tuple(keys),
         group_centers=centers,
         group_scales=scales,
