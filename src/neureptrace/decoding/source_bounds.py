@@ -18,6 +18,7 @@ SOURCE_BOUNDS_CATEGORY = "1_strict_source_only"
 CENTER_MODES = ("median", "mean", "zero")
 DEFAULT_LOWER_QUANTILE = 0.01
 DEFAULT_UPPER_QUANTILE = 0.99
+_BOUNDS_ERROR = "source feature bounds must be one-dimensional finite numeric non-boolean arrays with matching widths and lower <= upper."
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,9 +168,10 @@ def apply_source_feature_bounds(features: Sequence[Sequence[float]] | np.ndarray
     """Apply source-fitted bounds and return a changed-value mask."""
 
     matrix = _feature_matrix(features, name="features")
-    if matrix.shape[1] != bounds.lower.shape[0] or matrix.shape[1] != bounds.upper.shape[0]:
+    lower, upper = _validated_feature_bounds(bounds)
+    if matrix.shape[1] != lower.shape[0]:
         raise ValueError("features width must match bound vectors.")
-    bounded = np.minimum(np.maximum(matrix, bounds.lower), bounds.upper)
+    bounded = np.minimum(np.maximum(matrix, lower), upper)
     return bounded, bounded != matrix
 
 
@@ -240,8 +242,7 @@ def _materialize_one_pass_iterables(value: object) -> object:
     if isinstance(value, np.ndarray):
         if value.dtype != object:
             return value
-        materialized = [_materialize_one_pass_iterables(item) for item in value.ravel(order="C")]
-        return np.asarray(materialized, dtype=object).reshape(value.shape)
+        return _materialize_one_pass_iterables(value.tolist())
     if isinstance(value, (str, bytes)):
         return value
     if not isinstance(value, Iterable):
@@ -280,6 +281,30 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain only finite values.")
     return matrix
+
+
+def _bound_vector(values: object) -> np.ndarray:
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError(_BOUNDS_ERROR)
+    try:
+        vector = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_BOUNDS_ERROR) from exc
+    if vector.ndim != 1 or vector.shape[0] < 1 or not np.all(np.isfinite(vector)):
+        raise ValueError(_BOUNDS_ERROR)
+    return vector
+
+
+def _validated_feature_bounds(bounds: SourceFeatureBounds) -> tuple[np.ndarray, np.ndarray]:
+    try:
+        lower = _bound_vector(bounds.lower)
+        upper = _bound_vector(bounds.upper)
+    except AttributeError as exc:
+        raise ValueError(_BOUNDS_ERROR) from exc
+    if lower.shape[0] != upper.shape[0] or np.any(upper < lower):
+        raise ValueError(_BOUNDS_ERROR)
+    return lower, upper
 
 
 def _scalar_array_value(value: object, *, name: str) -> object:
