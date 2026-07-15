@@ -26,7 +26,13 @@ def group_columns(frame: pd.DataFrame) -> list[str]:
 
 
 def sequence_columns(frame: pd.DataFrame) -> list[str]:
-    identifier = "sequence_id" if "sequence_id" in frame.columns else "sample_index" if "sample_index" in frame.columns else None
+    identifier = (
+        "sequence_id"
+        if "sequence_id" in frame.columns
+        else "sample_index"
+        if "sample_index" in frame.columns
+        else None
+    )
     if identifier is None:
         raise ValueError("Observation rows must contain sequence_id or sample_index.")
     return [column for column in ("subject", "fold", identifier) if column in frame.columns]
@@ -67,6 +73,12 @@ def _has_value(value: object) -> bool:
 
     if value is None:
         return False
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return _has_value(value.item())
+        return any(_has_value(item) for item in value.reshape(-1))
+    if isinstance(value, (tuple, list)):
+        return any(_has_value(item) for item in value)
     try:
         missing = pd.isna(value)
     except (TypeError, ValueError):
@@ -168,13 +180,30 @@ def sequence_identity(row: pd.Series) -> dict:
 
 
 def is_correct_detection(row: pd.Series) -> bool:
-    if "true_label" in row and "predicted_label" in row and _has_value(row["true_label"]) and _has_value(row["predicted_label"]):
-        true_label = _integer_label(row["true_label"])
-        predicted_label = _integer_label(row["predicted_label"])
+    labels_present = (
+        "true_label" in row
+        and "predicted_label" in row
+        and _has_value(row["true_label"])
+        and _has_value(row["predicted_label"])
+    )
+    if labels_present:
+        true_value = row["true_label"]
+        predicted_value = row["predicted_label"]
+        if _is_boolean_label(true_value) or _is_boolean_label(predicted_value):
+            return False
+        true_label = _integer_label(true_value)
+        predicted_label = _integer_label(predicted_value)
         if true_label is not None and predicted_label is not None:
             return true_label == predicted_label
-        return values_equal(row["true_label"], row["predicted_label"])
-    if "true_class" in row and "predicted_class" in row and _has_value(row["true_class"]) and _has_value(row["predicted_class"]):
+        numeric_label_present = isinstance(true_value, numbers.Real) or isinstance(predicted_value, numbers.Real)
+        if not numeric_label_present:
+            return values_equal(true_value, predicted_value)
+    if (
+        "true_class" in row
+        and "predicted_class" in row
+        and _has_value(row["true_class"])
+        and _has_value(row["predicted_class"])
+    ):
         return str(row["true_class"]) == str(row["predicted_class"])
     return False
 
