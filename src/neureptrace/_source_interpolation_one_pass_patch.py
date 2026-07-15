@@ -111,16 +111,31 @@ def _install_source_masking_patch() -> None:
 
 def _install_source_smote_interpolation_patch() -> None:
     module = importlib.import_module("neureptrace.decoding.source_smote")
+    original_feature_matrix = module._feature_matrix
     original_interpolate_rows = module.interpolate_rows
     if getattr(original_interpolate_rows, _SMOTE_INTERPOLATION_PATCH_MARKER, False):
         return
 
+    @wraps(original_feature_matrix)
+    def _feature_matrix(values: Any, *, name: str) -> np.ndarray:
+        materialized = _materialize_one_pass_iterable(values)
+        if _contains_boolean_values(materialized):
+            raise ValueError(f"{name} must contain numeric, non-boolean values.")
+        return original_feature_matrix(materialized, name=name)
+
     @wraps(original_interpolate_rows)
     def interpolate_rows(content_row: Any, partner_row: Any, lam: Any) -> np.ndarray:
-        left = np.asarray(content_row, dtype=float).reshape(-1)
-        right = np.asarray(partner_row, dtype=float).reshape(-1)
+        materialized_content = _materialize_one_pass_iterable(content_row)
+        materialized_partner = _materialize_one_pass_iterable(partner_row)
+        if _contains_boolean_values(materialized_content) or _contains_boolean_values(materialized_partner):
+            raise ValueError("content_row and partner_row must contain numeric, non-boolean values.")
+
+        left = np.asarray(materialized_content, dtype=float).reshape(-1)
+        right = np.asarray(materialized_partner, dtype=float).reshape(-1)
         if left.shape != right.shape or left.size == 0:
             raise ValueError("content_row and partner_row must be non-empty vectors with the same shape.")
+        if not np.all(np.isfinite(left)) or not np.all(np.isfinite(right)):
+            raise ValueError("content_row and partner_row must contain only finite values.")
         weight = module._unit_interval_float(lam, name="lam")
 
         same_sign = np.signbit(left) == np.signbit(right)
@@ -130,6 +145,7 @@ def _install_source_smote_interpolation_patch() -> None:
         return row.astype(np.float32, copy=False)
 
     setattr(interpolate_rows, _SMOTE_INTERPOLATION_PATCH_MARKER, True)
+    module._feature_matrix = _feature_matrix
     module.interpolate_rows = interpolate_rows
 
 
