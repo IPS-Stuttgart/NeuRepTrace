@@ -12,12 +12,21 @@ import numpy as np
 _INSTALLED = False
 
 
+def _safe_repr(value: Any) -> str:
+    """Return a diagnostic representation without masking validation errors."""
+
+    try:
+        return repr(value)
+    except Exception:  # pragma: no cover - only exotic objects fail during repr
+        return f"<{type(value).__name__}>"
+
+
 def _is_boolean_scalar(value: Any) -> bool:
     return isinstance(value, (bool, np.bool_))
 
 
 def _scale_error(value: Any) -> ValueError:
-    return ValueError(f"reaction_time_scale must be a finite numeric scale, got {value!r}.")
+    return ValueError(f"reaction_time_scale must be a finite numeric scale, got {_safe_repr(value)}.")
 
 
 def _validate_reaction_time_scale(reaction_time_scale: Any) -> float:
@@ -25,7 +34,7 @@ def _validate_reaction_time_scale(reaction_time_scale: Any) -> float:
         raise _scale_error(reaction_time_scale)
     try:
         scale = float(reaction_time_scale)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise _scale_error(reaction_time_scale) from exc
     if not np.isfinite(scale) or scale <= 0.0:
         raise _scale_error(reaction_time_scale)
