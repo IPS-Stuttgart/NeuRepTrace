@@ -318,10 +318,14 @@ def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
         raise ValueError("probabilities must be a non-empty 2D matrix with at least two classes.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must be finite and non-negative.")
-    row_sums = matrix.sum(axis=1, keepdims=True)
-    if np.any(row_sums <= 0.0):
+    row_max = matrix.max(axis=1, keepdims=True)
+    if np.any(row_max <= 0.0):
         raise ValueError("probability rows must contain positive mass.")
-    return matrix / row_sums
+    scaled = matrix / row_max
+    row_sums = scaled.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0) or not np.all(np.isfinite(row_sums)):
+        raise ValueError("probability rows must contain positive finite mass.")
+    return scaled / row_sums
 
 
 def _normalize_weights(weights: Sequence[float] | np.ndarray, *, n_variants: int) -> np.ndarray:
@@ -333,9 +337,21 @@ def _normalize_weights(weights: Sequence[float] | np.ndarray, *, n_variants: int
         raise ValueError("weights must contain one entry per probability variant.")
     if not np.all(np.isfinite(vector)) or np.any(vector < 0.0):
         raise ValueError("weights must be finite and non-negative.")
-    if float(vector.sum()) <= 0.0:
-        raise ValueError("weights must contain positive mass.")
-    return vector / vector.sum()
+    return _normalize_nonnegative_vector(vector, name="weights")
+
+
+def _normalize_nonnegative_vector(vector: np.ndarray, *, name: str) -> np.ndarray:
+    vector = np.asarray(vector, dtype=float).reshape(-1)
+    if vector.size < 1:
+        raise ValueError(f"{name} must contain at least one value.")
+    max_value = float(np.max(vector))
+    if max_value <= 0.0:
+        raise ValueError(f"{name} must contain positive mass.")
+    scaled = vector / max_value
+    total = float(scaled.sum())
+    if total <= 0.0 or not np.isfinite(total):
+        raise ValueError(f"{name} must contain positive finite mass.")
+    return scaled / total
 
 
 def _contains_boolean_values(values: Any) -> bool:
@@ -380,7 +396,9 @@ def _row_entropy(probabilities: np.ndarray) -> np.ndarray:
 
 def _entropy(probabilities: np.ndarray) -> float:
     vector = np.asarray(probabilities, dtype=float).reshape(-1)
-    vector = np.clip(vector / vector.sum(), _EPS, 1.0)
+    if not np.all(np.isfinite(vector)) or np.any(vector < 0.0):
+        raise ValueError("entropy probabilities must be finite and non-negative.")
+    vector = np.clip(_normalize_nonnegative_vector(vector, name="entropy probabilities"), _EPS, 1.0)
     return float(-np.sum(vector * np.log(vector)))
 
 
