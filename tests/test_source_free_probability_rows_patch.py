@@ -40,7 +40,7 @@ class _TinyNegativeResidueModel:
 
 
 def test_source_free_fit_rejects_probability_row_mismatch() -> None:
-    with pytest.raises(ValueError, match="probability rows must match target_features rows"):
+    with pytest.raises(ValueError, match="one row per feature row"):
         fit_source_free_predict_proba(
             source_model=_ShortProbabilityModel(),
             target_features=np.zeros((3, 2), dtype=float),
@@ -52,7 +52,7 @@ def test_source_free_predict_rejects_probability_row_mismatch() -> None:
     model = _ChangingProbabilityModel()
     adapter = SourceFreeSubjectAdapter(source_model=model, max_iterations=0).fit(np.zeros((3, 2), dtype=float))
 
-    with pytest.raises(ValueError, match="probability rows must match target_features rows"):
+    with pytest.raises(ValueError, match="one row per feature row"):
         adapter.predict_proba(np.ones((3, 2), dtype=float))
 
 
