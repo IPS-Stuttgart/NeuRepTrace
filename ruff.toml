@@ -2,3 +2,4 @@ line-length = 180
 
 [lint.per-file-ignores]
 "src/neureptrace/__init__.py" = ["F401"]
+"src/neureptrace/decoding/source_smote.py" = ["F811"]
