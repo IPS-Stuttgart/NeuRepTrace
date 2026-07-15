@@ -38,7 +38,7 @@ def _normalize_domain_importance_config(
             config.account_for_sample_priors,
             name="account_for_sample_priors",
         ),
-        epsilon=_domain_importance._positive_float(config.epsilon, name="epsilon"),
+        epsilon=_domain_importance._probability_clipping_epsilon(config.epsilon),
     )
 
 
@@ -53,7 +53,7 @@ def _patched_domain_importance_config(
         clip=_domain_importance._normalize_clip(clip),
         normalize=_bool_config(normalize, name="normalize"),
         account_for_sample_priors=_bool_config(account_for_sample_priors, name="account_for_sample_priors"),
-        epsilon=_domain_importance._positive_float(epsilon, name="epsilon"),
+        epsilon=_domain_importance._probability_clipping_epsilon(epsilon),
     )
 
 
