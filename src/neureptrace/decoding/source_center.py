@@ -64,8 +64,8 @@ def fit_source_center_transform(
     train = apply_source_center_transform(source, center_map)
     test_out = apply_source_center_transform(test, center_map)
     return SourceCenterResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=_float32_if_safe(train),
+        test_features=_float32_if_safe(test_out),
         center_map=center_map,
         metadata=_metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], feature_dim=source.shape[1]),
     )
@@ -97,7 +97,7 @@ def fit_source_center_map(
     cfg = source_center_config() if config is None else _coerce_config(config)
     source = _feature_matrix(source_features, name="source_features")
     if cfg.center == "mean":
-        center = np.mean(source, axis=0)
+        center = _stable_feature_mean(source)
     elif cfg.center == "median":
         center = np.median(source, axis=0)
     elif cfg.center == "zero":
@@ -113,7 +113,32 @@ def apply_source_center_transform(features: Sequence[Sequence[float]] | np.ndarr
     matrix = _feature_matrix(features, name="features")
     if matrix.shape[1] != center_map.center.shape[0]:
         raise ValueError("features width must match center map width.")
-    return matrix - center_map.center[None, :]
+    with np.errstate(over="ignore", invalid="ignore"):
+        transformed = matrix - center_map.center[None, :]
+    if not np.all(np.isfinite(transformed)):
+        raise ValueError("source-centering output must contain only finite values.")
+    return transformed
+
+
+def _stable_feature_mean(source: np.ndarray) -> np.ndarray:
+    """Compute feature means without overflowing on finite high-magnitude rows."""
+
+    scale = np.max(np.abs(source), axis=0)
+    safe_scale = np.where(scale > 0.0, scale, 1.0)
+    return np.mean(source / safe_scale[None, :], axis=0) * scale
+
+
+def _float32_if_safe(values: Any) -> np.ndarray:
+    """Use float32 unless conversion overflows or erases nonzero values."""
+
+    array = np.asarray(values, dtype=float)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    lost_finite = np.isfinite(array) & ~np.isfinite(compact)
+    lost_nonzero = (array != 0.0) & (compact == 0.0)
+    if bool(np.any(lost_finite | lost_nonzero)):
+        return array
+    return compact
 
 
 def _coerce_config(config: SourceCenterConfig | Mapping[str, Any]) -> SourceCenterConfig:
