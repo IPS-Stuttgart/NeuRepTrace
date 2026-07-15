@@ -50,9 +50,11 @@ def transform_train_test_signed_sqrt(
             "train_features and test_features must have the same feature width: "
             f"{train.shape[1]} != {test.shape[1]}."
         )
+    train_transformed = signed_sqrt_transform(train, scale=cfg.scale)
+    test_transformed = signed_sqrt_transform(test, scale=cfg.scale)
     return SignedSqrtResult(
-        train_features=signed_sqrt_transform(train, scale=cfg.scale).astype(np.float32, copy=False),
-        test_features=signed_sqrt_transform(test, scale=cfg.scale).astype(np.float32, copy=False),
+        train_features=_compact_float32(train_transformed),
+        test_features=_compact_float32(test_transformed),
         metadata={
             "signed_sqrt_transform": True,
             "signed_sqrt_protocol": SIGNED_SQRT_PROTOCOL,
@@ -81,6 +83,18 @@ def signed_sqrt_transform(features: Sequence[Sequence[float]] | np.ndarray, *, s
     matrix = _feature_matrix(features, name="features")
     resolved_scale = _positive_float(scale, name="scale")
     return np.sign(matrix) * (np.sqrt(np.abs(matrix)) / np.sqrt(resolved_scale))
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _coerce_config(config: SignedSqrtConfig | Mapping[str, Any]) -> SignedSqrtConfig:
