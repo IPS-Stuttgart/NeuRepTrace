@@ -63,8 +63,8 @@ def normalize_train_test_rows_l1(
     return RowL1Result(
         train_features=train_out.astype(np.float32, copy=False),
         test_features=test_out.astype(np.float32, copy=False),
-        train_norms=train_norms.astype(np.float32, copy=False),
-        test_norms=test_norms.astype(np.float32, copy=False),
+        train_norms=train_norms.astype(float, copy=False),
+        test_norms=test_norms.astype(float, copy=False),
         metadata={
             "row_l1_normalization": True,
             "row_l1_protocol": ROW_L1_PROTOCOL,
@@ -95,9 +95,26 @@ def normalize_rows_l1(
     """Normalize each row by its L1 norm and return original norms."""
 
     matrix = _feature_matrix(features, name="features")
-    norms = np.sum(np.abs(matrix), axis=1)
-    safe_norms = np.maximum(norms, _positive_float(epsilon, name="epsilon"))
-    return matrix / safe_norms[:, None], norms
+    parsed_epsilon = _positive_float(epsilon, name="epsilon")
+    scales = np.max(np.abs(matrix), axis=1)
+    norms = np.zeros(matrix.shape[0], dtype=float)
+    normalized = np.zeros_like(matrix)
+    nonzero = scales > 0.0
+    if not np.any(nonzero):
+        return normalized, norms
+
+    scaled = matrix[nonzero] / scales[nonzero, None]
+    scaled_norms = np.sum(np.abs(scaled), axis=1)
+    with np.errstate(over="ignore"):
+        nonzero_norms = scales[nonzero] * scaled_norms
+    norms[nonzero] = nonzero_norms
+
+    normalized_nonzero = np.zeros_like(scaled)
+    normalize_to_unit = ~np.isfinite(nonzero_norms) | (nonzero_norms >= parsed_epsilon)
+    normalized_nonzero[normalize_to_unit] = scaled[normalize_to_unit] / scaled_norms[normalize_to_unit, None]
+    normalized_nonzero[~normalize_to_unit] = matrix[nonzero][~normalize_to_unit] / parsed_epsilon
+    normalized[nonzero] = normalized_nonzero
+    return normalized, norms
 
 
 def _coerce_config(config: RowL1Config | Mapping[str, Any]) -> RowL1Config:
