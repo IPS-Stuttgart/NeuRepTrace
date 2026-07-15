@@ -82,6 +82,13 @@ def test_replace_null_class_predictions_promotes_unrepresentable_fallback_label(
     assert repaired.tolist() == ["target", "target"]
 
 
+def test_replace_null_class_predictions_preserves_nonintegral_fallback_label() -> None:
+    repaired = replace_null_class_predictions(np.asarray([0, 0]), null_label=0, fallback_label=1.5)
+
+    assert repaired.dtype == object
+    assert repaired.tolist() == [1.5, 1.5]
+
+
 def test_replace_null_class_predictions_preserves_tuple_label_atoms() -> None:
     repaired = replace_null_class_predictions([0, ("subject-a", 1), ("subject-b", 2), 0], null_label=0)
 
