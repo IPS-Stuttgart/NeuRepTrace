@@ -97,8 +97,8 @@ def fit_source_feature_bounds(
         test_mask=test_mask,
     )
     return SourceBoundsResult(
-        train_features=train_features.astype(np.float32, copy=False),
-        test_features=test_features_out.astype(np.float32, copy=False),
+        train_features=_compact_float32(train_features),
+        test_features=_compact_float32(test_features_out),
         bounds=bounds,
         train_changed_mask=train_mask,
         test_changed_mask=test_mask,
@@ -173,6 +173,18 @@ def apply_source_feature_bounds(features: Sequence[Sequence[float]] | np.ndarray
         raise ValueError("features width must match bound vectors.")
     bounded = np.minimum(np.maximum(matrix, lower), upper)
     return bounded, bounded != matrix
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _coerce_config(config: SourceBoundsConfig | Mapping[str, Any]) -> SourceBoundsConfig:
