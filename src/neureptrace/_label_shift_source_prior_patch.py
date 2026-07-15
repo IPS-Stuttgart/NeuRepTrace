@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 _SOURCE_PRIOR_PATCH_MARKER = "_neureptrace_label_shift_source_prior_patch_installed"
 _PROBABILITY_MATRIX_PATCH_MARKER = "_neureptrace_label_shift_probability_matrix_patch_installed"
 _SCALAR_CONFIG_PATCH_MARKER = "_neureptrace_label_shift_scalar_config_patch_installed"
@@ -25,7 +27,7 @@ def _source_prior_value_for_class(label_shift: Any, source_prior: Mapping[Any, f
     """Return a mapping prior value using NeuRepTrace object-label equality."""
 
     for prior_label, prior_value in source_prior.items():
-        if label_shift._object_equal(prior_label, class_label):
+        if values_equal(prior_label, class_label) or label_shift._object_equal(prior_label, class_label):
             return True, prior_value
     return False, None
 
@@ -156,7 +158,12 @@ def install() -> None:
                         "source_prior mapping must provide a prior for every class; "
                         f"missing class label(s): {_format_label_preview(missing)}."
                     )
-                return label_shift._prior_vector(np.asarray(values, dtype=float), n_classes=n_classes, name="source_prior", epsilon=epsilon)
+                return label_shift._prior_vector(
+                    np.asarray(values, dtype=float),
+                    n_classes=n_classes,
+                    name="source_prior",
+                    epsilon=epsilon,
+                )
             labels = source_labels if source_labels is not None else source_validation_labels
             if labels is not None:
                 _reject_unknown_source_labels(label_shift, labels, classes)
@@ -179,7 +186,12 @@ def install() -> None:
         @wraps(original_probability_matrix)
         def _probability_matrix(values, *, name: str, epsilon: float | str, expected_classes: int | None = None):
             _reject_boolean_probability_values(values, name=name)
-            return original_probability_matrix(values, name=name, epsilon=epsilon, expected_classes=expected_classes)
+            return original_probability_matrix(
+                values,
+                name=name,
+                epsilon=epsilon,
+                expected_classes=expected_classes,
+            )
 
         setattr(_probability_matrix, _PROBABILITY_MATRIX_PATCH_MARKER, True)
         _probability_matrix.__wrapped__ = original_probability_matrix
