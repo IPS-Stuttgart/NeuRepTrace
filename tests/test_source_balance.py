@@ -7,6 +7,7 @@ import pytest
 
 from neureptrace.decoding.source_balance import (
     SOURCE_BALANCE_CATEGORY,
+    SourceBalanceConfig,
     compute_source_balance_weights,
     normalize_balance_strategy,
     normalize_balance_target,
@@ -183,6 +184,49 @@ def test_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="balance target"):
         normalize_balance_target("bad")
+
+
+def test_source_balance_accepts_numpy_scalar_config_values() -> None:
+    cfg = source_balance_config(
+        normalize_weights=np.asarray(False),  # type: ignore[arg-type]
+        random_state=np.asarray(7),  # type: ignore[arg-type]
+    )
+
+    assert cfg.normalize_weights is False
+    assert cfg.random_state == 7
+
+
+def test_source_balance_normalizes_direct_config_instances() -> None:
+    labels = np.asarray(["a", "a", "b"], dtype=object)
+    cfg = SourceBalanceConfig(
+        strategy="labels",
+        target="undersample",
+        normalize_weights=np.asarray(False),  # type: ignore[arg-type]
+        random_state=np.asarray(4),  # type: ignore[arg-type]
+    )
+
+    result = compute_source_balance_weights(labels, config=cfg)
+
+    assert cfg.strategy == "class"
+    assert cfg.target == "min"
+    assert cfg.normalize_weights is False
+    assert cfg.random_state == 4
+    assert result.metadata["source_balance_strategy"] == "class"
+    assert result.metadata["source_balance_target"] == "min"
+    assert result.metadata["source_balance_normalize_weights"] is False
+    assert np.allclose(result.sample_weights, [0.5, 0.5, 1.0])
+
+
+def test_source_balance_rejects_bool_and_array_numeric_controls() -> None:
+    invalid_configs = [
+        {"normalize_weights": np.asarray([True])},
+        {"random_state": np.asarray([7])},
+        {"random_state": np.asarray(True)},
+    ]
+
+    for config in invalid_configs:
+        with pytest.raises(ValueError):
+            source_balance_config(**config)  # type: ignore[arg-type]
 
 
 def test_heldout_arguments_are_not_part_of_public_api() -> None:
