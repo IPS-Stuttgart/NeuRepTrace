@@ -12,6 +12,7 @@ _PATCHED = False
 
 
 _SCORE_BOOLEAN_ERROR = "scores must contain numeric score values, not boolean flags."
+_SCORE_COMPLEX_ERROR = "scores must contain real-valued scores, not complex values."
 _CLASS_COLUMN_COLLISION_ERROR = "class_column='score' conflicts with generated rank*_score columns."
 
 
@@ -35,6 +36,8 @@ def _coerce_score_matrix(scores: object) -> np.ndarray:
     materialized = _materialize_score_iterables(scores)
     if _ranking._scores_contain_boolean(materialized):
         raise ValueError(_SCORE_BOOLEAN_ERROR)
+    if _ranking._scores_contain_complex(materialized):
+        raise ValueError(_SCORE_COMPLEX_ERROR)
     try:
         return np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
