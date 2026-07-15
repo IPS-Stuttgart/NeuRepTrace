@@ -65,10 +65,7 @@ def normalize_label_proportions(
         raise ValueError("target_proportions must contain at least one class proportion.")
     if not np.all(np.isfinite(values)) or np.any(values < 0.0):
         raise ValueError("target_proportions must be finite and non-negative.")
-    total = float(np.sum(values))
-    if total <= 0.0:
-        raise ValueError("target_proportions must contain at least one positive entry.")
-    return values / total, class_order
+    return _normalize_nonnegative_vector(values, zero_message="target_proportions must contain at least one positive entry."), class_order
 
 
 def adjust_probabilities_to_label_proportions(
@@ -264,12 +261,35 @@ def _as_probability_matrix(probabilities: Sequence[Sequence[float]] | np.ndarray
         raise ValueError("probabilities must contain at least one row and two classes.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probabilities must be finite and non-negative.")
-    row_sums = np.sum(matrix, axis=1, keepdims=True)
-    if np.any(row_sums <= 0.0):
-        raise ValueError("Each probability row must contain at least one positive value.")
-    matrix = matrix / row_sums
+    matrix = _normalize_nonnegative_rows(matrix, zero_message="Each probability row must contain at least one positive value.")
     matrix = np.clip(matrix, epsilon, None)
-    return matrix / np.sum(matrix, axis=1, keepdims=True)
+    return _normalize_nonnegative_rows(matrix, zero_message="Each probability row must contain at least one positive value.")
+
+
+def _normalize_nonnegative_vector(values: np.ndarray, *, zero_message: str) -> np.ndarray:
+    """Normalize a finite non-negative vector without overflowing its sum."""
+
+    scale = float(np.max(values))
+    if scale <= 0.0:
+        raise ValueError(zero_message)
+    scaled = values / scale
+    total = float(np.sum(scaled))
+    if total <= 0.0 or not np.isfinite(total):
+        raise ValueError(zero_message)
+    return scaled / total
+
+
+def _normalize_nonnegative_rows(matrix: np.ndarray, *, zero_message: str) -> np.ndarray:
+    """Normalize finite non-negative rows after per-row max scaling."""
+
+    scales = np.max(matrix, axis=1, keepdims=True)
+    if np.any(scales <= 0.0):
+        raise ValueError(zero_message)
+    scaled = matrix / scales
+    row_sums = np.sum(scaled, axis=1, keepdims=True)
+    if np.any(row_sums <= 0.0) or not np.all(np.isfinite(row_sums)):
+        raise ValueError(zero_message)
+    return scaled / row_sums
 
 
 def _apply_class_bias(probabilities: np.ndarray, class_bias: np.ndarray, *, epsilon: float) -> np.ndarray:
