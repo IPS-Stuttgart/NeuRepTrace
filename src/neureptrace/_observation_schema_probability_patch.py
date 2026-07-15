@@ -197,10 +197,18 @@ def _validate_decoded_fold_probabilities(probabilities: Any) -> None:
 
 
 def _validate_decoded_fold_integer_values(values: Any, *, name: str) -> None:
-    """Reject boolean label/index vectors before NumPy coerces them to 0/1."""
+    """Reject values that cannot be represented as finite integer vectors."""
 
     if _contains_boolean_values(values):
         raise ValueError(f"from_decoded_fold {name} must be integer-valued, not boolean.")
+    try:
+        numeric = np.asarray(values, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"from_decoded_fold {name} must be integer-valued.") from exc
+    if not np.isfinite(numeric).all():
+        raise ValueError(f"from_decoded_fold {name} must contain finite integer-valued values.")
+    if not np.equal(numeric, np.rint(numeric)).all():
+        raise ValueError(f"from_decoded_fold {name} must be integer-valued.")
 
 
 def _install_decoded_fold_probability_guard() -> None:
