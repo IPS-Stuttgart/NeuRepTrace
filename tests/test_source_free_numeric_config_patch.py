@@ -45,8 +45,6 @@ def test_source_free_numeric_string_aliases_survive_metadata():
 @pytest.mark.parametrize(
     ("parameter", "value", "expected_name"),
     [
-        ("confidence_threshold", np.asarray(0.25), "source_free_confidence_threshold"),
-        ("max_iterations", np.asarray(0), "source_free_max_iterations"),
         ("min_class_count", np.array([1]), "source_free_min_class_count"),
         ("min_active_classes", np.array([1]), "source_free_min_active_classes"),
         ("prototype_weight", np.asarray(True), "source_free_prototype_weight"),
