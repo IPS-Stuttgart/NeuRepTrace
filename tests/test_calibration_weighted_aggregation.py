@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -66,6 +67,30 @@ def test_aggregate_reliability_bins_normalizes_sample_weight_fraction_per_time(t
 
     assert aggregated["sample_weight_fraction"].tolist() == pytest.approx([0.2, 0.8, 0.25, 0.75])
     assert aggregated.groupby("time")["sample_weight_fraction"].sum().tolist() == pytest.approx([1.0, 1.0])
+
+
+def test_aggregate_reliability_bins_preserves_large_finite_weight_fractions(tmp_path: Path) -> None:
+    bins_csv = tmp_path / "large_weighted_bins.csv"
+    pd.DataFrame(
+        {
+            "decoder": ["logistic", "logistic"],
+            "time": [0.1, 0.1],
+            "bin": [0, 1],
+            "bin_left": [0.0, 0.5],
+            "bin_right": [0.5, 1.0],
+            "n_samples": [1, 1],
+            "sample_weight": [1e308, 1e308],
+            "accuracy": [1.0, 0.0],
+            "confidence": [0.75, 0.25],
+        }
+    ).to_csv(bins_csv, index=False)
+
+    with np.errstate(over="raise", invalid="raise"):
+        aggregated = aggregate_reliability_bins([bins_csv]).sort_values("bin").reset_index(drop=True)
+
+    assert aggregated["sample_weight"].tolist() == pytest.approx([1e308, 1e308])
+    assert aggregated["sample_weight_fraction"].tolist() == pytest.approx([0.5, 0.5])
+    assert aggregated["sample_weight_fraction"].sum() == pytest.approx(1.0)
 
 
 def test_aggregate_reliability_bins_rejects_positive_weight_for_empty_bins(tmp_path: Path) -> None:
