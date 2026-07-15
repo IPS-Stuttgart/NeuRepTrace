@@ -11,10 +11,16 @@ from neureptrace.bushmeg_all_protocols import (
 
 
 def test_protocol3_rejects_matrix_shaped_split_indices() -> None:
-    with pytest.raises(ValueError, match="calibration_indices must be a one-dimensional index vector"):
+    with pytest.raises(
+        ValueError,
+        match="calibration_indices must be a one-dimensional index vector",
+    ):
         validate_disjoint_calibration_evaluation([[0, 1], [2, 3]], [4, 5, 6, 7])
 
-    with pytest.raises(ValueError, match="evaluation_indices must be a one-dimensional index vector"):
+    with pytest.raises(
+        ValueError,
+        match="evaluation_indices must be a one-dimensional index vector",
+    ):
         validate_protocol_input_use(
             3,
             target_features_for_fitting=True,
@@ -25,14 +31,25 @@ def test_protocol3_rejects_matrix_shaped_split_indices() -> None:
 
 
 def test_protocol3_split_validator_accepts_column_and_row_vectors() -> None:
-    validate_disjoint_calibration_evaluation(np.asarray([[0], [1]]), np.asarray([[2, 3]]))
+    validate_disjoint_calibration_evaluation(
+        np.asarray([[0], [1]]), np.asarray([[2, 3]])
+    )
 
 
 def test_protocol3_rejects_non_integer_split_indices() -> None:
-    with pytest.raises(ValueError, match="calibration_indices must contain integer row indices"):
+    with pytest.raises(
+        ValueError,
+        match="calibration_indices must contain integer row indices",
+    ):
         validate_disjoint_calibration_evaluation([0.0, 1.5], [2, 3])
 
-    with pytest.raises(ValueError, match="evaluation_indices must contain integer row indices, not boolean values"):
+    with pytest.raises(
+        ValueError,
+        match=(
+            "evaluation_indices must contain integer row indices, "
+            "not boolean values"
+        ),
+    ):
         validate_disjoint_calibration_evaluation([0, 1], [False, True])
 
 
@@ -44,7 +61,10 @@ def test_protocol3_rejects_non_integer_split_indices() -> None:
         ("min_evaluation_per_class", np.asarray([[True]])),
     ],
 )
-def test_protocol3_target_split_rejects_boolean_array_split_options(option_name: str, option_value: object) -> None:
+def test_protocol3_target_split_rejects_boolean_array_split_options(
+    option_name: str,
+    option_value: object,
+) -> None:
     kwargs = {
         "per_class": 1,
         "seed": 7,
@@ -52,7 +72,10 @@ def test_protocol3_target_split_rejects_boolean_array_split_options(option_name:
     }
     kwargs[option_name] = option_value
 
-    with pytest.raises(ValueError, match=f"{option_name} must be an integer value, not a boolean value"):
+    with pytest.raises(
+        ValueError,
+        match=f"{option_name} must be an integer value, not a boolean value",
+    ):
         select_bushmeg_target_calibration_split(["a", "a", "b", "b"], **kwargs)
 
 
