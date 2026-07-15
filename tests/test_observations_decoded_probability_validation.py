@@ -94,3 +94,47 @@ def test_from_decoded_fold_rejects_nested_boolean_label_and_index_cells(field_na
             probabilities=np.array([[0.8, 0.2], [0.2, 0.8]]),
             **kwargs,
         )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "test_labels",
+        "predictions",
+        "test_indices",
+    ],
+)
+@pytest.mark.parametrize(
+    "values",
+    [
+        np.array([0.5, 1.0]),
+        ["0", "1.5"],
+        np.array([np.nan, 1.0]),
+        np.array([np.inf, 1.0]),
+    ],
+)
+def test_from_decoded_fold_rejects_non_integer_label_and_index_values(field_name: str, values: object) -> None:
+    kwargs = dict(_BASE_DECODED_FOLD_ARGS)
+    kwargs[field_name] = values
+
+    with pytest.raises(ValueError, match=fr"from_decoded_fold {field_name} .*integer-valued"):
+        ProbabilityObservationTable.from_decoded_fold(
+            probabilities=np.array([[0.8, 0.2], [0.2, 0.8]]),
+            **kwargs,
+        )
+
+
+def test_from_decoded_fold_accepts_integer_valued_float_vectors() -> None:
+    table = ProbabilityObservationTable.from_decoded_fold(
+        probabilities=np.array([[0.8, 0.2], [0.2, 0.8]]),
+        **{
+            **_BASE_DECODED_FOLD_ARGS,
+            "test_labels": np.array([0.0, 1.0]),
+            "predictions": np.array([0.0, 1.0]),
+            "test_indices": np.array([0.0, 1.0]),
+        },
+    )
+
+    assert table.frame["true_label"].tolist() == [0, 1]
+    assert table.frame["predicted_label"].tolist() == [0, 1]
+    assert table.frame["sample_index"].tolist() == [0, 1]
