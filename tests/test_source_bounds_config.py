@@ -58,7 +58,29 @@ def test_source_bounds_materializes_one_pass_feature_iterables() -> None:
 
     np.testing.assert_allclose(result.train_features, np.asarray([[0.0, 2.0], [1.0, 3.0]], dtype=np.float32))
     np.testing.assert_allclose(result.test_features, np.asarray([[0.0, 3.0]], dtype=np.float32))
+    assert result.train_features.dtype == np.float32
+    assert result.test_features.dtype == np.float32
     assert result.metadata["source_feature_bounds_n_source_rows"] == 2
+
+
+def test_source_bounds_preserves_values_outside_float32_range() -> None:
+    values = np.asarray([[1e100, -1e100, 1e-100, -1e-100]], dtype=np.float64)
+
+    with np.errstate(over="raise", under="raise", invalid="raise"):
+        result = fit_source_feature_bounds(
+            source_features=values,
+            test_features=values,
+            config={"lower_quantile": 0.0, "upper_quantile": 1.0},
+        )
+
+    assert result.train_features.dtype == np.float64
+    assert result.test_features.dtype == np.float64
+    assert np.all(np.isfinite(result.train_features))
+    assert np.all(np.isfinite(result.test_features))
+    np.testing.assert_array_equal(result.train_features, values)
+    np.testing.assert_array_equal(result.test_features, values)
+    assert not np.any(result.train_changed_mask)
+    assert not np.any(result.test_changed_mask)
 
 
 def test_source_bounds_accepts_object_arrays_containing_generator_rows() -> None:
