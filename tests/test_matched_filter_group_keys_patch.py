@@ -23,7 +23,9 @@ def _observations() -> pd.DataFrame:
 
 def test_matched_filter_preserves_missing_groups_and_tuple_stream_ids() -> None:
     observations = _observations()
-    annotations = pd.DataFrame([{"subject": pd.NA, "stimulus_class": "A", "onset_time": 0.0}])
+    annotations = pd.DataFrame(
+        [{"subject": pd.NA, "stream_id": ("session", 1), "stimulus_class": "A", "onset_time": 0.0}]
+    )
 
     templates = fit_stimulus_event_templates(
         observations,
@@ -67,3 +69,35 @@ def test_matched_filter_group_filter_matches_equivalent_missing_sentinels() -> N
     selected = _filter_by_values(frame, {"group": np.nan})
 
     assert selected["kind"].tolist() == ["numpy", "pandas", "none"]
+
+
+def test_template_annotations_do_not_conflate_stringified_stream_ids() -> None:
+    numeric_probabilities = [0.2, 0.8, 0.2]
+    text_probabilities = [0.2, 0.2, 0.2]
+    probabilities = numeric_probabilities + text_probabilities
+    observations = pd.DataFrame(
+        {
+            "stream_id": pd.Series([1, 1, 1, "1", "1", "1"], dtype=object),
+            "time": [0.0, 0.1, 0.2, 0.0, 0.1, 0.2],
+            "class_0": ["A"] * 6,
+            "class_1": ["B"] * 6,
+            "prob_class_0": probabilities,
+            "prob_class_1": [1.0 - value for value in probabilities],
+        }
+    )
+    annotations = pd.DataFrame([{"stream_id": 1, "stimulus_class": "A", "onset_time": 0.0}])
+
+    templates = fit_stimulus_event_templates(
+        observations,
+        annotations,
+        template_window=(0.0, 0.1),
+        template_step=0.1,
+        target_classes=("A",),
+        group_columns=(),
+        stream_columns=("stream_id",),
+        min_template_coverage=1.0,
+    )
+
+    assert templates["n_template_events"].unique().tolist() == [1]
+    peak_value = templates.loc[templates["template_time"] == 0.1, "template_value"].item()
+    assert np.isclose(peak_value, 0.8)
