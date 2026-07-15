@@ -83,3 +83,43 @@ def test_source_center_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError, match="center mode"):
         normalize_center_mode("bad")
+
+
+def test_source_center_mean_avoids_overflow_for_extreme_finite_values() -> None:
+    limit = np.finfo(np.float64).max
+
+    with np.errstate(over="raise", invalid="raise"):
+        center_map = fit_source_center_map([[limit], [limit]], config={"center": "mean"})
+
+    assert center_map.center.dtype == np.float64
+    assert np.isfinite(center_map.center[0])
+    assert center_map.center[0] == limit
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        float(np.finfo(np.float32).max) * 4.0,
+        np.nextafter(0.0, 1.0),
+    ],
+)
+def test_source_center_preserves_values_lost_by_float32_conversion(value: float) -> None:
+    with np.errstate(over="raise", under="raise", invalid="raise"):
+        result = fit_source_center_transform(
+            source_features=[[0.0]],
+            test_features=[[value]],
+            config={"center": "zero"},
+        )
+
+    assert result.train_features.dtype == np.float32
+    assert result.test_features.dtype == np.float64
+    assert result.test_features[0, 0] == value
+
+
+def test_source_center_rejects_unrepresentable_centered_values() -> None:
+    limit = np.finfo(np.float64).max
+    center_map = fit_source_center_map([[-limit], [-limit]], config={"center": "mean"})
+
+    with np.errstate(over="raise", invalid="raise"):
+        with pytest.raises(ValueError, match="source-centering output must contain only finite values"):
+            apply_source_center_transform([[limit]], center_map)
