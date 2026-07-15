@@ -11,6 +11,15 @@ from neureptrace._object_label_utils import label_equal_mask
 _PATCH_MARKER = "_neureptrace_matched_filter_group_keys_patch_installed"
 
 
+def _is_missing(value: object) -> bool:
+    """Return whether *value* is a scalar missing-value sentinel."""
+
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
 def _grouped(frame: pd.DataFrame, columns: Sequence[str], *, sort: bool = True):
     """Group rows without discarding missing-valued identifiers."""
 
@@ -28,13 +37,17 @@ def _key_values(key: object, columns: Sequence[str]) -> dict[str, object]:
 
 
 def _filter_by_values(frame: pd.DataFrame, values: dict[str, object]) -> pd.DataFrame:
-    """Filter identifiers using NeuRepTrace's exact, missing-aware equality."""
+    """Filter identifiers using exact equality and missing-sentinel equivalence."""
 
     filtered = frame
     for column, value in values.items():
-        if column in filtered.columns:
+        if column not in filtered.columns:
+            continue
+        if _is_missing(value):
+            mask = filtered[column].isna().to_numpy(dtype=bool)
+        else:
             mask = label_equal_mask(filtered[column].to_numpy(dtype=object), value)
-            filtered = filtered.loc[mask]
+        filtered = filtered.loc[mask]
     return filtered
 
 

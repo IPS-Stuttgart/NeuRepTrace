@@ -23,7 +23,7 @@ def _observations() -> pd.DataFrame:
 
 def test_matched_filter_preserves_missing_groups_and_tuple_stream_ids() -> None:
     observations = _observations()
-    annotations = pd.DataFrame([{"subject": np.nan, "stimulus_class": "A", "onset_time": 0.0}])
+    annotations = pd.DataFrame([{"subject": pd.NA, "stimulus_class": "A", "onset_time": 0.0}])
 
     templates = fit_stimulus_event_templates(
         observations,
@@ -54,3 +54,16 @@ def test_matched_filter_group_filter_does_not_conflate_stringified_ids() -> None
     selected = _filter_by_values(frame, {"group": 1})
 
     assert selected["kind"].tolist() == ["numeric"]
+
+
+def test_matched_filter_group_filter_matches_equivalent_missing_sentinels() -> None:
+    frame = pd.DataFrame(
+        {
+            "group": pd.Series([np.nan, pd.NA, None, "nan"], dtype=object),
+            "kind": ["numpy", "pandas", "none", "text"],
+        }
+    )
+
+    selected = _filter_by_values(frame, {"group": np.nan})
+
+    assert selected["kind"].tolist() == ["numpy", "pandas", "none"]
