@@ -89,9 +89,10 @@ def install() -> None:
     """Install robust boolean parsing for stimulus summary helpers."""
 
     import neureptrace._stimulus_detection_public as stimulus_public
-    from neureptrace import _matched_filter_template_offsets_patch
+    from neureptrace import _matched_filter_group_keys_patch, _matched_filter_template_offsets_patch
 
     _matched_filter_template_offsets_patch.install()
+    _matched_filter_group_keys_patch.install()
 
     if getattr(stimulus_public, _PATCH_MARKER, False):
         _install_group_completion_patch()
