@@ -20,6 +20,24 @@ def test_signed_log_transform_matches_formula() -> None:
     assert np.allclose(transformed, np.asarray([[-np.log1p(1.0), 0.0, np.log1p(1.0)]]))
 
 
+def test_signed_log_transform_handles_extreme_finite_scale_ratios() -> None:
+    maximum = np.finfo(np.float64).max
+    minimum = np.nextafter(0.0, 1.0)
+    values = np.asarray([[maximum, -maximum, 1.0, -1.0, minimum, -minimum, 0.0]])
+
+    with np.errstate(over="raise", under="raise", divide="raise", invalid="raise"):
+        transformed = transform_signed_log(values, scale=minimum)
+
+    expected_maximum = np.log(maximum) - np.log(minimum)
+    assert np.all(np.isfinite(transformed))
+    assert transformed[0, 0] == pytest.approx(expected_maximum)
+    assert transformed[0, 1] == pytest.approx(-expected_maximum)
+    assert transformed[0, 2] == pytest.approx(-transformed[0, 3])
+    assert transformed[0, 4] == pytest.approx(np.log1p(1.0))
+    assert transformed[0, 5] == pytest.approx(-np.log1p(1.0))
+    assert transformed[0, 6] == 0.0
+
+
 def test_signed_log_accepts_one_pass_feature_iterables() -> None:
     values = (row for row in [[-3.0, 0.0, 3.0]])
 
