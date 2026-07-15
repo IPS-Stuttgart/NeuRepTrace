@@ -19,6 +19,7 @@ from neureptrace.metrics.weighted import (
 
 importlib.import_module("neureptrace._weighted_probability_roundoff_patch").install()
 importlib.import_module("neureptrace._confusion_pair_empty_schema_patch").install()
+importlib.import_module("neureptrace._confusion_single_group_key_patch").install()
 
 __all__ = [
     "brier_score_multiclass",
