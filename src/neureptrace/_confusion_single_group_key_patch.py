@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Sequence
-from typing import Any
 
 import pandas as pd
 
