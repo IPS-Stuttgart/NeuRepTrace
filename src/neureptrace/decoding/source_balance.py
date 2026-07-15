@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace.decoding._domain_ids import ordered_unique, values_equal
+
 SOURCE_BALANCE_PROTOCOL = "strict_source_only_class_domain_balancing"
 SOURCE_BALANCE_CATEGORY = "1_strict_source_only"
 BALANCE_STRATEGIES = ("none", "class", "domain", "class_domain")
@@ -158,8 +160,8 @@ def resample_source_rows_balanced(
         indices = np.arange(features.shape[0], dtype=int)
     else:
         picked: list[int] = []
-        for key in tuple(dict.fromkeys(keys)):
-            group_indices = np.asarray([index for index, row_key in enumerate(keys) if row_key == key], dtype=int)
+        for key in ordered_unique(keys):
+            group_indices = np.asarray([index for index, row_key in enumerate(keys) if values_equal(row_key, key)], dtype=int)
             picked.extend(rng.choice(group_indices, size=target_count, replace=group_indices.size < target_count).astype(int).tolist())
         indices = np.asarray(picked, dtype=int)
     out_domains = None if source_domains is None else domains[indices]
@@ -391,6 +393,8 @@ def _object_value_vector(values: Iterable[Any]) -> np.ndarray:
 
 
 def _hashable_value(value: Any) -> Hashable:
+    if _is_nan_scalar(value):
+        return np.nan
     if isinstance(value, np.generic):
         value = value.item()
     if isinstance(value, np.ndarray):
