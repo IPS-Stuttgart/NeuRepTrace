@@ -74,7 +74,7 @@ def fit_source_zca_transform(
     train = apply_source_zca_transform(source, reference)
     test_out = apply_source_zca_transform(test, reference)
     metadata = _metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], feature_dim=source.shape[1])
-    return SourceZCAResult(train_features=train.astype(np.float32, copy=False), test_features=test_out.astype(np.float32, copy=False), reference=reference, metadata=metadata)
+    return SourceZCAResult(train_features=train, test_features=test_out, reference=reference, metadata=metadata)
 
 
 def fit_source_zca_reference(source_features: Iterable[Iterable[float]] | np.ndarray, *, config: SourceZCAConfig | Mapping[str, Any] | None = None) -> SourceZCAReference:
@@ -89,7 +89,14 @@ def fit_source_zca_reference(source_features: Iterable[Iterable[float]] | np.nda
     values = np.maximum(values, 0.0)
     whitening = (vectors * (1.0 / np.sqrt(values + cfg.regularization))) @ vectors.T
     coloring = (vectors * np.sqrt(values + cfg.regularization)) @ vectors.T
-    return SourceZCAReference(mean=mean.astype(float, copy=False), whitening=whitening.astype(np.float32, copy=False), coloring=coloring.astype(np.float32, copy=False), eigenvalues=values.astype(float, copy=False), config=cfg, n_fit_rows=int(source.shape[0]))
+    return SourceZCAReference(
+        mean=mean.astype(float, copy=False),
+        whitening=_float32_if_safe(whitening),
+        coloring=_float32_if_safe(coloring),
+        eigenvalues=values.astype(float, copy=False),
+        config=cfg,
+        n_fit_rows=int(source.shape[0]),
+    )
 
 
 def apply_source_zca_transform(features: Iterable[Iterable[float]] | np.ndarray, reference: SourceZCAReference) -> np.ndarray:
@@ -101,7 +108,7 @@ def apply_source_zca_transform(features: Iterable[Iterable[float]] | np.ndarray,
     transformed = (matrix - reference.mean) @ reference.whitening
     if reference.config.recolor:
         transformed = transformed @ reference.coloring
-    return transformed.astype(np.float32, copy=False)
+    return _float32_if_safe(transformed)
 
 
 def source_zca_config(*, regularization: Any = DEFAULT_REGULARIZATION, center: Any = True, recolor: Any = False) -> SourceZCAConfig:
@@ -124,6 +131,19 @@ def _covariance(centered: np.ndarray) -> np.ndarray:
     if centered.shape[0] <= 1:
         return np.zeros((centered.shape[1], centered.shape[1]), dtype=float)
     return centered.T @ centered / float(centered.shape[0] - 1)
+
+
+def _float32_if_safe(values: np.ndarray) -> np.ndarray:
+    """Use float32 unless conversion overflows or erases nonzero values."""
+
+    array = np.asarray(values, dtype=float)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    lost_finite = np.isfinite(array) & ~np.isfinite(compact)
+    lost_nonzero = (array != 0.0) & (compact == 0.0)
+    if bool(np.any(lost_finite | lost_nonzero)):
+        return array
+    return compact
 
 
 def _metadata(cfg: SourceZCAConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int) -> dict[str, Any]:
