@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+
 import numpy as np
 
 from neureptrace._object_label_utils import values_equal
@@ -79,13 +81,24 @@ def _normalize_integer(value, *, name: str, minimum: int | None = None) -> int:
         value = value.item()
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be an integer.")
-    try:
-        number = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer.") from exc
-    if not np.isfinite(number) or number % 1.0 != 0.0:
-        raise ValueError(f"{name} must be an integer.")
-    integer = int(number)
+    if isinstance(value, str):
+        try:
+            number = Decimal(value.strip())
+        except InvalidOperation as exc:
+            raise ValueError(f"{name} must be an integer.") from exc
+        if not number.is_finite() or number != number.to_integral_value():
+            raise ValueError(f"{name} must be an integer.")
+        integer = int(number)
+    elif isinstance(value, int):
+        integer = value
+    else:
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must be an integer.") from exc
+        if not np.isfinite(number) or number % 1.0 != 0.0:
+            raise ValueError(f"{name} must be an integer.")
+        integer = int(number)
     if minimum is not None and integer < minimum:
         raise ValueError(f"{name} must be at least {minimum}.")
     return integer
