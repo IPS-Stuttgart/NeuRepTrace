@@ -1,4 +1,4 @@
-"""Preserve zero-hit groups in summary tables."""
+"""Preserve zero-hit and missing-valued groups in stimulus workflows."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ _TOPIC = "".join(chr(code) for code in (115, 116, 105, 109, 117, 108, 117, 115))
 _PUBLIC_MODULE = __package__ + "._" + _TOPIC + "_" + "det" + "ection_public"
 _SUMMARY_NAME = "summarize_" + _TOPIC + "_events"
 _PATCH_MARKER = "_nrt_group_completion_installed"
+_MATCHED_FILTER_GROUP_PATCH_MARKER = "_nrt_missing_group_completion_installed"
 
 
 def _is_missing(value: object) -> bool:
@@ -137,7 +138,31 @@ def _missing_group_frames(
     return extras
 
 
+def _install_matched_filter_group_completion() -> None:
+    """Keep rows whose matched-filter group metadata is missing."""
+    matched_filter = importlib.import_module(__package__ + ".matched_filter_detection")
+    if matched_filter.__dict__.get(_MATCHED_FILTER_GROUP_PATCH_MARKER, False):
+        return
+
+    def _grouped(frame: pd.DataFrame, columns: Sequence[str], *, sort: bool = True):
+        if not columns:
+            return [((), frame)]
+        by: str | list[str] = columns[0] if len(columns) == 1 else list(columns)
+        return frame.groupby(by, sort=sort, dropna=False)
+
+    def _filter_by_values(frame: pd.DataFrame, values: dict[str, object]) -> pd.DataFrame:
+        filtered = _filter_group_values(frame, values)
+        assert filtered is not None
+        return filtered
+
+    matched_filter._grouped = _grouped  # noqa: SLF001
+    matched_filter._filter_by_values = _filter_by_values  # noqa: SLF001
+    matched_filter.__dict__[_MATCHED_FILTER_GROUP_PATCH_MARKER] = True
+
+
 def install() -> None:
+    _install_matched_filter_group_completion()
+
     public_module = importlib.import_module(_PUBLIC_MODULE)
     if public_module.__dict__.get(_PATCH_MARKER, False):
         return
