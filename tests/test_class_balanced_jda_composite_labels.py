@@ -50,6 +50,17 @@ def test_class_balanced_source_indices_accepts_string_random_state():
     assert string_result.random_state == 0
 
 
+def test_class_balanced_source_indices_preserves_large_integer_random_state():
+    seed = 2**53 + 1
+
+    numeric_result = class_balanced_source_indices(_SOURCE_LABELS, strategy="oversample", random_state=seed)
+    string_result = class_balanced_source_indices(_SOURCE_LABELS, strategy="oversample", random_state=str(seed))
+
+    assert numeric_result.random_state == seed
+    assert string_result.random_state == seed
+    assert string_result.indices.tolist() == numeric_result.indices.tolist()
+
+
 @pytest.mark.parametrize("bad_random_state", [True, False, -1, 1.5, "1.5", "nan", "seed"])
 def test_class_balanced_source_indices_rejects_invalid_random_state(bad_random_state):
     with pytest.raises(ValueError, match="random_state"):
