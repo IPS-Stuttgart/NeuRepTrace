@@ -138,6 +138,19 @@ def _positive_float(value: Any, *, name: str) -> float:
     return parsed
 
 
+def _float32_if_safe(values: Any) -> np.ndarray:
+    """Use float32 unless conversion overflows or erases nonzero values."""
+
+    array = np.asarray(values, dtype=float)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    lost_finite = np.isfinite(array) & ~np.isfinite(compact)
+    lost_nonzero = (array != 0.0) & (compact == 0.0)
+    if bool(np.any(lost_finite | lost_nonzero)):
+        return array
+    return compact
+
+
 def install() -> None:
     """Patch precomputed foundation-feature row-id, label, probability, and scalar validation."""
 
@@ -153,7 +166,7 @@ def install() -> None:
         if matrix.shape[1] != len(feature_names):
             raise ValueError(f"features and feature_names must have the same number of columns: {matrix.shape[1]} != {len(feature_names)}.")
         module._validate_unique_row_ids(row_ids)
-        object.__setattr__(self, "features", matrix.astype(np.float32, copy=False))
+        object.__setattr__(self, "features", _float32_if_safe(matrix))
         object.__setattr__(self, "row_ids", row_ids)
         object.__setattr__(self, "feature_names", feature_names)
 
@@ -206,7 +219,7 @@ def install() -> None:
         if missing:
             preview = ", ".join(repr(row_id) for row_id in missing[:5])
             raise KeyError(f"Precomputed feature table is missing {len(missing)} requested row id(s): {preview}.")
-        return table.features[[index[row_id] for row_id in requested]].astype(np.float32, copy=False)
+        return _float32_if_safe(table.features[[index[row_id] for row_id in requested]])
 
     def _predict_probabilities_or_none(model, features):
         if hasattr(model, "predict_proba"):
