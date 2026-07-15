@@ -1,4 +1,4 @@
-"""Reject colliding semantic-stage output destinations."""
+"""Apply semantic-stage compatibility fixes."""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-_PATCH_MARKER = "_neureptrace_semantic_stage_output_path_patch_installed"
+import numpy as np
+import pandas as pd
+
+_OUTPUT_PATCH_MARKER = "_neureptrace_semantic_stage_output_path_patch_installed"
+_SEQUENCE_KEY_PATCH_MARKER = "_neureptrace_semantic_stage_sequence_key_patch_installed"
+_MISSING_SEQUENCE_COMPONENT = object()
 
 
 def _output_paths(
@@ -38,12 +43,49 @@ def _output_paths(
     return paths
 
 
-def install() -> None:
-    """Patch semantic-stage analysis to reject output-path collisions."""
+def _is_missing_scalar(value: object) -> bool:
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
+def _sequence_keys(frame: pd.DataFrame) -> pd.Series:
+    """Return collision-safe, type-preserving semantic-stage sequence keys."""
 
     semantic_stages = importlib.import_module("neureptrace.semantic_stages")
+    key_columns = [
+        *semantic_stages._stage_group_columns(frame),
+        *(
+            column
+            for column in semantic_stages.sequence_key_columns(frame)
+            if column not in semantic_stages.STAGE_GROUP_COLUMNS
+        ),
+    ]
+    semantic_stages.validate_unique_sequence_times(frame, key_columns)
+    keys = [
+        tuple(
+            _MISSING_SEQUENCE_COMPONENT if _is_missing_scalar(value) else value
+            for value in values
+        )
+        for values in frame[key_columns].itertuples(index=False, name=None)
+    ]
+    return pd.Series(keys, index=frame.index, dtype=object)
+
+
+def install() -> None:
+    """Patch semantic-stage sequence identities and output destinations."""
+
+    semantic_stages = importlib.import_module("neureptrace.semantic_stages")
+
+    current_sequence_keys = semantic_stages._sequence_keys
+    if not getattr(current_sequence_keys, _SEQUENCE_KEY_PATCH_MARKER, False):
+        setattr(_sequence_keys, _SEQUENCE_KEY_PATCH_MARKER, True)
+        semantic_stages._sequence_keys = _sequence_keys
+
     original_analyze = semantic_stages.analyze_semantic_stages
-    if getattr(original_analyze, _PATCH_MARKER, False):
+    if getattr(original_analyze, _OUTPUT_PATCH_MARKER, False):
         return
 
     @wraps(original_analyze)
@@ -68,7 +110,7 @@ def install() -> None:
             out_report=out_report,
         )
 
-    setattr(analyze_semantic_stages, _PATCH_MARKER, True)
+    setattr(analyze_semantic_stages, _OUTPUT_PATCH_MARKER, True)
     semantic_stages.analyze_semantic_stages = analyze_semantic_stages
 
 
