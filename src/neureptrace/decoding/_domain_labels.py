@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace._object_label_utils import values_equal
+
 
 def _as_domain_vector(domains: Any, *, expected_length: int | None = None, name: str = "domains") -> np.ndarray:
     """Return a one-dimensional object array of hashable domain labels.
@@ -38,11 +40,9 @@ def _as_domain_vector(domains: Any, *, expected_length: int | None = None, name:
 def _unique_domain_labels(values: np.ndarray) -> tuple[Any, ...]:
     """Return first-occurrence unique domain labels from a domain vector."""
     unique: list[Any] = []
-    seen: set[Any] = set()
     for value in values.tolist():
         frozen = _freeze_domain_label(value)
-        if frozen not in seen:
-            seen.add(frozen)
+        if not any(values_equal(frozen, existing) for existing in unique):
             unique.append(frozen)
     return tuple(unique)
 
@@ -50,7 +50,7 @@ def _unique_domain_labels(values: np.ndarray) -> tuple[Any, ...]:
 def _domain_mask(values: np.ndarray, label: Any) -> np.ndarray:
     """Return a boolean mask for rows whose domain label equals ``label``."""
     frozen_label = _freeze_domain_label(label)
-    return np.asarray([_freeze_domain_label(value) == frozen_label for value in values.tolist()], dtype=bool)
+    return np.asarray([values_equal(_freeze_domain_label(value), frozen_label) for value in values.tolist()], dtype=bool)
 
 
 def _object_vector(values) -> np.ndarray:
