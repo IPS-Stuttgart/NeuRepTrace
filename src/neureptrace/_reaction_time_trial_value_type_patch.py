@@ -14,8 +14,17 @@ _FLOAT_PATCH_MARKER = "_neureptrace_reaction_time_float_missing_patch_installed"
 _VALUES_PATCH_MARKER = "_neureptrace_reaction_time_values_missing_patch_installed"
 
 
+def _safe_repr(value: object) -> str:
+    """Return a diagnostic representation without masking conversion errors."""
+
+    try:
+        return repr(value)
+    except Exception:  # pragma: no cover - only exotic objects fail during repr
+        return f"<{type(value).__name__}>"
+
+
 def _trial_error(value: object) -> ValueError:
-    return ValueError(f"trial values must be finite integers, got {value!r}.")
+    return ValueError(f"trial values must be finite integers, got {_safe_repr(value)}.")
 
 
 def _clean_id(value: object) -> str:
@@ -42,7 +51,7 @@ def _to_float(value: object) -> float:
         return np.nan
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return np.nan
 
 
@@ -52,7 +61,7 @@ def _to_int(value: object) -> int:
     try:
         text = "" if value is None else str(value).strip()
         number = Decimal(text)
-    except (TypeError, ValueError, InvalidOperation) as exc:
+    except (TypeError, ValueError, OverflowError, InvalidOperation) as exc:
         raise _trial_error(value) from exc
     if not number.is_finite() or number != number.to_integral_value():
         raise _trial_error(value)
