@@ -1,4 +1,4 @@
-"""Route random-subspace sample weights through sklearn Pipeline final estimators."""
+"""Patch random-subspace Pipeline weights and direct config normalization."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ import numpy as np
 from sklearn.base import BaseEstimator, clone
 from sklearn.pipeline import Pipeline
 
-_PATCH_MARKER = "_neureptrace_random_subspace_pipeline_weight_patch_installed"
+_PIPELINE_PATCH_MARKER = "_neureptrace_random_subspace_pipeline_weight_patch_installed"
+_CONFIG_PATCH_MARKER = "_neureptrace_random_subspace_direct_config_patch_installed"
 
 
 class _PipelineSampleWeightAdapter(BaseEstimator):
@@ -46,12 +47,32 @@ def _wrap_pipeline(estimator):
 
 
 def install() -> None:
-    """Install the random-subspace Pipeline sample-weight adapter."""
+    """Install random-subspace compatibility patches."""
 
     from neureptrace.decoding import random_subspace
 
+    original_coerce_config = random_subspace._coerce_config
+    if not getattr(original_coerce_config, _CONFIG_PATCH_MARKER, False):
+
+        @wraps(original_coerce_config)
+        def _coerce_config(config):
+            if isinstance(config, random_subspace.RandomSubspaceEnsembleConfig):
+                return random_subspace.random_subspace_ensemble_config(
+                    n_estimators=config.n_estimators,
+                    feature_fraction=config.feature_fraction,
+                    min_features=config.min_features,
+                    bootstrap_rows=config.bootstrap_rows,
+                    row_fraction=config.row_fraction,
+                    random_state=config.random_state,
+                    epsilon=config.epsilon,
+                )
+            return original_coerce_config(config)
+
+        setattr(_coerce_config, _CONFIG_PATCH_MARKER, True)
+        random_subspace._coerce_config = _coerce_config
+
     original_fit = random_subspace.fit_random_subspace_ensemble
-    if getattr(original_fit, _PATCH_MARKER, False):
+    if getattr(original_fit, _PIPELINE_PATCH_MARKER, False):
         return
 
     @wraps(original_fit)
@@ -66,7 +87,7 @@ def install() -> None:
             kwargs["estimator"] = _wrap_pipeline(estimator)
         return original_fit(*args, **kwargs)
 
-    setattr(fit_random_subspace_ensemble, _PATCH_MARKER, True)
+    setattr(fit_random_subspace_ensemble, _PIPELINE_PATCH_MARKER, True)
     random_subspace.fit_random_subspace_ensemble = fit_random_subspace_ensemble
 
 
