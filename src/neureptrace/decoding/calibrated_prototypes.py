@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from neureptrace.decoding._domain_ids import atomic_domain_vector, ordered_unique, values_equal
+
 CALIBRATED_PROTOTYPE_PROTOCOL = "supervised_calibrated_prototype_blend"
 CALIBRATED_PROTOTYPE_CATEGORY = "3_supervised_calibrated_target_alignment"
 DEFAULT_PRIOR_STRENGTH = 4.0
@@ -67,10 +69,17 @@ def fit_calibrated_prototype_decoder(
         raise ValueError("source, calibration, and evaluation features must have the same feature width.")
     source_y = _label_vector(source_labels, expected_length=source.shape[0], name="source_labels")
     calibration_y = _label_vector(calibration_labels, expected_length=calibration.shape[0], name="calibration_labels")
-    classes = np.asarray(tuple(dict.fromkeys(source_y.tolist())), dtype=object)
+    classes = atomic_domain_vector(ordered_unique(source_y))
     if classes.shape[0] < 2:
         raise ValueError("At least two source classes are required.")
-    unknown = sorted({label for label in calibration_y.tolist() if label not in set(classes.tolist())}, key=repr)
+    unknown = sorted(
+        [
+            label
+            for label in ordered_unique(calibration_y)
+            if not any(values_equal(label, source_label) for source_label in classes.tolist())
+        ],
+        key=repr,
+    )
     if unknown:
         raise ValueError(f"calibration_labels contain labels absent from source classes: {unknown}.")
 
@@ -141,7 +150,7 @@ def _class_means(features: np.ndarray, labels: np.ndarray, *, classes: np.ndarra
     means = np.zeros((classes.shape[0], features.shape[1]), dtype=float)
     counts = np.zeros(classes.shape[0], dtype=int)
     for index, label in enumerate(classes.tolist()):
-        mask = labels == label
+        mask = np.asarray([values_equal(value, label) for value in labels.tolist()], dtype=bool)
         counts[index] = int(np.count_nonzero(mask))
         if counts[index] > 0:
             means[index] = np.mean(features[mask], axis=0)
@@ -212,7 +221,7 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
-    vector = np.asarray(values, dtype=object).reshape(-1)
+    vector = atomic_domain_vector(values)
     if vector.shape[0] != expected_length:
         raise ValueError(f"{name} must contain one value per row: {vector.shape[0]} != {expected_length}.")
     return vector
