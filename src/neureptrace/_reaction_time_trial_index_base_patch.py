@@ -45,7 +45,7 @@ def _validate_trial_index_base(trial_index_base: Any) -> int:
     module = importlib.import_module("neureptrace.behavior.reaction_time")
     choices = getattr(module, "TRIAL_INDEX_BASE_CHOICES", (0, 1))
     if _is_boolean_scalar(trial_index_base) or not isinstance(trial_index_base, Integral) or trial_index_base not in choices:
-        raise ValueError(f"trial_index_base must be one of {choices}, got {trial_index_base!r}.")
+        raise ValueError(f"trial_index_base must be one of {choices}, got {_safe_repr(trial_index_base)}.")
     return int(trial_index_base)
 
 
