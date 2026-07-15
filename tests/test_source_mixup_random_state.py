@@ -58,26 +58,8 @@ def test_source_mixup_core_config_rejects_container_random_state_without_runtime
 
 
 def test_source_mixup_dataclass_config_rejects_negative_random_state_before_rng() -> None:
-    features = np.asarray(
-        [
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 1.0],
-        ],
-        dtype=float,
-    )
-    labels = np.asarray(["class_a", "class_a", "class_b", "class_b"], dtype=object)
-    domains = np.asarray(["s1", "s2", "s1", "s2"], dtype=object)
-    cfg = source_mixup.SourceMixUpConfig(synthetic_per_class=1, random_state=-1)
-
     with pytest.raises(ValueError, match="random_state must be a non-negative integer"):
-        source_mixup.augment_source_with_mixup(
-            features,
-            labels,
-            source_domains=domains,
-            config=cfg,
-        )
+        source_mixup.SourceMixUpConfig(synthetic_per_class=1, random_state=-1)
 
 
 def test_source_mixup_core_dataclass_config_normalizes_seed_before_rng_without_runtime_patch() -> None:
