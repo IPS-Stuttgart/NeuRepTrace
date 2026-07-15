@@ -48,6 +48,19 @@ def _label_equal_mask(labels: np.ndarray, label: Any) -> np.ndarray:
     return label_equal_mask(labels, label)
 
 
+def _float32_if_safe(values: Any) -> np.ndarray:
+    """Use float32 unless conversion overflows or erases nonzero values."""
+
+    array = np.asarray(values, dtype=float)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    lost_finite = np.isfinite(array) & ~np.isfinite(compact)
+    lost_nonzero = (array != 0.0) & (compact == 0.0)
+    if bool(np.any(lost_finite | lost_nonzero)):
+        return array
+    return compact
+
+
 def install() -> None:
     """Install NaN-aware source-label grouping for source-outlier weighting."""
 
@@ -98,13 +111,13 @@ def install() -> None:
         thresholds = _LabelThresholdMapping(class_labels, threshold_values)
 
         return source_outlier.SourceOutlierResult(
-            distances=distances.astype(np.float32, copy=False),
-            sample_weights=weights.astype(np.float32, copy=False),
+            distances=_float32_if_safe(distances),
+            sample_weights=_float32_if_safe(weights),
             inlier_mask=inlier_mask,
             thresholds=thresholds,
             classes=classes,
-            centroids=centroids.astype(np.float32, copy=False),
-            feature_scale=scale.astype(np.float32, copy=False),
+            centroids=_float32_if_safe(centroids),
+            feature_scale=_float32_if_safe(scale),
             metadata=source_outlier._metadata(
                 cfg,
                 labels=labels,
