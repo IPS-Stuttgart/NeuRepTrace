@@ -170,13 +170,25 @@ def _target_count(counts: np.ndarray, strategy: str) -> int:
 def _normalize_random_state(value: int | str | None, *, name: str) -> int | None:
     if value is None:
         return None
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a non-negative integer seed or None")
+    if isinstance(value, (int, np.integer)):
+        seed = int(value)
+        if seed < 0:
+            raise ValueError(f"{name} must be a non-negative integer seed or None")
+        return seed
     if isinstance(value, str):
         stripped = value.strip()
         if stripped.lower() in {"", "none", "null"}:
             return None
-        value = stripped
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a non-negative integer seed or None")
+        try:
+            seed = int(stripped, 10)
+        except ValueError:
+            value = stripped
+        else:
+            if seed < 0:
+                raise ValueError(f"{name} must be a non-negative integer seed or None")
+            return seed
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:
