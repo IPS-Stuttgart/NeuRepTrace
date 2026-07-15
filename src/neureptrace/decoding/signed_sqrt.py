@@ -80,7 +80,7 @@ def signed_sqrt_transform(features: Sequence[Sequence[float]] | np.ndarray, *, s
 
     matrix = _feature_matrix(features, name="features")
     resolved_scale = _positive_float(scale, name="scale")
-    return np.sign(matrix) * np.sqrt(np.abs(matrix) / resolved_scale)
+    return np.sign(matrix) * (np.sqrt(np.abs(matrix)) / np.sqrt(resolved_scale))
 
 
 def _coerce_config(config: SignedSqrtConfig | Mapping[str, Any]) -> SignedSqrtConfig:
