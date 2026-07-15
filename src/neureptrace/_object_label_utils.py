@@ -158,14 +158,17 @@ def _object_array_copy(values: np.ndarray) -> np.ndarray:
 
 
 def _ensure_assignable(array: np.ndarray, mask: np.ndarray, value: object) -> np.ndarray:
-    """Promote to object dtype when NumPy cannot store the replacement label."""
+    """Promote to object dtype when NumPy cannot store the replacement label exactly."""
 
     if array.dtype == object:
         return array
+    mask = np.asarray(mask, dtype=bool)
     try:
         trial = array.copy()
-        trial[np.asarray(mask, dtype=bool)] = value
+        trial[mask] = value
     except (TypeError, ValueError, OverflowError):
+        return _object_array_copy(array)
+    if any(not values_equal(stored, value) for stored in _array_items(np.asarray(trial[mask]))):
         return _object_array_copy(array)
     return array
 
