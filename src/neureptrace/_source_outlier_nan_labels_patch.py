@@ -1,4 +1,4 @@
-"""Handle NaN/composite labels consistently in source-outlier weighting."""
+"""Handle NaN/composite labels and extreme source features in outlier weighting."""
 
 from __future__ import annotations
 
@@ -48,8 +48,79 @@ def _label_equal_mask(labels: np.ndarray, label: Any) -> np.ndarray:
     return label_equal_mask(labels, label)
 
 
+def _stable_mean(values: np.ndarray) -> np.ndarray:
+    """Compute a column mean without overflowing on large finite values."""
+
+    array = np.asarray(values, dtype=float)
+    magnitude = np.max(np.abs(array), axis=0)
+    scaled = np.divide(array, magnitude, out=np.zeros_like(array), where=magnitude != 0.0)
+    return np.mean(scaled, axis=0) * magnitude
+
+
+def _stable_feature_scale(features: np.ndarray, *, enabled: bool, epsilon: float) -> np.ndarray:
+    """Compute feature-wise sample scales without squaring raw magnitudes."""
+
+    if not enabled:
+        return np.ones(features.shape[1], dtype=float)
+    magnitude = np.max(np.abs(features), axis=0)
+    scaled = np.divide(features, magnitude, out=np.zeros_like(features), where=magnitude != 0.0)
+    ddof = 1 if features.shape[0] > 1 else 0
+    scale = np.std(scaled, axis=0, ddof=ddof) * magnitude
+    return np.maximum(scale, float(epsilon))
+
+
+def _normalized_difference(left: np.ndarray, right: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    """Return ``(left - right) / scale`` while avoiding avoidable overflow."""
+
+    with np.errstate(over="ignore", under="ignore", divide="ignore", invalid="ignore"):
+        difference = (left - right) / scale
+    equal = left == right
+    difference[equal] = 0.0
+    fallback = ~np.isfinite(difference) & ~equal
+    if not bool(np.any(fallback)):
+        return difference
+
+    magnitude = np.maximum(np.abs(left), np.abs(right))
+    left_scaled = np.divide(left, magnitude, out=np.zeros_like(left), where=magnitude != 0.0)
+    right_scaled = np.divide(right, magnitude, out=np.zeros_like(right), where=magnitude != 0.0)
+    scale_scaled = np.divide(scale, magnitude, out=np.zeros_like(left), where=magnitude != 0.0)
+    numerator = left_scaled - right_scaled
+    with np.errstate(over="ignore", under="ignore", divide="ignore", invalid="ignore"):
+        alternative = numerator / scale_scaled
+    difference[fallback] = alternative[fallback]
+    return difference
+
+
+def _stable_scaled_l2(left: np.ndarray, right: np.ndarray, *, scale: np.ndarray) -> np.ndarray:
+    """Compute row-wise scaled Euclidean distances without overflow in squaring."""
+
+    difference = _normalized_difference(left, right, scale)
+    maximum = np.max(np.abs(difference), axis=1)
+    distances = np.zeros(difference.shape[0], dtype=float)
+    finite_nonzero = np.isfinite(maximum) & (maximum > 0.0)
+    if bool(np.any(finite_nonzero)):
+        normalized = difference[finite_nonzero] / maximum[finite_nonzero, None]
+        distances[finite_nonzero] = maximum[finite_nonzero] * np.sqrt(np.sum(normalized * normalized, axis=1))
+    distances[np.isposinf(maximum)] = np.inf
+    distances[np.isnan(maximum)] = np.nan
+    return distances
+
+
+def _float32_if_safe(values: np.ndarray) -> np.ndarray:
+    """Use float32 unless conversion overflows or erases nonzero values."""
+
+    array = np.asarray(values, dtype=float)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    lost_finite = np.isfinite(array) & ~np.isfinite(compact)
+    lost_nonzero = (array != 0.0) & (compact == 0.0)
+    if bool(np.any(lost_finite | lost_nonzero)):
+        return array
+    return compact
+
+
 def install() -> None:
-    """Install NaN-aware source-label grouping for source-outlier weighting."""
+    """Install robust source-label grouping and large-value distance handling."""
 
     import neureptrace.decoding.source_outlier as source_outlier
 
@@ -73,7 +144,7 @@ def install() -> None:
 
         class_labels = classes.tolist()
         class_masks = [label_equal_mask(labels, label) for label in class_labels]
-        centroids = np.vstack([np.mean(features[mask], axis=0) for mask in class_masks])
+        centroids = np.vstack([_stable_mean(features[mask]) for mask in class_masks])
         class_index_for_row = np.empty(labels.shape[0], dtype=int)
         assigned = np.zeros(labels.shape[0], dtype=bool)
         for class_index, mask in enumerate(class_masks):
@@ -82,9 +153,9 @@ def install() -> None:
         if not np.all(assigned):  # pragma: no cover - defensive guard for custom label objects
             raise ValueError("Every source row must match exactly one source class.")
 
-        scale = source_outlier._feature_scale(features, enabled=cfg.use_diagonal_scale, epsilon=cfg.epsilon)
+        scale = _stable_feature_scale(features, enabled=cfg.use_diagonal_scale, epsilon=cfg.epsilon)
         centroid_rows = centroids[class_index_for_row]
-        distances = source_outlier._scaled_l2(features, centroid_rows, scale=scale)
+        distances = _stable_scaled_l2(features, centroid_rows, scale=scale)
         threshold_values = np.asarray(
             [
                 source_outlier._class_threshold(distances[mask], cfg=cfg)
@@ -98,13 +169,13 @@ def install() -> None:
         thresholds = _LabelThresholdMapping(class_labels, threshold_values)
 
         return source_outlier.SourceOutlierResult(
-            distances=distances.astype(np.float32, copy=False),
-            sample_weights=weights.astype(np.float32, copy=False),
+            distances=_float32_if_safe(distances),
+            sample_weights=_float32_if_safe(weights),
             inlier_mask=inlier_mask,
             thresholds=thresholds,
             classes=classes,
-            centroids=centroids.astype(np.float32, copy=False),
-            feature_scale=scale.astype(np.float32, copy=False),
+            centroids=_float32_if_safe(centroids),
+            feature_scale=_float32_if_safe(scale),
             metadata=source_outlier._metadata(
                 cfg,
                 labels=labels,
