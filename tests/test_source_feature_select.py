@@ -68,6 +68,33 @@ def test_select_source_variance_features_normalizes_min_variance_metadata() -> N
     assert result.metadata["source_feature_select_min_variance"] == 1.0
 
 
+def test_select_source_variance_features_handles_extreme_finite_values() -> None:
+    source = np.asarray([[1e308, 1.0], [1e308, 3.0]], dtype=float)
+    test = np.asarray([[1e308, 2.0]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise"):
+        result = select_source_variance_features(source_features=source, test_features=test)
+
+    np.testing.assert_allclose(result.scores, [0.0, 2.0])
+    assert np.all(np.isfinite(result.train_features))
+    assert np.all(np.isfinite(result.test_features))
+    assert result.train_features.dtype == np.float64
+    assert result.test_features.dtype == np.float64
+
+
+def test_select_source_variance_features_preserves_large_finite_scores() -> None:
+    source = np.asarray([[0.0, 1e30], [0.0, -1e30]], dtype=float)
+
+    result = select_source_variance_features(
+        source_features=source,
+        test_features=[[0.0, 0.0]],
+    )
+
+    assert result.scores.dtype == np.float64
+    assert np.all(np.isfinite(result.scores))
+    np.testing.assert_allclose(result.scores, [0.0, 2e60])
+
+
 def test_source_variance_feature_indices_respects_min_variance() -> None:
     selected = source_variance_feature_indices(scores=[0.0, 0.5, 2.0, 1.0], min_variance=0.75)
 
