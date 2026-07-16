@@ -9,8 +9,8 @@ from typing import Any
 import numpy as np
 from scipy.linalg import eigh
 
-from neureptrace.decoding.array_stats import column_stats
 from neureptrace.decoding._domain_ids import ordered_unique, values_equal
+from neureptrace.decoding.array_stats import column_stats
 from neureptrace.decoding.subspace_adaptation import (
     MIN_SCALE,
     _canonicalize_projection,
