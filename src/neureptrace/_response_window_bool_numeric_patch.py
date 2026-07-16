@@ -1,9 +1,9 @@
-"""Reject boolean numerics and preserve exact probability-observation labels.
+"""Reject boolean numerics and preserve exact signed probability-observation labels.
 
 Pandas and NumPy treat booleans as numeric during coercion. They also commonly
 coerce integer-like values through ``float64``, which cannot distinguish adjacent
 integer class identifiers above ``2**53``. Probability-observation workflows must
-reject booleans without corrupting otherwise valid integer labels.
+reject booleans without corrupting otherwise valid signed integer labels.
 """
 
 from __future__ import annotations
@@ -95,19 +95,99 @@ def _exact_integer_labels(
     )
 
 
-def install() -> None:
-    """Patch probability validation and exact label conversion."""
+def _integer_probability_suffix(suffix: str) -> int | None:
+    """Parse a decimal integer suffix, including an optional sign."""
 
+    text = str(suffix)
+    digits = text[1:] if text[:1] in {"+", "-"} else text
+    if not digits or not digits.isdigit():
+        return None
+    return int(text)
+
+
+def _probability_sort_key(column: str) -> tuple[int, str]:
+    suffix = column.removeprefix("prob_class_")
+    label = _integer_probability_suffix(suffix)
+    return (label, suffix) if label is not None else (10_000, suffix)
+
+
+def _numeric_probability_labels(columns: Sequence[str]) -> tuple[int, ...] | None:
+    labels = tuple(
+        _integer_probability_suffix(column.removeprefix("prob_class_"))
+        for column in columns
+    )
+    if any(label is None for label in labels):
+        return None
+    return tuple(int(label) for label in labels if label is not None)
+
+
+def _duplicate_probability_labels(labels: Sequence[int]) -> list[int]:
+    seen: set[int] = set()
+    duplicates: list[int] = []
+    for label in labels:
+        if label in seen and label not in duplicates:
+            duplicates.append(label)
+        seen.add(label)
+    return duplicates
+
+
+def _probability_columns(frame: pd.DataFrame) -> list[str]:
+    columns = sorted(
+        (column for column in frame.columns if column.startswith("prob_class_")),
+        key=_probability_sort_key,
+    )
+    if not columns:
+        raise ValueError("Observation CSVs must contain probability columns named 'prob_class_*'.")
+    labels = _numeric_probability_labels(columns)
+    if labels is not None:
+        duplicates = _duplicate_probability_labels(labels)
+        if duplicates:
+            raise ValueError(
+                "prob_class_* columns must map to unique class labels; "
+                f"duplicate label(s): {duplicates}."
+            )
+    return columns
+
+
+def _label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
+    labels = _numeric_probability_labels(prob_columns)
+    if labels is None:
+        return tuple(range(len(prob_columns)))
+    return labels
+
+
+def _class_names(frame: pd.DataFrame, prob_columns: Sequence[str]) -> list[str]:
+    names: list[str] = []
+    for index, column in enumerate(prob_columns):
+        suffix = column.removeprefix("prob_class_")
+        class_column = f"class_{suffix}"
+        if class_column in frame.columns and frame[class_column].notna().any():
+            names.append(str(frame[class_column].dropna().iloc[0]))
+        else:
+            names.append(suffix if _integer_probability_suffix(suffix) is not None else str(index))
+    return names
+
+
+def install() -> None:
+    """Patch probability validation and exact signed label conversion."""
+
+    observations = importlib.import_module("neureptrace.observations")
     temporal_model = importlib.import_module("neureptrace.temporal_model")
     temporal_smoothing = importlib.import_module("neureptrace.temporal_smoothing")
     response_window_ensemble = importlib.import_module("neureptrace.response_window_ensemble")
 
     if (
-        getattr(temporal_model, _PATCH_MARKER, False)
+        getattr(observations, _PATCH_MARKER, False)
+        and getattr(temporal_model, _PATCH_MARKER, False)
         and getattr(temporal_smoothing, _PATCH_MARKER, False)
         and getattr(response_window_ensemble, _PATCH_MARKER, False)
     ):
         return
+
+    if not getattr(observations, _PATCH_MARKER, False):
+        observations._probability_sort_key = _probability_sort_key
+        observations._numeric_probability_labels = _numeric_probability_labels
+        setattr(observations, _PATCH_MARKER, True)
 
     if not getattr(temporal_model, _PATCH_MARKER, False):
         original_validate_probability_matrix = temporal_model._validate_probability_matrix
@@ -119,6 +199,8 @@ def install() -> None:
             return original_validate_probability_matrix(probabilities)
 
         temporal_model._validate_probability_matrix = _validate_probability_matrix
+        temporal_model.probability_columns = _probability_columns
+        temporal_model._class_names = _class_names
         setattr(temporal_model, _PATCH_MARKER, True)
 
     if not getattr(temporal_smoothing, _PATCH_MARKER, False):
@@ -138,6 +220,9 @@ def install() -> None:
                 )
             return labels
 
+        temporal_smoothing.probability_columns = temporal_model.probability_columns
+        temporal_smoothing._class_names = temporal_model._class_names
+        temporal_smoothing._label_values = _label_values
         temporal_smoothing._numeric_label_values = _numeric_label_values
         setattr(temporal_smoothing, _PATCH_MARKER, True)
 
@@ -145,12 +230,19 @@ def install() -> None:
         original_integer_label_values = response_window_ensemble._integer_label_values
 
         @wraps(original_integer_label_values)
-        def _integer_label_values(values: Sequence[object] | np.ndarray | pd.Series, *, n_classes: int | None = None) -> np.ndarray:
+        def _integer_label_values(
+            values: Sequence[object] | np.ndarray | pd.Series,
+            *,
+            n_classes: int | None = None,
+        ) -> np.ndarray:
             labels = _exact_integer_labels(values, label_name="Response-window true_label")
             if n_classes is not None and bool(((labels < 0) | (labels >= int(n_classes))).any()):
                 raise ValueError("Response-window true_label values must index prob_class_* columns.")
             return labels
 
+        response_window_ensemble.probability_columns = temporal_model.probability_columns
+        response_window_ensemble._label_values = _label_values
+        response_window_ensemble._class_names = _class_names
         response_window_ensemble._integer_label_values = _integer_label_values
         setattr(response_window_ensemble, _PATCH_MARKER, True)
 
