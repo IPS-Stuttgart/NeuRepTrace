@@ -1,11 +1,39 @@
-"""Runtime patch for invalid true-label handling in observation ensembles."""
+"""Runtime patch for exact observation-ensemble label handling."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import wraps
 from typing import Any
 
+import numpy as np
 import pandas as pd
+
+from ._response_window_bool_numeric_patch import (
+    _exact_integer_labels,
+    _numeric_probability_labels,
+)
+
+_LABEL_PATCH_MARKER = "_neureptrace_observation_ensemble_exact_label_patch_installed"
+
+
+def _label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
+    """Return exact signed probability labels, or positions for named classes."""
+
+    labels = _numeric_probability_labels(prob_columns)
+    if labels is None:
+        return tuple(range(len(prob_columns)))
+    return labels
+
+
+def _integer_label_values(
+    labels: Sequence[object] | np.ndarray | pd.Series,
+    *,
+    column_name: str = "true_label",
+) -> np.ndarray:
+    """Parse signed-64-bit labels without a lossy float64 round-trip."""
+
+    return _exact_integer_labels(labels, label_name=column_name)
 
 
 def _missing_true_labels(output: pd.DataFrame, observation_ensemble: Any) -> list[int]:
@@ -24,9 +52,14 @@ def _missing_true_labels(output: pd.DataFrame, observation_ensemble: Any) -> lis
 
 
 def install() -> None:
-    """Reject ensemble true labels that are not represented by probability columns."""
+    """Preserve exact labels and reject labels absent from probability columns."""
 
     import neureptrace.observation_ensemble as observation_ensemble
+
+    if not getattr(observation_ensemble, _LABEL_PATCH_MARKER, False):
+        observation_ensemble._label_values = _label_values
+        observation_ensemble._integer_label_values = _integer_label_values
+        setattr(observation_ensemble, _LABEL_PATCH_MARKER, True)
 
     if getattr(observation_ensemble.ensemble_probability_observations, "_missing_label_patch", False):
         return
