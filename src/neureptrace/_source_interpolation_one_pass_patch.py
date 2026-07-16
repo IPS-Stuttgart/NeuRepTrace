@@ -1,10 +1,12 @@
-"""Materialize one-pass source interpolation and masking inputs before NumPy conversion."""
+"""Materialize source inputs and preserve exact interpolation configuration values."""
 
 from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 from functools import wraps
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -12,6 +14,7 @@ import numpy as np
 _INTERPOLATION_PATCH_MARKER = "_neureptrace_source_interpolation_one_pass_patch_installed"
 _MASKING_PATCH_MARKER = "_neureptrace_source_masking_feature_input_patch_installed"
 _SMOTE_INTERPOLATION_PATCH_MARKER = "_neureptrace_source_smote_stable_interpolation_patch_installed"
+_INTEGER_PRECISION_PATCH_MARKER = "_neureptrace_source_interpolation_integer_precision_patch_installed"
 
 
 def _materialize_one_pass_iterable(value: Any) -> Any:
@@ -50,6 +53,53 @@ def _contains_boolean_values(value: Any) -> bool:
     except TypeError:
         return False
     return any(_contains_boolean_values(item) for item in iterator)
+
+
+def _exact_integer(value: Any, *, name: str) -> int:
+    """Normalize integer controls without routing exact integers through ``float``."""
+
+    message = f"{name} must be an integer."
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, (list, tuple, dict, set, Path)):
+        raise ValueError(message)
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (str, Decimal)):
+        try:
+            number = value if isinstance(value, Decimal) else Decimal(value.strip())
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError(message) from exc
+        if not number.is_finite() or number != number.to_integral_value():
+            raise ValueError(message)
+        return int(number)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+        raise ValueError(message)
+    return int(numeric)
+
+
+def _install_source_integer_precision_patch() -> None:
+    """Share exact integer normalization across MixUp and SMOTE config paths."""
+
+    source_mixup = importlib.import_module("neureptrace.decoding.source_mixup")
+    source_smote = importlib.import_module("neureptrace.decoding.source_smote")
+    random_state_patch = importlib.import_module("neureptrace._source_mixup_random_state_patch")
+
+    if getattr(source_mixup._normalize_integer, _INTEGER_PRECISION_PATCH_MARKER, False):
+        return
+
+    setattr(_exact_integer, _INTEGER_PRECISION_PATCH_MARKER, True)
+    source_mixup._normalize_integer = _exact_integer
+    source_smote._integer = _exact_integer
+    random_state_patch._normalize_integer = _exact_integer
 
 
 def _install_source_interpolation_patch() -> None:
@@ -134,8 +184,9 @@ def _install_source_smote_interpolation_patch() -> None:
 
 
 def install() -> None:
-    """Patch source interpolation, masking, and SMOTE numeric behavior."""
+    """Patch source interpolation, masking, SMOTE numerics, and integer precision."""
 
+    _install_source_integer_precision_patch()
     _install_source_interpolation_patch()
     _install_source_masking_patch()
     _install_source_smote_interpolation_patch()
