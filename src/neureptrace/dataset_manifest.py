@@ -84,7 +84,7 @@ def manifest_from_dataset_config(
     root = _string(dataset.get("root", ""))
     input_format = _string(dataset.get("input_format", dataset.get("format", "mne-epochs")))
     subject_template = _string(dataset.get("subject_template", "Part{participant}"))
-    path_base = config_dir if absolute_paths and config_dir is not None else None
+    path_base = config_dir.resolve() if absolute_paths and config_dir is not None else None
 
     common_columns = _common_manifest_columns(config)
     rows: list[dict[str, Any]] = []
