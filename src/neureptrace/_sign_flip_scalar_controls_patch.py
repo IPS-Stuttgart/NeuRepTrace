@@ -1,4 +1,4 @@
-"""Runtime patch for sign-flip scalar control validation."""
+"""Runtime patch for sign-flip scalar controls and zero-variance statistics."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ _PERMUTATION_COUNT_ERROR = "n_permutations must be a positive integer."
 _RANDOM_STATE_ERROR = "random_state must be a non-negative integer seed."
 _CLUSTER_ALPHA_ERROR = "cluster_alpha must be between 0 and 1."
 _PATCH_MARKER = "_sign_flip_scalar_controls_patched"
+_T_STATISTIC_PATCH_MARKER = "_sign_flip_zero_variance_t_patched"
 
 
 def _scalar_value(value: object, error_message: str) -> object:
@@ -72,6 +73,31 @@ def _validate_cluster_alpha(cluster_alpha: float) -> float:
     return float(numeric)
 
 
+def _t_statistics_from_mean_and_sem(means: np.ndarray, sem: np.ndarray) -> np.ndarray:
+    """Return t statistics, including signed infinities for exact nonzero constants."""
+
+    statistics = np.divide(
+        means,
+        sem,
+        out=np.zeros_like(means, dtype=float),
+        where=sem > 0.0,
+    )
+    zero_variance = sem == 0.0
+    statistics[zero_variance & (means > 0.0)] = np.inf
+    statistics[zero_variance & (means < 0.0)] = -np.inf
+    return statistics
+
+
+def _t_statistic(effects: np.ndarray) -> np.ndarray:
+    """Compute one-sample t statistics without erasing exact constant effects."""
+
+    if effects.shape[0] < 2:
+        raise ValueError("Need at least two subjects for subject-level inference.")
+    means = effects.mean(axis=0)
+    sem = effects.std(axis=0, ddof=1) / np.sqrt(effects.shape[0])
+    return _t_statistics_from_mean_and_sem(means, sem)
+
+
 def _patch_inference() -> None:
     import neureptrace.inference as inference
 
@@ -79,16 +105,33 @@ def _patch_inference() -> None:
         _validate_positive_permutation_count._sign_flip_scalar_controls_patched = True  # type: ignore[attr-defined]
         inference._validate_positive_permutation_count = _validate_positive_permutation_count
 
+    if not getattr(inference._t_statistic, _T_STATISTIC_PATCH_MARKER, False):
+        _t_statistic._sign_flip_zero_variance_t_patched = True  # type: ignore[attr-defined]
+        inference._t_statistic = _t_statistic
+
     if not getattr(inference._sign_flip_t_statistics, _PATCH_MARKER, False):
         original_sign_flip_t_statistics = inference._sign_flip_t_statistics
 
         @wraps(original_sign_flip_t_statistics)
-        def _sign_flip_t_statistics(effects: np.ndarray, *, n_permutations: int, random_state: int) -> np.ndarray:
-            return original_sign_flip_t_statistics(
-                effects,
-                n_permutations=_validate_positive_permutation_count(n_permutations),
-                random_state=_validate_random_state(random_state),
+        def _sign_flip_t_statistics(
+            effects: np.ndarray,
+            *,
+            n_permutations: int,
+            random_state: int,
+        ) -> np.ndarray:
+            validated_permutations = _validate_positive_permutation_count(n_permutations)
+            validated_random_state = _validate_random_state(random_state)
+            rng = np.random.default_rng(validated_random_state)
+            n_subjects = effects.shape[0]
+            signs = rng.choice(
+                np.array([-1.0, 1.0]),
+                size=(validated_permutations, n_subjects),
             )
+            means = signs @ effects / n_subjects
+            sum_squares = np.sum(effects**2, axis=0)
+            variances = (sum_squares[None, :] - n_subjects * means**2) / (n_subjects - 1)
+            sem = np.sqrt(np.maximum(variances, 0.0) / n_subjects)
+            return _t_statistics_from_mean_and_sem(means, sem)
 
         _sign_flip_t_statistics._sign_flip_scalar_controls_patched = True  # type: ignore[attr-defined]
         inference._sign_flip_t_statistics = _sign_flip_t_statistics
@@ -123,7 +166,7 @@ def _patch_paired_stats() -> None:
 
 
 def install() -> None:
-    """Install strict scalar control validators for sign-flip inference APIs."""
+    """Install strict scalar controls and exact zero-variance sign-flip statistics."""
     _patch_inference()
     _patch_paired_stats()
 
