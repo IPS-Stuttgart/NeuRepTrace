@@ -1,15 +1,20 @@
-"""Robust boolean parsing for stimulus-event summary tables.
+"""Robust stimulus-event summary parsing and online label inference.
 
 Stimulus event outputs are often persisted to CSV before downstream summaries
-are recomputed.  Pandas or callers may represent boolean columns as strings, and
+are recomputed. Pandas or callers may represent boolean columns as strings, and
 ``Series.astype(bool)`` treats every non-empty string, including ``"False"``, as
-true.  This patch prevents CSV round-trips from inflating true-positive and
+true. This patch prevents CSV round-trips from inflating true-positive and
 duplicate-detection counts.
+
+The online detector also needs to infer predictions from ``prob_class_*``
+columns when explicit prediction fields are absent. Public class labels can be
+signed or non-contiguous, so probability positions must not be used as labels.
 """
 
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping, Sequence
 from functools import wraps
 from typing import Any
 
@@ -19,6 +24,7 @@ import pandas as pd
 _TRUE_BOOL_TEXT = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_TEXT = {"0", "false", "f", "no", "n", "off", ""}
 _PATCH_MARKER = "_neureptrace_stimulus_boolean_summary_patch_installed"
+_STREAMING_LABEL_PATCH_MARKER = "_neureptrace_streaming_probability_label_patch_installed"
 _BOOLEAN_SUMMARY_COLUMNS = ("is_true_positive", "is_duplicate_detection")
 
 
@@ -69,6 +75,102 @@ def _coerce_boolean_summary_columns(events: pd.DataFrame) -> pd.DataFrame:
     return parsed
 
 
+def _integer_probability_suffix(suffix: str) -> int | None:
+    text = str(suffix)
+    digits = text[1:] if text[:1] in {"+", "-"} else text
+    if not digits or not digits.isdigit():
+        return None
+    return int(text)
+
+
+def _probability_sort_key(column: str) -> tuple[int, int, str]:
+    suffix = str(column).removeprefix("prob_class_")
+    label = _integer_probability_suffix(suffix)
+    if label is None:
+        return 1, 0, suffix
+    return 0, label, suffix
+
+
+def _probability_label_values(columns: Sequence[str]) -> tuple[int, ...]:
+    labels = tuple(
+        _integer_probability_suffix(str(column).removeprefix("prob_class_"))
+        for column in columns
+    )
+    if any(label is None for label in labels):
+        return tuple(range(len(columns)))
+    return tuple(int(label) for label in labels if label is not None)
+
+
+def _duplicate_labels(labels: Sequence[int]) -> list[int]:
+    seen: set[int] = set()
+    duplicates: list[int] = []
+    for label in labels:
+        if label in seen and label not in duplicates:
+            duplicates.append(label)
+        seen.add(label)
+    return duplicates
+
+
+def _streaming_probability_columns(observation: Mapping[str, object]) -> list[str]:
+    columns = sorted(
+        (str(column) for column in observation if str(column).startswith("prob_class_")),
+        key=_probability_sort_key,
+    )
+    if not columns:
+        raise ValueError("Observation rows must contain probability columns named 'prob_class_*'.")
+    labels = _probability_label_values(columns)
+    if len(labels) == len(columns):
+        parsed = tuple(
+            _integer_probability_suffix(column.removeprefix("prob_class_"))
+            for column in columns
+        )
+        if all(label is not None for label in parsed):
+            duplicates = _duplicate_labels(labels)
+            if duplicates:
+                raise ValueError(
+                    "prob_class_* columns must map to unique class labels; "
+                    f"duplicate label(s): {duplicates}."
+                )
+    return columns
+
+
+def _has_nonmissing_value(observation: Mapping[str, object], column: str) -> bool:
+    if column not in observation:
+        return False
+    try:
+        return not bool(pd.isna(observation[column]))
+    except (TypeError, ValueError):
+        return True
+
+
+def _install_streaming_probability_label_patch() -> None:
+    """Preserve public labels when the online detector infers predictions."""
+
+    import neureptrace.streaming_stimulus_detection as streaming
+
+    if getattr(streaming, _STREAMING_LABEL_PATCH_MARKER, False):
+        return
+
+    original_score_observation = streaming._score_observation
+
+    @wraps(original_score_observation)
+    def _score_observation(observation: Mapping[str, object], threshold_row: pd.Series) -> float:
+        if str(threshold_row["score_mode"]) != "predicted_class_confidence":
+            return original_score_observation(observation, threshold_row)
+        if _has_nonmissing_value(observation, "predicted_label") or _has_nonmissing_value(observation, "predicted_class"):
+            return original_score_observation(observation, threshold_row)
+
+        confidence = streaming._validated_confidence(observation)
+        columns, probabilities = streaming._validated_probability_observation(observation)
+        label_values = _probability_label_values(columns)
+        predicted_label = label_values[int(probabilities.argmax())]
+        return confidence if str(predicted_label) == str(threshold_row["stimulus_label"]) else 0.0
+
+    streaming._probability_columns_from_observation = _streaming_probability_columns
+    streaming._score_observation = _score_observation
+    setattr(streaming, _STREAMING_LABEL_PATCH_MARKER, True)
+
+
 def _install_group_completion_patch() -> None:
     """Keep zero-detection group preservation active for direct public-module users."""
 
@@ -86,11 +188,12 @@ def _sync_public_module(stimulus_public: Any) -> None:
 
 
 def install() -> None:
-    """Install robust boolean parsing for stimulus summary helpers."""
+    """Install robust stimulus summary and streaming-label handling."""
 
     import neureptrace._stimulus_detection_public as stimulus_public
     from neureptrace import _matched_filter_group_keys_patch, _matched_filter_template_offsets_patch
 
+    _install_streaming_probability_label_patch()
     _matched_filter_template_offsets_patch.install()
     _matched_filter_group_keys_patch.install()
 
