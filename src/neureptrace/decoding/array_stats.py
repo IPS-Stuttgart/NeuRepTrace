@@ -29,8 +29,8 @@ def column_stats(values: Sequence[Sequence[float]] | np.ndarray, *, scale_floor:
         raise ValueError("values must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
         raise ValueError("values must be finite.")
-    mean = np.mean(matrix, axis=0)
-    scale = np.maximum(np.std(matrix, axis=0, ddof=1 if matrix.shape[0] > 1 else 0), floor)
+    mean, scale = _stable_column_mean_and_std(matrix)
+    scale = np.maximum(scale, floor)
     minimum = np.min(matrix, axis=0)
     maximum = np.max(matrix, axis=0)
     return ArrayStatsResult(
@@ -40,6 +40,19 @@ def column_stats(values: Sequence[Sequence[float]] | np.ndarray, *, scale_floor:
         maximum=maximum,
         metadata={"array_stats_rows": int(matrix.shape[0]), "array_stats_columns": int(matrix.shape[1])},
     )
+
+
+def _stable_column_mean_and_std(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Compute column moments without overflowing intermediate sums or squares."""
+
+    magnitude = np.max(np.abs(matrix), axis=0)
+    normalized = np.zeros_like(matrix)
+    nonzero = magnitude > 0.0
+    normalized[:, nonzero] = matrix[:, nonzero] / magnitude[nonzero]
+    ddof = 1 if matrix.shape[0] > 1 else 0
+    mean = np.mean(normalized, axis=0) * magnitude
+    scale = np.std(normalized, axis=0, ddof=ddof) * magnitude
+    return mean, scale
 
 
 def _positive_float(value: Any, *, name: str) -> float:
