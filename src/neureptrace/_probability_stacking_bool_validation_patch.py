@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from . import _group_completion_patch
+from ._response_window_bool_numeric_patch import _exact_integer_labels
 
 _OBSERVATIONS_MODULE = __package__ + ".observations"
 _STACKING_MODULE = __package__ + ".probability_stacking"
@@ -103,7 +104,7 @@ def install() -> None:
     @wraps(original_integer_label_array)
     def _integer_label_array(labels: Any, *, name: str):
         _reject_boolean_label_values(labels, name=name)
-        return original_integer_label_array(labels, name=name)
+        return _exact_integer_labels(labels, label_name=name)
 
     original_validate_positive_integer = ps._validate_positive_integer
 
