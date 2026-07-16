@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from dataclasses import replace
 from functools import wraps
 from typing import Any
 
@@ -10,6 +11,7 @@ import numpy as np
 
 _PATCH_MARKER = "_neureptrace_reconstruction_encoder_config_patch_installed"
 _HIDDEN_UNITS_PATCH_MARKER = "_neureptrace_reconstruction_hidden_units_patch_installed"
+_FIT_SCOPE_PATCH_MARKER = "_neureptrace_reconstruction_fit_scope_patch_installed"
 
 
 def _normalize_bool(value: Any, *, name: str) -> bool:
@@ -49,6 +51,23 @@ def _install_hidden_units_normalizer(reconstruction_encoder: Any) -> None:
     reconstruction_encoder._normalize_hidden_units = _normalize_hidden_units
 
 
+def _install_fit_scope_normalizer(reconstruction_encoder: Any) -> None:
+    original = reconstruction_encoder.fit_reconstruction_latent_space
+    if getattr(original, _FIT_SCOPE_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def fit_reconstruction_latent_space(*, config=None, **kwargs: Any):
+        if config is not None:
+            normalized_scope = reconstruction_encoder.normalize_reconstruction_fit_scope(config.fit_scope)
+            if normalized_scope != config.fit_scope:
+                config = replace(config, fit_scope=normalized_scope)
+        return original(config=config, **kwargs)
+
+    setattr(fit_reconstruction_latent_space, _FIT_SCOPE_PATCH_MARKER, True)
+    reconstruction_encoder.fit_reconstruction_latent_space = fit_reconstruction_latent_space
+
+
 def install() -> None:
     """Patch user-facing reconstruction config parsing."""
 
@@ -57,6 +76,7 @@ def install() -> None:
         return
 
     _install_hidden_units_normalizer(reconstruction_encoder)
+    _install_fit_scope_normalizer(reconstruction_encoder)
     original = reconstruction_encoder.reconstruction_encoder_config
 
     @wraps(original)
