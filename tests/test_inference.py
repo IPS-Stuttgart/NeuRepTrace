@@ -213,7 +213,12 @@ def test_sign_flip_time_inference_finds_cluster(tmp_path: Path):
     csv_paths = []
     for idx in range(8):
         csv_path = tmp_path / f"sub-{idx + 1:02d}_time_decode.csv"
-        _write_subject_csv(csv_path, f"sub-{idx + 1:02d}", [0.0, 0.07 + idx * 0.004, 0.10 + idx * 0.004, 0.09 + idx * 0.004])
+        baseline_effect = -0.001 + (idx - 3.5) * 0.001
+        _write_subject_csv(
+            csv_path,
+            f"sub-{idx + 1:02d}",
+            [baseline_effect, 0.07 + idx * 0.004, 0.10 + idx * 0.004, 0.09 + idx * 0.004],
+        )
         csv_paths.append(csv_path)
 
     time_table, cluster_table = sign_flip_time_inference(csv_paths, n_permutations=2048, random_state=7, cluster_alpha=0.05)
