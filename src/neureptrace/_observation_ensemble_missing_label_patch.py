@@ -17,7 +17,8 @@ from ._response_window_bool_numeric_patch import (
 _LABEL_PATCH_MARKER = (
     "_neureptrace_observation_ensemble_exact_label_patch_installed"
 )
-_LABEL_PATCH_VERSION = 2
+_LABEL_PATCH_VERSION = 3
+_WRAPPER_VERSION_ATTR = "_observation_ensemble_exact_label_patch_version"
 
 
 def _label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
@@ -60,36 +61,57 @@ def _integer_label_values(
         ) from exc
 
 
-def _missing_true_labels(
+def _normalize_exact_label_outputs(
     output: pd.DataFrame,
     observation_ensemble: Any,
-) -> list[int]:
+) -> pd.DataFrame:
+    """Recompute label-derived columns from exact probability-column labels."""
+
     prob_columns = observation_ensemble.probability_columns(output)
-    if (
-        "true_label" not in output.columns
-        or "probability_true_class" not in output.columns
-        or not prob_columns
-    ):
-        return []
+    if not prob_columns:
+        return output
 
-    true_probability = pd.to_numeric(
-        output["probability_true_class"], errors="coerce"
-    )
-    if not bool(true_probability.isna().any()):
-        return []
+    label_values = _label_values(prob_columns)
+    labels = np.asarray(label_values, dtype=np.int64)
+    probabilities = output.loc[:, list(prob_columns)].to_numpy(dtype=float)
+    if probabilities.ndim != 2 or probabilities.shape[1] != len(labels):
+        return output
 
-    label_values = observation_ensemble._label_values(prob_columns)
-    valid_labels = {int(label) for label in label_values}
-    true_labels = observation_ensemble._integer_label_values(
-        output["true_label"]
+    normalized = output.copy()
+    predicted_labels = labels[np.argmax(probabilities, axis=1)]
+    normalized["predicted_label"] = predicted_labels
+
+    if "true_label" not in normalized.columns:
+        return normalized
+
+    true_labels = _integer_label_values(normalized["true_label"])
+    label_to_position = {
+        int(label): position for position, label in enumerate(label_values)
+    }
+    positions = np.asarray(
+        [label_to_position.get(int(label), -1) for label in true_labels],
+        dtype=int,
     )
-    return sorted(
-        {
-            int(label)
-            for label in true_labels
-            if int(label) not in valid_labels
-        }
-    )
+    if bool((positions < 0).any()):
+        missing = sorted(
+            {
+                int(label)
+                for label, position in zip(true_labels, positions, strict=True)
+                if position < 0
+            }
+        )
+        raise ValueError(
+            "true_label values must index probability labels "
+            f"{list(label_values)}; missing labels: {missing[:5]}"
+        )
+
+    row_indices = np.arange(len(normalized), dtype=int)
+    normalized["probability_true_class"] = probabilities[
+        row_indices,
+        positions,
+    ]
+    normalized["is_correct"] = predicted_labels == true_labels
+    return normalized
 
 
 def install() -> None:
@@ -108,31 +130,21 @@ def install() -> None:
         _LABEL_PATCH_VERSION,
     )
 
-    if getattr(
-        observation_ensemble.ensemble_probability_observations,
-        "_missing_label_patch",
-        False,
-    ):
+    current = observation_ensemble.ensemble_probability_observations
+    if getattr(current, _WRAPPER_VERSION_ATTR, 0) >= _LABEL_PATCH_VERSION:
         return
 
-    original_ensemble_probability_observations = (
-        observation_ensemble.ensemble_probability_observations
-    )
-
-    @wraps(original_ensemble_probability_observations)
+    @wraps(current)
     def ensemble_probability_observations(*args: Any, **kwargs: Any):
-        output = original_ensemble_probability_observations(*args, **kwargs)
-        missing = _missing_true_labels(output, observation_ensemble)
-        if missing:
-            prob_columns = observation_ensemble.probability_columns(output)
-            label_values = observation_ensemble._label_values(prob_columns)
-            raise ValueError(
-                "true_label values must index probability labels "
-                f"{list(label_values)}; missing labels: {missing[:5]}"
-            )
-        return output
+        output = current(*args, **kwargs)
+        return _normalize_exact_label_outputs(output, observation_ensemble)
 
     ensemble_probability_observations._missing_label_patch = True  # type: ignore[attr-defined]
+    setattr(
+        ensemble_probability_observations,
+        _WRAPPER_VERSION_ATTR,
+        _LABEL_PATCH_VERSION,
+    )
     observation_ensemble.ensemble_probability_observations = (
         ensemble_probability_observations
     )
