@@ -204,7 +204,7 @@ def test_epoch_dataset_concatenate_supports_channel_intersection():
         metadata=pd.DataFrame({"split": ["cue"]}),
     )
 
-    merged = EpochDataset.concatenate([first, second], name="merged", channel_policy="intersection")
+    merged = EpochDataset.concatenate([first, second], channel_policy="intersection")
 
     assert merged.channel_names == ["B", "C"]
     assert merged.data.shape == (2, 2, 2)
