@@ -26,6 +26,22 @@ def test_probability_true_class_scores_ignore_fractional_labels():
     assert np.isnan(scores.iloc[3])
 
 
+def test_probability_true_class_scores_follow_probability_column_labels():
+    frame = pd.DataFrame(
+        {
+            "true_label": [2, 5, 0],
+            "prob_class_5": [0.2, 0.9, 0.4],
+            "prob_class_2": [0.8, 0.1, 0.6],
+        }
+    )
+
+    scores = score_values(frame, "probability_true_class")
+
+    assert scores.iloc[0] == 0.8
+    assert scores.iloc[1] == 0.9
+    assert np.isnan(scores.iloc[2])
+
+
 def test_probability_true_class_scores_ignore_boolean_labels():
     frame = pd.DataFrame(
         {
@@ -79,6 +95,22 @@ def test_ensure_prediction_columns_does_not_truncate_fractional_labels():
     result = ensure_prediction_columns(frame)
 
     assert result["predicted_class"].tolist() == ["one", "one"]
+
+
+def test_ensure_prediction_columns_preserves_probability_column_labels():
+    frame = pd.DataFrame(
+        {
+            "class_2": ["two", "two"],
+            "class_5": ["five", "five"],
+            "prob_class_5": [0.1, 0.8],
+            "prob_class_2": [0.9, 0.2],
+        }
+    )
+
+    result = ensure_prediction_columns(frame)
+
+    assert result["predicted_label"].tolist() == [2, 5]
+    assert result["predicted_class"].tolist() == ["two", "five"]
 
 
 def test_ensure_prediction_columns_ignores_boolean_labels():
