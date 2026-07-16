@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping, Sequence
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -53,7 +54,7 @@ def _random_state_error(name: str) -> ValueError:
 
 
 def _normalize_optional_random_state(value: Any, *, name: str) -> int | None:
-    """Normalize optional integer seeds without leaking raw set/NumPy errors."""
+    """Normalize optional integer seeds without losing exact integer values."""
 
     if value is None:
         return None
@@ -70,13 +71,27 @@ def _normalize_optional_random_state(value: Any, *, name: str) -> int | None:
         raise _random_state_error(name)
     if isinstance(value, (bool, np.bool_)):
         raise _random_state_error(name)
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
-        raise _random_state_error(name) from exc
-    if not np.isfinite(parsed) or parsed < 0.0 or parsed % 1.0 != 0.0:
+    if isinstance(value, (int, np.integer)):
+        integer = int(value)
+    elif isinstance(value, str):
+        try:
+            number = Decimal(value)
+        except InvalidOperation as exc:
+            raise _random_state_error(name) from exc
+        if not number.is_finite() or number != number.to_integral_value():
+            raise _random_state_error(name)
+        integer = int(number)
+    else:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise _random_state_error(name) from exc
+        if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
+            raise _random_state_error(name)
+        integer = int(parsed)
+    if integer < 0:
         raise _random_state_error(name)
-    return int(parsed)
+    return integer
 
 
 def _normalize_random_subspace_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
