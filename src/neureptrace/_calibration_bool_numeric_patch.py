@@ -1,4 +1,4 @@
-"""Reject boolean-like calibration numeric fields before pandas coercion."""
+"""Reject invalid calibration numeric fields before report generation."""
 
 from __future__ import annotations
 
@@ -37,7 +37,12 @@ def _patched_validate_calibration_summary(summary: pd.DataFrame) -> pd.DataFrame
         _calibration.SUMMARY_NUMERIC_COLUMNS,
         source="Summary",
     )
-    return _ORIGINAL_VALIDATE_CALIBRATION_SUMMARY(summary)
+    validated = _ORIGINAL_VALIDATE_CALIBRATION_SUMMARY(summary)
+    negative_brier = validated["brier_mean"] < 0.0
+    if negative_brier.any():
+        bad_rows = negative_brier[negative_brier].index.tolist()[:5]
+        raise ValueError(f"Summary contains negative brier_mean at row(s) {bad_rows}.")
+    return validated
 
 
 def _patched_validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> pd.DataFrame:

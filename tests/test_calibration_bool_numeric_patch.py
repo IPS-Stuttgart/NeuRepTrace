@@ -30,6 +30,14 @@ def test_summarize_calibration_metrics_rejects_boolean_numeric_columns(column: s
         summarize_calibration_metrics(frame)
 
 
+def test_summarize_calibration_metrics_rejects_negative_brier_values():
+    frame = _summary_frame()
+    frame.loc[0, "brier_mean"] = -0.01
+
+    with pytest.raises(ValueError, match="negative brier_mean"):
+        summarize_calibration_metrics(frame)
+
+
 @pytest.mark.parametrize("column", ["time", "bin", "bin_left", "bin_right", "n_samples", "accuracy", "confidence"])
 def test_aggregate_reliability_bins_rejects_boolean_numeric_columns(tmp_path: Path, column: str):
     path = tmp_path / "bad_bool_calibration_bins.csv"
