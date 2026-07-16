@@ -14,6 +14,7 @@ import numpy as np
 _INTERPOLATION_PATCH_MARKER = "_neureptrace_source_interpolation_one_pass_patch_installed"
 _MASKING_PATCH_MARKER = "_neureptrace_source_masking_feature_input_patch_installed"
 _SMOTE_INTERPOLATION_PATCH_MARKER = "_neureptrace_source_smote_stable_interpolation_patch_installed"
+_SMOTE_OUTPUT_PATCH_MARKER = "_neureptrace_source_smote_disabled_output_patch_installed"
 _INTEGER_PRECISION_PATCH_MARKER = "_neureptrace_source_interpolation_integer_precision_patch_installed"
 
 
@@ -162,29 +163,50 @@ def _install_source_masking_patch() -> None:
 def _install_source_smote_interpolation_patch() -> None:
     module = importlib.import_module("neureptrace.decoding.source_smote")
     original_interpolate_rows = module.interpolate_rows
-    if getattr(original_interpolate_rows, _SMOTE_INTERPOLATION_PATCH_MARKER, False):
+    if not getattr(original_interpolate_rows, _SMOTE_INTERPOLATION_PATCH_MARKER, False):
+
+        @wraps(original_interpolate_rows)
+        def interpolate_rows(content_row: Any, partner_row: Any, lam: Any) -> np.ndarray:
+            left = np.asarray(content_row, dtype=float).reshape(-1)
+            right = np.asarray(partner_row, dtype=float).reshape(-1)
+            if left.shape != right.shape or left.size == 0:
+                raise ValueError("content_row and partner_row must be non-empty vectors with the same shape.")
+            weight = module._unit_interval_float(lam, name="lam")
+
+            same_sign = np.signbit(left) == np.signbit(right)
+            row = np.empty_like(left)
+            row[same_sign] = left[same_sign] + weight * (right[same_sign] - left[same_sign])
+            row[~same_sign] = (1.0 - weight) * left[~same_sign] + weight * right[~same_sign]
+            return row.astype(np.float32, copy=False)
+
+        setattr(interpolate_rows, _SMOTE_INTERPOLATION_PATCH_MARKER, True)
+        module.interpolate_rows = interpolate_rows
+
+    original_augment_source_with_smote = module.augment_source_with_smote
+    if getattr(original_augment_source_with_smote, _SMOTE_OUTPUT_PATCH_MARKER, False):
         return
 
-    @wraps(original_interpolate_rows)
-    def interpolate_rows(content_row: Any, partner_row: Any, lam: Any) -> np.ndarray:
-        left = np.asarray(content_row, dtype=float).reshape(-1)
-        right = np.asarray(partner_row, dtype=float).reshape(-1)
-        if left.shape != right.shape or left.size == 0:
-            raise ValueError("content_row and partner_row must be non-empty vectors with the same shape.")
-        weight = module._unit_interval_float(lam, name="lam")
+    @wraps(original_augment_source_with_smote)
+    def augment_source_with_smote(*args: Any, **kwargs: Any) -> Any:
+        result = original_augment_source_with_smote(*args, **kwargs)
+        if result.metadata["source_smote"] or result.metadata["source_smote_preserve_original"]:
+            return result
+        return module.SourceSmoteResult(
+            features=result.features[:0].copy(),
+            labels=result.labels[:0].copy(),
+            synthetic_mask=result.synthetic_mask[:0].copy(),
+            content_indices=result.content_indices,
+            partner_indices=result.partner_indices,
+            lambdas=result.lambdas,
+            metadata=result.metadata,
+        )
 
-        same_sign = np.signbit(left) == np.signbit(right)
-        row = np.empty_like(left)
-        row[same_sign] = left[same_sign] + weight * (right[same_sign] - left[same_sign])
-        row[~same_sign] = (1.0 - weight) * left[~same_sign] + weight * right[~same_sign]
-        return row.astype(np.float32, copy=False)
-
-    setattr(interpolate_rows, _SMOTE_INTERPOLATION_PATCH_MARKER, True)
-    module.interpolate_rows = interpolate_rows
+    setattr(augment_source_with_smote, _SMOTE_OUTPUT_PATCH_MARKER, True)
+    module.augment_source_with_smote = augment_source_with_smote
 
 
 def install() -> None:
-    """Patch source interpolation, masking, SMOTE numerics, and integer precision."""
+    """Patch source interpolation, masking, and SMOTE numeric/output behavior."""
 
     _install_source_integer_precision_patch()
     _install_source_interpolation_patch()
