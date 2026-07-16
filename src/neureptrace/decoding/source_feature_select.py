@@ -44,7 +44,7 @@ def select_source_variance_features(
     test = _matrix(test_features, name="test_features")
     if source.shape[1] != test.shape[1]:
         raise ValueError("source_features and test_features must have the same feature width.")
-    scores = np.var(source - np.mean(source, axis=0), axis=0, ddof=1 if source.shape[0] > 1 else 0)
+    scores = _stable_column_variances(source)
     parsed_k = None if k is None else _positive_int(k, name="k")
     parsed_min_variance = None if min_variance is None else _nonnegative_float(min_variance, name="min_variance")
     selected = source_variance_feature_indices(scores=scores, k=parsed_k, min_variance=parsed_min_variance)
@@ -65,10 +65,10 @@ def select_source_variance_features(
         "source_feature_select_min_variance": "" if parsed_min_variance is None else parsed_min_variance,
     }
     return SourceFeatureSelectResult(
-        train_features=source[:, selected].astype(np.float32, copy=False),
-        test_features=test[:, selected].astype(np.float32, copy=False),
+        train_features=_compact_float32(source[:, selected]),
+        test_features=_compact_float32(test[:, selected]),
         selected_indices=selected.astype(int, copy=False),
-        scores=scores.astype(np.float32, copy=False),
+        scores=_compact_float32(scores),
         metadata=metadata,
     )
 
@@ -94,6 +94,41 @@ def source_variance_feature_indices(*, scores, k: int | str | None = None, min_v
     else:
         candidate = candidate[np.argsort(values[candidate], kind="mergesort")[::-1]]
     return np.sort(candidate).astype(int, copy=False)
+
+
+def _stable_column_variances(matrix: np.ndarray) -> np.ndarray:
+    """Compute finite column variances without overflowing intermediate moments."""
+
+    magnitude = np.max(np.abs(matrix), axis=0)
+    normalized = np.zeros_like(matrix)
+    nonzero = magnitude > 0.0
+    normalized[:, nonzero] = matrix[:, nonzero] / magnitude[nonzero]
+    ddof = 1 if matrix.shape[0] > 1 else 0
+    normalized_variance = np.var(normalized, axis=0, ddof=ddof)
+
+    variances = np.zeros_like(magnitude)
+    positive = nonzero & (normalized_variance > 0.0)
+    if np.any(positive):
+        normalized_positive = normalized_variance[positive]
+        magnitude_positive = magnitude[positive]
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            maximum_magnitude = np.sqrt(np.finfo(float).max / normalized_positive)
+            scaled = normalized_positive * magnitude_positive * magnitude_positive
+        scaled[magnitude_positive > maximum_magnitude] = np.finfo(float).max
+        variances[positive] = scaled
+    return variances
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _matrix(values, *, name: str) -> np.ndarray:
