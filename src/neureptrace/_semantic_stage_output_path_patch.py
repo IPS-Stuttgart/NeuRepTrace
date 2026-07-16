@@ -12,6 +12,7 @@ import pandas as pd
 
 _OUTPUT_PATCH_MARKER = "_neureptrace_semantic_stage_output_path_patch_installed"
 _SEQUENCE_KEY_PATCH_MARKER = "_neureptrace_semantic_stage_sequence_key_patch_installed"
+_STATE_NAME_PATCH_MARKER = "_neureptrace_semantic_stage_state_name_patch_installed"
 _MISSING_SEQUENCE_COMPONENT = object()
 
 
@@ -74,8 +75,46 @@ def _sequence_keys(frame: pd.DataFrame) -> pd.Series:
     return pd.Series(keys, index=frame.index, dtype=object)
 
 
+def _validate_state_label_columns(frame: pd.DataFrame, posterior_columns: list[str]) -> None:
+    """Reject state columns whose class meaning changes across trace rows."""
+
+    for posterior_column in posterior_columns:
+        suffix = posterior_column.removeprefix("posterior_state_")
+        state_column = f"state_{suffix}"
+        if state_column not in frame.columns:
+            continue
+        labels: list[str] = []
+        for value in frame[state_column]:
+            if _is_missing_scalar(value):
+                continue
+            label = str(value)
+            if label not in labels:
+                labels.append(label)
+        if len(labels) > 1:
+            raise ValueError(
+                f"{state_column} values must identify one state for {posterior_column}; "
+                f"found {labels}."
+            )
+
+
+def _validate_unique_state_names(state_names: list[str]) -> None:
+    """Reject duplicate labels that make posterior-state columns ambiguous."""
+
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for state_name in state_names:
+        if state_name in seen and state_name not in duplicates:
+            duplicates.append(state_name)
+        seen.add(state_name)
+    if duplicates:
+        raise ValueError(
+            "State labels must map uniquely to posterior columns; "
+            f"duplicate labels: {duplicates}."
+        )
+
+
 def install() -> None:
-    """Patch semantic-stage sequence identities and output destinations."""
+    """Patch semantic-stage identities, state labels, and output destinations."""
 
     semantic_stages = importlib.import_module("neureptrace.semantic_stages")
 
@@ -83,6 +122,19 @@ def install() -> None:
     if not getattr(current_sequence_keys, _SEQUENCE_KEY_PATCH_MARKER, False):
         setattr(_sequence_keys, _SEQUENCE_KEY_PATCH_MARKER, True)
         semantic_stages._sequence_keys = _sequence_keys
+
+    original_state_names = semantic_stages._state_names
+    if not getattr(original_state_names, _STATE_NAME_PATCH_MARKER, False):
+
+        @wraps(original_state_names)
+        def state_names(frame: pd.DataFrame, columns: list[str]) -> list[str]:
+            _validate_state_label_columns(frame, columns)
+            names = original_state_names(frame, columns)
+            _validate_unique_state_names(names)
+            return names
+
+        setattr(state_names, _STATE_NAME_PATCH_MARKER, True)
+        semantic_stages._state_names = state_names
 
     original_analyze = semantic_stages.analyze_semantic_stages
     if getattr(original_analyze, _OUTPUT_PATCH_MARKER, False):
