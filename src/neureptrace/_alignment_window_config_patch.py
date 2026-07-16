@@ -68,6 +68,7 @@ def _patch_module(module: ModuleType) -> None:
         return
 
     alignment_window_cls = module.AlignmentWindow
+    original_label_vector = module._label_vector
 
     def resolved_alignment_window(config: Any):
         center_value, center_name = _resolved_config_value(config, override_name="alignment_window_center", fallback_name="window_center")
@@ -82,8 +83,24 @@ def _patch_module(module: ModuleType) -> None:
         window_size = _validated_float(getattr(config, "window_size"), name="window_size", positive=True)
         return not (np.isclose(alignment_window.center, window_center) and np.isclose(alignment_window.size, window_size))
 
+    def label_vector(values, *, expected_length: int, name: str, participant: int | None):
+        vector = original_label_vector(
+            values,
+            expected_length=expected_length,
+            name=name,
+            participant=participant,
+        )
+        if vector.shape[0] != int(expected_length):
+            context = "" if participant is None else f" for participant {participant}"
+            raise ValueError(
+                f"{name} row count differs from feature rows{context}: "
+                f"{vector.shape[0]} != {int(expected_length)}."
+            )
+        return vector
+
     module.resolved_alignment_window = resolved_alignment_window
     module.uses_separate_alignment_window = uses_separate_alignment_window
+    module._label_vector = label_vector
     setattr(module, _PATCH_MARKER, True)
 
 
@@ -121,7 +138,7 @@ class _AlignmentWindowConfigPatchFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Install validation for alignment-window config scalar values."""
+    """Install validation for alignment-window config scalar values and label rows."""
 
     loaded = sys.modules.get(_TARGET_MODULE)
     if loaded is not None:
