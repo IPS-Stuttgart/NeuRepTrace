@@ -8,6 +8,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.metrics import balanced_accuracy_score
 
+from neureptrace.decoding.array_stats import column_stats
 from neureptrace.decoding.classifiers import prediction_scores
 
 
@@ -271,7 +272,7 @@ def _fit_pca_transform(
     if normalized_components is None:
         return features, None, None, np.nan, int(features.shape[1])
 
-    feature_mean = np.mean(features, axis=0)
+    feature_mean = column_stats(features).mean
     centered = features - feature_mean
     pca = PCA(n_components=normalized_components)
     transformed = pca.fit_transform(centered)
