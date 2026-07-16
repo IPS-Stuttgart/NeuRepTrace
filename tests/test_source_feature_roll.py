@@ -88,6 +88,15 @@ def test_roll_shift_sampling_can_exclude_zero() -> None:
     assert all(shift in {-2, -1, 1, 2} for shift in shifts)
 
 
+def test_source_roll_config_preserves_large_exact_integers() -> None:
+    large_value = 2**53 + 1
+
+    assert source_feature_roll_config(random_state=large_value).random_state == large_value
+    assert source_feature_roll_config(random_state=np.uint64(large_value)).random_state == large_value
+    assert source_feature_roll_config(random_state=str(large_value)).random_state == large_value
+    assert source_feature_roll_config(max_shift="1e3").max_shift == 1000
+
+
 def test_roll_config_aliases_and_validation() -> None:
     assert normalize_roll_mode("wrap") == "circular"
     assert normalize_roll_mode("zero-pad") == "constant"

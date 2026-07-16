@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Iterable
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -11,6 +12,7 @@ import numpy as np
 
 _PATCH_MARKER = "_source_roll_label_matching_patched"
 _ROLL_PRECISION_MARKER = "_source_roll_feature_precision_patched"
+_INTEGER_PRECISION_MARKER = "_source_roll_integer_precision_patched"
 
 
 class _NanLabel:
@@ -136,6 +138,34 @@ def _label_vector(values: Any, *, n_rows: int, name: str) -> np.ndarray:
     return _object_vector(_normalize_label(row) for row in rows)
 
 
+def _integer(value: Any, *, name: str) -> int:
+    """Normalize integer options without losing values above float precision."""
+
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a scalar value.")
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be an integer.")
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            number = Decimal(value.strip())
+        except InvalidOperation as exc:
+            raise ValueError(f"{name} must be an integer.") from exc
+        if not number.is_finite() or number != number.to_integral_value():
+            raise ValueError(f"{name} must be an integer.")
+        return int(number)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if not np.isfinite(parsed) or parsed % 1.0 != 0.0:
+        raise ValueError(f"{name} must be an integer.")
+    return int(parsed)
+
+
 def _compact_float32(values: np.ndarray) -> np.ndarray:
     """Use float32 only when every finite nonzero value remains usable."""
 
@@ -147,6 +177,14 @@ def _compact_float32(values: np.ndarray) -> np.ndarray:
     if np.any((array != 0.0) & (compact == 0.0)):
         return array
     return compact
+
+
+def _install_integer_precision(source_roll: Any) -> None:
+    current = source_roll._integer
+    if getattr(current, _INTEGER_PRECISION_MARKER, False):
+        return
+    setattr(_integer, _INTEGER_PRECISION_MARKER, True)
+    source_roll._integer = _integer
 
 
 def _install_roll_feature_row_precision(source_roll: Any) -> None:
@@ -188,6 +226,7 @@ def install() -> None:
     """Install robust source feature-roll label and precision handling."""
 
     source_roll = importlib.import_module("neureptrace.decoding.source_roll")
+    _install_integer_precision(source_roll)
     _install_roll_feature_row_precision(source_roll)
 
     original = source_roll.augment_source_with_feature_roll
