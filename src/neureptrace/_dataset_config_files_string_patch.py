@@ -1,4 +1,4 @@
-"""Normalize scalar FieldTrip dataset.files values and validate optional config sections."""
+"""Normalize dataset file declarations and validate optional config sections."""
 
 from __future__ import annotations
 
@@ -19,6 +19,19 @@ def _with_scalar_files_normalized(config: Mapping[str, Any], dataset: Mapping[st
     normalized = dict(config)
     normalized["dataset"] = {**dataset, "files": [files]}
     return normalized
+
+
+def _mne_metadata_template(dataset: Mapping[str, Any]) -> str | None:
+    """Return the optional metadata path template paired with MNE epoch templates."""
+
+    epochs_files = dataset.get("epochs_files")
+    if not isinstance(epochs_files, Mapping):
+        return None
+    for key in ("metadata_csv", "metadata_template", "metadata_path"):
+        value = epochs_files.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return None
 
 
 def _optional_section(config: Mapping[str, Any], name: str, *, error_type: type[Exception]) -> dict[str, Any]:
@@ -67,7 +80,7 @@ def _install_optional_section_validation(dataset_config: Any) -> None:
 
 
 def install() -> None:
-    """Install scalar files normalization and strict optional-section validation."""
+    """Install dataset file normalization and strict optional-section validation."""
 
     dataset_config = importlib.import_module("neureptrace.dataset_config")
     _install_optional_section_validation(dataset_config)
@@ -76,6 +89,7 @@ def install() -> None:
 
     original_iter_dataset_files = dataset_config.iter_dataset_files
     original_fieldtrip_file_specs = dataset_config._fieldtrip_file_specs
+    original_mne_epoch_file_specs = dataset_config._mne_epoch_file_specs
 
     def iter_dataset_files(config: Mapping[str, Any], *, base_dir: str | Path = ".") -> list[Path]:
         dataset = dataset_config._dataset_section(config)
@@ -88,8 +102,35 @@ def install() -> None:
         config = _with_scalar_files_normalized(config, dataset)
         return original_fieldtrip_file_specs(config, base_dir=base_dir)
 
+    def _mne_epoch_file_specs(config: Mapping[str, Any], *, base_dir: str | Path) -> list[tuple[Path, Path | None]]:
+        specs = original_mne_epoch_file_specs(config, base_dir=base_dir)
+        dataset = dataset_config._dataset_section(config)
+        metadata_template = _mne_metadata_template(dataset)
+        if dataset.get("type") != "mne_epochs" or metadata_template is None:
+            return specs
+
+        root = dataset.get("root")
+        participants = dataset_config._participant_ids(config)
+        metadata_paths = [
+            dataset_config.expand_path(
+                metadata_template.format(**dataset_config._format_values_for_participant(participant)),
+                base_dir=base_dir,
+                root=root,
+            )
+            for participant in participants
+        ]
+        if len(metadata_paths) != len(specs):
+            raise dataset_config.ConfigValidationError(
+                "dataset.epochs_files metadata template must expand once per epoch template."
+            )
+        return [
+            (epochs_path, metadata_path)
+            for (epochs_path, _), metadata_path in zip(specs, metadata_paths, strict=True)
+        ]
+
     dataset_config.iter_dataset_files = iter_dataset_files
     dataset_config._fieldtrip_file_specs = _fieldtrip_file_specs
+    dataset_config._mne_epoch_file_specs = _mne_epoch_file_specs
     setattr(dataset_config, _PATCH_MARKER, True)
 
 
