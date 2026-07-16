@@ -69,6 +69,19 @@ def _integer_label(value: object) -> int | None:
     return int(numeric)
 
 
+def _probability_label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
+    """Return numeric probability-column labels, or positional labels for named classes."""
+
+    suffixes = tuple(column.removeprefix("prob_class_") for column in prob_columns)
+    try:
+        labels = tuple(int(suffix) for suffix in suffixes)
+    except ValueError:
+        return tuple(range(len(prob_columns)))
+    if len(set(labels)) != len(labels):
+        raise ValueError("prob_class_* columns must map to unique class labels.")
+    return labels
+
+
 def _confidence_values(frame: pd.DataFrame) -> pd.Series:
     confidence = pd.to_numeric(frame["confidence"], errors="coerce")
     if confidence.isna().any() or not np.isfinite(confidence.to_numpy(dtype=float)).all():
@@ -89,10 +102,18 @@ def score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
         return pd.Series(probabilities.max(axis=1), index=frame.index)
     if score_column == "probability_true_class" and "true_label" in frame.columns:
         true_labels, valid_labels = _integer_labels(frame["true_label"])
+        label_positions = {
+            label: position
+            for position, label in enumerate(_probability_label_values(prob_columns))
+        }
+        probability_positions = np.asarray(
+            [label_positions.get(int(label), -1) for label in true_labels],
+            dtype=int,
+        )
         scores = np.full(len(frame), np.nan, dtype=float)
-        in_bounds = valid_labels & (true_labels >= 0) & (true_labels < probabilities.shape[1])
+        in_bounds = valid_labels & (probability_positions >= 0)
         valid_positions = np.flatnonzero(in_bounds)
-        scores[valid_positions] = probabilities[valid_positions, true_labels[valid_positions]]
+        scores[valid_positions] = probabilities[valid_positions, probability_positions[valid_positions]]
         return pd.Series(scores, index=frame.index)
     raise ValueError(f"Score column '{score_column}' is missing and cannot be inferred.")
 
@@ -118,7 +139,8 @@ def ensure_prediction_columns(frame: pd.DataFrame) -> pd.DataFrame:
         return frame
     prob_columns = probability_columns(frame)
     probabilities = _normalize_probabilities(frame[prob_columns].to_numpy(dtype=float))
-    predicted_labels = probabilities.argmax(axis=1)
+    probability_labels = np.asarray(_probability_label_values(prob_columns), dtype=int)
+    predicted_labels = probability_labels[probabilities.argmax(axis=1)]
     if "predicted_label" in frame.columns:
         parsed_labels, valid_labels = _integer_labels(frame["predicted_label"])
         predicted_labels[valid_labels] = parsed_labels[valid_labels]
