@@ -19,6 +19,18 @@ def test_random_subspace_random_state_accepts_integer_seeds(value) -> None:
     assert [subset.tolist() for subset in first] == [subset.tolist() for subset in second]
 
 
+def test_random_subspace_random_state_preserves_large_exact_seeds() -> None:
+    seed = 2**53 + 1
+    expected = sample_feature_subspaces(n_features=20, n_estimators=3, random_state=seed)
+
+    for value in (seed, str(seed), np.uint64(seed), np.asarray(seed, dtype=np.uint64)):
+        assert random_subspace_ensemble_config(random_state=value).random_state == seed
+        actual = sample_feature_subspaces(n_features=20, n_estimators=3, random_state=value)
+        assert [subset.tolist() for subset in actual] == [subset.tolist() for subset in expected]
+
+    assert random_subspace_ensemble_config(random_state="1e3").random_state == 1000
+
+
 @pytest.mark.parametrize("value", [True, -1, 0.5, "1.5", [1], {"seed": 1}, np.asarray([1, 2])])
 def test_random_subspace_random_state_rejects_invalid_values(value) -> None:
     with pytest.raises(ValueError, match="random_state"):
