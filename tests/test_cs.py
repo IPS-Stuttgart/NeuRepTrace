@@ -77,3 +77,38 @@ def test_fit_jda_preserves_large_transform_state() -> None:
     assert np.all(np.isfinite(result.scale))
     assert np.allclose(transform_jda(source_features, result), result.source_features)
     assert np.allclose(transform_jda(target_features, result), result.target_features)
+
+
+def test_fit_jda_avoids_overflow_for_extreme_finite_statistics() -> None:
+    source_features = np.asarray(
+        [
+            [1e308, -1e308],
+            [1e308, -5e307],
+            [1e308, 5e307],
+            [1e308, 1e308],
+        ],
+        dtype=float,
+    )
+    source_labels = np.asarray([0, 0, 1, 1], dtype=object)
+    target_features = np.asarray(
+        [
+            [1e308, -7.5e307],
+            [1e308, 7.5e307],
+        ],
+        dtype=float,
+    )
+
+    with np.errstate(over="raise", invalid="raise"):
+        result = fit_jda(
+            source_features,
+            source_labels,
+            target_features,
+            n_components=1,
+            max_iterations=3,
+        )
+
+    for value in (result.mean, result.scale, result.source_features, result.target_features, result.projection):
+        assert np.all(np.isfinite(value))
+    np.testing.assert_allclose(result.mean, [1e308, 0.0])
+    np.testing.assert_allclose(transform_jda(source_features, result), result.source_features)
+    np.testing.assert_allclose(transform_jda(target_features, result), result.target_features)
