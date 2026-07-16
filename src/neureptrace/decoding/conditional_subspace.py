@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 from scipy.linalg import eigh
 
+from neureptrace.decoding.array_stats import column_stats
 from neureptrace.decoding._domain_ids import ordered_unique, values_equal
 from neureptrace.decoding.subspace_adaptation import (
     MIN_SCALE,
@@ -54,8 +55,9 @@ def fit_jda(
     weight = _nonnegative(conditional_weight, "conditional_weight")
 
     joint = np.vstack([source, target]).astype(float, copy=False)
-    mean = joint.mean(axis=0)
-    scale = np.maximum(joint.std(axis=0, ddof=1), MIN_SCALE)
+    statistics = column_stats(joint, scale_floor=MIN_SCALE)
+    mean = statistics.mean
+    scale = statistics.scale
     z = (joint - mean) / scale
     n_source, n_target = len(source), len(target)
     pseudo = _predict(z[:n_source], labels, z[n_source:], classes)
