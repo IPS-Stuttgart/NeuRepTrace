@@ -109,6 +109,28 @@ def test_iter_dataset_files_expands_mne_epochs_template(tmp_path: Path):
     ]
 
 
+def test_iter_dataset_files_expands_mne_metadata_template(tmp_path: Path):
+    config = {
+        "dataset": {
+            "type": "mne_epochs",
+            "root": "staged",
+            "epochs_files": {
+                "template": "ds004276/sub-{subject03d}_epo.fif",
+                "metadata_csv": "ds004276/sub-{subject03d}_events.csv",
+            },
+        },
+        "participants": {"ids": "1-2"},
+        "decoding": {"label_column": "condition"},
+    }
+
+    assert iter_dataset_files(config, base_dir=tmp_path) == [
+        tmp_path / "staged" / "ds004276" / "sub-001_epo.fif",
+        tmp_path / "staged" / "ds004276" / "sub-001_events.csv",
+        tmp_path / "staged" / "ds004276" / "sub-002_epo.fif",
+        tmp_path / "staged" / "ds004276" / "sub-002_events.csv",
+    ]
+
+
 def test_mne_epochs_template_requires_participants_ids(tmp_path: Path):
     config = {
         "dataset": {
@@ -182,7 +204,7 @@ def test_epoch_dataset_concatenate_supports_channel_intersection():
         metadata=pd.DataFrame({"split": ["cue"]}),
     )
 
-    merged = EpochDataset.concatenate([first, second], channel_policy="intersection")
+    merged = EpochDataset.concatenate([first, second], name="merged", channel_policy="intersection")
 
     assert merged.channel_names == ["B", "C"]
     assert merged.data.shape == (2, 2, 2)
@@ -196,24 +218,33 @@ def test_load_mne_epochs_dataset_concatenates_template_files(tmp_path: Path):
     staged.mkdir(parents=True)
     for subject, offset in [(1, 0.0), (2, 1.0)]:
         info = mne.create_info(["MEG001", "MEG002"], sfreq=10.0, ch_types="mag")
-        metadata = pd.DataFrame({"subject": [f"sub-{subject:03d}"], "condition": ["a" if subject == 1 else "b"]})
+        embedded_metadata = pd.DataFrame({"subject": [f"embedded-{subject:03d}"], "condition": ["embedded"]})
         epochs = mne.EpochsArray(
             np.ones((1, 2, 3)) + offset,
             info,
             events=np.array([[subject, 0, 1]]),
             event_id={"event": 1},
             tmin=-0.1,
-            metadata=metadata,
+            metadata=embedded_metadata,
             verbose="error",
         )
         epochs.save(staged / f"sub-{subject:03d}_epo.fif", overwrite=True)
+        pd.DataFrame(
+            {
+                "subject": [f"sub-{subject:03d}"],
+                "condition": ["a" if subject == 1 else "b"],
+            }
+        ).to_csv(staged / f"sub-{subject:03d}_events.csv", index=False)
 
     dataset = load_epoch_dataset_from_config(
         {
             "dataset": {
                 "type": "mne_epochs",
                 "root": "staged",
-                "epochs_files": {"template": "demo/sub-{subject03d}_epo.fif"},
+                "epochs_files": {
+                    "template": "demo/sub-{subject03d}_epo.fif",
+                    "metadata_csv": "demo/sub-{subject03d}_events.csv",
+                },
             },
             "participants": {"ids": "1-2"},
             "decoding": {"label_column": "condition"},
@@ -224,3 +255,4 @@ def test_load_mne_epochs_dataset_concatenates_template_files(tmp_path: Path):
 
     assert dataset.data.shape == (2, 2, 3)
     assert dataset.metadata["subject"].tolist() == ["sub-001", "sub-002"]
+    assert dataset.metadata["condition"].tolist() == ["a", "b"]
