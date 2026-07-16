@@ -28,6 +28,20 @@ def test_column_stats_preserves_large_finite_statistics():
     np.testing.assert_allclose(result.maximum, [2e100, -1e100])
 
 
+def test_column_stats_avoids_overflow_for_extreme_finite_statistics():
+    values = np.asarray([[1e308, 1e308], [1e308, -1e308]], dtype=float)
+
+    with np.errstate(over="raise", invalid="raise"):
+        result = column_stats(values)
+
+    for summary in (result.mean, result.scale, result.minimum, result.maximum):
+        assert np.all(np.isfinite(summary))
+    np.testing.assert_allclose(result.mean, [1e308, 0.0])
+    np.testing.assert_allclose(result.scale, [1e-12, np.sqrt(2.0) * 1e308], rtol=1e-15)
+    np.testing.assert_allclose(result.minimum, [1e308, -1e308])
+    np.testing.assert_allclose(result.maximum, [1e308, 1e308])
+
+
 def test_column_stats_accepts_scalar_array_scale_floor():
     result = column_stats([[1.0], [1.0]], scale_floor=np.asarray(0.25))
 
