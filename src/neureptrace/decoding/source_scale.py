@@ -91,8 +91,9 @@ def fit_source_feature_scale_stats(
     cfg = source_feature_scale_config() if config is None else _coerce_config(config)
     source = _feature_matrix(source_features, name="source_features")
     if cfg.method == "standard":
-        offset = np.mean(source, axis=0) if cfg.center else np.zeros(source.shape[1], dtype=float)
-        scale = np.std(source - offset, axis=0, ddof=1 if source.shape[0] > 1 else 0) if cfg.scale else np.ones(source.shape[1], dtype=float)
+        mean, standard_scale = _stable_column_mean_and_std(source)
+        offset = mean if cfg.center else np.zeros(source.shape[1], dtype=float)
+        scale = standard_scale if cfg.scale else np.ones(source.shape[1], dtype=float)
     elif cfg.method == "robust":
         offset = np.median(source, axis=0) if cfg.center else np.zeros(source.shape[1], dtype=float)
         q75 = np.percentile(source, 75.0, axis=0)
@@ -107,6 +108,19 @@ def fit_source_feature_scale_stats(
         raise ValueError(f"Unhandled source scaling method {cfg.method!r}.")
     scale = np.maximum(np.asarray(scale, dtype=float), cfg.epsilon)
     return SourceFeatureScaleStats(offset=np.asarray(offset, dtype=float), scale=scale, method=cfg.method, n_fit_rows=int(source.shape[0]))
+
+
+def _stable_column_mean_and_std(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Compute column moments without overflowing intermediate sums or squares."""
+
+    magnitude = np.max(np.abs(matrix), axis=0)
+    normalized = np.zeros_like(matrix)
+    nonzero = magnitude > 0.0
+    normalized[:, nonzero] = matrix[:, nonzero] / magnitude[nonzero]
+    ddof = 1 if matrix.shape[0] > 1 else 0
+    mean = np.mean(normalized, axis=0) * magnitude
+    scale = np.std(normalized, axis=0, ddof=ddof) * magnitude
+    return mean, scale
 
 
 def apply_source_feature_scale(features: Iterable[Iterable[float]] | np.ndarray, stats: SourceFeatureScaleStats) -> np.ndarray:
