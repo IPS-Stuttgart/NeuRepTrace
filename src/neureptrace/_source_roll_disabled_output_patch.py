@@ -15,7 +15,10 @@ def install() -> None:
 
     source_roll = importlib.import_module("neureptrace.decoding.source_roll")
     original = source_roll.augment_source_with_feature_roll
-    if getattr(original, _PATCH_MARKER, False):
+    # ``functools.wraps`` copies function attributes. A compatibility wrapper can
+    # therefore inherit our marker without actually being the outer guard. Store
+    # the wrapper itself as the marker value and only skip when it is still final.
+    if getattr(original, _PATCH_MARKER, None) is original:
         return
 
     @wraps(original)
@@ -42,7 +45,7 @@ def install() -> None:
             synthetic_mask=result.synthetic_mask[:0].copy(),
         )
 
-    setattr(augment_source_with_feature_roll, _PATCH_MARKER, True)
+    setattr(augment_source_with_feature_roll, _PATCH_MARKER, augment_source_with_feature_roll)
     source_roll.augment_source_with_feature_roll = augment_source_with_feature_roll
 
 
