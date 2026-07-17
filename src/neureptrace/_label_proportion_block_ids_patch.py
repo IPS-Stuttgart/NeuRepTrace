@@ -6,6 +6,7 @@ from collections.abc import Hashable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 import neureptrace.decoding.label_proportions as _label_proportions
 
@@ -59,9 +60,25 @@ def _object_block_vector(values: Sequence[Hashable] | np.ndarray, *, expected_le
     return vector
 
 
+def _is_missing_scalar(value: Any) -> bool:
+    """Return whether a hashable scalar is a missing-value sentinel."""
+
+    if isinstance(value, np.generic):
+        value = value.item()
+    if value is pd.NA or value is pd.NaT:
+        return True
+    return isinstance(value, float) and np.isnan(value)
+
+
 def _values_equal(left: Any, right: Any) -> bool:
     if left is right:
         return True
+    if _is_missing_scalar(left) and _is_missing_scalar(right):
+        return True
+    if isinstance(left, tuple) or isinstance(right, tuple):
+        if not isinstance(left, tuple) or not isinstance(right, tuple) or len(left) != len(right):
+            return False
+        return all(_values_equal(left_value, right_value) for left_value, right_value in zip(left, right, strict=True))
     try:
         result = left == right
     except Exception:
@@ -84,6 +101,28 @@ def _unique_blocks(block_vector: np.ndarray) -> tuple[Hashable, ...]:
         if not any(_values_equal(block, existing) for existing in blocks):
             blocks.append(block)
     return tuple(blocks)
+
+
+def _lookup_block_proportions(
+    target_proportions_by_block: Mapping[Hashable, Mapping[Any, float] | Sequence[float] | np.ndarray],
+    block: Hashable,
+    *,
+    default_proportions: Mapping[Any, float] | Sequence[float] | np.ndarray | None,
+) -> Mapping[Any, float] | Sequence[float] | np.ndarray:
+    """Resolve proportions using missing-aware block-id equality."""
+
+    try:
+        return target_proportions_by_block[block]
+    except (KeyError, TypeError):
+        for candidate, proportions in target_proportions_by_block.items():
+            if _values_equal(candidate, block):
+                return proportions
+        text_block = str(block)
+        if text_block in target_proportions_by_block:
+            return target_proportions_by_block[text_block]
+        if default_proportions is not None:
+            return default_proportions
+        raise KeyError(f"Missing target label proportions for block {block!r}.") from None
 
 
 def _apply_class_bias(probabilities: np.ndarray, class_bias: np.ndarray, *, epsilon: float) -> np.ndarray:
@@ -211,7 +250,7 @@ def _adjust_probability_blocks_to_label_proportions(
 
     for block in ordered_blocks:
         mask = _block_equal_mask(block_vector, block)
-        proportions = _label_proportions._lookup_block_proportions(
+        proportions = _lookup_block_proportions(
             target_proportions_by_block,
             block,
             default_proportions=default_proportions,
