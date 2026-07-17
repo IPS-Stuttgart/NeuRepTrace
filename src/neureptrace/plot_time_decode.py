@@ -30,6 +30,9 @@ def _validate_metrics(metrics: tuple[str, ...]) -> tuple[str, ...]:
     unknown = [metric for metric in requested if metric not in METRIC_COLUMNS]
     if unknown:
         raise ValueError(f"Unknown metrics: {unknown}")
+    duplicates = list(dict.fromkeys(metric for metric in requested if requested.count(metric) > 1))
+    if duplicates:
+        raise ValueError(f"Duplicate metrics are not allowed: {duplicates}")
     return requested
 
 
