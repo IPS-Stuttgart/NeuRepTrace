@@ -44,7 +44,7 @@ def test_plot_time_decode_results_accepts_selected_raw_metric_only(tmp_path: Pat
 
 def test_plot_time_decode_results_accepts_selected_aggregated_metric_only(tmp_path: Path):
     results_csv = tmp_path / "accuracy_summary.csv"
-    out_path = tmp_path / "accuracy_only.png"
+    out_path = tmp_path / "accuracy_summary.png"
     pd.DataFrame(
         {
             "time": [0.1, 0.2],
