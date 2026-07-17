@@ -1,4 +1,4 @@
-"""Runtime patch for sign-flip scalar controls and zero-variance statistics."""
+"""Runtime patch for sign-flip scalar controls and robust statistics."""
 
 from __future__ import annotations
 
@@ -88,13 +88,22 @@ def _t_statistics_from_mean_and_sem(means: np.ndarray, sem: np.ndarray) -> np.nd
     return statistics
 
 
+def _scale_effect_columns(effects: np.ndarray) -> np.ndarray:
+    """Scale effect columns without changing their t statistics."""
+
+    scales = np.max(np.abs(effects), axis=0)
+    safe_scales = np.where(scales > 0.0, scales, 1.0)
+    return effects / safe_scales
+
+
 def _t_statistic(effects: np.ndarray) -> np.ndarray:
-    """Compute one-sample t statistics without erasing exact constant effects."""
+    """Compute overflow-safe one-sample t statistics for finite effects."""
 
     if effects.shape[0] < 2:
         raise ValueError("Need at least two subjects for subject-level inference.")
-    means = effects.mean(axis=0)
-    sem = effects.std(axis=0, ddof=1) / np.sqrt(effects.shape[0])
+    scaled_effects = _scale_effect_columns(effects)
+    means = scaled_effects.mean(axis=0)
+    sem = scaled_effects.std(axis=0, ddof=1) / np.sqrt(effects.shape[0])
     return _t_statistics_from_mean_and_sem(means, sem)
 
 
@@ -127,8 +136,9 @@ def _patch_inference() -> None:
                 np.array([-1.0, 1.0]),
                 size=(validated_permutations, n_subjects),
             )
-            means = signs @ effects / n_subjects
-            sum_squares = np.sum(effects**2, axis=0)
+            scaled_effects = _scale_effect_columns(effects)
+            means = signs @ scaled_effects / n_subjects
+            sum_squares = np.sum(scaled_effects**2, axis=0)
             variances = (sum_squares[None, :] - n_subjects * means**2) / (n_subjects - 1)
             sem = np.sqrt(np.maximum(variances, 0.0) / n_subjects)
             return _t_statistics_from_mean_and_sem(means, sem)
@@ -166,7 +176,7 @@ def _patch_paired_stats() -> None:
 
 
 def install() -> None:
-    """Install strict scalar controls and exact zero-variance sign-flip statistics."""
+    """Install strict scalar controls and overflow-safe sign-flip statistics."""
     _patch_inference()
     _patch_paired_stats()
 
