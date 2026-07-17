@@ -39,22 +39,26 @@ def _contains_boolean(value: Any) -> bool:
 
 
 def install() -> None:
-    """Install a guard for public MixUp lambda weights."""
+    """Install guards for public Source MixUp lambda weights and disabled source-roll output."""
 
     source_mixup = importlib.import_module("neureptrace.decoding.source_mixup")
     original_mixup_rows = source_mixup.mixup_rows
-    if getattr(original_mixup_rows, _PATCH_MARKER, False):
-        return
+    if not getattr(original_mixup_rows, _PATCH_MARKER, False):
 
-    @wraps(original_mixup_rows)
-    def mixup_rows(content_features, partner_features, *, lambdas):
-        lambda_values = _materialize(lambdas)
-        if _contains_boolean(lambda_values):
-            raise ValueError(_ERROR)
-        return original_mixup_rows(content_features, partner_features, lambdas=lambda_values)
+        @wraps(original_mixup_rows)
+        def mixup_rows(content_features, partner_features, *, lambdas):
+            lambda_values = _materialize(lambdas)
+            if _contains_boolean(lambda_values):
+                raise ValueError(_ERROR)
+            return original_mixup_rows(content_features, partner_features, lambdas=lambda_values)
 
-    setattr(mixup_rows, _PATCH_MARKER, True)
-    source_mixup.mixup_rows = mixup_rows
+        setattr(mixup_rows, _PATCH_MARKER, True)
+        source_mixup.mixup_rows = mixup_rows
+
+    # Package initialization calls this installer immediately after the source-roll
+    # compatibility patch, so the final public wrapper can be corrected here.
+    source_roll_patch = importlib.import_module("neureptrace._source_roll_disabled_output_patch")
+    source_roll_patch.install()
 
 
 __all__ = ["install"]
