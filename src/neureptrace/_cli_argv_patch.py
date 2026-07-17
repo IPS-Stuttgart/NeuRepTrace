@@ -37,8 +37,12 @@ def _build_parser(public: Any) -> argparse.ArgumentParser:
 
 
 def install() -> None:
-    from neureptrace import _onset_signed_probability_labels_patch
+    from neureptrace import (
+        _onset_sensitivity_setting_id_patch,
+        _onset_signed_probability_labels_patch,
+    )
 
+    _onset_sensitivity_setting_id_patch.install()
     _onset_signed_probability_labels_patch.install()
     public = importlib.import_module("neureptrace._stimulus_detection_public")
     if getattr(public.main, _PATCH_MARKER, False):
