@@ -86,8 +86,9 @@ def _stable_column_ranges(matrix: np.ndarray) -> np.ndarray:
     if np.any(positive):
         normalized_positive = normalized_range[positive]
         magnitude_positive = magnitude[positive]
-        maximum_magnitude = np.finfo(float).max / normalized_positive
-        safe = magnitude_positive <= maximum_magnitude
+        safe = normalized_positive <= 1.0
+        above_one = ~safe
+        safe[above_one] = magnitude_positive[above_one] <= np.finfo(float).max / normalized_positive[above_one]
         scaled = np.empty_like(normalized_positive)
         scaled[safe] = normalized_positive[safe] * magnitude_positive[safe]
         scaled[~safe] = np.finfo(float).max
