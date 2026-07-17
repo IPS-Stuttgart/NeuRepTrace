@@ -44,7 +44,7 @@ def test_plot_time_decode_results_accepts_selected_raw_metric_only(tmp_path: Pat
 
 def test_plot_time_decode_results_accepts_selected_aggregated_metric_only(tmp_path: Path):
     results_csv = tmp_path / "accuracy_summary.csv"
-    out_path = tmp_path / "accuracy_summary.png"
+    out_path = tmp_path / "accuracy_only.png"
     pd.DataFrame(
         {
             "time": [0.1, 0.2],
@@ -65,6 +65,18 @@ def test_plot_time_decode_results_rejects_empty_metric_selection(tmp_path: Path)
 
     with pytest.raises(ValueError, match="At least one metric"):
         plot_time_decode_results(results_csv, out_path=tmp_path / "plot.png", metrics=())
+
+
+def test_plot_time_decode_results_rejects_duplicate_metric_selection(tmp_path: Path):
+    results_csv = tmp_path / "results.csv"
+    pd.DataFrame({"time": [0.1, 0.1], "accuracy": [0.6, 0.8]}).to_csv(results_csv, index=False)
+
+    with pytest.raises(ValueError, match="Duplicate metrics"):
+        plot_time_decode_results(
+            results_csv,
+            out_path=tmp_path / "plot.png",
+            metrics=("accuracy", "accuracy"),
+        )
 
 
 def test_summary_from_csv_keeps_grouped_sem_aligned(tmp_path: Path):
