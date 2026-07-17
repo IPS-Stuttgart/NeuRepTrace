@@ -28,13 +28,13 @@ def fit_source_range_selector(*, source_features, test_features, min_range: floa
         raise ValueError("feature widths differ")
     min_range_value = _nonnegative_float(min_range, name="min_range")
     top_k_value = None if top_k is None else _positive_int(top_k, name="top_k")
-    ranges = np.ptp(source, axis=0).astype(float, copy=False)
+    ranges = _stable_column_ranges(source)
     selected = select_source_range_features(ranges, min_range=min_range_value, top_k=top_k_value)
     return SourceRangeSelectorResult(
-        train_features=source[:, selected].astype(np.float32, copy=False),
-        test_features=test[:, selected].astype(np.float32, copy=False),
+        train_features=_compact_float32(source[:, selected]),
+        test_features=_compact_float32(test[:, selected]),
         selected_indices=selected.astype(int, copy=False),
-        ranges=ranges.astype(np.float32, copy=False),
+        ranges=_compact_float32(ranges),
         metadata={
             "source_range_selector": True,
             "source_range_selector_protocol": SOURCE_RANGE_SELECTOR_PROTOCOL,
@@ -68,6 +68,44 @@ def select_source_range_features(ranges, *, min_range: float = 0.0, top_k: int |
     if selected.size == 0:
         selected = np.asarray([int(np.argmax(values))], dtype=int)
     return np.sort(selected).astype(int, copy=False)
+
+
+def _stable_column_ranges(matrix: np.ndarray) -> np.ndarray:
+    """Compute finite column ranges without overflowing max-minus-min."""
+
+    minimum = np.min(matrix, axis=0)
+    maximum = np.max(matrix, axis=0)
+    magnitude = np.maximum(np.abs(minimum), np.abs(maximum))
+    normalized_range = np.zeros_like(magnitude)
+    nonzero = magnitude > 0.0
+    normalized_range[nonzero] = maximum[nonzero] / magnitude[nonzero] - minimum[nonzero] / magnitude[nonzero]
+    normalized_range = np.maximum(normalized_range, 0.0)
+
+    ranges = np.zeros_like(magnitude)
+    positive = normalized_range > 0.0
+    if np.any(positive):
+        normalized_positive = normalized_range[positive]
+        magnitude_positive = magnitude[positive]
+        safe = normalized_positive <= 1.0
+        above_one = ~safe
+        safe[above_one] = magnitude_positive[above_one] <= np.finfo(float).max / normalized_positive[above_one]
+        scaled = np.empty_like(normalized_positive)
+        scaled[safe] = normalized_positive[safe] * magnitude_positive[safe]
+        scaled[~safe] = np.finfo(float).max
+        ranges[positive] = scaled
+    return ranges
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _materialize_one_pass_iterables(value: object) -> object:
