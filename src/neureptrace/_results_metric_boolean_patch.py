@@ -15,6 +15,8 @@ _OPTIONAL_PATCH_ATTR = "_neureptrace_results_optional_metric_aggregation"
 _POSITIVE_INTEGER_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_positive_integer_controls"
 _FINITE_SCALAR_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_finite_numeric_scalars"
 _POSITIVE_COUNT_COLUMN_ARRAY_PATCH_ATTR = "_neureptrace_rejects_array_positive_count_columns"
+_STABLE_SERIES_SUMMARY_PATCH_ATTR = "_neureptrace_stable_metric_table_series_summary"
+_STABLE_NANMEAN_PATCH_ATTR = "_neureptrace_stable_metric_table_nanmean"
 _OPTIONAL_METRICS = ("balanced_accuracy", "top2_accuracy", "top3_accuracy")
 
 
@@ -145,6 +147,28 @@ def _reject_mixed_boolean_optional_column(
             raise ValueError(f"Metric table column '{column}' must not contain booleans; bad row(s): {bad_rows}.")
 
 
+def _rescale_finite_statistic(value: float, scale: float) -> float:
+    """Rescale a normalized finite statistic without overflowing binary64."""
+
+    value = float(value)
+    scale = float(scale)
+    if value == 0.0 or scale == 0.0:
+        return 0.0
+    maximum = np.finfo(float).max
+    if abs(value) > maximum / scale:
+        return float(np.copysign(maximum, value))
+    return float(value * scale)
+
+
+def _stable_mean(finite: np.ndarray) -> float:
+    """Return a finite mean for a non-empty finite binary64 vector."""
+
+    scale = float(np.max(np.abs(finite)))
+    if scale == 0.0:
+        return 0.0
+    return _rescale_finite_statistic(float(np.mean(finite / scale)), scale)
+
+
 def install() -> None:
     """Install aggregate result metric guards."""
 
@@ -187,6 +211,50 @@ def install() -> None:
         setattr(_finite_numeric_scalar_checked, _FINITE_SCALAR_ARRAY_PATCH_ATTR, True)
         _finite_numeric_scalar_checked.__wrapped__ = original_finite_numeric_scalar
         tables._finite_numeric_scalar = _finite_numeric_scalar_checked
+
+    original_series_summary = tables._series_summary
+    if not getattr(original_series_summary, _STABLE_SERIES_SUMMARY_PATCH_ATTR, False):
+
+        def _series_summary_stable(
+            values: pd.Series,
+            *,
+            zero_singleton_dispersion: bool,
+        ) -> tuple[float, float, float, float]:
+            finite = tables._finite_array(values)
+            if finite.size == 0:
+                return np.nan, np.nan, np.nan, np.nan
+
+            scale = float(np.max(np.abs(finite)))
+            if scale == 0.0:
+                normalized = finite
+            else:
+                normalized = finite / scale
+            mean = _rescale_finite_statistic(float(np.mean(normalized)), scale)
+            median = _rescale_finite_statistic(float(np.median(normalized)), scale)
+            if finite.size == 1:
+                dispersion = 0.0 if zero_singleton_dispersion else np.nan
+                return mean, float(dispersion), float(dispersion), median
+
+            normalized_std = float(np.std(normalized, ddof=1))
+            std = _rescale_finite_statistic(normalized_std, scale)
+            normalized_sem = normalized_std / float(np.sqrt(finite.size))
+            sem = _rescale_finite_statistic(normalized_sem, scale)
+            return mean, std, sem, median
+
+        setattr(_series_summary_stable, _STABLE_SERIES_SUMMARY_PATCH_ATTR, True)
+        _series_summary_stable.__wrapped__ = original_series_summary
+        tables._series_summary = _series_summary_stable
+
+    original_nanmean = tables._nanmean
+    if not getattr(original_nanmean, _STABLE_NANMEAN_PATCH_ATTR, False):
+
+        def _nanmean_stable(values: object) -> float:
+            finite = tables._finite_array(values)
+            return _stable_mean(finite) if finite.size else np.nan
+
+        setattr(_nanmean_stable, _STABLE_NANMEAN_PATCH_ATTR, True)
+        _nanmean_stable.__wrapped__ = original_nanmean
+        tables._nanmean = _nanmean_stable
 
     original = results._coerce_finite_metric_columns
     if not getattr(original, _PATCH_ATTR, False):
