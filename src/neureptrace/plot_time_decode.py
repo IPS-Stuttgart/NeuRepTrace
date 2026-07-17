@@ -30,6 +30,14 @@ def _validate_metrics(metrics: tuple[str, ...]) -> tuple[str, ...]:
     unknown = [metric for metric in requested if metric not in METRIC_COLUMNS]
     if unknown:
         raise ValueError(f"Unknown metrics: {unknown}")
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for metric in requested:
+        if metric in seen and metric not in duplicates:
+            duplicates.append(metric)
+        seen.add(metric)
+    if duplicates:
+        raise ValueError(f"Metrics must be unique; duplicate metrics: {duplicates}")
     return requested
 
 
