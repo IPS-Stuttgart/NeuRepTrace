@@ -43,7 +43,13 @@ def column_stats(values: Sequence[Sequence[float]] | np.ndarray, *, scale_floor:
 
 
 def _stable_column_mean_and_std(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Compute column moments without overflowing intermediate sums or squares."""
+    """Compute column moments without overflowing intermediate sums or squares.
+
+    A finite sample standard deviation can exceed the largest representable
+    ``float64`` value even when every input is finite. Saturate that
+    unrepresentable result at the largest finite value instead of returning
+    ``inf`` or raising under strict NumPy error handling.
+    """
 
     magnitude = np.max(np.abs(matrix), axis=0)
     normalized = np.zeros_like(matrix)
@@ -51,7 +57,13 @@ def _stable_column_mean_and_std(matrix: np.ndarray) -> tuple[np.ndarray, np.ndar
     normalized[:, nonzero] = matrix[:, nonzero] / magnitude[nonzero]
     ddof = 1 if matrix.shape[0] > 1 else 0
     mean = np.mean(normalized, axis=0) * magnitude
-    scale = np.std(normalized, axis=0, ddof=ddof) * magnitude
+    normalized_scale = np.std(normalized, axis=0, ddof=ddof)
+
+    max_float = np.finfo(matrix.dtype).max
+    scale_limit = np.full_like(magnitude, max_float)
+    large_magnitude = magnitude > 1.0
+    scale_limit[large_magnitude] = max_float / magnitude[large_magnitude]
+    scale = np.minimum(normalized_scale, scale_limit) * magnitude
     return mean, scale
 
 
