@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.plot_time_decode import _summary_from_csv, plot_time_decode_results
 
@@ -22,6 +23,48 @@ def test_plot_time_decode_results_writes_png(tmp_path: Path):
 
     assert out_path.exists()
     assert out_path.stat().st_size > 0
+
+
+def test_plot_time_decode_results_accepts_selected_raw_metric_only(tmp_path: Path):
+    results_csv = tmp_path / "accuracy_only.csv"
+    out_path = tmp_path / "accuracy_only.png"
+    pd.DataFrame(
+        {
+            "time": [0.1, 0.1, 0.2, 0.2],
+            "accuracy": [0.6, 0.8, 0.7, 0.9],
+        }
+    ).to_csv(results_csv, index=False)
+
+    plot_time_decode_results(results_csv, out_path=out_path, metrics=("accuracy",))
+
+    assert out_path.exists()
+    summary = _summary_from_csv(results_csv, metrics=("accuracy",))
+    assert list(summary.columns) == ["time", "accuracy_mean", "accuracy_sem"]
+
+
+def test_plot_time_decode_results_accepts_selected_aggregated_metric_only(tmp_path: Path):
+    results_csv = tmp_path / "accuracy_summary.csv"
+    out_path = tmp_path / "accuracy_summary.png"
+    pd.DataFrame(
+        {
+            "time": [0.1, 0.2],
+            "accuracy_mean": [0.7, 0.8],
+        }
+    ).to_csv(results_csv, index=False)
+
+    plot_time_decode_results(results_csv, out_path=out_path, metrics=("accuracy",))
+
+    assert out_path.exists()
+    summary = _summary_from_csv(results_csv, metrics=("accuracy",))
+    assert summary["accuracy_sem"].tolist() == [0.0, 0.0]
+
+
+def test_plot_time_decode_results_rejects_empty_metric_selection(tmp_path: Path):
+    results_csv = tmp_path / "results.csv"
+    pd.DataFrame({"time": [0.1], "accuracy": [0.7]}).to_csv(results_csv, index=False)
+
+    with pytest.raises(ValueError, match="At least one metric"):
+        plot_time_decode_results(results_csv, out_path=tmp_path / "plot.png", metrics=())
 
 
 def test_summary_from_csv_keeps_grouped_sem_aligned(tmp_path: Path):

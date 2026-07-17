@@ -23,28 +23,48 @@ def _group_label(group_name) -> str:
     return str(group_name)
 
 
-def _summary_from_csv(results_csv: Path) -> pd.DataFrame:
+def _validate_metrics(metrics: tuple[str, ...]) -> tuple[str, ...]:
+    requested = tuple(metrics)
+    if not requested:
+        raise ValueError("At least one metric must be selected for plotting.")
+    unknown = [metric for metric in requested if metric not in METRIC_COLUMNS]
+    if unknown:
+        raise ValueError(f"Unknown metrics: {unknown}")
+    return requested
+
+
+def _summary_from_csv(
+    results_csv: Path,
+    *,
+    metrics: tuple[str, ...] = METRIC_COLUMNS,
+) -> pd.DataFrame:
+    requested_metrics = _validate_metrics(metrics)
     results = pd.read_csv(results_csv)
     if "time" not in results.columns:
         raise ValueError("Results CSV must contain a 'time' column.")
 
-    if all(f"{metric}_mean" in results.columns for metric in METRIC_COLUMNS):
+    aggregated_columns = [f"{metric}_mean" for metric in requested_metrics]
+    if all(column in results.columns for column in aggregated_columns):
         summary = results.copy()
-        for metric in METRIC_COLUMNS:
+        for metric in requested_metrics:
             if f"{metric}_sem" not in summary.columns:
                 summary[f"{metric}_sem"] = 0.0
         sort_columns = [*_group_columns(summary), "time"]
         return summary.sort_values(sort_columns or ["time"])
 
-    missing = [metric for metric in METRIC_COLUMNS if metric not in results.columns]
+    missing = [metric for metric in requested_metrics if metric not in results.columns]
     if missing:
-        raise ValueError(f"Results CSV is missing required metric columns: {missing}")
+        missing_aggregated = [f"{metric}_mean" for metric in missing]
+        raise ValueError(
+            "Results CSV is missing requested metric columns. "
+            f"Expected raw columns {missing} or aggregated columns {missing_aggregated}."
+        )
 
     group_columns = _group_columns(results)
     group_keys = [*group_columns, "time"]
     grouped = results.groupby(group_keys, as_index=False, dropna=False)
-    summary = grouped[list(METRIC_COLUMNS)].mean()
-    for metric in METRIC_COLUMNS:
+    summary = grouped[list(requested_metrics)].mean()
+    for metric in requested_metrics:
         sem = grouped[metric].sem().rename(columns={metric: f"{metric}_sem"})
         summary = summary.merge(sem, on=group_keys, how="left", validate="one_to_one")
         summary = summary.rename(columns={metric: f"{metric}_mean"})
@@ -60,11 +80,8 @@ def plot_time_decode_results(
     title: str | None = None,
 ) -> Path:
     """Plot time-resolved decoding metrics from a raw or aggregated CSV file."""
-    unknown = [metric for metric in metrics if metric not in METRIC_COLUMNS]
-    if unknown:
-        raise ValueError(f"Unknown metrics: {unknown}")
-
-    summary = _summary_from_csv(results_csv)
+    metrics = _validate_metrics(metrics)
+    summary = _summary_from_csv(results_csv, metrics=metrics)
     group_columns = _group_columns(summary)
     plot_groups = list(summary.groupby(group_columns, sort=True, dropna=False)) if group_columns else [(None, summary)]
     n_metrics = len(metrics)
