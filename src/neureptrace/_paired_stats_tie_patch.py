@@ -1,7 +1,8 @@
-"""Runtime patches for paired-statistics reporting robustness."""
+"""Runtime patches for paired-statistics input and reporting robustness."""
 
 from __future__ import annotations
 
+from collections import Counter
 from functools import wraps
 import re
 
@@ -10,6 +11,17 @@ import pandas as pd
 
 
 _REQUIRED_COLUMNS = {"decoder_a_mean", "decoder_b_mean", "better_decoder_by_mean"}
+
+
+def _validate_unique_metric_names(metrics: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    """Return metric names as a tuple after rejecting repetitions."""
+    if metrics is None:
+        return None
+    metric_names = tuple(metrics)
+    duplicates = sorted(name for name, count in Counter(metric_names).items() if count > 1)
+    if duplicates:
+        raise ValueError(f"metrics must not contain duplicate names: {duplicates}")
+    return metric_names
 
 
 def _mark_exact_mean_ties(statistics: pd.DataFrame) -> pd.DataFrame:
@@ -27,7 +39,7 @@ def _mark_exact_mean_ties(statistics: pd.DataFrame) -> pd.DataFrame:
 
 
 def install() -> None:
-    """Install unbiased tie handling and robust Markdown rendering."""
+    """Install metric validation, unbiased tie handling, and robust Markdown rendering."""
     from . import _emission_compare_empty_pairs_patch
 
     _emission_compare_empty_pairs_patch.install()
@@ -45,9 +57,10 @@ def install() -> None:
             n_permutations: int = 10_000,
             random_state: int = 13,
         ) -> pd.DataFrame:
+            metric_names = _validate_unique_metric_names(metrics)
             statistics = original_paired_decoder_statistics(
                 subject_metrics,
-                metrics=metrics,
+                metrics=metric_names,
                 n_permutations=n_permutations,
                 random_state=random_state,
             )
