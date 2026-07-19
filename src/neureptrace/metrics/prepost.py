@@ -232,7 +232,13 @@ def _group_row(group_columns: Sequence[str], group_key: object) -> dict[str, obj
 def _sorted_frame(rows: list[dict[str, object]], group_columns: Sequence[str]) -> pd.DataFrame:
     result = pd.DataFrame(rows)
     if group_columns and not result.empty:
-        result = result.sort_values(list(group_columns), kind="mergesort")
+        try:
+            result = result.sort_values(list(group_columns), kind="mergesort")
+        except TypeError:
+            # Group identifiers are labels and need not define a shared ordering
+            # across Python types. Grouping and merging already provide a stable
+            # row order, so retain it when the cosmetic sort is undefined.
+            pass
     return result.reset_index(drop=True)
 
 
