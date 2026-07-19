@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
+_SAMPLE_WEIGHT_COLUMN = "sample_weight"
+
+
 def _display_label(row: pd.Series | dict) -> str:
     decoder = str(row["decoder"])
     emission_mode = row.get("emission_mode")
@@ -48,12 +51,16 @@ def summarize_reliability_curve(
     else:
         bins["emission_mode"] = bins["emission_mode"].astype("object").where(bins["emission_mode"].notna(), "calibrated")
 
+    mass_column = _SAMPLE_WEIGHT_COLUMN if _SAMPLE_WEIGHT_COLUMN in bins.columns else "n_samples"
     rows = []
     group_columns = ["decoder", "emission_mode", "bin", "bin_left", "bin_right"]
     for keys, group in bins.groupby(group_columns, sort=True):
         n_samples = int(group["n_samples"].sum())
-        if n_samples:
-            weights = group["n_samples"] / n_samples
+        aggregation_mass = group[mass_column].astype(float)
+        max_mass = float(aggregation_mass.max())
+        if max_mass > 0.0:
+            scaled_mass = aggregation_mass / max_mass
+            weights = scaled_mass / float(scaled_mass.sum())
             accuracy = float((group["accuracy"].fillna(0.0) * weights).sum())
             confidence = float((group["confidence"].fillna(0.0) * weights).sum())
         else:
@@ -65,7 +72,7 @@ def summarize_reliability_curve(
                 "n_samples": n_samples,
                 "accuracy": accuracy,
                 "confidence": confidence,
-                "gap": accuracy - confidence if n_samples else float("nan"),
+                "gap": accuracy - confidence if max_mass > 0.0 else float("nan"),
             }
         )
     return pd.DataFrame(rows)
