@@ -163,8 +163,8 @@ def _iter_groups(frame: pd.DataFrame, group_columns: Sequence[str]):
 def _group_row(group_columns: Sequence[str], group_key: object) -> dict[str, object]:
     if not group_columns:
         return {}
-    if len(group_columns) == 1 and not isinstance(group_key, tuple):
-        group_key = (group_key,)
+    if len(group_columns) == 1:
+        return {group_columns[0]: group_key}
     return dict(zip(group_columns, group_key))
 
 
