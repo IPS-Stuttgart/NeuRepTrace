@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from neureptrace.results import summarize_metric_table
 
@@ -17,4 +18,4 @@ def test_summarize_metric_table_preserves_tuple_valued_single_group():
 
     assert summary["condition"].tolist() == [first_group, second_group]
     assert summary["n_rows"].tolist() == [2, 1]
-    assert summary["accuracy_mean"].tolist() == [0.7, 0.7]
+    assert summary["accuracy_mean"].tolist() == pytest.approx([0.7, 0.7])
