@@ -28,6 +28,50 @@ def test_summarize_reliability_curve_weights_by_samples():
     assert first_bin["confidence"] == pytest.approx(0.35)
 
 
+def test_summarize_reliability_curve_prefers_sample_weight():
+    bins = pd.DataFrame(
+        {
+            "decoder": ["logistic", "logistic"],
+            "time": [0.1, 0.2],
+            "bin": [1, 1],
+            "bin_left": [0.0, 0.0],
+            "bin_right": [0.5, 0.5],
+            "n_samples": [100, 1],
+            "sample_weight": [1.0, 9.0],
+            "accuracy": [1.0, 0.0],
+            "confidence": [0.9, 0.1],
+        }
+    )
+
+    curve = summarize_reliability_curve(bins)
+
+    assert curve.loc[0, "n_samples"] == 101
+    assert curve.loc[0, "accuracy"] == pytest.approx(0.1)
+    assert curve.loc[0, "confidence"] == pytest.approx(0.18)
+    assert curve.loc[0, "gap"] == pytest.approx(-0.08)
+
+
+def test_summarize_reliability_curve_handles_large_sample_weights():
+    bins = pd.DataFrame(
+        {
+            "decoder": ["logistic", "logistic"],
+            "time": [0.1, 0.2],
+            "bin": [1, 1],
+            "bin_left": [0.0, 0.0],
+            "bin_right": [0.5, 0.5],
+            "n_samples": [1, 1],
+            "sample_weight": [1e308, 1e308],
+            "accuracy": [1.0, 0.0],
+            "confidence": [0.75, 0.25],
+        }
+    )
+
+    curve = summarize_reliability_curve(bins)
+
+    assert curve.loc[0, "accuracy"] == pytest.approx(0.5)
+    assert curve.loc[0, "confidence"] == pytest.approx(0.5)
+
+
 def test_summarize_reliability_curve_preserves_rows_with_missing_group_labels():
     bins = pd.DataFrame(
         {
