@@ -1,4 +1,4 @@
-"""Handle composite labels in BUSH-MEG profile summaries."""
+"""Handle composite labels and class-count metadata in BUSH-MEG summaries."""
 
 from __future__ import annotations
 
@@ -47,6 +47,8 @@ def _class_count_dict(labels: Any) -> dict[str, int]:
 
 
 def install() -> None:
+    importlib.import_module("neureptrace._bushmeg_diagnostics_class_count_patch").install()
+
     all_protocols = importlib.import_module("neureptrace.bushmeg_all_protocols")
     if getattr(all_protocols, _PATCH_MARKER, False):
         return
