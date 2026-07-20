@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from functools import wraps
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,7 @@ from . import calibration as _calibration
 
 _ORIGINAL_VALIDATE_CALIBRATION_SUMMARY = _calibration._validate_calibration_summary
 _ORIGINAL_VALIDATE_RELIABILITY_BINS = _calibration._validate_reliability_bins
+_ORIGINAL_SUMMARIZE_CALIBRATION_METRICS = _calibration.summarize_calibration_metrics
 _INSTALLED = False
 
 
@@ -59,6 +61,24 @@ def _patched_validate_reliability_bins(frame: pd.DataFrame, csv_path: Path) -> p
     return _ORIGINAL_VALIDATE_RELIABILITY_BINS(frame, csv_path)
 
 
+@wraps(_ORIGINAL_SUMMARIZE_CALIBRATION_METRICS)
+def _patched_summarize_calibration_metrics(
+    summary: pd.DataFrame,
+    *,
+    baseline_window: tuple[float, float] = (-0.1, 0.0),
+    effect_window: tuple[float, float] = (0.1, 0.8),
+) -> pd.DataFrame:
+    """Make best-ECE row selection independent of caller-provided index labels."""
+
+    if not summary.index.is_unique:
+        summary = summary.reset_index(drop=True)
+    return _ORIGINAL_SUMMARIZE_CALIBRATION_METRICS(
+        summary,
+        baseline_window=baseline_window,
+        effect_window=effect_window,
+    )
+
+
 def install() -> None:
     """Install calibration numeric validation guardrails."""
 
@@ -67,4 +87,5 @@ def install() -> None:
         return
     _calibration._validate_calibration_summary = _patched_validate_calibration_summary
     _calibration._validate_reliability_bins = _patched_validate_reliability_bins
+    _calibration.summarize_calibration_metrics = _patched_summarize_calibration_metrics
     _INSTALLED = True
