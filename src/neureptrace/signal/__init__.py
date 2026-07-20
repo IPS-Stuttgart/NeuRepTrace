@@ -14,8 +14,6 @@ from neureptrace.signal.band import (
     extract_alpha_signal_and_phase,
     extract_band_signal_and_phase,
     extract_phase,
-    sampling_rate_from_time_axis,
-    sampling_rate_from_time_vector,
     uniform_sample_interval,
     validate_band_hz,
     validate_sampling_rate,
