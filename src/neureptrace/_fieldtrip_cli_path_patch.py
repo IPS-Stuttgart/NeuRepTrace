@@ -1,4 +1,4 @@
-"""Runtime patch for complete FieldTrip-to-MNE CLI path options."""
+"""Runtime patches for FieldTrip loader and CLI validation."""
 
 from __future__ import annotations
 
@@ -14,11 +14,13 @@ _PATCH_MARKER = "_neureptrace_fieldtrip_cli_path_options_patched"
 _WRITER_PATCH_MARKER = "_neureptrace_fieldtrip_output_paths_patched"
 _PARSE_PATH_PATCH_MARKER = "_neureptrace_fieldtrip_parse_path_bool_guard_patched"
 _LABEL_CONFIG_PATCH_MARKER = "_neureptrace_fieldtrip_label_config_validation_patched"
+_SAMPLING_PROPERTIES_PATCH_MARKER = "_neureptrace_fieldtrip_sampling_properties_finite_patched"
 _PATH_TOKEN_ERROR = "path tokens must be strings or integer indices, not boolean values."
 _LABEL_BASE_ERROR = "label_base must be a finite numeric scalar or None, not a boolean value."
 _LABEL_BASE_PARSE_ERROR = "label-base must be finite numeric or 'none'."
 _TRIALINFO_COLUMN_ERROR = "trialinfo_column must be an integer column index, not a boolean value."
 _OUTPUT_PATH_ERROR = "FieldTrip epochs and metadata output paths must be distinct."
+_SAMPLING_PROPERTIES_ERROR = "FieldTrip time vectors must contain finite values and yield a finite positive sampling frequency."
 
 
 def _format_path_default(tokens: Sequence[Any] | None) -> str:
@@ -289,14 +291,38 @@ def _install_writer_path_patch(fieldtrip_mat: Any) -> None:
     fieldtrip_mat.write_fieldtrip_raw_mat_epochs = write_fieldtrip_raw_mat_epochs
 
 
+def _install_sampling_properties_patch(fieldtrip_mat: Any) -> None:
+    """Reject non-finite time axes and non-finite derived sampling rates."""
+
+    if getattr(fieldtrip_mat._sampling_properties, _SAMPLING_PROPERTIES_PATCH_MARKER, False):
+        return
+
+    original_sampling_properties = fieldtrip_mat._sampling_properties
+
+    def _sampling_properties(times: np.ndarray) -> tuple[float, float]:
+        numeric_times = np.asarray(times, dtype=float)
+        if not np.all(np.isfinite(numeric_times)):
+            raise ValueError(_SAMPLING_PROPERTIES_ERROR)
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            sampling_rate, tmin = original_sampling_properties(numeric_times)
+        if not np.isfinite(sampling_rate) or sampling_rate <= 0.0 or not np.isfinite(tmin):
+            raise ValueError(_SAMPLING_PROPERTIES_ERROR)
+        return sampling_rate, tmin
+
+    setattr(_sampling_properties, _SAMPLING_PROPERTIES_PATCH_MARKER, True)
+    _sampling_properties.__wrapped__ = original_sampling_properties
+    fieldtrip_mat._sampling_properties = _sampling_properties
+
+
 def install() -> None:
-    """Install a CLI patch that exposes all loader path options."""
+    """Install FieldTrip loader and CLI validation patches."""
 
     import neureptrace.fieldtrip_mat as fieldtrip_mat
 
     _install_parse_path_tokens_patch(fieldtrip_mat)
     _install_label_config_patch(fieldtrip_mat)
     _install_writer_path_patch(fieldtrip_mat)
+    _install_sampling_properties_patch(fieldtrip_mat)
 
     if getattr(fieldtrip_mat.main, _PATCH_MARKER, False):
         return
