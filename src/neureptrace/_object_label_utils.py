@@ -82,6 +82,22 @@ def _label_items(values: Sequence | np.ndarray) -> list[object]:
     return list(values)
 
 
+def _dicts_equal(left: dict[object, object], right: dict[object, object]) -> bool:
+    """Compare dictionary labels recursively without relying on array truth values."""
+
+    if len(left) != len(right):
+        return False
+    unmatched = list(right.items())
+    for left_key, left_value in left.items():
+        for index, (right_key, right_value) in enumerate(unmatched):
+            if values_equal(left_key, right_key) and values_equal(left_value, right_value):
+                unmatched.pop(index)
+                break
+        else:
+            return False
+    return True
+
+
 def values_equal(left: object, right: object) -> bool:
     """Compare labels without leaking tuple/list/array-valued equality."""
 
@@ -103,6 +119,11 @@ def values_equal(left: object, right: object) -> bool:
             values_equal(left_item, right_item)
             for left_item, right_item in zip(_array_items(left_array), _array_items(right_array), strict=True)
         )
+
+    if isinstance(left, dict) or isinstance(right, dict):
+        if not isinstance(left, dict) or not isinstance(right, dict):
+            return False
+        return _dicts_equal(left, right)
 
     if isinstance(left, (list, tuple)) or isinstance(right, (list, tuple)):
         if not isinstance(left, (list, tuple)) or not isinstance(right, (list, tuple)):
