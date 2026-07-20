@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import importlib
 
-importlib.import_module("neureptrace._signal_sampling_rate_finite_patch").install()
-
 from neureptrace.signal.band import (
     average_phases,
     band_analytic_signal,
@@ -24,6 +22,11 @@ from neureptrace.signal.band import (
     validate_signal_values,
     validate_time_axis,
 )
+
+importlib.import_module("neureptrace._signal_sampling_rate_finite_patch").install()
+_patched_band = importlib.import_module("neureptrace.signal.band")
+sampling_rate_from_time_axis = _patched_band.sampling_rate_from_time_axis
+sampling_rate_from_time_vector = _patched_band.sampling_rate_from_time_vector
 
 __all__ = [
     "average_phases",
