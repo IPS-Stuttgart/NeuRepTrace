@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import wraps
 
 import numpy as np
 import pandas as pd
 
 _REPORT_PATCH_MARKER = "_report_finite_metric_selection_patched"
+_RESULTS_METRIC_SELECTION_PATCH_MARKER = "_results_unique_metric_selection_patched"
 _SEMANTIC_STAGE_PATCH_MARKER = "_semantic_stage_positional_selection_patched"
 
 
@@ -106,11 +108,43 @@ def _install_semantic_stage_patch() -> None:
     semantic_stages.build_stage_report = build_stage_report
 
 
+def _duplicate_metric_columns(metric_columns: Sequence[str]) -> list[str]:
+    duplicates: list[str] = []
+    seen: set[str] = set()
+    for column in metric_columns:
+        if column in seen and column not in duplicates:
+            duplicates.append(column)
+        seen.add(column)
+    return duplicates
+
+
+def _install_results_metric_selection_patch() -> None:
+    import neureptrace.results as results
+
+    original_selected_metric_columns = results._selected_metric_columns
+    if getattr(original_selected_metric_columns, _RESULTS_METRIC_SELECTION_PATCH_MARKER, False):
+        return
+
+    @wraps(original_selected_metric_columns)
+    def _selected_metric_columns(
+        metric_columns: Sequence[str] | str | None = None,
+    ) -> list[str]:
+        selected = original_selected_metric_columns(metric_columns)
+        duplicates = _duplicate_metric_columns(selected)
+        if duplicates:
+            raise ValueError(f"metric_columns must not contain duplicates: {duplicates}")
+        return selected
+
+    setattr(_selected_metric_columns, _RESULTS_METRIC_SELECTION_PATCH_MARKER, True)
+    results._selected_metric_columns = _selected_metric_columns
+
+
 def install() -> None:
     """Install finite-value and positional-selection report guards."""
 
     _install_report_patch()
     _install_semantic_stage_patch()
+    _install_results_metric_selection_patch()
 
 
 __all__ = ["install"]
