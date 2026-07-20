@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
+
+importlib.import_module("neureptrace._signal_sampling_rate_finite_patch").install()
+
 from neureptrace.signal.band import (
     average_phases,
     band_analytic_signal,
