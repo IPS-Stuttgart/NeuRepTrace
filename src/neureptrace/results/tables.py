@@ -132,9 +132,7 @@ def peak_metric_rows(
         selected["peak_distance_to_prefer_time"] = float(ranked.iloc[0]["_peak_distance_to_prefer_time"])
         rows.append(selected)
 
-    result = pd.DataFrame(rows)
-    if group_columns and not result.empty:
-        result = result.sort_values(group_columns, kind="mergesort")
+    result = _sort_group_rows(pd.DataFrame(rows), group_columns)
     return result.reset_index(drop=True)
 
 
@@ -169,10 +167,18 @@ def _group_row(group_columns: Sequence[str], group_key: object) -> dict[str, obj
 
 
 def _sorted_frame(rows: list[dict[str, object]], group_columns: Sequence[str]) -> pd.DataFrame:
-    result = pd.DataFrame(rows)
-    if group_columns and not result.empty:
-        result = result.sort_values(list(group_columns), kind="mergesort")
-    return result.reset_index(drop=True)
+    return _sort_group_rows(pd.DataFrame(rows), group_columns).reset_index(drop=True)
+
+
+def _sort_group_rows(frame: pd.DataFrame, group_columns: Sequence[str]) -> pd.DataFrame:
+    if not group_columns or frame.empty:
+        return frame
+    try:
+        return frame.sort_values(list(group_columns), kind="mergesort")
+    except TypeError:
+        # Group identifiers are labels and need not define a shared ordering
+        # across Python types. Grouping already supplies a stable row order.
+        return frame
 
 
 def _float_or_nan(value: object) -> float:
