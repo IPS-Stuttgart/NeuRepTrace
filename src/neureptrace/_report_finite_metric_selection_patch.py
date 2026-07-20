@@ -10,6 +10,7 @@ import pandas as pd
 
 _REPORT_PATCH_MARKER = "_report_finite_metric_selection_patched"
 _RESULTS_METRIC_SELECTION_PATCH_MARKER = "_results_unique_metric_selection_patched"
+_RESULTS_SUMMARY_SELECTION_PATCH_MARKER = "_results_summary_positional_selection_patched"
 _SEMANTIC_STAGE_PATCH_MARKER = "_semantic_stage_positional_selection_patched"
 
 
@@ -108,6 +109,21 @@ def _install_semantic_stage_patch() -> None:
     semantic_stages.build_stage_report = build_stage_report
 
 
+def _install_results_summary_selection_patch() -> None:
+    import neureptrace.results as results
+
+    original_best_summary_row = results._best_summary_row
+    if getattr(original_best_summary_row, _RESULTS_SUMMARY_SELECTION_PATCH_MARKER, False):
+        return
+
+    @wraps(original_best_summary_row)
+    def _best_summary_row(frame: pd.DataFrame, selection_metric: str) -> pd.Series:
+        return original_best_summary_row(frame.reset_index(drop=True), selection_metric)
+
+    setattr(_best_summary_row, _RESULTS_SUMMARY_SELECTION_PATCH_MARKER, True)
+    results._best_summary_row = _best_summary_row
+
+
 def _duplicate_metric_columns(metric_columns: Sequence[str]) -> list[str]:
     duplicates: list[str] = []
     seen: set[str] = set()
@@ -144,6 +160,7 @@ def install() -> None:
 
     _install_report_patch()
     _install_semantic_stage_patch()
+    _install_results_summary_selection_patch()
     _install_results_metric_selection_patch()
 
 
