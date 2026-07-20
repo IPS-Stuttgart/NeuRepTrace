@@ -33,3 +33,28 @@ def test_collect_artifacts_includes_single_task_inference_files(tmp_path: Path):
         "inference_logistic_time.csv",
         "inference_logistic_clusters.csv",
     }
+
+
+def test_export_artifacts_preserves_relative_paths_for_duplicate_names(tmp_path: Path):
+    module = _load_export_module()
+    source_dir = tmp_path / "results"
+    destination_dir = tmp_path / "paper"
+    first_summary = source_dir / "run_a" / "summary.csv"
+    second_summary = source_dir / "run_b" / "summary.csv"
+    first_summary.parent.mkdir(parents=True)
+    second_summary.parent.mkdir(parents=True)
+    first_summary.write_text("run,value\na,1\n", encoding="utf-8")
+    second_summary.write_text("run,value\nb,2\n", encoding="utf-8")
+
+    copied = module.export_artifacts(
+        source_dir,
+        destination_dir,
+        patterns=("*/summary.csv",),
+    )
+
+    first_target = destination_dir / "run_a" / "summary.csv"
+    second_target = destination_dir / "run_b" / "summary.csv"
+    assert copied == [first_target, second_target]
+    assert first_target.read_text(encoding="utf-8") == "run,value\na,1\n"
+    assert second_target.read_text(encoding="utf-8") == "run,value\nb,2\n"
+    assert not (destination_dir / "summary.csv").exists()

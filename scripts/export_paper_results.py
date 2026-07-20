@@ -87,7 +87,8 @@ def export_artifacts(
     destination_dir.mkdir(parents=True, exist_ok=True)
     copied: list[Path] = []
     for artifact in artifacts:
-        target = destination_dir / artifact.name
+        target = destination_dir / artifact.relative_to(source_dir)
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(artifact, target)
         copied.append(target)
     reliability_bins = destination_dir / "reliability_bins.csv"
