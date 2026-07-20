@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Iterable, Mapping
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 
 import numpy as np
 
@@ -14,6 +14,7 @@ _FLOAT_PATCH_MARKER = "_neureptrace_reaction_time_float_missing_patch_installed"
 _VALUES_PATCH_MARKER = "_neureptrace_reaction_time_values_missing_patch_installed"
 _ASSOCIATION_MEAN_PATCH_MARKER = "_neureptrace_reaction_time_association_mean_patch_installed"
 _WITHIN_CENTER_PATCH_MARKER = "_neureptrace_reaction_time_within_center_patch_installed"
+_ASSOCIATION_SCALE_PATCH_MARKER = "_neureptrace_reaction_time_association_scale_patch_installed"
 
 
 def _safe_repr(value: object) -> str:
@@ -98,6 +99,41 @@ def _stable_mean(values: np.ndarray) -> float:
     return float(np.mean(values / magnitude) * magnitude)
 
 
+def _scaled_values(values: np.ndarray) -> tuple[np.ndarray, float]:
+    """Normalize a non-constant finite vector without changing association statistics."""
+
+    magnitude = float(np.max(np.abs(values)))
+    if magnitude == 0.0:
+        return values.copy(), 0.0
+    return values / magnitude, magnitude
+
+
+def _has_variation(values: np.ndarray) -> bool:
+    """Check exact variation without subtracting extreme finite values."""
+
+    return bool(values.size and np.any(values != values[0]))
+
+
+def _rescale_ratio(value: float, numerator: float, denominator: float = 1.0) -> float:
+    """Return ``value * numerator / denominator`` without binary64 intermediates."""
+
+    if value == 0.0 or numerator == 0.0:
+        return 0.0
+    with localcontext() as context:
+        context.prec = 80
+        scaled = (
+            Decimal.from_float(float(value))
+            * Decimal.from_float(float(numerator))
+            / Decimal.from_float(float(denominator))
+        )
+        maximum = Decimal.from_float(np.finfo(float).max)
+    if scaled > maximum:
+        return np.finfo(float).max
+    if scaled < -maximum:
+        return -np.finfo(float).max
+    return float(scaled)
+
+
 def _empty_association(
     scope: str,
     participant: str,
@@ -117,6 +153,40 @@ def _empty_association(
         "slope_reaction_time_per_unit": np.nan,
         "intercept_reaction_time": np.nan,
     }
+
+
+def _association_row(
+    module,
+    scope: str,
+    participant: str,
+    metric: str,
+    rows,
+    *,
+    reaction_time_column: str,
+    min_trials: int,
+) -> dict[str, object]:
+    """Compute one association after independent overflow-safe axis scaling."""
+
+    x_values, y_values = module._finite_metric_arrays(rows, metric, reaction_time_column)
+    result = module._empty_association(scope, participant, metric, x_values, y_values)
+    if x_values.size < min_trials or not _has_variation(x_values) or not _has_variation(y_values):
+        return result
+
+    from scipy import stats  # pylint: disable=import-outside-toplevel
+
+    scaled_x, x_scale = _scaled_values(x_values)
+    scaled_y, y_scale = _scaled_values(y_values)
+    pearson = stats.pearsonr(scaled_x, scaled_y)
+    regression = stats.linregress(scaled_x, scaled_y)
+    result.update(
+        {
+            "pearson_r": float(pearson.statistic),
+            "pearson_p": float(pearson.pvalue),
+            "slope_reaction_time_per_unit": _rescale_ratio(float(regression.slope), y_scale, x_scale),
+            "intercept_reaction_time": _rescale_ratio(float(regression.intercept), y_scale),
+        }
+    )
+    return result
 
 
 def _within_participant_centered_rows(
@@ -142,7 +212,7 @@ def _within_participant_centered_rows(
 
 
 def install() -> None:
-    """Ensure invalid scalars and extreme finite means are handled explicitly."""
+    """Ensure invalid scalars and extreme finite association values are handled explicitly."""
 
     module = importlib.import_module("neureptrace.behavior.reaction_time")
 
@@ -185,6 +255,31 @@ def install() -> None:
     if not getattr(original_empty_association, _ASSOCIATION_MEAN_PATCH_MARKER, False):
         setattr(_empty_association, _ASSOCIATION_MEAN_PATCH_MARKER, True)
         module._empty_association = _empty_association
+
+    original_association_row = module._association_row
+    if not getattr(original_association_row, _ASSOCIATION_SCALE_PATCH_MARKER, False):
+
+        def association_row(
+            scope,
+            participant,
+            metric,
+            rows,
+            *,
+            reaction_time_column,
+            min_trials,
+        ):
+            return _association_row(
+                module,
+                scope,
+                participant,
+                metric,
+                rows,
+                reaction_time_column=reaction_time_column,
+                min_trials=min_trials,
+            )
+
+        setattr(association_row, _ASSOCIATION_SCALE_PATCH_MARKER, True)
+        module._association_row = association_row
 
     original_within_participant_centered_rows = module._within_participant_centered_rows
     if not getattr(original_within_participant_centered_rows, _WITHIN_CENTER_PATCH_MARKER, False):
