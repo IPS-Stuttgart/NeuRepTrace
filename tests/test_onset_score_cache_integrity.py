@@ -63,6 +63,7 @@ def test_detect_onsets_recomputes_cache_with_incomplete_metadata(
         threshold_quantile=1.0,
     )
     cached["score_threshold"] = 0.99
+    cached[metadata_column] = cached[metadata_column].astype(object)
     cached.loc[cached.index[0], metadata_column] = missing_value
 
     events = detect_onsets(
