@@ -1,4 +1,4 @@
-"""Robust parsing, grouping, and exact label matching for onset tables.
+"""Robust parsing, grouping, exact label matching, and score integrity for onset tables.
 
 Onset events and thresholded observations are commonly written to CSV before
 being summarized again. Pandas may preserve boolean-looking columns as strings
@@ -12,10 +12,14 @@ default, which can silently remove whole sequences whose metadata is missing.
 This patch maps missing group keys to a private sentinel while the original
 helper runs, then restores missing values in the returned table.
 
-Finally, onset correctness originally converted integer-like class identifiers
-through ``float``. IEEE-754 double precision cannot distinguish every adjacent
-integer above ``2**53``, so a wrong prediction could be reported as correct.
-This patch parses signed-64-bit integer labels without a lossy float round-trip.
+Onset correctness originally converted integer-like class identifiers through
+``float``. IEEE-754 double precision cannot distinguish every adjacent integer
+above ``2**53``, so a wrong prediction could be reported as correct. This patch
+parses signed-64-bit integer labels without a lossy float round-trip.
+
+Explicit score columns must also be finite numeric data rather than partially
+coercible values. Cached threshold annotations are reused only when every row
+contains complete matching text and boolean provenance.
 """
 
 from __future__ import annotations
@@ -31,6 +35,8 @@ import pandas as pd
 _TRUE_BOOL_TEXT = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_TEXT = {"0", "false", "f", "no", "n", "off", ""}
 _PATCH_MARKER = "_neureptrace_onset_boolean_summary_patch_installed"
+_SCORE_VALIDATION_PATCH_MARKER = "_neureptrace_onset_score_validation_patch_installed"
+_THRESHOLD_CACHE_PATCH_MARKER = "_neureptrace_onset_threshold_cache_integrity_patch_installed"
 _PARSED_ABOVE_THRESHOLD_COLUMN = "_neureptrace_parsed_above_threshold"
 _MISSING_GROUP_SENTINEL = object()
 _MAX_EXACT_FLOAT_INTEGER = 2**53
@@ -224,10 +230,78 @@ def _window_threshold_stats(
     return stats
 
 
+def _install_explicit_score_validation(onset_detection: Any) -> None:
+    """Reject malformed explicit score columns instead of silently dropping rows."""
+
+    if getattr(onset_detection, _SCORE_VALIDATION_PATCH_MARKER, False):
+        return
+
+    original_score_values = onset_detection._score_values
+
+    @wraps(original_score_values)
+    def score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
+        if score_column not in frame.columns or score_column == "confidence":
+            return original_score_values(frame, score_column)
+
+        raw_scores = frame[score_column]
+        if raw_scores.map(lambda value: isinstance(value, (bool, np.bool_))).any():
+            raise ValueError(f"{score_column} values must be finite numeric scores, not booleans.")
+        parsed = pd.to_numeric(raw_scores, errors="coerce")
+        numeric = parsed.to_numpy(dtype=float)
+        if parsed.isna().any() or not np.isfinite(numeric).all():
+            raise ValueError(f"{score_column} values must be finite numeric scores.")
+        return pd.Series(numeric, index=raw_scores.index, dtype=float)
+
+    onset_detection._score_values = score_values
+    setattr(onset_detection, _SCORE_VALIDATION_PATCH_MARKER, True)
+
+
+def _strict_metadata_text_matches(
+    observations: pd.DataFrame,
+    column: str,
+    expected: object,
+) -> bool:
+    if column not in observations.columns:
+        return False
+    values = observations[column]
+    return not values.empty and not values.isna().any() and values.astype(str).eq(str(expected)).all()
+
+
+def _strict_metadata_bool_matches(
+    observations: pd.DataFrame,
+    column: str,
+    expected: bool,
+) -> bool:
+    if column not in observations.columns:
+        return False
+    values = observations[column]
+    if values.empty or values.isna().any():
+        return False
+    normalized = values.astype(str).str.strip().str.lower()
+    mapped = normalized.map({"true": True, "1": True, "false": False, "0": False})
+    return not mapped.isna().any() and mapped.eq(bool(expected)).all()
+
+
+def _install_threshold_cache_integrity_guards() -> None:
+    """Require complete provenance before reusing cached threshold annotations."""
+
+    from neureptrace import _event_detection_extensions
+
+    if getattr(_event_detection_extensions, _THRESHOLD_CACHE_PATCH_MARKER, False):
+        return
+
+    _event_detection_extensions._metadata_text_matches = _strict_metadata_text_matches
+    _event_detection_extensions._metadata_bool_matches = _strict_metadata_bool_matches
+    setattr(_event_detection_extensions, _THRESHOLD_CACHE_PATCH_MARKER, True)
+
+
 def install() -> None:
-    """Install robust onset parsing, grouping, and exact label matching."""
+    """Install robust onset parsing, grouping, exact labels, and score integrity."""
 
     import neureptrace.onset_detection as onset_detection
+
+    _install_explicit_score_validation(onset_detection)
+    _install_threshold_cache_integrity_guards()
 
     if getattr(onset_detection, _PATCH_MARKER, False):
         return
