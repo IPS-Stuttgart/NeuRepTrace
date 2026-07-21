@@ -26,7 +26,7 @@ else:
     from neureptrace._stimulus_detection_public import *  # noqa: F401,F403
     from neureptrace._stimulus_detection_public import __all__ as _public_all
     from neureptrace._stimulus_detection_public import main
-    from neureptrace import _group_completion_patch
+    from neureptrace import _group_completion_patch, _stimulus_annotation_index_patch
     from neureptrace.matched_filter_detection import (  # noqa: F401
         MATCHED_FILTER_SCORE_COLUMN,
         MATCHED_FILTER_SCORE_MODE,
@@ -38,9 +38,11 @@ else:
     )
 
     # Preserve annotated/observed groups with zero detections in grouped summaries
-    # even when other groups have detected events.
+    # even when other groups have detected events, and keep duplicate-indexed event
+    # rows independent during annotation matching.
+    _stimulus_annotation_index_patch.install()
     _group_completion_patch.install()
-    from neureptrace._stimulus_detection_public import summarize_stimulus_events  # noqa: F401,E402
+    from neureptrace._stimulus_detection_public import match_stimulus_annotations, summarize_stimulus_events  # noqa: F401,E402
 
     # Backwards-compatible private helpers used by the streaming detector.
     from neureptrace._stimulus_detection_public import _event_row, _run_duration  # noqa: F401
