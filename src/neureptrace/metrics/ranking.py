@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from numbers import Integral
 
 import numpy as np
 
@@ -61,6 +62,7 @@ def rank_class_scores(
         raise ValueError(f"classes must be unique; duplicate label {duplicate_class!r} found.")
     if score_matrix.shape[1] == 0:
         return _empty_class_rank_result(y_true, top_k)
+    row_top_k = min(row_top_k, score_matrix.shape[1])
 
     order = np.argsort(-score_matrix, axis=1, kind="mergesort")
     top_hits = {k: [] for k in top_k}
@@ -261,13 +263,16 @@ def _validate_integer(value: object, *, name: str, minimum: int) -> int:
         raise ValueError(f"{name} values must be integers.")
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} values must be integers.")
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} values must be integers.") from exc
-    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
-        raise ValueError(f"{name} values must be integers.")
-    integer = int(numeric)
+    if isinstance(value, Integral):
+        integer = int(value)
+    else:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} values must be integers.") from exc
+        if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+            raise ValueError(f"{name} values must be integers.")
+        integer = int(numeric)
     if integer < int(minimum):
         qualifier = "positive" if int(minimum) == 1 else "non-negative"
         raise ValueError(f"{name} values must be {qualifier}.")
