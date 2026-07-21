@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 _REPORT_PATCH_MARKER = "_report_finite_metric_selection_patched"
+_REPORT_AGGREGATE_PATCH_MARKER = "_report_aggregate_positional_selection_patched"
 _RESULTS_METRIC_SELECTION_PATCH_MARKER = "_results_unique_metric_selection_patched"
 _RESULTS_SUMMARY_SELECTION_PATCH_MARKER = "_results_summary_positional_selection_patched"
 _SEMANTIC_STAGE_PATCH_MARKER = "_semantic_stage_positional_selection_patched"
@@ -54,13 +55,37 @@ def _best_metric_row(frame: pd.DataFrame, selection_metric: str, column: str) ->
 def _install_report_patch() -> None:
     import neureptrace.report as report
 
-    if getattr(report._best_metric_row, _REPORT_PATCH_MARKER, False):
+    if not getattr(report._best_metric_row, _REPORT_PATCH_MARKER, False):
+        setattr(_best_metric_row, _REPORT_PATCH_MARKER, True)
+        setattr(_window_mean, _REPORT_PATCH_MARKER, True)
+        report._best_metric_row = _best_metric_row
+        report._window_mean = _window_mean
+
+    original_summarize_aggregate_time_decode = report.summarize_aggregate_time_decode
+    if getattr(original_summarize_aggregate_time_decode, _REPORT_AGGREGATE_PATCH_MARKER, False):
         return
 
-    setattr(_best_metric_row, _REPORT_PATCH_MARKER, True)
-    setattr(_window_mean, _REPORT_PATCH_MARKER, True)
-    report._best_metric_row = _best_metric_row
-    report._window_mean = _window_mean
+    @wraps(original_summarize_aggregate_time_decode)
+    def summarize_aggregate_time_decode(
+        summary: pd.DataFrame,
+        *,
+        chance: float = 0.5,
+        baseline_window: tuple[float, float] = (-0.1, 0.0),
+        effect_window: tuple[float, float] = (0.1, 0.8),
+        selection_metric: str = "accuracy",
+    ) -> dict[str, float | str | bool]:
+        if not summary.index.is_unique:
+            summary = summary.reset_index(drop=True)
+        return original_summarize_aggregate_time_decode(
+            summary,
+            chance=chance,
+            baseline_window=baseline_window,
+            effect_window=effect_window,
+            selection_metric=selection_metric,
+        )
+
+    setattr(summarize_aggregate_time_decode, _REPORT_AGGREGATE_PATCH_MARKER, True)
+    report.summarize_aggregate_time_decode = summarize_aggregate_time_decode
 
 
 def _install_semantic_stage_patch() -> None:
