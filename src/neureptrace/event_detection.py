@@ -8,7 +8,11 @@ first-onset-per-sequence semantics.
 
 from __future__ import annotations
 
-from neureptrace._stimulus_detection_public import (
+from neureptrace import _stimulus_annotation_index_patch
+
+_stimulus_annotation_index_patch.install()
+
+from neureptrace._stimulus_detection_public import (  # noqa: E402
     CONFLICT_RESOLUTION_MODES,
     DEFAULT_GROUP_COLUMNS,
     DEFAULT_STREAM_FALLBACKS,
@@ -25,7 +29,7 @@ from neureptrace._stimulus_detection_public import (
     read_stimulus_probability_observations,
     summarize_stimulus_events,
 )
-from neureptrace.streaming_stimulus_detection import (
+from neureptrace.streaming_stimulus_detection import (  # noqa: E402
     StimulusDetectionConfig,
     StreamingStimulusDetector,
 )
