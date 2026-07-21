@@ -12,24 +12,29 @@ _PATCH_MARKER = "_neureptrace_bushmeg_diagnostics_class_count_patch_installed"
 
 
 def _uniform_integral_class_count(summary: pd.DataFrame) -> int | None:
-    """Return one trustworthy class count, or ``None`` when metadata is unusable."""
+    """Return one trustworthy class count, tolerating only missing entries."""
 
     if "n_classes" not in summary.columns:
         return None
-    numeric = pd.to_numeric(summary["n_classes"], errors="coerce")
-    finite = numeric[np.isfinite(numeric)].to_numpy(dtype=float)
-    if finite.size == 0:
+    raw = summary["n_classes"]
+    present = raw.notna()
+    if not present.any():
         return None
-    if not np.all(finite > 1.0) or not np.all(finite == np.floor(finite)):
+    numeric = pd.to_numeric(raw, errors="coerce")
+    populated = numeric[present]
+    if populated.isna().any() or not np.all(np.isfinite(populated)):
         return None
-    unique = np.unique(finite)
+    values = populated.to_numpy(dtype=float)
+    if not np.all(values > 1.0) or not np.all(values == np.floor(values)):
+        return None
+    unique = np.unique(values)
     if unique.size != 1:
         return None
     return int(unique[0])
 
 
 def install() -> None:
-    """Prevent fractional class counts from being truncated during chance inference."""
+    """Prevent invalid class counts from being used during chance inference."""
 
     diagnostics = importlib.import_module("neureptrace.bushmeg_diagnostics")
     original = diagnostics.infer_balanced_accuracy_chance
