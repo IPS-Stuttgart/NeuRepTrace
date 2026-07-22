@@ -8,6 +8,9 @@ from typing import Any
 
 import numpy as np
 
+from .row_l1 import normalize_rows_l1
+from .row_l2 import normalize_rows_l2
+
 ROW_NORMALIZATION_PROTOCOL = "strict_source_compatible_row_normalization"
 ROW_NORMALIZATION_CATEGORY = "1_strict_source_only"
 ROW_NORMALIZATION_MODES = ("none", "l2", "l1", "max_abs")
@@ -49,10 +52,10 @@ def apply_row_normalization_pair(
     train_normalized, train_norms = normalize_feature_rows(train, mode=cfg.mode, epsilon=cfg.epsilon)
     eval_normalized, eval_norms = normalize_feature_rows(eval_matrix, mode=cfg.mode, epsilon=cfg.epsilon)
     return RowNormalizationResult(
-        train_features=train_normalized.astype(np.float32, copy=False),
-        eval_features=eval_normalized.astype(np.float32, copy=False),
-        train_norms=train_norms.astype(np.float32, copy=False),
-        eval_norms=eval_norms.astype(np.float32, copy=False),
+        train_features=_compact_float32(train_normalized),
+        eval_features=_compact_float32(eval_normalized),
+        train_norms=train_norms.astype(float, copy=False),
+        eval_norms=eval_norms.astype(float, copy=False),
         metadata=_metadata(cfg, n_train_rows=train.shape[0], n_eval_rows=eval_matrix.shape[0], feature_dim=train.shape[1]),
     )
 
@@ -80,22 +83,35 @@ def normalize_feature_rows(features: Sequence[Sequence[float]] | np.ndarray, *, 
     resolved = normalize_row_normalization_mode(mode)
     eps = _positive_float(epsilon, name="epsilon")
     if resolved == "none":
-        return matrix.astype(np.float32, copy=False), np.ones(matrix.shape[0], dtype=np.float32)
+        return _compact_float32(matrix), np.ones(matrix.shape[0], dtype=float)
     if resolved == "l2":
-        norms = np.linalg.norm(matrix, ord=2, axis=1)
+        normalized, norms = normalize_rows_l2(matrix, epsilon=eps)
     elif resolved == "l1":
-        norms = np.linalg.norm(matrix, ord=1, axis=1)
+        normalized, norms = normalize_rows_l1(matrix, epsilon=eps)
     elif resolved == "max_abs":
         norms = np.max(np.abs(matrix), axis=1)
+        safe_norms = np.maximum(norms, eps)
+        normalized = matrix / safe_norms[:, None]
     else:
         raise ValueError(f"Unhandled row normalization mode {resolved!r}.")
-    safe_norms = np.maximum(norms, eps)
-    return (matrix / safe_norms[:, None]).astype(np.float32, copy=False), norms.astype(np.float32, copy=False)
+    return _compact_float32(normalized), norms.astype(float, copy=False)
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _coerce_config(config: RowNormalizationConfig | Mapping[str, Any]) -> RowNormalizationConfig:
     if isinstance(config, RowNormalizationConfig):
-        return config
+        return row_normalization_config(mode=config.mode, epsilon=config.epsilon)
     return row_normalization_config(**dict(config))
 
 
