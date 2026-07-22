@@ -120,8 +120,10 @@ def _t_statistics_from_mean_and_sem(means: np.ndarray, sem: np.ndarray) -> np.nd
 
 
 def _scale_effect_columns(effects: np.ndarray) -> np.ndarray:
-    """Scale effect columns without changing their t statistics."""
+    """Scale finite effect columns without changing their t statistics."""
 
+    if not np.isfinite(effects).all():
+        raise ValueError("Subject-level effects must contain only finite values.")
     scales = np.max(np.abs(effects), axis=0)
     safe_scales = np.where(scales > 0.0, scales, 1.0)
     return effects / safe_scales
