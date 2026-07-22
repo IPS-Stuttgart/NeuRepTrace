@@ -24,14 +24,14 @@ def _is_missing_scalar(value: Any) -> bool:
         missing = pd.isna(value)
     except (TypeError, ValueError):
         return False
-    return bool(missing) if isinstance(missing, bool) else False
+    return bool(missing) if isinstance(missing, (bool, np.bool_)) else False
 
 
 def _first_nonempty(*values: Any) -> str:
-    """Return the first non-empty value as text without hashing structured values."""
+    """Return the first non-empty, non-missing value as text."""
 
     for value in values:
-        if value is None:
+        if value is None or _is_missing_scalar(value):
             continue
         text = str(value).strip()
         if text:
