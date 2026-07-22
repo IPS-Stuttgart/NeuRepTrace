@@ -1,9 +1,10 @@
-"""Preserve tuple-valued row groups in source-weight helpers."""
+"""Preserve tuple-valued row groups and exact source-balance config values."""
 
 from __future__ import annotations
 
 import importlib
 from collections.abc import Sequence
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
@@ -12,6 +13,7 @@ import numpy as np
 _SAMPLE_WEIGHTS_PATCH_MARKER = "_neureptrace_source_weighting_tuple_row_groups_patch_installed"
 _GROUP_LIST_PATCH_MARKER = "_neureptrace_source_weighting_tuple_group_list_patch_installed"
 _SOURCE_BALANCE_CONFIG_PATCH_MARKER = "_neureptrace_source_balance_config_revalidation_patch_installed"
+_SOURCE_BALANCE_INTEGER_PATCH_MARKER = "_neureptrace_source_balance_exact_integer_patch_installed"
 
 
 def _hashable_group_value(value: Any) -> Any:
@@ -75,7 +77,10 @@ def _install_source_weighting_tuple_row_groups() -> None:
             if group_weights is None:
                 return None
             rows = _row_group_vector(row_groups)
-            lookup = {group: source_weighting._nonnegative_float(weight, name="source_group_weight") for group, weight in group_weights.items()}
+            lookup = {
+                group: source_weighting._nonnegative_float(weight, name="source_group_weight")
+                for group, weight in group_weights.items()
+            }
             default_value = source_weighting._nonnegative_float(default, name="source_group_weight_default")
             weights = np.asarray([lookup.get(group, default_value) for group in rows.tolist()], dtype=np.float64)
             if normalize:
@@ -121,11 +126,47 @@ def _install_source_balance_config_revalidation() -> None:
     source_balance._coerce_config = _coerce_config
 
 
+def _install_source_balance_exact_integer_validation() -> None:
+    """Preserve exact integer seeds instead of round-tripping them through float."""
+
+    source_balance = importlib.import_module("neureptrace.decoding.source_balance")
+    original_nonnegative_int = source_balance._nonnegative_int
+    if getattr(original_nonnegative_int, _SOURCE_BALANCE_INTEGER_PATCH_MARKER, False):
+        return
+
+    @wraps(original_nonnegative_int)
+    def _nonnegative_int(value: Any, *, name: str) -> int:
+        message = f"{name} must be a non-negative integer."
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
+
+        if isinstance(value, (int, np.integer)):
+            parsed = int(value)
+        elif isinstance(value, (str, Decimal)):
+            try:
+                numeric = value if isinstance(value, Decimal) else Decimal(value.strip())
+            except (InvalidOperation, ValueError) as exc:
+                raise ValueError(message) from exc
+            if not numeric.is_finite() or numeric != numeric.to_integral_value():
+                raise ValueError(message)
+            parsed = int(numeric)
+        else:
+            return original_nonnegative_int(value, name=name)
+
+        if parsed < 0:
+            raise ValueError(message)
+        return parsed
+
+    setattr(_nonnegative_int, _SOURCE_BALANCE_INTEGER_PATCH_MARKER, True)
+    source_balance._nonnegative_int = _nonnegative_int
+
+
 def install() -> None:
     """Patch source weighting/balancing helpers to keep composite and config inputs safe."""
 
     _install_source_weighting_tuple_row_groups()
     _install_source_balance_config_revalidation()
+    _install_source_balance_exact_integer_validation()
 
 
 install()
