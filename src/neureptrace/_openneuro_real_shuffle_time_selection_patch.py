@@ -71,7 +71,15 @@ def _install_manifest_bool_token_patch() -> None:
 
 
 def _is_missing_provenance_value(value: Any) -> bool:
-    return value is None or (isinstance(value, str) and value == "")
+    """Return whether a scalar provenance value is absent."""
+
+    if value is None or (isinstance(value, str) and value == ""):
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return bool(missing) if isinstance(missing, (bool, np.bool_)) else False
 
 
 def _install_provenance_value_patch() -> None:
