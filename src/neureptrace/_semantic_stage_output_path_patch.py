@@ -13,6 +13,7 @@ import pandas as pd
 _OUTPUT_PATCH_MARKER = "_neureptrace_semantic_stage_output_path_patch_installed"
 _SEQUENCE_KEY_PATCH_MARKER = "_neureptrace_semantic_stage_sequence_key_patch_installed"
 _STATE_NAME_PATCH_MARKER = "_neureptrace_semantic_stage_state_name_patch_installed"
+_TEMPORAL_STATE_PEAK_PATCH_MARKER = "_neureptrace_temporal_state_peak_selection_patch_installed"
 _MISSING_SEQUENCE_COMPONENT = object()
 
 
@@ -113,8 +114,32 @@ def _validate_unique_state_names(state_names: list[str]) -> None:
         )
 
 
+def _install_temporal_state_peak_selection() -> None:
+    """Make temporal-state peak metadata independent of DataFrame index labels."""
+
+    workflow = importlib.import_module("neureptrace.temporal_state_workflow")
+    original_stage_stats = workflow._stage_stats
+    if getattr(original_stage_stats, _TEMPORAL_STATE_PEAK_PATCH_MARKER, False):
+        return
+
+    @wraps(original_stage_stats)
+    def stage_stats(
+        stages: pd.DataFrame,
+        stage_time: pd.DataFrame,
+        task: str,
+        decoder: str,
+        emission_mode: str,
+    ) -> dict[str, float | int]:
+        if not stage_time.index.is_unique:
+            stage_time = stage_time.reset_index(drop=True)
+        return original_stage_stats(stages, stage_time, task, decoder, emission_mode)
+
+    setattr(stage_stats, _TEMPORAL_STATE_PEAK_PATCH_MARKER, True)
+    workflow._stage_stats = stage_stats
+
+
 def install() -> None:
-    """Patch semantic-stage identities, state labels, and output destinations."""
+    """Patch semantic-stage identities, state labels, output destinations, and summaries."""
 
     semantic_stages = importlib.import_module("neureptrace.semantic_stages")
 
@@ -135,6 +160,8 @@ def install() -> None:
 
         setattr(state_names, _STATE_NAME_PATCH_MARKER, True)
         semantic_stages._state_names = state_names
+
+    _install_temporal_state_peak_selection()
 
     original_analyze = semantic_stages.analyze_semantic_stages
     if getattr(original_analyze, _OUTPUT_PATCH_MARKER, False):
