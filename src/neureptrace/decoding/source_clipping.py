@@ -85,11 +85,12 @@ def fit_source_feature_clipping(
         "source_feature_clipping_lower_quantile": float(cfg.lower_quantile),
         "source_feature_clipping_upper_quantile": float(cfg.upper_quantile),
     }
+    output_dtype = _compact_float_dtype(train, test_clipped, lower, upper)
     return SourceFeatureClippingResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_clipped.astype(np.float32, copy=False),
-        lower_bounds=lower.astype(np.float32, copy=False),
-        upper_bounds=upper.astype(np.float32, copy=False),
+        train_features=train.astype(output_dtype, copy=False),
+        test_features=test_clipped.astype(output_dtype, copy=False),
+        lower_bounds=lower.astype(output_dtype, copy=False),
+        upper_bounds=upper.astype(output_dtype, copy=False),
         metadata=metadata,
     )
 
@@ -155,6 +156,20 @@ def _coerce_config(config: SourceFeatureClippingConfig | Mapping[str, Any]) -> S
             copy=config.copy,
         )
     return source_feature_clipping_config(**dict(config))
+
+
+def _compact_float_dtype(*arrays: np.ndarray) -> np.dtype:
+    """Use float32 only when it keeps finite values nonzero and finite."""
+
+    for values in arrays:
+        array = np.asarray(values, dtype=float)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            compact = array.astype(np.float32)
+        if not np.all(np.isfinite(compact)):
+            return np.dtype(float)
+        if np.any((array != 0.0) & (compact == 0.0)):
+            return np.dtype(float)
+    return np.dtype(np.float32)
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
