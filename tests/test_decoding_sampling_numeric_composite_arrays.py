@@ -19,6 +19,20 @@ def _numeric_composite_labels() -> np.ndarray:
     )
 
 
+def _higher_rank_numeric_composite_labels() -> np.ndarray:
+    return np.asarray(
+        [
+            ((1, 10), (100, 1000)),
+            ((2, 20), (200, 2000)),
+            ((1, 10), (100, 1000)),
+            ((2, 20), (200, 2000)),
+            ((1, 10), (100, 1000)),
+            ((2, 20), (200, 2000)),
+        ],
+        dtype=int,
+    )
+
+
 def test_class_limiter_keeps_numeric_composite_rows_atomic_when_uncapped() -> None:
     labels = _numeric_composite_labels()
 
@@ -44,3 +58,22 @@ def test_class_limiter_keeps_numeric_column_vectors_as_scalar_labels() -> None:
     selected = select_class_limited_indices(labels, 2, selection="first")
 
     assert selected.tolist() == [0, 1, 2, 3]
+
+
+def test_class_limiter_keeps_higher_rank_numeric_rows_atomic_when_uncapped() -> None:
+    labels = _higher_rank_numeric_composite_labels()
+
+    selected = select_class_limited_indices(labels, None)
+
+    assert selected.tolist() == list(range(labels.shape[0]))
+
+
+def test_class_limiter_keeps_higher_rank_numeric_rows_atomic_when_capped() -> None:
+    labels = _higher_rank_numeric_composite_labels()
+
+    first = select_class_limited_indices(labels, 2, selection="first")
+    random = select_class_limited_indices(labels, 2, selection="random", seed=0)
+
+    assert first.tolist() == [0, 1, 2, 3]
+    assert len(random) == 4
+    assert np.all(random < labels.shape[0])
