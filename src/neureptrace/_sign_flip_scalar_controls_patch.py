@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from functools import wraps
+from numbers import Integral, Real
 
 import numpy as np
 
@@ -38,18 +40,47 @@ def _scalar_float(value: object, error_message: str) -> float:
         raise ValueError(error_message) from exc
 
 
-def _scalar_integer(value: object, error_message: str) -> int:
-    """Return an exact integer when the supplied scalar already has integer type."""
-    scalar = _scalar_value(value, error_message)
-    if isinstance(scalar, (int, np.integer)):
-        return int(scalar)
-    try:
-        numeric = float(scalar)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(error_message) from exc
-    if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+def _decimal_integer(value: object, error_message: str) -> int:
+    """Parse an exact integral decimal representation without a float round-trip."""
+    if isinstance(value, bytes):
+        try:
+            text = value.decode().strip()
+        except UnicodeDecodeError as exc:
+            raise ValueError(error_message) from exc
+    else:
+        text = str(value).strip()
+    if not text:
         raise ValueError(error_message)
-    return int(numeric)
+    try:
+        numeric = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(error_message) from exc
+    if not numeric.is_finite():
+        raise ValueError(error_message)
+    integral = numeric.to_integral_value()
+    if numeric != integral:
+        raise ValueError(error_message)
+    return int(integral)
+
+
+def _scalar_integer(value: object, error_message: str) -> int:
+    """Return an exact integer from an integer or integral scalar representation."""
+    scalar = _scalar_value(value, error_message)
+    if isinstance(scalar, Integral):
+        return int(scalar)
+    if isinstance(scalar, Decimal):
+        if not scalar.is_finite():
+            raise ValueError(error_message)
+        integral = scalar.to_integral_value()
+        if scalar != integral:
+            raise ValueError(error_message)
+        return int(integral)
+    if isinstance(scalar, Real):
+        numeric = float(scalar)
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(error_message)
+        return int(numeric)
+    return _decimal_integer(scalar, error_message)
 
 
 def _validate_positive_permutation_count(n_permutations: int) -> int:
