@@ -17,6 +17,7 @@ _SCALAR_CONFIG_PATCH_MARKER = "_neureptrace_label_shift_scalar_config_patch_inst
 _CLASSES_PATCH_MARKER = "_neureptrace_label_shift_classes_patch_installed"
 _SOFT_CONFUSION_LABEL_PATCH_MARKER = "_neureptrace_label_shift_soft_confusion_label_patch_installed"
 _SOURCE_PRIOR_LABEL_EQUALITY_PATCH_MARKER = "_neureptrace_source_prior_missing_label_kind_patch_installed"
+_PRIOR_FROM_LABELS_PATCH_MARKER = "_neureptrace_prior_shift_class_coverage_patch_installed"
 _SCALAR_ERROR_SUFFIXES = {
     "_positive_int": "must be a positive integer.",
     "_positive_float": "must be positive and finite.",
@@ -120,6 +121,39 @@ def _install_source_prior_label_equality() -> None:
     source_prior._object_equal = _object_equal
 
 
+def _install_prior_from_labels_guard() -> None:
+    """Require explicit prior-shift class lists to be unique and exhaustive."""
+
+    prior_shift = importlib.import_module("neureptrace.decoding.prior_shift")
+    original = prior_shift.prior_from_labels
+    if getattr(original, _PRIOR_FROM_LABELS_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def prior_from_labels(labels, classes=None, *, smoothing=0.0):
+        if classes is None:
+            return original(labels, classes=None, smoothing=smoothing)
+
+        label_vector = prior_shift._object_vector(labels, name="labels")
+        class_order = prior_shift._object_vector(classes, name="classes")
+        if len(prior_shift._unique_values(class_order)) != class_order.shape[0]:
+            raise ValueError("classes must be unique.")
+
+        unknown = [
+            label
+            for label in prior_shift._unique_values(label_vector)
+            if not any(prior_shift._object_equal(label, class_label) for class_label in class_order.tolist())
+        ]
+        if unknown:
+            raise ValueError(f"labels contain labels absent from classes: {_format_label_preview(unknown)}.")
+
+        return original(label_vector, classes=class_order, smoothing=smoothing)
+
+    setattr(prior_from_labels, _PRIOR_FROM_LABELS_PATCH_MARKER, True)
+    prior_from_labels.__wrapped__ = original
+    prior_shift.prior_from_labels = prior_from_labels
+
+
 def install() -> None:
     """Reject malformed label-shift inputs and install source-prior label guards."""
 
@@ -209,6 +243,7 @@ def install() -> None:
 
     _install_scalar_config_guards(label_shift)
     _install_source_prior_label_equality()
+    _install_prior_from_labels_guard()
 
 
 __all__ = ["install"]
