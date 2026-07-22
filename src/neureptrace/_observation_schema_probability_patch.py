@@ -205,10 +205,26 @@ def _validate_decoded_fold_integer_values(values: Any, *, name: str) -> None:
         numeric = np.asarray(values, dtype=float)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"from_decoded_fold {name} must be integer-valued.") from exc
+    if numeric.ndim != 1:
+        raise ValueError(f"from_decoded_fold {name} must be a one-dimensional integer-valued vector.")
     if not np.isfinite(numeric).all():
         raise ValueError(f"from_decoded_fold {name} must contain finite integer-valued values.")
     if not np.equal(numeric, np.rint(numeric)).all():
         raise ValueError(f"from_decoded_fold {name} must be integer-valued.")
+
+    limits = np.iinfo(np.int_)
+    raw = np.asarray(values, dtype=object)
+    for value in raw.tolist():
+        if isinstance(value, np.ndarray):
+            if value.ndim != 0:
+                raise ValueError(f"from_decoded_fold {name} must be a one-dimensional integer-valued vector.")
+            value = value.item()
+        try:
+            integer = int(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"from_decoded_fold {name} must be integer-valued.") from exc
+        if integer < int(limits.min) or integer > int(limits.max):
+            raise ValueError(f"from_decoded_fold {name} values must fit the platform integer range.")
 
 
 def _install_decoded_fold_probability_guard() -> None:
