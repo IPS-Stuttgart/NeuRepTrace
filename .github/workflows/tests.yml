@@ -71,7 +71,9 @@ jobs:
               run: poetry run ruff check .
 
             - name: Run tests
-              run: poetry run python -m pytest --rootdir . -v --strict-config --junitxml=junit_test_results.xml ./tests
+              run: |
+                  set -o pipefail
+                  poetry run python -m pytest --rootdir . -v --strict-config --junitxml=junit_test_results.xml ./tests 2>&1 | tee pytest.log
               env:
                   PYTHONPATH: ${{ github.workspace }}/src
 
@@ -80,7 +82,9 @@ jobs:
               uses: actions/upload-artifact@v7
               with:
                   name: ${{ matrix.python-version }}-test-results
-                  path: junit_test_results.xml
+                  path: |
+                      junit_test_results.xml
+                      pytest.log
                   if-no-files-found: warn
 
     pymegdec-downstream-smoke:
