@@ -1,14 +1,17 @@
-"""Allow structured OpenNeuro alignment manifest fallback values."""
+"""Guard structured and non-finite OpenNeuro alignment comparison inputs."""
 
 from __future__ import annotations
 
 import importlib
 from collections.abc import Sequence
+from functools import wraps
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_openneuro_alignment_compare_structured_values_patch_installed"
+_FINITE_METRIC_PATCH_MARKER = "_neureptrace_openneuro_alignment_compare_finite_metric_patch_installed"
 
 _TRUE_TOKENS = {"1", "true", "yes", "y", "on"}
 _FALSE_TOKENS = {"0", "false", "no", "n", "off"}
@@ -67,15 +70,49 @@ def _as_bool(value: Any) -> bool:
     return parsed.pop()
 
 
+def _install_finite_metric_selection(module: Any) -> None:
+    """Exclude non-finite time/metric rows before ranking alignment variants."""
+
+    if getattr(module, _FINITE_METRIC_PATCH_MARKER, False):
+        return
+
+    original_select_metric = module._select_metric
+
+    @wraps(original_select_metric)
+    def select_metric(
+        summary: pd.DataFrame,
+        *,
+        metric: str,
+        fixed_time: float | None,
+    ) -> dict[str, Any]:
+        fixed_time_value = None if fixed_time is None else float(fixed_time)
+        if fixed_time_value is not None and not np.isfinite(fixed_time_value):
+            raise ValueError("fixed_time must be finite.")
+
+        if "time" in summary.columns and metric in summary.columns:
+            times = pd.to_numeric(summary["time"], errors="coerce").to_numpy(dtype=float)
+            scores = pd.to_numeric(summary[metric], errors="coerce").to_numpy(dtype=float)
+            finite = np.isfinite(times) & np.isfinite(scores)
+            positions = np.flatnonzero(finite)
+            summary = summary.iloc[positions].copy()
+            summary["time"] = times[positions]
+            summary[metric] = scores[positions]
+
+        return original_select_metric(summary, metric=metric, fixed_time=fixed_time_value)
+
+    module._select_metric = select_metric
+    setattr(module, _FINITE_METRIC_PATCH_MARKER, True)
+
+
 def install() -> None:
-    """Patch OpenNeuro alignment comparison structured-value handling."""
+    """Patch OpenNeuro alignment comparison input handling."""
 
     module = importlib.import_module("neureptrace.openneuro_alignment_compare")
-    if getattr(module, _PATCH_MARKER, False):
-        return
-    module._first_nonempty = _first_nonempty
-    module._as_bool = _as_bool
-    setattr(module, _PATCH_MARKER, True)
+    if not getattr(module, _PATCH_MARKER, False):
+        module._first_nonempty = _first_nonempty
+        module._as_bool = _as_bool
+        setattr(module, _PATCH_MARKER, True)
+    _install_finite_metric_selection(module)
 
 
 __all__ = ["install"]
