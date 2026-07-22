@@ -20,13 +20,13 @@ _FALSE_TOKENS = {"0", "false", "no", "n", "off"}
 def _is_missing_scalar(value: Any) -> bool:
     """Return true for scalar pandas/numpy missing values only."""
 
-    try:
-        missing = np.asarray(pd.isna(value))
-    except (TypeError, ValueError):
-        return False
-    if missing.ndim != 0:
-        return False
-    return bool(missing.item())
+    if value is pd.NA or value is pd.NaT:
+        return True
+    if isinstance(value, (float, np.floating)):
+        return bool(np.isnan(value))
+    if isinstance(value, (np.datetime64, np.timedelta64)):
+        return bool(np.isnat(value))
+    return False
 
 
 def _first_nonempty(*values: Any) -> str:
