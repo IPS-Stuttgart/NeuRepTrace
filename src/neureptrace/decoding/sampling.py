@@ -86,11 +86,9 @@ def _label_vector(labels) -> np.ndarray:
             return array.reshape(1)
         if array.ndim == 1:
             return array
-        if array.ndim == 2 and array.shape[1] > 0 and (
-            np.issubdtype(original_dtype, np.object_) or array.shape[1] > 1
-        ):
-            return _row_tuple_label_vector(array)
-        return array.reshape(-1)
+        if array.ndim == 2 and array.shape[1] == 1 and not np.issubdtype(original_dtype, np.object_):
+            return array.reshape(-1)
+        return _row_tuple_label_vector(array)
 
     if isinstance(labels, (str, bytes)):
         return np.asarray([labels], dtype=object)
@@ -106,9 +104,11 @@ def _label_vector(labels) -> np.ndarray:
 
 
 def _row_tuple_label_vector(array: np.ndarray) -> np.ndarray:
-    """Interpret an object row matrix as one composite label per input row."""
+    """Interpret every NumPy row as one flattened composite label."""
 
-    return _object_label_vector([tuple(row) for row in array.tolist()])
+    row_width = int(np.prod(array.shape[1:], dtype=int))
+    flat_rows = array.reshape(array.shape[0], row_width)
+    return _object_label_vector([tuple(row) for row in flat_rows.tolist()])
 
 
 def _object_label_vector(items: list[object]) -> np.ndarray:
