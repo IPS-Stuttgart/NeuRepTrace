@@ -21,10 +21,12 @@ def _is_missing_scalar(value: Any) -> bool:
     """Return true for scalar pandas/numpy missing values only."""
 
     try:
-        missing = pd.isna(value)
+        missing = np.asarray(pd.isna(value))
     except (TypeError, ValueError):
         return False
-    return bool(missing) if isinstance(missing, (bool, np.bool_)) else False
+    if missing.ndim != 0:
+        return False
+    return bool(missing.item())
 
 
 def _first_nonempty(*values: Any) -> str:
