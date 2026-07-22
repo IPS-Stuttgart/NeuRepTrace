@@ -21,33 +21,35 @@ def _decoded_fold_arguments() -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("field", ["test_labels", "predictions", "test_indices"])
 @pytest.mark.parametrize(
-    ("field", "value"),
+    "invalid_value",
     [
-        ("test_labels", np.array([1.5, 0.0])),
-        ("predictions", np.array([True, False])),
-        ("test_indices", np.array([0.5, 1.0])),
+        int(np.iinfo(np.int_).max) + 1,
+        int(np.iinfo(np.int_).min) - 1,
     ],
 )
-def test_from_decoded_fold_rejects_lossy_integer_coercion(field: str, value: np.ndarray) -> None:
+def test_from_decoded_fold_rejects_values_outside_platform_integer_range(
+    field: str,
+    invalid_value: int,
+) -> None:
     arguments = _decoded_fold_arguments()
-    arguments[field] = value
+    arguments[field] = np.asarray([invalid_value, 0], dtype=object)
 
     with pytest.raises(
         ValueError,
-        match=rf"{field} must be a one-dimensional sequence of finite integers, not booleans",
+        match=rf"from_decoded_fold {field} values must fit the platform integer range",
     ):
         ProbabilityObservationTable.from_decoded_fold(**arguments)
 
 
-def test_from_decoded_fold_keeps_integer_valued_float_vectors() -> None:
+@pytest.mark.parametrize("field", ["test_labels", "predictions", "test_indices"])
+def test_from_decoded_fold_rejects_non_vector_integer_inputs(field: str) -> None:
     arguments = _decoded_fold_arguments()
-    arguments["test_labels"] = np.array([1.0, 0.0])
-    arguments["predictions"] = np.array([1.0, 0.0])
-    arguments["test_indices"] = np.array([0.0, 1.0])
+    arguments[field] = np.asarray([[1], [0]], dtype=int)
 
-    table = ProbabilityObservationTable.from_decoded_fold(**arguments)
-
-    assert table.frame["true_label"].tolist() == [1, 0]
-    assert table.frame["predicted_label"].tolist() == [1, 0]
-    assert table.frame["sample_index"].tolist() == [0, 1]
+    with pytest.raises(
+        ValueError,
+        match=rf"from_decoded_fold {field} must be a one-dimensional integer-valued vector",
+    ):
+        ProbabilityObservationTable.from_decoded_fold(**arguments)
