@@ -1,7 +1,8 @@
 """Patch Gaussian/Mahalanobis source-decoder numeric validation edge cases.
 
 This module keeps strict source-only Gaussian and Mahalanobis helpers robust for
-configuration scalars, feature-matrix validation, and Gaussian result precision.
+configuration scalars, feature-matrix validation, Gaussian likelihood evaluation,
+and Gaussian result precision.
 """
 
 from __future__ import annotations
@@ -92,7 +93,7 @@ def _compact_float32(values: np.ndarray) -> np.ndarray:
 
 
 def install() -> None:
-    """Install scalar, feature, and Gaussian result-precision guards."""
+    """Install scalar, feature, likelihood, and Gaussian result-precision guards."""
 
     global _INSTALLED
     if _INSTALLED:
@@ -104,6 +105,7 @@ def install() -> None:
 
     original_gaussian_feature_matrix = source_gaussian._feature_matrix
     original_mahalanobis_feature_matrix = source_mahalanobis._feature_matrix
+    original_gaussian_log_likelihoods = source_gaussian.gaussian_log_likelihoods
     original_fit_source_gaussian_decoder = source_gaussian.fit_source_gaussian_decoder
 
     @wraps(original_gaussian_feature_matrix)
@@ -115,6 +117,31 @@ def install() -> None:
     def _mahalanobis_feature_matrix(values: Any, *, name: str) -> np.ndarray:
         _reject_boolean_feature_values(values, name=name)
         return original_mahalanobis_feature_matrix(values, name=name)
+
+    @wraps(original_gaussian_log_likelihoods)
+    def _gaussian_log_likelihoods(
+        features: Any,
+        *,
+        means: Any,
+        variances: Any,
+    ) -> np.ndarray:
+        """Evaluate diagonal Gaussians without squaring unscaled residuals."""
+
+        x = source_gaussian._feature_matrix(features, name="features")
+        mean_matrix = source_gaussian._feature_matrix(means, name="means")
+        variance_matrix = source_gaussian._feature_matrix(variances, name="variances")
+        if mean_matrix.shape != variance_matrix.shape:
+            raise ValueError("means and variances must have the same shape.")
+        if x.shape[1] != mean_matrix.shape[1]:
+            raise ValueError(f"feature width {x.shape[1]} does not match mean width {mean_matrix.shape[1]}.")
+        if np.any(variance_matrix <= 0.0):
+            raise ValueError("variances must be positive.")
+
+        residuals = x[:, None, :] - mean_matrix[None, :, :]
+        standardized = residuals / np.sqrt(variance_matrix)[None, :, :]
+        quadratic = np.sum(standardized * standardized, axis=2)
+        log_det = np.sum(np.log(variance_matrix), axis=1)
+        return -0.5 * (quadratic + log_det[None, :] + x.shape[1] * np.log(2.0 * np.pi))
 
     @wraps(original_fit_source_gaussian_decoder)
     def _fit_source_gaussian_decoder(
@@ -183,6 +210,7 @@ def install() -> None:
 
     source_gaussian._positive_float = _positive_float
     source_gaussian._feature_matrix = _gaussian_feature_matrix
+    source_gaussian.gaussian_log_likelihoods = _gaussian_log_likelihoods
     source_gaussian.fit_source_gaussian_decoder = _fit_source_gaussian_decoder
     source_mahalanobis._positive_float = _positive_float
     source_mahalanobis._nonnegative_float = _nonnegative_float
