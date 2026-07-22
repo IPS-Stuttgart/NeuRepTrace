@@ -1,22 +1,81 @@
 """Patch canonical probability-observation label validation.
 
 Canonical observation rows use integer ``prob_class_<label>`` suffixes to connect
-``true_label`` and ``predicted_label`` to probability columns.  Older validators
+``true_label`` and ``predicted_label`` to probability columns. Older validators
 coerced these labels with ``int(...)`` inside consistency checks, which could
-silently truncate fractional labels or crash on non-finite values.  This shim
+silently truncate fractional labels or crash on non-finite values. This shim
 keeps the public validator stable while reporting malformed labels as regular
 validation errors.
+
+The decoded-fold table builder historically performed the same lossy conversion
+before validating labels, predictions, and row indices. The constructor guard
+below rejects fractional, non-finite, boolean, or non-vector integer inputs
+before the original implementation casts them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import wraps
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 
 _PATCH_MARKER = "_neureptrace_observation_label_patch_installed"
+_DECODED_FOLD_PATCH_MARKER = "_neureptrace_decoded_fold_integer_patch_installed"
+
+
+def _integer_vector(values: Any, *, name: str) -> np.ndarray:
+    message = f"{name} must be a one-dimensional sequence of finite integers, not booleans."
+    try:
+        raw = np.asarray(values, dtype=object)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if raw.ndim != 1:
+        raise ValueError(message)
+
+    limits = np.iinfo(np.int_)
+    integers: list[int] = []
+    for value in raw.tolist():
+        if isinstance(value, np.ndarray):
+            if value.ndim != 0:
+                raise ValueError(message)
+            value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(message)
+        if isinstance(value, (int, np.integer)):
+            integer = int(value)
+        else:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(message) from exc
+            if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+                raise ValueError(message)
+            try:
+                integer = int(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(message) from exc
+        if integer < limits.min or integer > limits.max:
+            raise ValueError(f"{name} values must fit the platform integer range.")
+        integers.append(integer)
+    return np.asarray(integers, dtype=int)
+
+
+def _make_safe_from_decoded_fold(observations):
+    descriptor = observations.ProbabilityObservationTable.__dict__["from_decoded_fold"]
+    original = descriptor.__func__
+
+    @wraps(original)
+    def _from_decoded_fold(cls, *args: Any, **kwargs: Any):
+        for name in ("test_labels", "predictions", "test_indices"):
+            if name in kwargs:
+                kwargs[name] = _integer_vector(kwargs[name], name=name)
+        return original(cls, *args, **kwargs)
+
+    return classmethod(_from_decoded_fold)
 
 
 def _integer_label_series(observation_schema, frame: pd.DataFrame, column: str, issues: list) -> tuple[pd.Series, pd.Series]:
@@ -198,9 +257,13 @@ def _make_safe_probability_consistency(observation_schema):
 def install() -> None:
     """Install stricter canonical label checks for probability observations."""
 
-    from neureptrace import observation_schema
+    from neureptrace import observation_schema, observations
 
-    if getattr(observation_schema, _PATCH_MARKER, False):
-        return
-    observation_schema._validate_probability_consistency = _make_safe_probability_consistency(observation_schema)
-    setattr(observation_schema, _PATCH_MARKER, True)
+    if not getattr(observation_schema, _PATCH_MARKER, False):
+        observation_schema._validate_probability_consistency = _make_safe_probability_consistency(observation_schema)
+        setattr(observation_schema, _PATCH_MARKER, True)
+
+    table_class = observations.ProbabilityObservationTable
+    if not getattr(table_class, _DECODED_FOLD_PATCH_MARKER, False):
+        table_class.from_decoded_fold = _make_safe_from_decoded_fold(observations)
+        setattr(table_class, _DECODED_FOLD_PATCH_MARKER, True)
