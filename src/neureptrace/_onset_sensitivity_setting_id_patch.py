@@ -1,11 +1,15 @@
-"""Keep onset-sensitivity setting identifiers injective."""
+"""Keep onset-sensitivity identifiers injective and boolean controls strict."""
 
 from __future__ import annotations
 
 import importlib
+from functools import wraps
 from typing import Any
 
-_PATCH_MARKER = "_neureptrace_onset_sensitivity_setting_id_patch_installed"
+import numpy as np
+
+_SETTING_ID_PATCH_MARKER = "_neureptrace_onset_sensitivity_setting_id_patch_installed"
+_BOOLEAN_CONTROL_PATCH_MARKER = "_neureptrace_onset_sensitivity_boolean_control_patch_installed"
 
 
 def _exact_float_token(value: float) -> str:
@@ -57,17 +61,68 @@ def _setting_id(setting: Any) -> str:
     return "_".join([method, quantile, consecutive, duration, stable])
 
 
+def _boolean_value(value: object, *, name: str) -> bool:
+    """Return a strict Python boolean without accepting truthy substitutes."""
+
+    if not isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a boolean value.")
+    return bool(value)
+
+
+def _boolean_grid_values(values: object) -> tuple[bool, ...]:
+    """Validate stable-prediction grid values before ``bool`` can coerce them."""
+
+    try:
+        raw_values = tuple(values)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise ValueError("stable_prediction_values must contain only boolean values.") from exc
+    if any(not isinstance(value, (bool, np.bool_)) for value in raw_values):
+        raise ValueError("stable_prediction_values must contain only boolean values.")
+    return tuple(bool(value) for value in raw_values)
+
+
+def _install_boolean_control_validation(onset_sensitivity: Any) -> None:
+    """Reject truthy non-booleans in both onset-sensitivity public APIs."""
+
+    original_build_settings = onset_sensitivity.build_sensitivity_settings
+    if not getattr(original_build_settings, _BOOLEAN_CONTROL_PATCH_MARKER, False):
+
+        @wraps(original_build_settings)
+        def build_sensitivity_settings(*args: Any, **kwargs: Any):
+            if "stable_prediction_values" in kwargs:
+                kwargs["stable_prediction_values"] = _boolean_grid_values(kwargs["stable_prediction_values"])
+            return original_build_settings(*args, **kwargs)
+
+        setattr(build_sensitivity_settings, _BOOLEAN_CONTROL_PATCH_MARKER, True)
+        onset_sensitivity.build_sensitivity_settings = build_sensitivity_settings
+
+    original_run_sensitivity = onset_sensitivity.run_onset_sensitivity
+    if not getattr(original_run_sensitivity, _BOOLEAN_CONTROL_PATCH_MARKER, False):
+
+        @wraps(original_run_sensitivity)
+        def run_onset_sensitivity(*args: Any, **kwargs: Any):
+            if "include_stable_prediction" in kwargs:
+                kwargs["include_stable_prediction"] = _boolean_value(
+                    kwargs["include_stable_prediction"],
+                    name="include_stable_prediction",
+                )
+            return original_run_sensitivity(*args, **kwargs)
+
+        setattr(run_onset_sensitivity, _BOOLEAN_CONTROL_PATCH_MARKER, True)
+        onset_sensitivity.run_onset_sensitivity = run_onset_sensitivity
+
+
 def install() -> None:
-    """Install collision-free setting identifiers for onset sensitivity sweeps."""
+    """Install collision-free identifiers and strict boolean sensitivity controls."""
 
     onset_sensitivity = importlib.import_module("neureptrace.onset_sensitivity")
     current_property = onset_sensitivity.OnsetSensitivitySetting.setting_id
     current_getter = getattr(current_property, "fget", None)
-    if getattr(current_getter, _PATCH_MARKER, False):
-        return
+    if not getattr(current_getter, _SETTING_ID_PATCH_MARKER, False):
+        setattr(_setting_id, _SETTING_ID_PATCH_MARKER, True)
+        onset_sensitivity.OnsetSensitivitySetting.setting_id = property(_setting_id)
 
-    setattr(_setting_id, _PATCH_MARKER, True)
-    onset_sensitivity.OnsetSensitivitySetting.setting_id = property(_setting_id)
+    _install_boolean_control_validation(onset_sensitivity)
 
 
 __all__ = ["install"]
