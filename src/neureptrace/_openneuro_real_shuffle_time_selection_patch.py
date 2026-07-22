@@ -75,13 +75,13 @@ def _is_missing_provenance_value(value: Any) -> bool:
 
     if value is None or (isinstance(value, str) and value == ""):
         return True
-    try:
-        missing = np.asarray(pd.isna(value))
-    except (TypeError, ValueError):
-        return False
-    if missing.ndim != 0:
-        return False
-    return bool(missing.item())
+    if value is pd.NA or value is pd.NaT:
+        return True
+    if isinstance(value, (float, np.floating)):
+        return bool(np.isnan(value))
+    if isinstance(value, (np.datetime64, np.timedelta64)):
+        return bool(np.isnat(value))
+    return False
 
 
 def _install_provenance_value_patch() -> None:
