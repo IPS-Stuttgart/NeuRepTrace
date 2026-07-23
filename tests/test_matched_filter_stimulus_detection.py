@@ -160,3 +160,35 @@ def test_matched_filter_scores_peak_at_event_onset():
     best = scores.sort_values("matched_filter_score", ascending=False).iloc[0]
     assert best["stimulus_class"] == "A"
     assert best["time"] == 1.0
+
+
+def test_matched_filter_score_metadata_overrides_conflicting_observation_columns():
+    train_observations = _stream("train", event_onset=0.0)
+    template_annotations = pd.DataFrame([{"stream_id": "train", "stimulus_class": "A", "onset_time": 0.0}])
+    templates = fit_stimulus_event_templates(
+        train_observations,
+        template_annotations,
+        template_window=(0.0, 0.3),
+        template_step=0.1,
+        target_classes=["A"],
+        stream_columns=("stream_id",),
+        min_template_coverage=1.0,
+    )
+
+    scan_observations = _stream("scan", event_onset=1.0).assign(
+        stimulus_label=1,
+        stimulus_class="B",
+        score_column="prob_class_1",
+        score_mode="class_probability",
+    )
+    scores = score_stimulus_event_templates(
+        scan_observations,
+        templates,
+        stream_columns=("stream_id",),
+        min_template_coverage=1.0,
+    )
+
+    assert scores["stimulus_label"].eq(0).all()
+    assert scores["stimulus_class"].eq("A").all()
+    assert scores["score_column"].eq("matched_filter_score").all()
+    assert scores["score_mode"].eq("matched_filter").all()
