@@ -1,4 +1,4 @@
-"""Normalize temporal-generalization summary grouping and boolean metadata."""
+"""Normalize temporal grouping, boolean metadata, and continuous sequence identity."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_temporal_generalization_string_groups_patch_installed"
+_CONTINUOUS_SEQUENCE_PATCH_MARKER = "_neureptrace_continuous_stream_sequence_identity_patch_installed"
 _TRUE_BOOL_TEXT = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_TEXT = {"0", "false", "f", "no", "n", "off", ""}
 
@@ -66,8 +67,46 @@ def _coerce_is_diagonal(frame: Any) -> Any:
     return coerced
 
 
+def _with_stream_sequence_ids(observations: Any) -> Any:
+    """Use one generated sequence identifier per continuous stream."""
+
+    if not isinstance(observations, pd.DataFrame):
+        return observations
+    if "sequence_id" in observations.columns or "stream_id" not in observations.columns:
+        return observations
+    standardized = observations.copy()
+    standardized["sequence_id"] = standardized["stream_id"]
+    return standardized
+
+
+def _continuous_standardizer(original):
+    @wraps(original)
+    def standardize(observations, *args, **kwargs):
+        return original(_with_stream_sequence_ids(observations), *args, **kwargs)
+
+    setattr(standardize, _CONTINUOUS_SEQUENCE_PATCH_MARKER, True)
+    return standardize
+
+
+def _install_continuous_sequence_identity() -> None:
+    """Keep all time windows from one continuous stream in one sequence."""
+
+    targets = (
+        ("neureptrace.continuous_observations", "standardize_continuous_observations"),
+        ("neureptrace.continuous_stimulus_scan", "_standardize_stream_observations"),
+    )
+    for module_name, function_name in targets:
+        module = importlib.import_module(module_name)
+        original = getattr(module, function_name)
+        if getattr(original, _CONTINUOUS_SEQUENCE_PATCH_MARKER, False):
+            continue
+        setattr(module, function_name, _continuous_standardizer(original))
+
+
 def install() -> None:
-    """Patch summary grouping and CSV-round-tripped boolean metadata."""
+    """Patch temporal grouping, continuous identities, and CSV boolean metadata."""
+
+    _install_continuous_sequence_identity()
 
     temporal_generalization = importlib.import_module("neureptrace.decoding.temporal_generalization")
     original_summarize = temporal_generalization.summarize_temporal_generalization_matrix
