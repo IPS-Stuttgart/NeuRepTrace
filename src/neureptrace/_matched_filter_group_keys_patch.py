@@ -1,4 +1,4 @@
-"""Preserve exact and missing matched-filter group and stream identifiers."""
+"""Preserve exact matched-filter identifiers and template-owned score metadata."""
 
 from __future__ import annotations
 
@@ -168,14 +168,86 @@ def fit_stimulus_event_templates(
     return pd.DataFrame(rows)
 
 
+def score_stimulus_event_templates(
+    observations: pd.DataFrame,
+    templates: pd.DataFrame,
+    *,
+    group_columns: Sequence[str] | None = None,
+    stream_columns: Sequence[str] | None = None,
+    detection_window: tuple[float, float] | None = None,
+    min_template_coverage: float = 0.8,
+) -> pd.DataFrame:
+    """Score templates while keeping template metadata authoritative."""
+
+    from neureptrace import matched_filter_detection as matched_filter
+
+    if templates.empty:
+        return pd.DataFrame()
+    groups = matched_filter._group_columns(observations, group_columns)
+    streams = matched_filter._stream_columns(observations, stream_columns)
+    rows: list[dict[str, object]] = []
+    key_columns = matched_filter._template_key_columns(templates, groups)
+    for template_key, template in templates.groupby(key_columns, sort=True, dropna=False):
+        metadata = _key_values(template_key, key_columns)
+        group_values = {column: metadata[column] for column in groups if column in metadata}
+        group_frame = _filter_by_values(observations, group_values) if group_values else observations
+        if group_frame.empty:
+            continue
+        scores = matched_filter._score_values(
+            group_frame,
+            stimulus_label=metadata["stimulus_label"],
+            stimulus_class=str(metadata["stimulus_class"]),
+            score_column=str(metadata["score_column"]),
+            score_mode=str(metadata["score_mode"]),
+        )
+        template = template.sort_values("template_time")
+        offsets = pd.to_numeric(template["template_time"], errors="coerce").to_numpy(dtype=float)
+        weights = pd.to_numeric(template["template_weight"], errors="coerce").to_numpy(dtype=float)
+        baseline = float(pd.to_numeric(template["baseline_score"], errors="coerce").dropna().iloc[0])
+        n_template_events = int(pd.to_numeric(template["n_template_events"], errors="coerce").dropna().iloc[0])
+        for stream_key, stream_frame in _grouped(group_frame, streams, sort=True):
+            stream_values = _key_values(stream_key, streams)
+            table = matched_filter._time_score_table(stream_frame, scores.loc[stream_frame.index])
+            for _, candidate in stream_frame.sort_values("time").iterrows():
+                time = float(candidate["time"])
+                if detection_window is not None and not (detection_window[0] <= time <= detection_window[1]):
+                    continue
+                sampled = matched_filter._interpolate(table, time + offsets)
+                finite = np.isfinite(sampled) & np.isfinite(weights)
+                if not finite.size or float(finite.mean()) < min_template_coverage:
+                    continue
+                local_weights = weights[finite]
+                norm = float(np.sqrt(np.sum(local_weights**2)))
+                if not np.isfinite(norm) or norm <= 0:
+                    continue
+                score = float(np.dot(sampled[finite] - baseline, local_weights / norm))
+                rows.append(
+                    {
+                        **candidate.to_dict(),
+                        **group_values,
+                        **stream_values,
+                        "stimulus_label": metadata["stimulus_label"],
+                        "stimulus_class": metadata["stimulus_class"],
+                        "score_column": matched_filter.MATCHED_FILTER_SCORE_COLUMN,
+                        "score_mode": matched_filter.MATCHED_FILTER_SCORE_MODE,
+                        "_stimulus_score": score,
+                        matched_filter.MATCHED_FILTER_SCORE_COLUMN: score,
+                        "template_coverage": float(finite.mean()),
+                        "n_template_events": n_template_events,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
 def _sync_public_alias() -> None:
     public_module = sys.modules.get("neureptrace.stimulus_detection")
     if public_module is not None:
         public_module.fit_stimulus_event_templates = fit_stimulus_event_templates
+        public_module.score_stimulus_event_templates = score_stimulus_event_templates
 
 
 def install() -> None:
-    """Install robust group-key and annotation-stream handling."""
+    """Install robust matched-filter identifiers and score metadata handling."""
 
     from neureptrace import matched_filter_detection
 
@@ -184,6 +256,7 @@ def install() -> None:
         matched_filter_detection._key_values = _key_values  # noqa: SLF001
         matched_filter_detection._filter_by_values = _filter_by_values  # noqa: SLF001
         matched_filter_detection.fit_stimulus_event_templates = fit_stimulus_event_templates
+        matched_filter_detection.score_stimulus_event_templates = score_stimulus_event_templates
         setattr(matched_filter_detection, _PATCH_MARKER, True)
     _sync_public_alias()
 
