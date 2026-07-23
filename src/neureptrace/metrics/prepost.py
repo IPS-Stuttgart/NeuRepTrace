@@ -159,6 +159,8 @@ def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
 
 
 def _validate_window(window: Window) -> Window:
+    if isinstance(window, (str, bytes, bytearray)):
+        raise ValueError("window must contain exactly two values")
     try:
         window_length = len(window)
     except TypeError as exc:
