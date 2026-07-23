@@ -181,6 +181,8 @@ def score_stimulus_event_templates(
 
     from neureptrace import matched_filter_detection as matched_filter
 
+    if not 0 < min_template_coverage <= 1:
+        raise ValueError("min_template_coverage must be in (0, 1].")
     if templates.empty:
         return pd.DataFrame()
     groups = matched_filter._group_columns(observations, group_columns)
