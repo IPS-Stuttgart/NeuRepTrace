@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_temporal_smoothing_singleton_sequence_patch_installed"
+_MISSING_SUBJECT_TOKENS = frozenset({"", "nan", "none", "nat"})
 
 
 def _contains_boolean_values(values: object) -> bool:
@@ -40,6 +41,25 @@ def _temporal_config_scalar(value: object, message: str) -> object:
     elif isinstance(value, (list, tuple, dict, set)):
         raise ValueError(message)
     return value
+
+
+def _restore_missing_subjects(
+    observations: pd.DataFrame,
+    fallback_subjects: list[str],
+) -> pd.DataFrame:
+    """Replace unresolved subject placeholders with their input filename stems."""
+
+    if "subject" not in observations.columns or len(observations) != len(fallback_subjects):
+        return observations
+    subject_tokens = observations["subject"].astype(str).str.strip().str.lower()
+    missing_subject = observations["subject"].isna() | subject_tokens.isin(_MISSING_SUBJECT_TOKENS)
+    if not bool(missing_subject.any()):
+        return observations
+    restored = observations.copy()
+    fallback_values = pd.Series(fallback_subjects, index=restored.index, dtype=object)
+    restored.loc[missing_subject, "subject"] = fallback_values.loc[missing_subject]
+    restored["subject"] = restored["subject"].astype(str)
+    return restored
 
 
 def _fit_temporal_smoothing_sequences(temporal_smoothing, fit_frame: pd.DataFrame, prob_columns: list[str]) -> list[np.ndarray]:
@@ -102,14 +122,17 @@ def install() -> None:
     @wraps(original_read_probability_observations)
     def read_probability_observations(csv_paths: list[Path]) -> pd.DataFrame:
         paths = [path if isinstance(path, Path) else Path(path) for path in csv_paths]
+        fallback_subjects: list[str] = []
         for csv_path in paths:
             frame = pd.read_csv(csv_path)
+            fallback_subjects.extend([csv_path.stem] * len(frame))
             if "time" in frame.columns:
                 _reject_boolean_values(
                     frame["time"].to_numpy(dtype=object),
                     f"{csv_path} time values must be numeric, not boolean.",
                 )
-        return original_read_probability_observations(paths)
+        observations = original_read_probability_observations(paths)
+        return _restore_missing_subjects(observations, fallback_subjects)
 
     temporal_model.read_probability_observations = read_probability_observations
     temporal_smoothing.read_probability_observations = read_probability_observations
