@@ -29,9 +29,8 @@ def _standardize(standardizer: Callable[..., pd.DataFrame], observations: pd.Dat
     )
 
 
-@pytest.mark.parametrize("standardizer", _STANDARDIZERS)
-def test_continuous_standardizers_group_time_rows_by_stream(standardizer: Callable[..., pd.DataFrame]) -> None:
-    observations = pd.DataFrame(
+def _stream_observations() -> pd.DataFrame:
+    return pd.DataFrame(
         {
             "stream_id": ["run-a", "run-a", "run-b", "run-b"],
             "sample_index": [0, 1, 0, 1],
@@ -39,10 +38,23 @@ def test_continuous_standardizers_group_time_rows_by_stream(standardizer: Callab
         }
     )
 
-    standardized = _standardize(standardizer, observations)
+
+def test_continuous_scan_groups_time_rows_by_stream() -> None:
+    standardized = _standardize(_standardize_stream_observations, _stream_observations())
 
     assert standardized["sequence_id"].tolist() == ["run-a", "run-a", "run-b", "run-b"]
     assert standardized.groupby("stream_id")["sequence_id"].nunique().eq(1).all()
+
+
+def test_generic_continuous_standardizer_preserves_sample_identity() -> None:
+    standardized = _standardize(standardize_continuous_observations, _stream_observations())
+
+    assert standardized["sequence_id"].tolist() == [
+        ("run-a", 0),
+        ("run-a", 1),
+        ("run-b", 0),
+        ("run-b", 1),
+    ]
 
 
 @pytest.mark.parametrize("standardizer", _STANDARDIZERS)
