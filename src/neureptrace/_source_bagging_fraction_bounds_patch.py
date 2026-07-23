@@ -40,6 +40,10 @@ def _estimator_score_column_error() -> ValueError:
     return ValueError("source bagging estimator decision_function output must contain one column per class.")
 
 
+def _estimator_prediction_shape_error() -> ValueError:
+    return ValueError("source bagging estimator predictions must be one-dimensional.")
+
+
 def _positive_int(value: Any, *, name: str) -> int:
     """Return a positive integer while rejecting booleans and non-scalar arrays."""
 
@@ -229,7 +233,9 @@ def _install_aligned_probability_validation(source_bagging: Any) -> None:
             logits = np.exp(np.clip(scores - np.max(scores, axis=1, keepdims=True), -50.0, 50.0))
             return source_bagging._normalize_probability_rows(logits, epsilon=epsilon)
         predictions = np.asarray(model.predict(features), dtype=object)
-        if predictions.ndim == 0 or predictions.shape[0] != n_rows:
+        if predictions.ndim != 1:
+            raise _estimator_prediction_shape_error()
+        if predictions.shape[0] != n_rows:
             raise _estimator_row_count_error("predictions")
         output = np.full((n_rows, classes.shape[0]), float(epsilon), dtype=float)
         for row, label in enumerate(predictions.tolist()):
