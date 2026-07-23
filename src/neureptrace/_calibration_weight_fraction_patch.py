@@ -8,8 +8,10 @@ import numpy as np
 
 
 _FRACTION_GROUP_COLUMNS = ("decoder", "emission_mode", "time")
+_GROUP_COLUMN_DEFAULTS = {"decoder": "overall", "emission_mode": "calibrated"}
 _WEIGHT_FRACTION_PATCH_ATTR = "_calibration_weight_fraction_patched"
 _EMPTY_BIN_WEIGHT_PATCH_ATTR = "_calibration_empty_bin_weight_patched"
+_GROUP_METADATA_PATCH_ATTR = "_calibration_group_metadata_patched"
 
 
 def _weight_fraction_group_columns(frame) -> list[str]:
@@ -51,6 +53,14 @@ def _reject_positive_empty_bin_weights(frame, csv_path, weight_column: str) -> N
         )
 
 
+def _normalise_present_group_columns(frame):
+    normalised = frame.copy()
+    for column, default in _GROUP_COLUMN_DEFAULTS.items():
+        if column in normalised.columns:
+            normalised[column] = normalised[column].where(normalised[column].notna(), default)
+    return normalised
+
+
 def install() -> None:
     """Patch calibration validation and weight-fraction aggregation."""
     from . import _calibration_bool_numeric_patch
@@ -73,6 +83,17 @@ def install() -> None:
 
         setattr(_validate_reliability_bins, _EMPTY_BIN_WEIGHT_PATCH_ATTR, True)
         calibration._validate_reliability_bins = _validate_reliability_bins
+
+    if not getattr(calibration._validate_reliability_bins, _GROUP_METADATA_PATCH_ATTR, False):
+        original_validate_reliability_bins = calibration._validate_reliability_bins
+
+        @wraps(original_validate_reliability_bins)
+        def _validate_reliability_bin_groups(frame, csv_path):
+            validated = original_validate_reliability_bins(frame, csv_path)
+            return _normalise_present_group_columns(validated)
+
+        setattr(_validate_reliability_bin_groups, _GROUP_METADATA_PATCH_ATTR, True)
+        calibration._validate_reliability_bins = _validate_reliability_bin_groups
 
     if not getattr(calibration.aggregate_reliability_bins, _WEIGHT_FRACTION_PATCH_ATTR, False):
         original_aggregate_reliability_bins = calibration.aggregate_reliability_bins
