@@ -34,7 +34,8 @@ def _array_label_vector(array: np.ndarray) -> np.ndarray:
         return array.reshape(1)
     if array.ndim == 1:
         return array
-    rows = array.reshape(array.shape[0], -1)
+    row_width = int(np.prod(array.shape[1:], dtype=int))
+    rows = array.reshape(array.shape[0], row_width)
     if rows.shape[1] == 1:
         return rows[:, 0].astype(object, copy=False)
     vector = np.empty(rows.shape[0], dtype=object)
