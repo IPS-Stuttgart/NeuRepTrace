@@ -5,7 +5,7 @@ import pandas as pd
 from neureptrace.continuous_observations import standardize_continuous_observations
 
 
-def test_standardize_continuous_observations_preserves_typed_stream_identity() -> None:
+def test_standardize_continuous_observations_preserves_typed_sequence_identity() -> None:
     observations = pd.DataFrame(
         {
             "stream_id": pd.Series([1, "1"], dtype=object),
@@ -27,5 +27,5 @@ def test_standardize_continuous_observations_preserves_typed_stream_identity() -
         model_hash="model",
     )
 
-    assert standardized["sequence_id"].tolist() == [1, "1"]
+    assert standardized["sequence_id"].tolist() == [(1, 7), ("1", 7)]
     assert standardized["sequence_id"].is_unique
