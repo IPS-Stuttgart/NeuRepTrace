@@ -69,11 +69,11 @@ def install() -> None:
     _calibration_bool_numeric_patch.install()
 
     if not getattr(calibration._validate_reliability_bins, _EMPTY_BIN_WEIGHT_PATCH_ATTR, False):
-        original_validate_reliability_bins = calibration._validate_reliability_bins
+        original_empty_bin_validator = calibration._validate_reliability_bins
 
-        @wraps(original_validate_reliability_bins)
+        @wraps(original_empty_bin_validator)
         def _validate_reliability_bins(frame, csv_path):
-            validated = original_validate_reliability_bins(frame, csv_path)
+            validated = original_empty_bin_validator(frame, csv_path)
             _reject_positive_empty_bin_weights(
                 validated,
                 csv_path,
@@ -85,11 +85,11 @@ def install() -> None:
         calibration._validate_reliability_bins = _validate_reliability_bins
 
     if not getattr(calibration._validate_reliability_bins, _GROUP_METADATA_PATCH_ATTR, False):
-        original_validate_reliability_bins = calibration._validate_reliability_bins
+        original_group_metadata_validator = calibration._validate_reliability_bins
 
-        @wraps(original_validate_reliability_bins)
+        @wraps(original_group_metadata_validator)
         def _validate_reliability_bin_groups(frame, csv_path):
-            validated = original_validate_reliability_bins(frame, csv_path)
+            validated = original_group_metadata_validator(frame, csv_path)
             return _normalise_present_group_columns(validated)
 
         setattr(_validate_reliability_bin_groups, _GROUP_METADATA_PATCH_ATTR, True)
