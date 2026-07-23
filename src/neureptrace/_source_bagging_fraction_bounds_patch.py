@@ -218,20 +218,32 @@ def _install_aligned_probability_validation(source_bagging: Any) -> None:
             return source_bagging._normalize_probability_rows(aligned, epsilon=epsilon)
         if hasattr(model, "decision_function"):
             scores = np.asarray(model.decision_function(features), dtype=float)
+            model_classes = np.asarray(getattr(model, "classes_", classes), dtype=object).reshape(-1)
             if scores.ndim == 1:
                 if scores.shape[0] != n_rows:
                     raise _estimator_row_count_error("decision_function output")
-                scores = np.column_stack([-scores, scores])
-            elif scores.ndim == 2 and scores.shape[1] == 1 and classes.shape[0] == 2:
+                if model_classes.shape[0] != 2:
+                    raise _estimator_score_column_error()
+                half_margins = 0.5 * scores
+                scores = np.column_stack([-half_margins, half_margins])
+            elif scores.ndim == 2 and scores.shape[1] == 1:
                 if scores.shape[0] != n_rows:
                     raise _estimator_row_count_error("decision_function output")
-                scores = np.column_stack([-scores[:, 0], scores[:, 0]])
+                if model_classes.shape[0] != 2:
+                    raise _estimator_score_column_error()
+                half_margins = 0.5 * scores[:, 0]
+                scores = np.column_stack([-half_margins, half_margins])
             elif scores.ndim != 2 or scores.shape[0] != n_rows:
                 raise _estimator_row_count_error("decision_function output")
-            if scores.shape[1] != classes.shape[0]:
+            if scores.shape[1] != model_classes.shape[0]:
                 raise _estimator_score_column_error()
             logits = np.exp(np.clip(scores - np.max(scores, axis=1, keepdims=True), -50.0, 50.0))
-            return source_bagging._normalize_probability_rows(logits, epsilon=epsilon)
+            aligned = np.full((n_rows, classes.shape[0]), float(epsilon), dtype=float)
+            for column, class_label in enumerate(model_classes.tolist()):
+                class_index = source_bagging._label_index_or_none(class_label, classes)
+                if class_index is not None:
+                    aligned[:, class_index] = logits[:, column]
+            return source_bagging._normalize_probability_rows(aligned, epsilon=epsilon)
         predictions = np.asarray(model.predict(features), dtype=object)
         if predictions.ndim != 1:
             raise _estimator_prediction_shape_error()
