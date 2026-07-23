@@ -102,6 +102,9 @@ def fit_stimulus_event_templates(
         group_annotations = _filter_by_values(annotations, group_values)
         if group_annotations.empty:
             continue
+        # Scores are paired with rows positionally. Normalize the index before
+        # selecting per-stream scores so duplicate labels cannot expand ``.loc``.
+        group_frame = group_frame.reset_index(drop=True)
         stream_groups = {stream_key: stream_frame for stream_key, stream_frame in _grouped(group_frame, streams, sort=False)}
         for _, class_row in classes.iterrows():
             class_annotations = group_annotations.loc[
@@ -193,6 +196,9 @@ def score_stimulus_event_templates(
         group_frame = _filter_by_values(observations, group_values) if group_values else observations
         if group_frame.empty:
             continue
+        # Keep row-to-score alignment positional even when concatenated streams
+        # retain overlapping source indices.
+        group_frame = group_frame.reset_index(drop=True)
         scores = matched_filter._score_values(
             group_frame,
             stimulus_label=metadata["stimulus_label"],
