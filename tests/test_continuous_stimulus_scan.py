@@ -117,7 +117,8 @@ def test_continuous_stimulus_scan_trains_scans_and_summarizes_events(tmp_path: P
     assert result.observations["backend"].unique().tolist() == ["sklearn"]
     assert result.observations["seed"].unique().tolist() == [13]
     assert result.observations["test_time"].round(6).tolist() == result.observations["time"].round(6).tolist()
-    assert result.observations["sequence_id"].str.contains(":").all()
+    assert result.observations["sequence_id"].equals(result.observations["stream_id"])
+    assert result.observations.groupby("stream_id")["sequence_id"].nunique().eq(1).all()
     assert result.observations["preprocessing_hash"].str.len().eq(16).all()
     assert result.observations["model_hash"].str.len().eq(16).all()
     assert validate_probability_observations(result.observations, profile="stimulus-detection").is_valid
