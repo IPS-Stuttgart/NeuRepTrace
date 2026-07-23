@@ -1,4 +1,4 @@
-"""Guard LOSO group handling and grouped source-window CV support."""
+"""Guard LOSO grouping, source-window CV support, and held-out selection."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
 
 _CV_PATCH_MARKER = "_neureptrace_loso_source_cv_group_support_patch_installed"
 _GROUP_PATCH_MARKER = "_neureptrace_loso_group_label_validation_patch_installed"
+_TEST_GROUP_PATCH_MARKER = "_neureptrace_loso_explicit_test_group_patch_installed"
 
 
 def _minimum_class_group_support(labels: np.ndarray, groups: np.ndarray) -> int:
@@ -36,6 +37,34 @@ def _reject_missing_groups(groups: Any, *, name: str) -> None:
     missing = np.asarray(pd.isna(groups), dtype=bool)
     if missing.any():
         raise ValueError(f"{name} must not contain missing values.")
+
+
+def _install_explicit_test_group_patch(module: Any) -> None:
+    """Keep an explicitly configured scalar group even when its value is falsy."""
+
+    original = module._loso_section
+    if getattr(original, _TEST_GROUP_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def _loso_section(config: Any) -> dict[str, Any]:
+        section = original(config)
+        if "test_groups" not in section:
+            return section
+
+        value = section["test_groups"]
+        if value is None or not (isinstance(value, (str, bytes)) or np.isscalar(value)):
+            return section
+        try:
+            is_falsy = not bool(value)
+        except (TypeError, ValueError):
+            return section
+        if is_falsy:
+            section["test_groups"] = [value]
+        return section
+
+    setattr(_loso_section, _TEST_GROUP_PATCH_MARKER, True)
+    module._loso_section = _loso_section
 
 
 def _install_source_cv_patch(module: Any) -> None:
@@ -121,9 +150,10 @@ def _install_group_label_patch(module: Any) -> None:
 
 
 def install() -> None:
-    """Reject missing LOSO groups and invalid grouped source-window folds."""
+    """Reject invalid LOSO groups and preserve explicit held-out selections."""
 
     module = importlib.import_module("neureptrace.loso_time_decode")
+    _install_explicit_test_group_patch(module)
     _install_source_cv_patch(module)
     _install_group_label_patch(module)
 
