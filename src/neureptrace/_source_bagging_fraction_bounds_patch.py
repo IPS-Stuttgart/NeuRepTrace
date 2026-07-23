@@ -148,6 +148,49 @@ def _validate_config(cfg: Any) -> Any:
     return cfg
 
 
+def _install_without_replacement_row_sampling(source_bagging: Any) -> None:
+    original_sample_rows = source_bagging._sample_rows
+    if getattr(original_sample_rows, _PATCH_MARKER, False):
+        return
+
+    @wraps(original_sample_rows)
+    def _sample_rows(labels: np.ndarray, *, classes: np.ndarray, cfg: Any, rng: np.random.Generator) -> np.ndarray:
+        if cfg.class_balanced or cfg.bootstrap_rows:
+            return original_sample_rows(labels, classes=classes, cfg=cfg, rng=rng)
+
+        n_take = max(classes.shape[0], int(round(labels.shape[0] * cfg.sample_fraction)))
+        rows = rng.choice(labels.shape[0], size=n_take, replace=False).astype(int, copy=False)
+        selected_labels = labels[rows]
+        missing_classes = [
+            class_label
+            for class_label in classes.tolist()
+            if not np.any(source_bagging._label_equal_mask(selected_labels, class_label))
+        ]
+        for class_label in missing_classes:
+            selected_labels = labels[rows]
+            donor_positions = [
+                position
+                for position, selected_label in enumerate(selected_labels.tolist())
+                if np.count_nonzero(source_bagging._label_equal_mask(selected_labels, selected_label)) > 1
+            ]
+            if not donor_positions:
+                raise RuntimeError("Cannot repair source-bagging class coverage without duplicating rows.")
+
+            class_rows = np.flatnonzero(source_bagging._label_equal_mask(labels, class_label))
+            available_rows = class_rows[~np.isin(class_rows, rows)]
+            if available_rows.size == 0:
+                raise RuntimeError("Cannot repair source-bagging class coverage without duplicating rows.")
+
+            donor_position = int(rng.choice(np.asarray(donor_positions, dtype=int)))
+            rows[donor_position] = int(rng.choice(available_rows))
+
+        rng.shuffle(rows)
+        return rows.astype(int, copy=False)
+
+    setattr(_sample_rows, _PATCH_MARKER, True)
+    source_bagging._sample_rows = _sample_rows
+
+
 def _install_aligned_probability_validation(source_bagging: Any) -> None:
     original_aligned_probabilities = source_bagging._aligned_probabilities
     if getattr(original_aligned_probabilities, _PATCH_MARKER, False):
@@ -200,10 +243,11 @@ def _install_aligned_probability_validation(source_bagging: Any) -> None:
 
 
 def install() -> None:
-    """Install source-bagging numeric-option, feature-matrix, and estimator-output validation."""
+    """Install source-bagging numeric-option, feature-matrix, sampling, and estimator-output validation."""
 
     source_bagging = importlib.import_module("neureptrace.decoding.source_bagging")
 
+    _install_without_replacement_row_sampling(source_bagging)
     _install_aligned_probability_validation(source_bagging)
 
     original_feature_matrix = source_bagging._feature_matrix
