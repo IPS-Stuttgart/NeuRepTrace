@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Sequence
+from dataclasses import replace
 from functools import wraps
 from typing import Any
 
@@ -13,6 +14,7 @@ import pandas as pd
 _PATCH_MARKER = "_neureptrace_temporal_generalization_string_groups_patch_installed"
 _CONTINUOUS_SEQUENCE_PATCH_MARKER = "_neureptrace_continuous_stream_sequence_identity_patch_installed"
 _CONTINUOUS_SLICE_PATCH_MARKER = "_neureptrace_continuous_slice_selection_patch_installed"
+_CONTINUOUS_ANNOTATION_PATCH_MARKER = "_neureptrace_continuous_annotation_boundary_patch_installed"
 _TRUE_BOOL_TEXT = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_TEXT = {"0", "false", "f", "no", "n", "off", ""}
 
@@ -180,6 +182,36 @@ def _scan_segment_builder(original):
     return build_scan_segments
 
 
+def _same_boundary(left: float, right: float) -> bool:
+    scale = max(1.0, abs(left), abs(right))
+    return abs(left - right) <= 8.0 * np.finfo(float).eps * scale
+
+
+def _half_open_annotation_segments(segments: Sequence[Any]) -> tuple[Any, ...]:
+    """Make shared slice boundaries belong to the slice that starts there."""
+
+    segment_tuple = tuple(segments)
+    starts = tuple(float(segment.start) for segment in segment_tuple)
+    adjusted = []
+    for index, segment in enumerate(segment_tuple):
+        stop = float(segment.stop)
+        shared_stop = any(other_index != index and _same_boundary(stop, start) for other_index, start in enumerate(starts))
+        adjusted.append(replace(segment, stop=np.nextafter(stop, -np.inf)) if shared_stop else segment)
+    return tuple(adjusted)
+
+
+def _scan_annotation_builder(original):
+    @wraps(original)
+    def annotation_table(*args, **kwargs):
+        segments = kwargs.get("segments")
+        if segments is not None:
+            kwargs["segments"] = _half_open_annotation_segments(segments)
+        return original(*args, **kwargs)
+
+    setattr(annotation_table, _CONTINUOUS_ANNOTATION_PATCH_MARKER, True)
+    return annotation_table
+
+
 def _install_continuous_scan_patches() -> None:
     """Keep scan windows grouped and validate optional slice selection."""
 
@@ -192,6 +224,10 @@ def _install_continuous_scan_patches() -> None:
     original_builder = module.build_scan_segments
     if not getattr(original_builder, _CONTINUOUS_SLICE_PATCH_MARKER, False):
         module.build_scan_segments = _scan_segment_builder(original_builder)
+
+    original_annotation_table = module._annotation_table
+    if not getattr(original_annotation_table, _CONTINUOUS_ANNOTATION_PATCH_MARKER, False):
+        module._annotation_table = _scan_annotation_builder(original_annotation_table)
 
 
 def install() -> None:
