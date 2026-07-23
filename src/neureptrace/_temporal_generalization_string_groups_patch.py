@@ -67,8 +67,8 @@ def _coerce_is_diagonal(frame: Any) -> Any:
     return coerced
 
 
-def _with_stream_sequence_ids(observations: Any) -> Any:
-    """Use one generated sequence identifier per continuous stream."""
+def _with_scan_stream_sequence_ids(observations: Any) -> Any:
+    """Use one generated sequence identifier per scanned continuous stream."""
 
     if not isinstance(observations, pd.DataFrame):
         return observations
@@ -79,32 +79,27 @@ def _with_stream_sequence_ids(observations: Any) -> Any:
     return standardized
 
 
-def _continuous_standardizer(original):
+def _scan_standardizer(original):
     @wraps(original)
     def standardize(observations, *args, **kwargs):
-        return original(_with_stream_sequence_ids(observations), *args, **kwargs)
+        return original(_with_scan_stream_sequence_ids(observations), *args, **kwargs)
 
     setattr(standardize, _CONTINUOUS_SEQUENCE_PATCH_MARKER, True)
     return standardize
 
 
 def _install_continuous_sequence_identity() -> None:
-    """Keep all time windows from one continuous stream in one sequence."""
+    """Keep all scan windows from one continuous stream in one sequence."""
 
-    targets = (
-        ("neureptrace.continuous_observations", "standardize_continuous_observations"),
-        ("neureptrace.continuous_stimulus_scan", "_standardize_stream_observations"),
-    )
-    for module_name, function_name in targets:
-        module = importlib.import_module(module_name)
-        original = getattr(module, function_name)
-        if getattr(original, _CONTINUOUS_SEQUENCE_PATCH_MARKER, False):
-            continue
-        setattr(module, function_name, _continuous_standardizer(original))
+    module = importlib.import_module("neureptrace.continuous_stimulus_scan")
+    original = module._standardize_stream_observations
+    if getattr(original, _CONTINUOUS_SEQUENCE_PATCH_MARKER, False):
+        return
+    module._standardize_stream_observations = _scan_standardizer(original)
 
 
 def install() -> None:
-    """Patch temporal grouping, continuous identities, and CSV boolean metadata."""
+    """Patch temporal grouping, scan identities, and CSV boolean metadata."""
 
     _install_continuous_sequence_identity()
 
