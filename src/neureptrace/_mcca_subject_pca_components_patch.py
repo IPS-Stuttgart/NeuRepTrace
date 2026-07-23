@@ -17,6 +17,7 @@ import importlib.abc
 import importlib.util
 import sys
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from types import ModuleType
 from typing import Any
@@ -41,17 +42,33 @@ def _normalize_subject_pca_components(value: Any) -> int | float | None:
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{_ERROR_MESSAGE} Boolean values are not valid component counts.")
 
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(_ERROR_MESSAGE) from exc
+    if isinstance(value, (int, np.integer)):
+        components = int(value)
+    elif isinstance(value, (str, Decimal)):
+        text = value.strip() if isinstance(value, str) else value
+        try:
+            numeric = Decimal(text)
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError(_ERROR_MESSAGE) from exc
+        if numeric.is_infinite():
+            if numeric > 0:
+                return float("inf")
+            raise ValueError(_ERROR_MESSAGE)
+        if not numeric.is_finite() or numeric != numeric.to_integral_value():
+            raise ValueError(_ERROR_MESSAGE)
+        components = int(numeric)
+    else:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(_ERROR_MESSAGE) from exc
 
-    if numeric == float("inf"):
-        return float("inf")
-    if not np.isfinite(numeric) or not numeric.is_integer():
-        raise ValueError(_ERROR_MESSAGE)
+        if numeric == float("inf"):
+            return float("inf")
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(_ERROR_MESSAGE)
+        components = int(numeric)
 
-    components = int(numeric)
     if components < 1:
         raise ValueError(_ERROR_MESSAGE)
     return components
