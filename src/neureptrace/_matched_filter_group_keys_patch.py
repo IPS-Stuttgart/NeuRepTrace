@@ -99,6 +99,9 @@ def fit_stimulus_event_templates(
     rows: list[dict[str, object]] = []
     for group_key, group_frame in _grouped(observations, groups, sort=True):
         group_values = _key_values(group_key, groups)
+        # Concatenated streams often reuse index labels. Normalize them before
+        # selecting stream-local scores so pandas cannot cross-select duplicate labels.
+        group_frame = group_frame.reset_index(drop=True)
         group_annotations = _filter_by_values(annotations, group_values)
         if group_annotations.empty:
             continue
@@ -193,6 +196,8 @@ def score_stimulus_event_templates(
         group_frame = _filter_by_values(observations, group_values) if group_values else observations
         if group_frame.empty:
             continue
+        # Keep score alignment positional even when separate streams have duplicate indices.
+        group_frame = group_frame.reset_index(drop=True)
         scores = matched_filter._score_values(
             group_frame,
             stimulus_label=metadata["stimulus_label"],
