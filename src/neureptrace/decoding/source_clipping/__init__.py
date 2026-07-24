@@ -68,11 +68,12 @@ def fit_source_feature_clipping(
     )
     train = apply_feature_clipping(source, lower_bounds=lower, upper_bounds=upper, copy=cfg.copy)
     clipped = apply_feature_clipping(test, lower_bounds=lower, upper_bounds=upper, copy=cfg.copy)
+    output_dtype = _compact_float_dtype(train, clipped, lower, upper)
     return SourceFeatureClippingResult(
-        train.astype(np.float32, copy=False),
-        clipped.astype(np.float32, copy=False),
-        lower.astype(np.float32, copy=False),
-        upper.astype(np.float32, copy=False),
+        train.astype(output_dtype, copy=False),
+        clipped.astype(output_dtype, copy=False),
+        lower.astype(output_dtype, copy=False),
+        upper.astype(output_dtype, copy=False),
         _metadata(cfg, source.shape[0], test.shape[0], source.shape[1]),
     )
 
@@ -120,6 +121,20 @@ def _coerce_config(config: SourceFeatureClippingConfig | Mapping[str, Any]) -> S
             copy=config.copy,
         )
     return source_feature_clipping_config(**dict(config))
+
+
+def _compact_float_dtype(*arrays: np.ndarray) -> np.dtype:
+    """Use float32 only when down-casting preserves finite, nonzero values."""
+
+    for values in arrays:
+        array = np.asarray(values, dtype=float)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            compact = array.astype(np.float32)
+        if not np.all(np.isfinite(compact)):
+            return np.dtype(float)
+        if np.any((array != 0.0) & (compact == 0.0)):
+            return np.dtype(float)
+    return np.dtype(np.float32)
 
 
 def _matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
