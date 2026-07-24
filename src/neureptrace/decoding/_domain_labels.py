@@ -8,6 +8,16 @@ from typing import Any
 import numpy as np
 
 
+def _materialize_one_pass_domain_input(domains: Any) -> Any:
+    """Materialize iterators before NumPy can treat them as scalar labels."""
+
+    try:
+        iterator = iter(domains)
+    except TypeError:
+        return domains
+    return list(iterator) if iterator is domains else domains
+
+
 def _as_domain_vector(domains: Any, *, expected_length: int | None = None, name: str = "domains") -> np.ndarray:
     """Return a one-dimensional object array of hashable domain labels.
 
@@ -15,6 +25,7 @@ def _as_domain_vector(domains: Any, *, expected_length: int | None = None, name:
     ``[[subject, run], ...]`` remain one domain label per sample instead of being
     flattened into unrelated scalar tokens.
     """
+    domains = _materialize_one_pass_domain_input(domains)
     array = np.asarray(domains, dtype=object)
     if array.ndim == 0:
         if expected_length is not None and int(expected_length) != 1:
