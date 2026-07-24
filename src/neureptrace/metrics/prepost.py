@@ -175,7 +175,7 @@ def _validate_window(window: Window) -> Window:
 
 
 def _validate_window_endpoint(value: object, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_)) or _is_complex_scalar(value):
         raise ValueError(f"window {name} must be a finite numeric value")
     if isinstance(value, np.ndarray):
         raise ValueError(f"window {name} must be a finite numeric scalar")
@@ -190,7 +190,7 @@ def _validate_window_endpoint(value: object, *, name: str) -> float:
 
 def _finite_numeric_series(values: object, *, name: str) -> pd.Series:
     series = pd.Series(values)
-    if series.map(_is_boolean_scalar).any():
+    if series.map(_is_boolean_scalar).any() or series.map(_is_complex_scalar).any():
         raise ValueError(f"{name} must contain only finite numeric values")
     parsed = pd.to_numeric(series, errors="coerce")
     numeric = parsed.to_numpy(dtype=float)
@@ -202,7 +202,7 @@ def _finite_numeric_series(values: object, *, name: str) -> pd.Series:
 def _finite_numeric_or_missing_series(values: object, *, name: str) -> pd.Series:
     series = pd.Series(values)
     message = f"{name} must contain only finite numeric values or missing values"
-    if series.map(_is_boolean_scalar).any():
+    if series.map(_is_boolean_scalar).any() or series.map(_is_complex_scalar).any():
         raise ValueError(message)
     parsed = pd.to_numeric(series, errors="coerce")
     invalid = series.notna() & parsed.isna()
@@ -214,6 +214,10 @@ def _finite_numeric_or_missing_series(values: object, *, name: str) -> pd.Series
 
 def _is_boolean_scalar(value: object) -> bool:
     return isinstance(value, (bool, np.bool_))
+
+
+def _is_complex_scalar(value: object) -> bool:
+    return isinstance(value, (complex, np.complexfloating))
 
 
 def _iter_groups(frame: pd.DataFrame, group_columns: Sequence[str]):
