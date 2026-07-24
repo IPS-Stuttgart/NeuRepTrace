@@ -1,4 +1,4 @@
-"""Runtime patch for exact observation-ensemble label handling."""
+"""Runtime patch for exact observation-ensemble label and rank handling."""
 
 from __future__ import annotations
 
@@ -61,6 +61,33 @@ def _integer_label_values(
         ) from exc
 
 
+def _rank_scores(probabilities: np.ndarray) -> np.ndarray:
+    """Return normalized average ranks without ordering exact ties by class."""
+
+    n_classes = probabilities.shape[1]
+    if n_classes <= 1:
+        return np.zeros_like(probabilities, dtype=float)
+
+    scores = np.empty_like(probabilities, dtype=float)
+    for row_index, row in enumerate(probabilities):
+        order = np.argsort(row, kind="stable")
+        sorted_values = row[order]
+        sorted_scores = np.arange(n_classes, dtype=float)
+        group_start = 0
+        for group_stop in range(1, n_classes + 1):
+            if (
+                group_stop < n_classes
+                and sorted_values[group_stop] == sorted_values[group_start]
+            ):
+                continue
+            sorted_scores[group_start:group_stop] = 0.5 * (
+                group_start + group_stop - 1
+            )
+            group_start = group_stop
+        scores[row_index, order] = sorted_scores
+    return scores / float(n_classes - 1)
+
+
 def _normalize_exact_label_outputs(
     output: pd.DataFrame,
     observation_ensemble: Any,
@@ -114,16 +141,29 @@ def _normalize_exact_label_outputs(
     return normalized
 
 
+def _refresh_helper_aliases(observation_ensemble: Any) -> None:
+    """Install helpers on both the public package and its delegated implementation."""
+
+    modules = [observation_ensemble]
+    implementation = getattr(observation_ensemble, "_impl", None)
+    if implementation is not None:
+        modules.append(implementation)
+
+    for module in modules:
+        module._label_values = _label_values
+        module._integer_label_values = _integer_label_values
+        module._rank_scores = _rank_scores
+
+
 def install() -> None:
-    """Preserve exact labels and reject labels absent from probability columns."""
+    """Preserve exact labels, tied ranks, and probability-label coverage."""
 
     import neureptrace.observation_ensemble as observation_ensemble
 
-    # Always refresh these aliases. Older runtime-patch installations can leave
-    # the module-level marker set while the helpers still point at the legacy
-    # float64/unsigned-suffix implementations.
-    observation_ensemble._label_values = _label_values
-    observation_ensemble._integer_label_values = _integer_label_values
+    # The public compatibility package copies helpers from a separately loaded
+    # implementation module. Refresh both namespaces so the delegated ensemble
+    # function uses the corrected helpers as well.
+    _refresh_helper_aliases(observation_ensemble)
     setattr(
         observation_ensemble,
         _LABEL_PATCH_MARKER,
