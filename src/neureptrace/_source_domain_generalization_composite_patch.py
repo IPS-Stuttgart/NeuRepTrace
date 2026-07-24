@@ -180,8 +180,10 @@ def install() -> None:
         if 0.0 < fraction < 1.0 and unique_domains.shape[0] >= 2:
             n_valid_domains = max(1, int(round(unique_domains.shape[0] * fraction)))
             n_valid_domains = min(n_valid_domains, unique_domains.shape[0] - 1)
-            subsets = [(domain,) for domain in rng.permutation(unique_domains).tolist()]
-            if n_valid_domains > 1:
+            if n_valid_domains == 1:
+                subsets = [(domain,) for domain in rng.permutation(unique_domains).tolist()]
+            else:
+                subsets = []
                 for _ in range(min(32, 4 * unique_domains.shape[0])):
                     subset = tuple(sorted(rng.choice(unique_domains, size=n_valid_domains, replace=False).tolist()))
                     if subset not in subsets:
