@@ -12,6 +12,7 @@ _GROUP_COLUMN_DEFAULTS = {"decoder": "overall", "emission_mode": "calibrated"}
 _WEIGHT_FRACTION_PATCH_ATTR = "_calibration_weight_fraction_patched"
 _EMPTY_BIN_WEIGHT_PATCH_ATTR = "_calibration_empty_bin_weight_patched"
 _GROUP_METADATA_PATCH_ATTR = "_calibration_group_metadata_patched"
+_SUMMARY_GROUP_METADATA_PATCH_ATTR = "_calibration_summary_group_metadata_patched"
 
 
 def _weight_fraction_group_columns(frame) -> list[str]:
@@ -67,6 +68,17 @@ def install() -> None:
     import neureptrace.calibration as calibration
 
     _calibration_bool_numeric_patch.install()
+
+    if not getattr(calibration._validate_calibration_summary, _SUMMARY_GROUP_METADATA_PATCH_ATTR, False):
+        original_summary_validator = calibration._validate_calibration_summary
+
+        @wraps(original_summary_validator)
+        def _validate_calibration_summary(frame):
+            validated = original_summary_validator(frame)
+            return _normalise_present_group_columns(validated)
+
+        setattr(_validate_calibration_summary, _SUMMARY_GROUP_METADATA_PATCH_ATTR, True)
+        calibration._validate_calibration_summary = _validate_calibration_summary
 
     if not getattr(calibration._validate_reliability_bins, _EMPTY_BIN_WEIGHT_PATCH_ATTR, False):
         original_empty_bin_validator = calibration._validate_reliability_bins
