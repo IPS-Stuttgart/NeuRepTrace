@@ -141,17 +141,29 @@ def _normalize_exact_label_outputs(
     return normalized
 
 
+def _refresh_helper_aliases(observation_ensemble: Any) -> None:
+    """Install helpers on both the public package and its delegated implementation."""
+
+    modules = [observation_ensemble]
+    implementation = getattr(observation_ensemble, "_impl", None)
+    if implementation is not None:
+        modules.append(implementation)
+
+    for module in modules:
+        module._label_values = _label_values
+        module._integer_label_values = _integer_label_values
+        module._rank_scores = _rank_scores
+
+
 def install() -> None:
     """Preserve exact labels, tied ranks, and probability-label coverage."""
 
     import neureptrace.observation_ensemble as observation_ensemble
 
-    # Always refresh these aliases. Older runtime-patch installations can leave
-    # the module-level marker set while the helpers still point at legacy
-    # float64/unsigned-suffix or order-dependent rank implementations.
-    observation_ensemble._label_values = _label_values
-    observation_ensemble._integer_label_values = _integer_label_values
-    observation_ensemble._rank_scores = _rank_scores
+    # The public compatibility package copies helpers from a separately loaded
+    # implementation module. Refresh both namespaces so the delegated ensemble
+    # function uses the corrected helpers as well.
+    _refresh_helper_aliases(observation_ensemble)
     setattr(
         observation_ensemble,
         _LABEL_PATCH_MARKER,
