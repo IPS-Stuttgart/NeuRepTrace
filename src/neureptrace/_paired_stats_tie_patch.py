@@ -24,6 +24,20 @@ def _validate_unique_metric_names(metrics: tuple[str, ...] | None) -> tuple[str,
     return metric_names
 
 
+def _validate_complete_pairing_identifiers(subject_metrics: pd.DataFrame) -> None:
+    """Reject missing decoder or subject identifiers before string conversion."""
+    missing_columns = [
+        column
+        for column in ("decoder", "subject")
+        if column in subject_metrics.columns and bool(subject_metrics[column].isna().any())
+    ]
+    if missing_columns:
+        raise ValueError(
+            "Subject metrics must not contain missing decoder or subject identifiers. "
+            f"Columns with missing values: {missing_columns}"
+        )
+
+
 def _mark_exact_mean_ties(statistics: pd.DataFrame) -> pd.DataFrame:
     """Return statistics with exact mean ties labeled explicitly."""
     if not _REQUIRED_COLUMNS.issubset(statistics.columns):
@@ -39,7 +53,7 @@ def _mark_exact_mean_ties(statistics: pd.DataFrame) -> pd.DataFrame:
 
 
 def install() -> None:
-    """Install metric validation, unbiased tie handling, and robust Markdown rendering."""
+    """Install input validation, unbiased tie handling, and robust Markdown rendering."""
     from . import _emission_compare_empty_pairs_patch
 
     _emission_compare_empty_pairs_patch.install()
@@ -58,6 +72,7 @@ def install() -> None:
             random_state: int = 13,
         ) -> pd.DataFrame:
             metric_names = _validate_unique_metric_names(metrics)
+            _validate_complete_pairing_identifiers(subject_metrics)
             statistics = original_paired_decoder_statistics(
                 subject_metrics,
                 metrics=metric_names,
