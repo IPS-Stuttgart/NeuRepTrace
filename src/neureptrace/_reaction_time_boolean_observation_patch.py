@@ -47,21 +47,49 @@ def _contains_boolean(value: object) -> bool:
     return False
 
 
+def _guard_to_float(original):
+    if getattr(original, _TO_FLOAT_MARKER, False):
+        return original
+
+    def to_float(value: object) -> float:
+        if _is_boolean_scalar(value):
+            return np.nan
+        return original(value)
+
+    setattr(to_float, _TO_FLOAT_MARKER, True)
+    return to_float
+
+
+def _guard_numeric_values(original):
+    if getattr(original, _VALUES_MARKER, False):
+        return original
+
+    def numeric_values(values):
+        materialized = _materialize_nested_iterables(values)
+        if _contains_boolean(materialized):
+            raise ValueError(
+                "reaction-time values must be numeric observations, not boolean flags."
+            )
+        return original(materialized)
+
+    setattr(numeric_values, _VALUES_MARKER, True)
+    return numeric_values
+
+
 def install() -> None:
     """Prevent boolean flags from becoming zero/one-second observations."""
 
     module = importlib.import_module("neureptrace.behavior.reaction_time")
+    value_patch = importlib.import_module(
+        "neureptrace._reaction_time_trial_value_type_patch"
+    )
 
-    original_to_float = module._to_float
-    if not getattr(original_to_float, _TO_FLOAT_MARKER, False):
-
-        def to_float(value: object) -> float:
-            if _is_boolean_scalar(value):
-                return np.nan
-            return original_to_float(value)
-
-        setattr(to_float, _TO_FLOAT_MARKER, True)
-        module._to_float = to_float
+    # Patch both the currently installed functions and the authoritative
+    # value-type patch functions. The latter patch is installed later during
+    # package initialization and would otherwise overwrite these guards.
+    module._to_float = _guard_to_float(module._to_float)
+    value_patch._to_float = _guard_to_float(value_patch._to_float)
+    value_patch._numeric_values = _guard_numeric_values(value_patch._numeric_values)
 
     original_reaction_time_rows_from_values = module.reaction_time_rows_from_values
     if not getattr(original_reaction_time_rows_from_values, _VALUES_MARKER, False):
@@ -75,7 +103,10 @@ def install() -> None:
         ):
             materialized = _materialize_nested_iterables(values)
             if _contains_boolean(materialized):
-                raise ValueError("reaction-time values must be numeric observations, not boolean flags.")
+                raise ValueError(
+                    "reaction-time values must be numeric observations, "
+                    "not boolean flags."
+                )
             return original_reaction_time_rows_from_values(
                 materialized,
                 participant=participant,
