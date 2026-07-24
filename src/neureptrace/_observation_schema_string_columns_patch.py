@@ -1,15 +1,16 @@
 """Patch observation-schema column arguments and temporal sequence keys.
 
 The public observation validator accepts optional grouping and stream-column
-arguments.  Because strings are sequences, passing a single column name such as
+arguments. Because strings are sequences, passing a single column name such as
 ``group_columns="subject"`` used to be interpreted as the characters
-``"s"``, ``"u"``, ... and reported as missing columns.  Normalize these API
+``"s"``, ``"u"``, ... and reported as missing columns. Normalize these API
 arguments before the validator checks them.
 
 The temporal profile should also use the same provenance-aware sequence identity
-as the temporal model reader.  Reused ``sequence_id``/``sample_index`` values in
+as the temporal model reader. Reused ``sequence_id``/``sample_index`` values in
 different source files, sessions, or runs must not be concatenated during schema
-validation.
+validation. Missing or blank sequence identifiers are rejected because grouping
+them with ``dropna=False`` would otherwise create an artificial sequence.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from functools import wraps
 from typing import Any
 
 _PATCH_MARKER = "_neureptrace_observation_schema_string_columns_patch_installed"
+_MISSING_IDENTIFIER_TOKENS = frozenset({"", "<na>", "nan", "nat", "none", "null"})
 
 
 _SEQUENCE_ID_KEY_CANDIDATES = (
@@ -58,6 +60,76 @@ def _temporal_sequence_key_columns(frame: Any) -> list[str]:
     return []
 
 
+def _temporal_identifier_column(frame: Any) -> str | None:
+    if "sequence_id" in frame.columns:
+        return "sequence_id"
+    if "sample_index" in frame.columns:
+        return "sample_index"
+    return None
+
+
+def _missing_identifier_mask(frame: Any, column: str) -> Any:
+    values = frame[column]
+    missing = values.isna()
+    try:
+        tokens = values.astype("string").str.strip().str.lower()
+    except (AttributeError, TypeError, ValueError):
+        return missing
+    return missing | tokens.isin(_MISSING_IDENTIFIER_TOKENS).fillna(False)
+
+
+def _append_temporal_identifier_issues(report: Any, frame: Any, observation_schema: Any) -> Any:
+    if report.profile != "temporal-model":
+        return report
+    column = _temporal_identifier_column(frame)
+    if column is None:
+        return report
+    missing = _missing_identifier_mask(frame, column)
+    if not bool(missing.any()):
+        return report
+
+    issues = list(report.issues)
+    for row_index, value in frame.loc[missing, column].head(20).items():
+        issues.append(
+            observation_schema.ObservationValidationIssue(
+                "error",
+                "missing_sequence_identifier_value",
+                f"Temporal-model observations must not contain missing or blank values in '{column}'.",
+                column=column,
+                row=int(row_index),
+                value=value,
+            )
+        )
+    if int(missing.sum()) > 20:
+        issues.append(
+            observation_schema.ObservationValidationIssue(
+                "error",
+                "missing_sequence_identifier_value_truncated",
+                f"Column '{column}' contains {int(missing.sum())} missing or blank temporal sequence identifiers; first 20 are listed.",
+                column=column,
+            )
+        )
+    return observation_schema.ObservationValidationReport(
+        profile=report.profile,
+        n_rows=report.n_rows,
+        probability_columns=report.probability_columns,
+        issues=tuple(issues),
+    )
+
+
+def _reject_missing_temporal_identifiers(frame: Any) -> None:
+    column = _temporal_identifier_column(frame)
+    if column is None:
+        return
+    missing = _missing_identifier_mask(frame, column)
+    if bool(missing.any()):
+        bad_rows = frame.index[missing].tolist()[:5]
+        raise ValueError(
+            f"Temporal sequence identifier column '{column}' contains missing or blank values at row(s) {bad_rows}. "
+            "Fill every sequence identifier before temporal modeling."
+        )
+
+
 def install() -> None:
     """Patch observation validation string handling and temporal keys."""
 
@@ -72,7 +144,11 @@ def install() -> None:
                 kwargs["group_columns"] = _normalize_column_argument(kwargs["group_columns"])
             if "stream_columns" in kwargs:
                 kwargs["stream_columns"] = _normalize_column_argument(kwargs["stream_columns"])
-            return original_validate(*args, **kwargs)
+            report = original_validate(*args, **kwargs)
+            frame = args[0] if args else kwargs.get("frame")
+            if frame is None:
+                return report
+            return _append_temporal_identifier_issues(report, frame, observation_schema)
 
         setattr(validate_probability_observations, _PATCH_MARKER, True)
         observation_schema.validate_probability_observations = validate_probability_observations
@@ -101,6 +177,19 @@ def install() -> None:
     if not getattr(original_sequence_key_columns, _PATCH_MARKER, False):
         setattr(_temporal_sequence_key_columns, _PATCH_MARKER, True)
         observation_schema._sequence_key_columns = _temporal_sequence_key_columns
+
+    temporal_model = importlib.import_module("neureptrace.temporal_model")
+    original_reader = temporal_model.read_probability_observations
+    if not getattr(original_reader, _PATCH_MARKER, False):
+
+        @wraps(original_reader)
+        def read_probability_observations(*args: Any, **kwargs: Any):
+            frame = original_reader(*args, **kwargs)
+            _reject_missing_temporal_identifiers(frame)
+            return frame
+
+        setattr(read_probability_observations, _PATCH_MARKER, True)
+        temporal_model.read_probability_observations = read_probability_observations
 
 
 __all__ = ["install"]
