@@ -7,9 +7,13 @@ files or thin project repositories that call these adapters.
 
 from __future__ import annotations
 
-from neureptrace.io import _fieldtrip_config_participant
+from neureptrace.io import (
+    _fieldtrip_config_participant,
+    _synthetic_fieldtrip_output_collision_patch,
+)
 
 _fieldtrip_config_participant.install()
+_synthetic_fieldtrip_output_collision_patch.install()
 
 from neureptrace.io.dataset import EpochDataset  # noqa: E402
 from neureptrace.io.fieldtrip_mat import (  # noqa: E402
