@@ -1,5 +1,5 @@
 # ruff: noqa
-"""Composite-label support for windowed decoding helpers."""
+"""Composite-label support and real-feature validation for windowed decoding helpers."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from neureptrace._object_label_utils import label_accuracy, label_counts, values
 _INSTALLED = False
 _ORIGINAL_LABEL_VECTOR = None
 _ORIGINAL_CLASS_SCORE_MATRIX = None
+_ORIGINAL_FEATURE_MATRIX = None
 
 
 def _object_vector(values) -> np.ndarray:
@@ -152,10 +153,40 @@ def _features_contain_boolean(values: object) -> bool:
     return any(_features_contain_boolean(value) for value in values)
 
 
+def _features_contain_complex(values: object) -> bool:
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return bool(values.size)
+        if values.dtype == object:
+            return any(_features_contain_complex(value) for value in values.ravel(order="C"))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _features_contain_complex(np.asarray(values))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if not isinstance(values, Iterable):
+        return False
+    return any(_features_contain_complex(value) for value in values)
+
+
+def _feature_matrix(features: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    materialized = _materialize_feature_input(features)
+    if _features_contain_complex(materialized):
+        raise ValueError(f"{name} must contain real-valued features, not complex values.")
+    return _ORIGINAL_FEATURE_MATRIX(materialized, name=name)
+
+
 def _class_score_feature_matrix(features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
     materialized = _materialize_feature_input(features)
     if _features_contain_boolean(materialized):
         raise ValueError("features must contain numeric, non-boolean values.")
+    if _features_contain_complex(materialized):
+        raise ValueError("features must contain real-valued features, not complex values.")
     try:
         matrix = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -170,14 +201,16 @@ def _class_score_feature_matrix(features: Sequence[Sequence[float]] | np.ndarray
 def install() -> None:
     """Install the composite-label-safe windowed decoding patch."""
 
-    global _INSTALLED, _ORIGINAL_LABEL_VECTOR, _ORIGINAL_CLASS_SCORE_MATRIX
+    global _INSTALLED, _ORIGINAL_LABEL_VECTOR, _ORIGINAL_CLASS_SCORE_MATRIX, _ORIGINAL_FEATURE_MATRIX
     if _INSTALLED:
         return
 
     from neureptrace.decoding import class_scores, windowed
 
     _ORIGINAL_LABEL_VECTOR = windowed._label_vector
+    _ORIGINAL_FEATURE_MATRIX = windowed._feature_matrix
     windowed._label_vector = _label_vector
+    windowed._feature_matrix = _feature_matrix
     windowed._balanced_accuracy = _balanced_accuracy
 
     original_predict_window_model = windowed.predict_window_model
