@@ -15,7 +15,7 @@ _COMPLEX_LABEL_ERROR = "labels must contain real integer class indices, not comp
 def _coerce_non_array_scalar(value: object, message: str) -> float:
     if isinstance(value, np.ndarray):
         raise ValueError(message)
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(message)
     try:
         return float(value)
