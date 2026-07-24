@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence, Set
+from collections.abc import Hashable, Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -217,8 +217,55 @@ def _materialize_reused_prior_kwargs(kwargs: Mapping[str, Any]) -> dict[str, Any
     return materialized
 
 
+def _numeric_values_contain_boolean(values: object) -> bool:
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return True
+        if values.dtype == object:
+            return any(_numeric_values_contain_boolean(value) for value in values.ravel(order="C"))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _numeric_values_contain_boolean(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes, bytearray, Mapping)) or not isinstance(values, Iterable):
+        return False
+    return any(_numeric_values_contain_boolean(value) for value in values)
+
+
+def _numeric_values_contain_complex(values: object) -> bool:
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return True
+        if values.dtype == object:
+            return any(_numeric_values_contain_complex(value) for value in values.ravel(order="C"))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _numeric_values_contain_complex(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes, bytearray, Mapping)) or not isinstance(values, Iterable):
+        return False
+    return any(_numeric_values_contain_complex(value) for value in values)
+
+
+def _validate_real_numeric_values(values: object, *, name: str) -> None:
+    if _numeric_values_contain_boolean(values):
+        raise ValueError(f"{name} must contain numeric values, not boolean flags.")
+    if _numeric_values_contain_complex(values):
+        raise ValueError(f"{name} must contain real-valued values, not complex values.")
+
+
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float | str) -> np.ndarray:
-    matrix = np.asarray(_materialize_numeric_iterables(values), dtype=float)
+    materialized = _materialize_numeric_iterables(values)
+    _validate_real_numeric_values(materialized, name="probabilities")
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a non-empty two-dimensional matrix with at least two classes.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
@@ -242,7 +289,9 @@ def _prior(values: Sequence[float] | np.ndarray | None, *, n_classes: int, defau
     if values is None:
         vector = np.full(n_classes, 1.0 / n_classes, dtype=float) if default == "uniform" else np.ones(n_classes, dtype=float)
     else:
-        vector = np.asarray(_materialize_numeric_iterables(values), dtype=float).reshape(-1)
+        materialized = _materialize_numeric_iterables(values)
+        _validate_real_numeric_values(materialized, name=name)
+        vector = np.asarray(materialized, dtype=float).reshape(-1)
     if vector.shape[0] != n_classes:
         raise ValueError(f"{name} must contain one value per class: {vector.shape[0]} != {n_classes}.")
     if not np.all(np.isfinite(vector)) or np.any(vector < 0.0):
@@ -359,7 +408,7 @@ def _object_equal(left: Any, right: Any) -> bool:
 
 
 def _numeric_scalar(value: object, *, message: str) -> float:
-    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)) or isinstance(value, np.ndarray):
         raise ValueError(message)
     try:
         return float(value)
