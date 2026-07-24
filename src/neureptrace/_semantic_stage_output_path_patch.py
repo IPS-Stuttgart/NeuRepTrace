@@ -133,8 +133,23 @@ def _validate_unique_state_names(state_names: list[str]) -> None:
         )
 
 
+def _finite_posterior_rows(stage_time: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows that cannot participate in temporal-state peak selection."""
+
+    column = "posterior_true_class_mean"
+    if stage_time.empty or column not in stage_time.columns:
+        return stage_time
+    numeric = pd.to_numeric(stage_time[column], errors="coerce")
+    finite = np.isfinite(numeric.to_numpy(dtype=float))
+    if bool(finite.all()):
+        return stage_time
+    filtered = stage_time.loc[finite].copy()
+    filtered[column] = numeric.loc[finite].to_numpy(dtype=float)
+    return filtered
+
+
 def _install_temporal_state_peak_selection() -> None:
-    """Make temporal-state peak metadata independent of DataFrame index labels."""
+    """Make temporal-state peak metadata independent of invalid index labels and values."""
 
     workflow = importlib.import_module("neureptrace.temporal_state_workflow")
     original_stage_stats = workflow._stage_stats
@@ -149,6 +164,7 @@ def _install_temporal_state_peak_selection() -> None:
         decoder: str,
         emission_mode: str,
     ) -> dict[str, float | int]:
+        stage_time = _finite_posterior_rows(stage_time)
         if not stage_time.index.is_unique:
             stage_time = stage_time.reset_index(drop=True)
         return original_stage_stats(stages, stage_time, task, decoder, emission_mode)
