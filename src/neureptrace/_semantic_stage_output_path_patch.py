@@ -14,6 +14,7 @@ _OUTPUT_PATCH_MARKER = "_neureptrace_semantic_stage_output_path_patch_installed"
 _SEQUENCE_KEY_PATCH_MARKER = "_neureptrace_semantic_stage_sequence_key_patch_installed"
 _STATE_NAME_PATCH_MARKER = "_neureptrace_semantic_stage_state_name_patch_installed"
 _TEMPORAL_STATE_PEAK_PATCH_MARKER = "_neureptrace_temporal_state_peak_selection_patch_installed"
+_SUBJECT_FALLBACK_PATCH_MARKER = "_neureptrace_semantic_stage_subject_fallback_patch_installed"
 _MISSING_SEQUENCE_COMPONENT = object()
 
 
@@ -51,6 +52,24 @@ def _is_missing_scalar(value: object) -> bool:
     except (TypeError, ValueError):
         return False
     return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
+def _state_trace_subject_fallbacks(
+    csv_paths: list[Path | str],
+) -> tuple[list[Path], np.ndarray, list[str]]:
+    """Return input paths and row-aligned subject fallback metadata."""
+
+    paths = [path if isinstance(path, Path) else Path(path) for path in csv_paths]
+    missing_subjects: list[bool] = []
+    fallback_subjects: list[str] = []
+    for csv_path in paths:
+        frame = pd.read_csv(csv_path)
+        fallback_subjects.extend([csv_path.stem] * len(frame))
+        if "subject" not in frame.columns:
+            missing_subjects.extend([False] * len(frame))
+        else:
+            missing_subjects.extend(frame["subject"].isna().tolist())
+    return paths, np.asarray(missing_subjects, dtype=bool), fallback_subjects
 
 
 def _sequence_keys(frame: pd.DataFrame) -> pd.Series:
@@ -142,6 +161,26 @@ def install() -> None:
     """Patch semantic-stage identities, state labels, output destinations, and summaries."""
 
     semantic_stages = importlib.import_module("neureptrace.semantic_stages")
+
+    original_read_state_traces = semantic_stages.read_state_traces
+    if not getattr(original_read_state_traces, _SUBJECT_FALLBACK_PATCH_MARKER, False):
+
+        @wraps(original_read_state_traces)
+        def read_state_traces(csv_paths: list[Path | str]) -> pd.DataFrame:
+            paths, missing_subjects, fallback_subjects = _state_trace_subject_fallbacks(csv_paths)
+            traces = original_read_state_traces(paths)
+            if len(traces) != len(missing_subjects):
+                raise RuntimeError("Semantic-stage trace row count changed while restoring subject identifiers.")
+            if not bool(missing_subjects.any()):
+                return traces
+            restored = traces.copy()
+            fallback_values = pd.Series(fallback_subjects, index=restored.index, dtype=object)
+            restored.loc[missing_subjects, "subject"] = fallback_values.loc[missing_subjects]
+            restored["subject"] = restored["subject"].astype(str)
+            return restored
+
+        setattr(read_state_traces, _SUBJECT_FALLBACK_PATCH_MARKER, True)
+        semantic_stages.read_state_traces = read_state_traces
 
     current_sequence_keys = semantic_stages._sequence_keys
     if not getattr(current_sequence_keys, _SEQUENCE_KEY_PATCH_MARKER, False):
