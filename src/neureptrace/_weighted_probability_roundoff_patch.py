@@ -61,29 +61,31 @@ def _validate_probability_inputs(probabilities: Any, labels: Any) -> tuple[np.nd
 
 
 def _overflow_safe_sample_weight_validator(original_validate):
-    """Wrap sample-weight validation with scale-invariant overflow protection."""
+    """Wrap sample-weight validation with scale-invariant reduction protection."""
 
     @wraps(original_validate)
     def validate_sample_weight(sample_weight: Any, n_samples: int) -> np.ndarray:
-        with np.errstate(over="ignore", invalid="ignore"):
+        with np.errstate(over="ignore", invalid="ignore", under="ignore"):
             weights = original_validate(sample_weight, n_samples)
             total_weight = float(np.sum(weights))
-        safe_total = np.finfo(float).max / _WEIGHTED_REDUCTION_SAFETY_FACTOR
-        if np.isfinite(total_weight) and total_weight <= safe_total:
+        float_info = np.finfo(float)
+        safe_max_total = float_info.max / _WEIGHTED_REDUCTION_SAFETY_FACTOR
+        safe_min_total = float_info.tiny * _WEIGHTED_REDUCTION_SAFETY_FACTOR
+        if np.isfinite(total_weight) and safe_min_total <= total_weight <= safe_max_total:
             return weights
 
         max_weight = float(np.max(weights))
         # The original validator guarantees non-negative weights and positive
         # total mass, so max_weight is finite and strictly positive here.
-        # A safety factor above the largest possible clipped float64 log-loss
-        # also protects weighted numerators when the denominator remains finite.
+        # Rescaling protects both overflow for very large weights and product
+        # underflow for subnormal weights while preserving all relative weights.
         return weights / max_weight
 
     return validate_sample_weight
 
 
 def install() -> None:
-    """Patch weighted metrics for probability roundoff and weight-reduction overflow."""
+    """Patch weighted metrics for probability roundoff and stable weight reductions."""
 
     weighted = importlib.import_module("neureptrace.metrics.weighted")
     if getattr(weighted, _PATCH_MARKER, False):
