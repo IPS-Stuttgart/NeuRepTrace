@@ -21,6 +21,19 @@ class ConfidenceSelectionResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when finite nonzero values survive the conversion."""
+
+    array = np.asarray(values)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return array
+    if np.any((array != 0.0) & (compact == 0.0)):
+        return array
+    return compact
+
+
 def confidence_scores(probabilities: Sequence[Sequence[float]] | np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return confidence, top-two margin, entropy, and predicted index.
 
@@ -39,9 +52,9 @@ def confidence_scores(probabilities: Sequence[Sequence[float]] | np.ndarray) -> 
     margin = confidence - matrix[rows, second]
     entropy = -np.sum(matrix * np.log(np.maximum(matrix, 1e-12)), axis=1) / np.log(matrix.shape[1])
     return (
-        confidence.astype(np.float32, copy=False),
-        margin.astype(np.float32, copy=False),
-        entropy.astype(np.float32, copy=False),
+        _compact_float32(confidence),
+        _compact_float32(margin),
+        _compact_float32(entropy),
         top.astype(int, copy=False),
     )
 
@@ -89,7 +102,7 @@ def accepted_probability_rows(probabilities: Sequence[Sequence[float]] | np.ndar
     mask = np.asarray(selection.accepted_mask, dtype=bool).reshape(-1)
     if mask.shape[0] != matrix.shape[0]:
         raise ValueError("selection mask length must match probability rows.")
-    return matrix[mask].astype(np.float32, copy=False)
+    return _compact_float32(matrix[mask])
 
 
 def _materialize_nested_iterables(values: Any) -> Any:
