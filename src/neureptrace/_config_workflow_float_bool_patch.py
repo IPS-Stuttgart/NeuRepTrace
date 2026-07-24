@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import importlib
 import math
+import os
+from collections import defaultdict
 from functools import wraps
 from numbers import Real
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -13,6 +16,7 @@ import numpy as np
 _BOOL_PATCH_MARKER = "_neureptrace_config_workflow_float_bool_patch_installed"
 _FLOAT_PAIR_PATCH_MARKER = "_neureptrace_config_workflow_string_pair_patch_installed"
 _FLOAT_VALUE_PATCH_MARKER = "_neureptrace_config_workflow_float_value_patch_installed"
+_OUTPUT_PATH_PATCH_MARKER = "_neureptrace_config_workflow_output_path_patch_installed"
 _BENCHMARK_BOOL_PATCH_MARKER = "_neureptrace_benchmark_manifest_bool_patch_installed"
 _BENCHMARK_MISSING_PATCH_MARKER = "_neureptrace_benchmark_manifest_missing_scalar_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
@@ -87,6 +91,39 @@ def _contains_boolean_scalar(value: Any) -> bool:
     return False
 
 
+def _validate_distinct_output_paths(config_workflow: Any, kwargs: dict[str, Any]) -> None:
+    """Reject active workflow outputs that resolve to the same destination."""
+
+    paths = {
+        "outputs.metrics_csv": kwargs.get("out_path"),
+        "outputs.calibration_csv": kwargs.get("calibration_out_path"),
+        "outputs.observations_csv": kwargs.get("observation_out_path"),
+    }
+    by_destination: dict[str, list[str]] = defaultdict(list)
+    for label, path in paths.items():
+        if path is None:
+            continue
+        destination = os.path.normcase(str(Path(path).resolve(strict=False)))
+        by_destination[destination].append(label)
+
+    collisions = {
+        destination: labels
+        for destination, labels in by_destination.items()
+        if len(labels) > 1
+    }
+    if not collisions:
+        return
+
+    details = "; ".join(
+        f"{', '.join(labels)} -> {destination}"
+        for destination, labels in sorted(collisions.items())
+    )
+    raise config_workflow.DatasetConfigError(
+        "Configured output paths must be distinct; "
+        f"conflicting outputs: {details}."
+    )
+
+
 def install() -> None:
     """Install tolerant parsing for generated dataset workflow configs."""
 
@@ -138,6 +175,18 @@ def install() -> None:
 
         setattr(_as_float_pair, _FLOAT_PAIR_PATCH_MARKER, True)
         config_workflow._as_float_pair = _as_float_pair
+
+    original_decode_kwargs = config_workflow._decode_kwargs
+    if not getattr(original_decode_kwargs, _OUTPUT_PATH_PATCH_MARKER, False):
+
+        @wraps(original_decode_kwargs)
+        def _decode_kwargs(config: Any, *, config_path: Path) -> dict[str, Any]:
+            kwargs = original_decode_kwargs(config, config_path=config_path)
+            _validate_distinct_output_paths(config_workflow, kwargs)
+            return kwargs
+
+        setattr(_decode_kwargs, _OUTPUT_PATH_PATCH_MARKER, True)
+        config_workflow._decode_kwargs = _decode_kwargs
 
 
 __all__ = ["install"]
