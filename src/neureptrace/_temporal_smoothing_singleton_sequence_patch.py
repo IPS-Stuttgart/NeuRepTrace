@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 from functools import wraps
 from pathlib import Path
 
@@ -72,6 +73,20 @@ def _fit_temporal_smoothing_sequences(temporal_smoothing, fit_frame: pd.DataFram
         if "Need at least one sequence with two or more time points" not in message:
             raise
         return []
+
+
+def _validate_distinct_output_paths(
+    out_observations: Path | None,
+    out_metrics: Path | None,
+) -> None:
+    """Reject temporal-smoothing outputs that resolve to one destination."""
+
+    if out_observations is None or out_metrics is None:
+        return
+    observation_destination = os.path.normcase(str(out_observations.resolve(strict=False)))
+    metric_destination = os.path.normcase(str(out_metrics.resolve(strict=False)))
+    if observation_destination == metric_destination:
+        raise ValueError("Temporal smoothing observation and metric output paths must be distinct.")
 
 
 def install() -> None:
@@ -190,6 +205,10 @@ def install() -> None:
         decoder group has no two-row sequence in the fitting window, the group is
         retained unchanged instead of aborting the full smoothing run.
         """
+
+        out_observations = None if out_observations is None else Path(out_observations)
+        out_metrics = None if out_metrics is None else Path(out_metrics)
+        _validate_distinct_output_paths(out_observations, out_metrics)
 
         if mode not in temporal_smoothing.SMOOTHING_MODE_CHOICES:
             choices = ", ".join(temporal_smoothing.SMOOTHING_MODE_CHOICES)
