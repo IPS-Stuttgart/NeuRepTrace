@@ -100,6 +100,22 @@ def test_run_onset_workflow_allows_missing_tasks(tmp_path: Path):
     assert len(run.task_outputs) == 1
 
 
+def test_plot_onset_summary_allows_decoder_without_emission_mode(tmp_path: Path):
+    summary = pd.DataFrame(
+        {
+            "task": ["task-b", "task-a"],
+            "decoder": ["ridge", "logistic"],
+            "post_detection_latency_median": [0.2, 0.1],
+            "false_alarm_rate": [0.1, 0.2],
+            "post_zero_detected_rate": [0.8, 0.9],
+        }
+    )
+    out_path = tmp_path / "plot.png"
+
+    assert plot_onset_summary(summary, out_path) == out_path
+    assert out_path.exists()
+
+
 def test_plot_onset_summary_rejects_empty_frame(tmp_path: Path):
     try:
         plot_onset_summary(pd.DataFrame(), tmp_path / "plot.png")
