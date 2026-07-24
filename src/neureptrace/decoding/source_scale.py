@@ -73,9 +73,10 @@ def fit_source_feature_scale(
     stats = fit_source_feature_scale_stats(source, config=cfg)
     train = apply_source_feature_scale(source, stats)
     test_out = apply_source_feature_scale(test, stats)
+    output_dtype = _compact_float_dtype(train, test_out)
     return SourceFeatureScaleResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=train.astype(output_dtype, copy=False),
+        test_features=test_out.astype(output_dtype, copy=False),
         stats=stats,
         metadata=_metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], feature_dim=source.shape[1]),
     )
@@ -175,6 +176,20 @@ def _coerce_config(config: SourceFeatureScaleConfig | Mapping[str, Any]) -> Sour
     if unknown:
         raise ValueError(f"Unknown source scale config option(s): {', '.join(unknown)}. Available options: {', '.join(sorted(allowed))}.")
     return source_feature_scale_config(**raw)
+
+
+def _compact_float_dtype(*arrays: np.ndarray) -> np.dtype:
+    """Use float32 only when down-casting preserves finite, nonzero values."""
+
+    for values in arrays:
+        array = np.asarray(values, dtype=float)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            compact = array.astype(np.float32)
+        if not np.all(np.isfinite(compact)):
+            return np.dtype(float)
+        if np.any((array != 0.0) & (compact == 0.0)):
+            return np.dtype(float)
+    return np.dtype(np.float32)
 
 
 def _metadata(cfg: SourceFeatureScaleConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int) -> dict[str, Any]:
