@@ -278,6 +278,12 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
