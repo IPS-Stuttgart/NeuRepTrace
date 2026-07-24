@@ -30,6 +30,27 @@ def test_domain_subsets_accepts_tuple_ids() -> None:
     assert rows[1][1].tolist() == [False, False, True, True]
 
 
+def test_domain_risk_summary_accepts_one_pass_domain_ids() -> None:
+    domains = (domain for domain in ["a", "a", "b", "b"])
+
+    summary = domain_risk_summary([1.0, 3.0, 2.0, 4.0], domains)
+
+    assert summary["domain_risks"] == {"a": 2.0, "b": 3.0}
+    assert summary["mean_risk"] == 2.5
+
+
+def test_domain_subsets_accepts_one_pass_composite_domain_ids() -> None:
+    domains = (domain for domain in [("a", "x"), ("a", "x"), ("b", "y"), ("b", "y")])
+
+    rows = domain_subsets(domains, subset_size=1)
+
+    assert len(rows) == 2
+    assert rows[0][0] == (("a", "x"),)
+    assert rows[0][1].tolist() == [True, True, False, False]
+    assert rows[1][0] == (("b", "y"),)
+    assert rows[1][1].tolist() == [False, False, True, True]
+
+
 def test_domain_subsets_accepts_string_integer_subset_size() -> None:
     rows = domain_subsets(["a", "a", "b", "b"], subset_size="1")
 
