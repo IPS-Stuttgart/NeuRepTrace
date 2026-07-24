@@ -1,4 +1,4 @@
-"""Normalize generative augmentation config values and feature matrices."""
+"""Normalize generative augmentation config values, feature matrices, and covariance powers."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ _INSTALLED = False
 _CONFIG_PATCH_MARKER = "_neureptrace_generative_augmentation_random_state_patch_installed"
 _FEATURE_PATCH_MARKER = "_neureptrace_generative_augmentation_finite_feature_patch_installed"
 _INTEGER_PATCH_MARKER = "_neureptrace_generative_augmentation_exact_integer_patch_installed"
+_MATRIX_POWER_PATCH_MARKER = "_neureptrace_generative_augmentation_zero_floor_matrix_power_patch_installed"
 
 
 def _random_state_error(name: str) -> ValueError:
@@ -98,7 +99,7 @@ def _normalize_optional_nonnegative_int(value: Any, *, name: str = "random_state
 
 
 def install() -> None:
-    """Patch generative augmentation config and feature-matrix normalization."""
+    """Patch generative augmentation config and numerical input normalization."""
 
     global _INSTALLED
     if _INSTALLED:
@@ -134,6 +135,29 @@ def install() -> None:
 
         setattr(_feature_matrix, _FEATURE_PATCH_MARKER, True)
         module._feature_matrix = _feature_matrix
+
+    original_matrix_power = module._matrix_power
+    if not getattr(original_matrix_power, _MATRIX_POWER_PATCH_MARKER, False):
+
+        @wraps(original_matrix_power)
+        def _matrix_power(matrix: np.ndarray, power: float, *, floor: float) -> np.ndarray:
+            numeric_power = float(power)
+            numeric_floor = max(float(floor), 0.0)
+            if numeric_power >= 0.0 or numeric_floor > 0.0:
+                return original_matrix_power(matrix, numeric_power, floor=numeric_floor)
+
+            array = np.asarray(matrix, dtype=float)
+            symmetric = 0.5 * (array + array.T)
+            values, vectors = np.linalg.eigh(symmetric)
+            scale = float(np.max(np.abs(values))) if values.size else 0.0
+            tolerance = np.finfo(float).eps * max(symmetric.shape) * scale
+            powered_values = np.zeros_like(values)
+            positive = values > tolerance
+            powered_values[positive] = np.power(values[positive], numeric_power)
+            return (vectors * powered_values) @ vectors.T
+
+        setattr(_matrix_power, _MATRIX_POWER_PATCH_MARKER, True)
+        module._matrix_power = _matrix_power
 
     _INSTALLED = True
 
