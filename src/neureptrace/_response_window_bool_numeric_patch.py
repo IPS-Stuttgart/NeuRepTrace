@@ -1,9 +1,11 @@
-"""Reject boolean numerics and preserve exact signed probability-observation labels.
+"""Reject invalid probability numerics and preserve exact signed labels.
 
-Pandas and NumPy treat booleans as numeric during coercion. They also commonly
-coerce integer-like values through ``float64``, which cannot distinguish adjacent
-integer class identifiers above ``2**53``. Probability-observation workflows must
-reject booleans without corrupting otherwise valid signed integer labels.
+Pandas and NumPy treat booleans as numeric during coercion and silently discard
+imaginary components when complex arrays are converted to ``float``. They also
+commonly coerce integer-like values through ``float64``, which cannot distinguish
+adjacent integer class identifiers above ``2**53``. Probability-observation
+workflows must reject booleans and complex values without corrupting otherwise
+valid signed integer labels.
 """
 
 from __future__ import annotations
@@ -36,6 +38,23 @@ def _contains_boolean(values: object) -> bool:
     if array.dtype == object:
         object_array = np.asarray(values, dtype=object)
         return any(_is_bool_scalar(value) for value in object_array.ravel())
+    return False
+
+
+def _contains_complex(values: object) -> bool:
+    """Return whether a materialized numeric input contains complex values."""
+
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    array = np.asarray(values)
+    if np.issubdtype(array.dtype, np.complexfloating):
+        return bool(array.size)
+    if array.dtype == object:
+        object_array = np.asarray(values, dtype=object)
+        return any(
+            isinstance(value, (complex, np.complexfloating))
+            for value in object_array.ravel()
+        )
     return False
 
 
@@ -168,6 +187,23 @@ def _class_names(frame: pd.DataFrame, prob_columns: Sequence[str]) -> list[str]:
     return names
 
 
+def _validate_response_window_probability_frame(frame: pd.DataFrame) -> None:
+    probability_values = frame.loc[:, _probability_columns(frame)].to_numpy()
+    if _contains_complex(probability_values):
+        raise ValueError(
+            "Response-window probabilities must contain real-valued values, not complex values."
+        )
+
+
+def _guard_response_window_rows(original):
+    @wraps(original)
+    def guarded(observations: pd.DataFrame, *args, **kwargs):
+        _validate_response_window_probability_frame(observations)
+        return original(observations, *args, **kwargs)
+
+    return guarded
+
+
 def install() -> None:
     """Patch probability validation and exact signed label conversion."""
 
@@ -196,6 +232,10 @@ def install() -> None:
         def _validate_probability_matrix(probabilities: np.ndarray) -> np.ndarray:
             if _contains_boolean(probabilities):
                 raise ValueError("Probability observations must be numeric probabilities, not booleans.")
+            if _contains_complex(probabilities):
+                raise ValueError(
+                    "Probability observations must contain real-valued probabilities, not complex values."
+                )
             return original_validate_probability_matrix(probabilities)
 
         temporal_model._validate_probability_matrix = _validate_probability_matrix
@@ -228,6 +268,11 @@ def install() -> None:
 
     if not getattr(response_window_ensemble, _PATCH_MARKER, False):
         original_integer_label_values = response_window_ensemble._integer_label_values
+        original_normalize_rows = response_window_ensemble._normalize_rows
+        original_response_window_rows = response_window_ensemble._response_window_rows
+        original_decoder_source_rows = (
+            response_window_ensemble._decoder_source_oof_response_window_rows
+        )
 
         @wraps(original_integer_label_values)
         def _integer_label_values(
@@ -240,10 +285,25 @@ def install() -> None:
                 raise ValueError("Response-window true_label values must index prob_class_* columns.")
             return labels
 
+        @wraps(original_normalize_rows)
+        def _normalize_rows(probabilities: np.ndarray) -> np.ndarray:
+            if _contains_complex(probabilities):
+                raise ValueError(
+                    "Response-window probabilities must contain real-valued values, not complex values."
+                )
+            return original_normalize_rows(probabilities)
+
         response_window_ensemble.probability_columns = temporal_model.probability_columns
         response_window_ensemble._label_values = _label_values
         response_window_ensemble._class_names = _class_names
         response_window_ensemble._integer_label_values = _integer_label_values
+        response_window_ensemble._normalize_rows = _normalize_rows
+        response_window_ensemble._response_window_rows = _guard_response_window_rows(
+            original_response_window_rows
+        )
+        response_window_ensemble._decoder_source_oof_response_window_rows = (
+            _guard_response_window_rows(original_decoder_source_rows)
+        )
         setattr(response_window_ensemble, _PATCH_MARKER, True)
 
 
