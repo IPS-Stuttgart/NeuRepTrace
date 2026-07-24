@@ -5,14 +5,14 @@ from __future__ import annotations
 import importlib
 from functools import wraps
 from pathlib import Path
+from typing import Any
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_onset_workflow_plot_optional_columns_patch_installed"
 
 
-def _plot_onset_summary(summary: pd.DataFrame, out_path: Path) -> Path:
+def _plot_onset_summary(summary: pd.DataFrame, out_path: Path, *, plotting: Any) -> Path:
     """Plot onset summaries without assuming optional columns occur together."""
 
     if summary.empty:
@@ -30,7 +30,7 @@ def _plot_onset_summary(summary: pd.DataFrame, out_path: Path) -> Path:
     if "emission_mode" in frame.columns:
         labels = labels + " / " + frame["emission_mode"].astype(str)
 
-    fig, axes = plt.subplots(1, 2, figsize=(max(7.0, 0.8 * len(frame)), 4.2))
+    fig, axes = plotting.subplots(1, 2, figsize=(max(7.0, 0.8 * len(frame)), 4.2))
     positions = range(len(frame))
 
     axes[0].bar(positions, frame["post_detection_latency_median"])
@@ -65,7 +65,7 @@ def _plot_onset_summary(summary: pd.DataFrame, out_path: Path) -> Path:
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=160)
-    plt.close(fig)
+    plotting.close(fig)
     return out_path
 
 
@@ -79,7 +79,7 @@ def install() -> None:
 
     @wraps(current)
     def plot_onset_summary(summary: pd.DataFrame, out_path: Path) -> Path:
-        return _plot_onset_summary(summary, out_path)
+        return _plot_onset_summary(summary, out_path, plotting=onset_workflow.plt)
 
     setattr(plot_onset_summary, _PATCH_MARKER, True)
     onset_workflow.plot_onset_summary = plot_onset_summary
