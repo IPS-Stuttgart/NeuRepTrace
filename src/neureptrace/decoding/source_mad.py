@@ -74,9 +74,10 @@ def fit_source_mad_transform(
     reference = fit_source_mad_reference(source, config=cfg)
     train = apply_source_mad_transform(source, reference)
     test_out = apply_source_mad_transform(test, reference)
+    train_out, test_out = _compact_float_outputs(train, test_out)
     return SourceMADResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=train_out,
+        test_features=test_out,
         reference=reference,
         metadata=_metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], feature_dim=source.shape[1]),
     )
@@ -162,6 +163,18 @@ def _metadata(cfg: SourceMADConfig, *, n_source_rows: int, n_test_rows: int, fea
         "source_mad_normal_consistency": bool(cfg.normal_consistency),
         "source_mad_epsilon": float(cfg.epsilon),
     }
+
+
+def _compact_float_outputs(train: np.ndarray, test: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Use float32 only when down-casting keeps transformed values usable."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        train_compact = train.astype(np.float32)
+        test_compact = test.astype(np.float32)
+    for original, compact in ((train, train_compact), (test, test_compact)):
+        if not np.all(np.isfinite(compact)) or np.any((original != 0.0) & (compact == 0.0)):
+            return train.astype(float, copy=False), test.astype(float, copy=False)
+    return train_compact, test_compact
 
 
 def _materialize_feature_iterables(value: object) -> object:
