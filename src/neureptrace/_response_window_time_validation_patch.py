@@ -1,8 +1,9 @@
-"""Reject malformed values for response-window time controls.
+"""Validate temporal-window controls and matched-filter template bounds.
 
 Response-window time arguments are scalar controls. NumPy boolean arrays should
 not be coerced to ``0``/``1``, and non-scalar arrays should not be accepted as
-scalar times.
+scalar times. Matched-filter template offsets must also remain inside the
+configured template window when its width is not divisible by the sampling step.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_response_window_time_validation_patch_installed"
+_MATCHED_FILTER_PATCH_MARKER = "_neureptrace_matched_filter_template_window_patch_installed"
 
 
 def _coerce_time_control_scalar(value: Any, *, message: str) -> Any:
@@ -36,8 +38,36 @@ def _coerce_time_control_scalar(value: Any, *, message: str) -> Any:
     return value
 
 
+def _install_matched_filter_template_window_patch() -> None:
+    """Discard rounded template offsets that exceed the requested stop time."""
+
+    matched_filter = importlib.import_module("neureptrace.matched_filter_detection")
+    if getattr(matched_filter, _MATCHED_FILTER_PATCH_MARKER, False):
+        return
+
+    original_template_offsets = matched_filter._template_offsets
+
+    @wraps(original_template_offsets)
+    def _template_offsets(
+        template_window: tuple[float, float],
+        template_step: float,
+    ) -> np.ndarray:
+        offsets = np.asarray(
+            original_template_offsets(template_window, template_step),
+            dtype=float,
+        )
+        start, stop = map(float, template_window)
+        tolerance = 8.0 * np.finfo(float).eps * max(1.0, abs(start), abs(stop))
+        return offsets[offsets <= stop + tolerance]
+
+    matched_filter._template_offsets = _template_offsets
+    setattr(matched_filter, _MATCHED_FILTER_PATCH_MARKER, True)
+
+
 def install() -> None:
-    """Patch response-window time control validation."""
+    """Patch temporal-window validation and matched-filter offset generation."""
+
+    _install_matched_filter_template_window_patch()
 
     response_window_ensemble = importlib.import_module("neureptrace.response_window_ensemble")
     if getattr(response_window_ensemble, _PATCH_MARKER, False):
