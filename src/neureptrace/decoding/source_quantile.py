@@ -93,8 +93,8 @@ def source_quantile_clip(*, source_features, test_features, lower=0.01, upper=0.
         "source_quantile_clip_test_values_clipped": int(np.count_nonzero(test_mask)),
     }
     return SourceQuantileClipResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=_compact_float32(train),
+        test_features=_compact_float32(test_out),
         lower=lower_values.astype(float, copy=False),
         upper=upper_values.astype(float, copy=False),
         train_clipped_mask=train_mask,
@@ -136,8 +136,8 @@ def source_quantile_rank(*, source_features, test_features, centered: bool | str
         "source_quantile_rank_epsilon": float(eps),
     }
     return SourceQuantileRankResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=_compact_float32(train),
+        test_features=_compact_float32(test_out),
         sorted_source_values=sorted_values.astype(float, copy=False),
         metadata=metadata,
     )
@@ -222,6 +222,18 @@ def apply_source_quantile_clip(features, lower, upper):
         raise ValueError("features width must match lower and upper bounds.")
     clipped = np.minimum(np.maximum(matrix, lower_values), upper_values)
     return clipped, clipped != matrix
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _materialize_one_pass_iterables(value: object) -> object:
