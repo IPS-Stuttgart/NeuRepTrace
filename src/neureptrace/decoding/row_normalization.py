@@ -78,10 +78,10 @@ def normalize_source_and_test_rows(
         "row_normalization_epsilon": float(cfg.epsilon),
     }
     return RowNormalizationResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
-        train_norms=train_norms.astype(np.float32, copy=False),
-        test_norms=test_norms.astype(np.float32, copy=False),
+        train_features=_compact_float32(train),
+        test_features=_compact_float32(test_out),
+        train_norms=train_norms.astype(float, copy=False),
+        test_norms=test_norms.astype(float, copy=False),
         metadata=metadata,
     )
 
@@ -128,6 +128,19 @@ def _stable_row_l2_norms(matrix: np.ndarray) -> np.ndarray:
     with np.errstate(over="ignore"):
         norms[nonzero] = scales[nonzero] * scaled_norms
     return norms
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    array = np.asarray(values)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return array
+    if np.any((array != 0.0) & (compact == 0.0)):
+        return array
+    return compact
 
 
 def row_normalization_config(
