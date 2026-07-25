@@ -8,7 +8,7 @@ using held-out-domain information.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -157,7 +157,31 @@ def _coerce_config(config: SourceFeatureClippingConfig | Mapping[str, Any]) -> S
     return source_feature_clipping_config(**dict(config))
 
 
+def _contains_complex(value: object) -> bool:
+    """Return whether an input container contains complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, np.generic):
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Mapping):
+        return any(_contains_complex(item) for item in value.values())
+    if isinstance(value, Iterable):
+        return any(_contains_complex(item) for item in value)
+    return False
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    if _contains_complex(values):
+        raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
@@ -167,9 +191,9 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
 
 
 def _bound_vector(values: Sequence[float] | np.ndarray, *, name: str) -> np.ndarray:
-    """Return one numeric clipping-bound vector without undefined NaN entries."""
+    """Return one numeric clipping-bound vector without lossy coercion or NaNs."""
 
-    if np.iscomplexobj(values):
+    if _contains_complex(values):
         raise ValueError(f"{name} must contain real-valued bounds.")
     try:
         vector = np.asarray(values, dtype=float).reshape(-1)
@@ -207,6 +231,8 @@ def _quantile(value: float | str, *, name: str) -> float:
     value = _scalar_array_value(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a numeric quantile, not boolean.")
+    if isinstance(value, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must be a real numeric scalar quantile, not complex.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
