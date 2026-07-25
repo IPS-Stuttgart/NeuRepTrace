@@ -14,6 +14,9 @@ from typing import Any
 
 import numpy as np
 
+from .row_l1 import normalize_rows_l1
+from .row_l2 import normalize_rows_l2
+
 ROW_NORMALIZATION_PROTOCOL = "row_wise_feature_normalization"
 ROW_NORMALIZATION_CATEGORY = "1_strict_source_only"
 NORM_MODES = ("l2", "l1", "max")
@@ -78,10 +81,10 @@ def normalize_source_and_test_rows(
         "row_normalization_epsilon": float(cfg.epsilon),
     }
     return RowNormalizationResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
-        train_norms=train_norms.astype(np.float32, copy=False),
-        test_norms=test_norms.astype(np.float32, copy=False),
+        train_features=_compact_float32(train),
+        test_features=_compact_float32(test_out),
+        train_norms=train_norms.astype(float, copy=False),
+        test_norms=test_norms.astype(float, copy=False),
         metadata=metadata,
     )
 
@@ -96,6 +99,10 @@ def normalize_rows(
     cfg = row_normalization_config() if config is None else _coerce_config(config)
     matrix = _feature_matrix(features, name="features")
     working = matrix - np.mean(matrix, axis=1, keepdims=True) if cfg.center_rows else matrix.copy()
+    if cfg.norm == "l1":
+        return normalize_rows_l1(working, epsilon=cfg.epsilon)
+    if cfg.norm == "l2":
+        return normalize_rows_l2(working, epsilon=cfg.epsilon)
     norms = row_norms(working, norm=cfg.norm)
     safe_norms = np.maximum(norms, cfg.epsilon)
     return working / safe_norms[:, None], norms
@@ -128,6 +135,18 @@ def _stable_row_l2_norms(matrix: np.ndarray) -> np.ndarray:
     with np.errstate(over="ignore"):
         norms[nonzero] = scales[nonzero] * scaled_norms
     return norms
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def row_normalization_config(
