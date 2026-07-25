@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping
+from functools import wraps
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 _TIME_SELECTION_PATCH_MARKER = "_neureptrace_openneuro_real_shuffle_time_selection_patch_installed"
+_FIXED_TIME_PATCH_MARKER = "_neureptrace_openneuro_real_shuffle_fixed_time_patch_installed"
 _MANIFEST_BOOL_PATCH_MARKER = "_neureptrace_openneuro_manifest_bool_token_patch_installed"
 _PROVENANCE_VALUE_PATCH_MARKER = "_neureptrace_openneuro_provenance_value_patch_installed"
 _ALIGNMENT_COMPARE_FIRST_NONEMPTY_PATCH_MARKER = "_neureptrace_openneuro_alignment_compare_first_nonempty_patch_installed"
@@ -51,6 +53,25 @@ def _finite_positions(frame: pd.DataFrame, *columns: str) -> np.ndarray:
         values = pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
         mask &= np.isfinite(values)
     return np.flatnonzero(mask)
+
+
+def _finite_fixed_time(value: Any) -> float:
+    """Return one finite real fixed-time scalar without lossy coercion."""
+
+    message = "fixed_time must be a finite real scalar."
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(message)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(parsed):
+        raise ValueError(message)
+    return parsed
 
 
 def _install_manifest_bool_token_patch() -> None:
@@ -127,35 +148,47 @@ def _install_alignment_compare_first_nonempty_patch() -> None:
 def _install_time_selection_patch() -> None:
     module = importlib.import_module("neureptrace.openneuro_real_shuffle_report")
     original_nearest_row = module._nearest_row
-    if getattr(original_nearest_row, _TIME_SELECTION_PATCH_MARKER, False):
-        return
+    if not getattr(original_nearest_row, _TIME_SELECTION_PATCH_MARKER, False):
 
-    def _nearest_row(frame: pd.DataFrame, time: float) -> pd.Series:
-        if frame.empty or "time" not in frame.columns:
-            raise ValueError("Time-course table must contain at least one time row.")
-        positions = _finite_positions(frame, "time")
-        if positions.size == 0:
-            raise ValueError("Time-course table must contain at least one finite time row.")
-        times = pd.to_numeric(frame["time"], errors="coerce").to_numpy(dtype=float)
-        nearest_position = positions[int(np.argmin(np.abs(times[positions] - float(time))))]
-        return frame.iloc[int(nearest_position)]
+        def _nearest_row(frame: pd.DataFrame, time: float) -> pd.Series:
+            requested_time = _finite_fixed_time(time)
+            if frame.empty or "time" not in frame.columns:
+                raise ValueError("Time-course table must contain at least one time row.")
+            positions = _finite_positions(frame, "time")
+            if positions.size == 0:
+                raise ValueError("Time-course table must contain at least one finite time row.")
+            times = pd.to_numeric(frame["time"], errors="coerce").to_numpy(dtype=float)
+            nearest_position = positions[int(np.argmin(np.abs(times[positions] - requested_time)))]
+            return frame.iloc[int(nearest_position)]
 
-    def _best_time_row(frame: pd.DataFrame, metric: str = "balanced_accuracy") -> pd.Series:
-        if frame.empty or metric not in frame.columns:
-            raise ValueError(f"Time-course table must contain '{metric}'.")
-        if "time" not in frame.columns:
-            raise ValueError("Time-course table must contain 'time'.")
-        positions = _finite_positions(frame, "time", metric)
-        if positions.size == 0:
-            raise ValueError(f"Time-course table must contain at least one finite '{metric}' row with finite time.")
-        values = pd.to_numeric(frame[metric], errors="coerce").to_numpy(dtype=float)
-        best_position = positions[int(np.argmax(values[positions]))]
-        return frame.iloc[int(best_position)]
+        def _best_time_row(frame: pd.DataFrame, metric: str = "balanced_accuracy") -> pd.Series:
+            if frame.empty or metric not in frame.columns:
+                raise ValueError(f"Time-course table must contain '{metric}'.")
+            if "time" not in frame.columns:
+                raise ValueError("Time-course table must contain 'time'.")
+            positions = _finite_positions(frame, "time", metric)
+            if positions.size == 0:
+                raise ValueError(f"Time-course table must contain at least one finite '{metric}' row with finite time.")
+            values = pd.to_numeric(frame[metric], errors="coerce").to_numpy(dtype=float)
+            best_position = positions[int(np.argmax(values[positions]))]
+            return frame.iloc[int(best_position)]
 
-    setattr(_nearest_row, _TIME_SELECTION_PATCH_MARKER, True)
-    setattr(_best_time_row, _TIME_SELECTION_PATCH_MARKER, True)
-    module._nearest_row = _nearest_row
-    module._best_time_row = _best_time_row
+        setattr(_nearest_row, _TIME_SELECTION_PATCH_MARKER, True)
+        setattr(_best_time_row, _TIME_SELECTION_PATCH_MARKER, True)
+        module._nearest_row = _nearest_row
+        module._best_time_row = _best_time_row
+
+    original_write_report = module.write_real_shuffle_report
+    if not getattr(original_write_report, _FIXED_TIME_PATCH_MARKER, False):
+
+        @wraps(original_write_report)
+        def write_real_shuffle_report(*args: Any, **kwargs: Any):
+            if "fixed_time" in kwargs:
+                kwargs["fixed_time"] = _finite_fixed_time(kwargs["fixed_time"])
+            return original_write_report(*args, **kwargs)
+
+        setattr(write_real_shuffle_report, _FIXED_TIME_PATCH_MARKER, True)
+        module.write_real_shuffle_report = write_real_shuffle_report
 
 
 def install() -> None:
