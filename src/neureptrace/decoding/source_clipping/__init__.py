@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -103,8 +103,8 @@ def apply_feature_clipping(
     copy: bool | int | str = True,
 ) -> np.ndarray:
     matrix = _matrix(features, name="features")
-    lower = np.asarray(lower_bounds, dtype=float).reshape(-1)
-    upper = np.asarray(upper_bounds, dtype=float).reshape(-1)
+    lower = _bound_vector(lower_bounds, name="lower_bounds")
+    upper = _bound_vector(upper_bounds, name="upper_bounds")
     if lower.shape[0] != matrix.shape[1] or upper.shape[0] != matrix.shape[1]:
         raise ValueError("lower_bounds and upper_bounds must match the feature width.")
     if np.any(lower > upper):
@@ -137,13 +137,51 @@ def _compact_float_dtype(*arrays: np.ndarray) -> np.dtype:
     return np.dtype(np.float32)
 
 
+def _contains_complex(value: object) -> bool:
+    """Return whether an input container contains complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, np.generic):
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Mapping):
+        return any(_contains_complex(item) for item in value.values())
+    if isinstance(value, Iterable):
+        return any(_contains_complex(item) for item in value)
+    return False
+
+
 def _matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    if _contains_complex(values):
+        raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
         raise ValueError(f"{name} must contain only finite values.")
     return matrix
+
+
+def _bound_vector(values: Sequence[float] | np.ndarray, *, name: str) -> np.ndarray:
+    """Return one numeric clipping-bound vector without lossy coercion or NaNs."""
+
+    if _contains_complex(values):
+        raise ValueError(f"{name} must contain real-valued bounds.")
+    try:
+        vector = np.asarray(values, dtype=float).reshape(-1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a numeric vector.") from exc
+    if np.any(np.isnan(vector)):
+        raise ValueError(f"{name} must not contain NaN values.")
+    return vector
 
 
 def _quantile(value: float | str, *, name: str) -> float:
@@ -155,6 +193,8 @@ def _quantile(value: float | str, *, name: str) -> float:
         value = value.item()
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a numeric quantile, not boolean.")
+    if isinstance(value, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must be a real numeric scalar quantile, not complex.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
