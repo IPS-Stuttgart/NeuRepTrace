@@ -89,7 +89,20 @@ def install() -> None:
     _install_stimulus_detection_boolean_summary_patch()
 
     import neureptrace.metrics as metrics
+    import neureptrace.metrics.ranking as ranking_metrics
     import neureptrace.metrics.weighted as weighted_metrics
+
+    if not getattr(ranking_metrics._validate_integer, "_metric_ranking_complex_validation_patched", False):
+        original_ranking_validate_integer = ranking_metrics._validate_integer
+
+        @wraps(original_ranking_validate_integer)
+        def validate_ranking_integer(value: object, *, name: str, minimum: int) -> int:
+            if isinstance(value, (complex, np.complexfloating)):
+                raise ValueError(f"{name} values must be integers.")
+            return original_ranking_validate_integer(value, name=name, minimum=minimum)
+
+        validate_ranking_integer._metric_ranking_complex_validation_patched = True  # type: ignore[attr-defined]
+        ranking_metrics._validate_integer = validate_ranking_integer
 
     if getattr(metrics.validate_probability_inputs, "_metric_scalar_array_validation_patched", False):
         return
