@@ -54,6 +54,53 @@ def test_l2_norms_avoid_intermediate_overflow() -> None:
     np.testing.assert_allclose(row_norms(normalized), [1.0])
 
 
+def test_l1_normalization_preserves_direction_when_norm_overflows() -> None:
+    maximum = np.finfo(np.float64).max
+
+    with np.errstate(over="raise", invalid="raise"):
+        normalized, norms = normalize_rows([[maximum, -maximum]], config={"norm": "l1"})
+
+    assert np.isinf(norms[0])
+    np.testing.assert_allclose(normalized, [[0.5, -0.5]])
+
+
+def test_l2_normalization_preserves_direction_when_norm_overflows() -> None:
+    maximum = np.finfo(np.float64).max
+
+    with np.errstate(over="raise", invalid="raise"):
+        normalized, norms = normalize_rows([[maximum, maximum]], config={"norm": "l2"})
+
+    assert np.isinf(norms[0])
+    np.testing.assert_allclose(normalized, [[1.0 / np.sqrt(2.0), 1.0 / np.sqrt(2.0)]])
+
+
+def test_high_level_outputs_preserve_precision_when_float32_would_corrupt() -> None:
+    result = normalize_source_and_test_rows(
+        source_features=[[1e100, 1e50]],
+        test_features=[[1e80, 1e30]],
+        config={"norm": "max"},
+    )
+
+    assert result.train_features.dtype == np.float64
+    assert result.test_features.dtype == np.float64
+    assert result.train_features[0, 1] > 0.0
+    assert result.test_features[0, 1] > 0.0
+    assert result.train_norms.dtype == np.float64
+    assert result.test_norms.dtype == np.float64
+    np.testing.assert_allclose(result.train_norms, [1e100])
+    np.testing.assert_allclose(result.test_norms, [1e80])
+
+
+def test_high_level_outputs_keep_float32_for_representable_values() -> None:
+    result = normalize_source_and_test_rows(
+        source_features=[[3.0, 4.0]],
+        test_features=[[5.0, 12.0]],
+    )
+
+    assert result.train_features.dtype == np.float32
+    assert result.test_features.dtype == np.float32
+
+
 def test_center_rows_before_normalizing() -> None:
     features = np.asarray([[1.0, 2.0, 3.0]], dtype=float)
 
