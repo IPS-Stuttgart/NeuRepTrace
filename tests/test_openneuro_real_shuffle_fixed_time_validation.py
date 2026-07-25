@@ -49,15 +49,14 @@ def test_openneuro_report_rejects_nonfinite_fixed_time_before_artifact_lookup(
     assert not out_dir.exists()
 
 
-def test_openneuro_report_accepts_zero_dimensional_finite_fixed_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, float] = {}
+def test_openneuro_nearest_row_accepts_zero_dimensional_finite_time() -> None:
+    time_course = pd.DataFrame(
+        {
+            "time": [-0.1, 0.1],
+            "balanced_accuracy": [0.4, 0.6],
+        }
+    )
 
-    def fake_report(*, fixed_time: float, **_kwargs: object) -> dict[str, Path]:
-        captured["fixed_time"] = fixed_time
-        return {}
+    row = _nearest_row(time_course, np.asarray(0.08))
 
-    wrapped = write_real_shuffle_report.__wrapped__
-    monkeypatch.setattr("neureptrace.openneuro_real_shuffle_report.write_real_shuffle_report.__wrapped__", fake_report, raising=False)
-
-    assert np.isfinite(np.asarray(0.184)).all()
-    assert callable(wrapped)
+    assert row["time"] == pytest.approx(0.1)
