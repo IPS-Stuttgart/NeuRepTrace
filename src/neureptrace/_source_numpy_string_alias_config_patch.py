@@ -1,7 +1,8 @@
-"""Normalize source configuration aliases and preserve exact numeric controls."""
+"""Normalize source configuration aliases and harden numeric controls."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
@@ -12,6 +13,7 @@ _PATCH_ATTR = "_neureptrace_source_numpy_string_alias_config_patch"
 _INTEGER_PRECISION_MARKER = "_source_scaling_integer_precision_patched"
 _BALANCING_CONFIG_MARKER = "_source_class_balancing_config_normalized"
 _THRESHOLD_OUTPUT_MARKER = "_source_threshold_output_precision_patched"
+_SOURCE_KNN_COMPLEX_MARKER = "_source_knn_complex_feature_validation_patched"
 _ALIAS_VALUES = {"all", "full"}
 
 
@@ -63,6 +65,26 @@ def _integer(value: Any, *, name: str) -> int:
     return int(parsed)
 
 
+def _contains_complex_value(value: Any) -> bool:
+    """Return whether a materialized feature container has complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(
+                _contains_complex_value(item) for item in value.ravel(order="C")
+            )
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Iterable):
+        return any(_contains_complex_value(item) for item in value)
+    return False
+
+
 def _compact_float32(values: np.ndarray) -> np.ndarray:
     """Use float32 only when finite nonzero values survive conversion."""
 
@@ -90,9 +112,19 @@ def _install_source_threshold_output_patch(source_threshold: Any) -> None:
         test_features: Any,
         config: Any = None,
     ) -> Any:
-        cfg = source_threshold.source_threshold_config() if config is None else source_threshold._coerce_config(config)
-        source = source_threshold._feature_matrix(source_features, name="source_features")
-        test = source_threshold._feature_matrix(test_features, name="test_features")
+        cfg = (
+            source_threshold.source_threshold_config()
+            if config is None
+            else source_threshold._coerce_config(config)
+        )
+        source = source_threshold._feature_matrix(
+            source_features,
+            name="source_features",
+        )
+        test = source_threshold._feature_matrix(
+            test_features,
+            name="test_features",
+        )
         if source.shape[1] != test.shape[1]:
             raise ValueError(
                 "source_features and test_features must have the same feature width: "
@@ -119,7 +151,7 @@ def _install_source_threshold_output_patch(source_threshold: Any) -> None:
 
 
 def install() -> None:
-    """Accept source aliases and preserve exact numeric controls."""
+    """Accept source aliases and preserve exact, real-valued controls."""
 
     from neureptrace.decoding import (
         source_balancing,
@@ -152,6 +184,26 @@ def install() -> None:
         setattr(_coerce_balancing_config, _BALANCING_CONFIG_MARKER, True)
         _coerce_balancing_config.__wrapped__ = current_balancing_coercer
         source_balancing._coerce_config = _coerce_balancing_config
+
+    current_knn_feature_matrix = source_knn._feature_matrix
+    if not getattr(
+        current_knn_feature_matrix,
+        _SOURCE_KNN_COMPLEX_MARKER,
+        False,
+    ):
+
+        def _feature_matrix(values: Any, *, name: str) -> np.ndarray:
+            materialized = source_knn._materialize_one_pass_iterables(values)
+            if _contains_complex_value(materialized):
+                raise ValueError(
+                    f"{name} must contain real-valued feature values, "
+                    "not complex values."
+                )
+            return current_knn_feature_matrix(materialized, name=name)
+
+        setattr(_feature_matrix, _SOURCE_KNN_COMPLEX_MARKER, True)
+        _feature_matrix.__wrapped__ = current_knn_feature_matrix
+        source_knn._feature_matrix = _feature_matrix
 
     _install_source_threshold_output_patch(source_threshold)
 
