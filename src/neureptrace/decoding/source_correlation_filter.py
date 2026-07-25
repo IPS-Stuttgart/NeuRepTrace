@@ -87,11 +87,11 @@ def fit_source_correlation_filter(
         "source_correlation_filter_selected_indices": "|".join(str(int(index)) for index in selected.tolist()),
     }
     return SourceCorrelationFilterResult(
-        train_features=source[:, selected].astype(np.float32, copy=False),
-        test_features=test[:, selected].astype(np.float32, copy=False),
+        train_features=source[:, selected].astype(float, copy=False),
+        test_features=test[:, selected].astype(float, copy=False),
         selected_indices=selected.astype(int, copy=False),
-        correlation=correlation.astype(np.float32, copy=False),
-        importance=importance.astype(np.float32, copy=False),
+        correlation=correlation.astype(float, copy=False),
+        importance=importance.astype(float, copy=False),
         metadata=metadata,
     )
 
@@ -118,12 +118,20 @@ def source_feature_correlation(source_features: Sequence[Sequence[float]] | np.n
 
     source = _feature_matrix(source_features, name="source_features")
     eps = _positive_float(epsilon, name="epsilon")
-    centered = source - np.mean(source, axis=0, keepdims=True)
+
+    # Correlation is invariant to positive per-feature scaling. Scaling before
+    # centering prevents finite, high-magnitude columns from overflowing in the
+    # mean and L2-norm reductions.
+    scales = np.max(np.abs(source), axis=0)
+    safe_scales = np.where(scales > 0.0, scales, 1.0)
+    scaled = source / safe_scales[None, :]
+    centered = scaled - np.mean(scaled, axis=0, keepdims=True)
     norms = np.linalg.norm(centered, axis=0)
-    safe_norms = np.maximum(norms, eps)
+    with np.errstate(over="ignore", under="ignore"):
+        zero_var = norms <= eps / safe_scales
+    safe_norms = np.where(zero_var, 1.0, norms)
     normalized = centered / safe_norms[None, :]
     correlation = normalized.T @ normalized
-    zero_var = norms <= eps
     if np.any(zero_var):
         correlation[zero_var, :] = 0.0
         correlation[:, zero_var] = 0.0
@@ -137,8 +145,27 @@ def source_feature_importance(source_features: Sequence[Sequence[float]] | np.nd
     """Return source-only feature importance based on variance."""
 
     source = _feature_matrix(source_features, name="source_features")
-    variances = np.var(source, axis=0, ddof=1 if source.shape[0] > 1 else 0)
-    return np.maximum(variances, _positive_float(epsilon, name="epsilon")).astype(float, copy=False)
+    eps = _positive_float(epsilon, name="epsilon")
+    scales = np.max(np.abs(source), axis=0)
+    safe_scales = np.where(scales > 0.0, scales, 1.0)
+    scaled = source / safe_scales[None, :]
+    scaled_variances = np.var(scaled, axis=0, ddof=1 if source.shape[0] > 1 else 0)
+
+    # Reconstruct variances in log space so scale**2 cannot overflow. A true
+    # variance larger than float64's range is saturated at the largest finite
+    # value, which preserves a usable high-importance score instead of inf.
+    variances = np.zeros_like(scaled_variances, dtype=float)
+    positive = scaled_variances > 0.0
+    if np.any(positive):
+        maximum = np.finfo(float).max
+        maximum_log = np.log(maximum)
+        with np.errstate(divide="ignore", over="ignore", under="ignore"):
+            log_variances = np.log(scaled_variances[positive]) + 2.0 * np.log(safe_scales[positive])
+        reconstructed = np.full(log_variances.shape, maximum, dtype=float)
+        representable = log_variances < maximum_log
+        reconstructed[representable] = np.exp(log_variances[representable])
+        variances[positive] = reconstructed
+    return np.maximum(variances, eps).astype(float, copy=False)
 
 
 def select_uncorrelated_features(
