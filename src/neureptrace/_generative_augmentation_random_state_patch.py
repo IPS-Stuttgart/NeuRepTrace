@@ -12,6 +12,7 @@ import numpy as np
 
 _INSTALLED = False
 _CONFIG_PATCH_MARKER = "_neureptrace_generative_augmentation_random_state_patch_installed"
+_CONFIG_COERCER_PATCH_MARKER = "_neureptrace_generative_augmentation_direct_config_patch_installed"
 _FEATURE_PATCH_MARKER = "_neureptrace_generative_augmentation_finite_feature_patch_installed"
 _INTEGER_PATCH_MARKER = "_neureptrace_generative_augmentation_exact_integer_patch_installed"
 _MATRIX_POWER_PATCH_MARKER = "_neureptrace_generative_augmentation_zero_floor_matrix_power_patch_installed"
@@ -122,6 +123,34 @@ def install() -> None:
 
         setattr(generative_augmentation_config, _CONFIG_PATCH_MARKER, True)
         module.generative_augmentation_config = generative_augmentation_config
+
+    original_coerce_config = module._coerce_config
+    if not getattr(original_coerce_config, _CONFIG_COERCER_PATCH_MARKER, False):
+
+        @wraps(original_coerce_config)
+        def _coerce_config(config: Any):
+            if isinstance(config, module.GenerativeAugmentationConfig):
+                return module.generative_augmentation_config(
+                    method=config.method,
+                    synthetic_per_class=config.synthetic_per_class,
+                    noise_scale=config.noise_scale,
+                    covariance_shrinkage=config.covariance_shrinkage,
+                    covariance_floor=config.covariance_floor,
+                    random_state=config.random_state,
+                    target_style_strength=config.target_style_strength,
+                    target_calibration_weight=config.target_calibration_weight,
+                    neural_epochs=config.neural_epochs,
+                    neural_hidden_dim=config.neural_hidden_dim,
+                    neural_batch_size=config.neural_batch_size,
+                    neural_learning_rate=config.neural_learning_rate,
+                    gan_latent_dim=config.gan_latent_dim,
+                    gan_discriminator_steps=config.gan_discriminator_steps,
+                    diffusion_steps=config.diffusion_steps,
+                )
+            return original_coerce_config(config)
+
+        setattr(_coerce_config, _CONFIG_COERCER_PATCH_MARKER, True)
+        module._coerce_config = _coerce_config
 
     original_feature_matrix = module._feature_matrix
     if not getattr(original_feature_matrix, _FEATURE_PATCH_MARKER, False):
