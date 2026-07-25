@@ -80,7 +80,17 @@ def transform_signed_log(features: Sequence[Sequence[float]] | np.ndarray, *, sc
 
     matrix = _feature_matrix(features, name="features")
     scale_value = _positive_float(scale, name="scale")
-    return np.sign(matrix) * np.log1p(np.abs(matrix) / scale_value)
+    magnitude = np.abs(matrix)
+    larger_than_scale = magnitude > scale_value
+    compressed = np.empty_like(magnitude)
+    with np.errstate(under="ignore"):
+        compressed[~larger_than_scale] = np.log1p(magnitude[~larger_than_scale] / scale_value)
+        compressed[larger_than_scale] = (
+            np.log(magnitude[larger_than_scale])
+            - np.log(scale_value)
+            + np.log1p(scale_value / magnitude[larger_than_scale])
+        )
+    return np.sign(matrix) * compressed
 
 
 def _coerce_config(config: SignedLogConfig | Mapping[str, Any]) -> SignedLogConfig:
