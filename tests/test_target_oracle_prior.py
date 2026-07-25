@@ -77,3 +77,22 @@ def test_oracle_target_prior_rejects_bad_source_prior_length() -> None:
 def test_oracle_target_prior_requires_label_per_probability_row() -> None:
     with pytest.raises(ValueError, match="one value per probability row"):
         apply_oracle_target_prior([[0.5, 0.5], [0.6, 0.4]], ["a"], classes=["a", "b"])
+
+
+def test_oracle_target_prior_handles_extreme_finite_probability_rows() -> None:
+    maximum = np.finfo(np.float64).max
+
+    with np.errstate(over="raise", divide="raise", invalid="raise"):
+        result = apply_oracle_target_prior(
+            [[maximum, maximum]],
+            ["a"],
+            classes=["a", "b"],
+            source_prior=[0.5, 0.5],
+        )
+
+    assert np.all(np.isfinite(result.original_probabilities))
+    assert np.all(np.isfinite(result.probabilities))
+    np.testing.assert_allclose(result.original_probabilities, [[0.5, 0.5]])
+    np.testing.assert_allclose(result.probabilities.sum(axis=1), [1.0])
+    assert result.probabilities[0, 0] > 0.999999
+    assert result.probabilities[0, 1] > 0.0
