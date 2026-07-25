@@ -1,7 +1,8 @@
-"""Normalize source configuration aliases and preserve exact integer controls."""
+"""Normalize source configuration aliases and harden source numeric inputs."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -10,6 +11,7 @@ import numpy as np
 _PATCH_ATTR = "_neureptrace_source_numpy_string_alias_config_patch"
 _INTEGER_PRECISION_MARKER = "_source_scaling_integer_precision_patched"
 _BALANCING_CONFIG_MARKER = "_source_class_balancing_config_normalized"
+_SOURCE_KNN_COMPLEX_MARKER = "_source_knn_complex_feature_validation_patched"
 _ALIAS_VALUES = {"all", "full"}
 
 
@@ -61,8 +63,26 @@ def _integer(value: Any, *, name: str) -> int:
     return int(parsed)
 
 
+def _contains_complex_value(value: Any) -> bool:
+    """Return whether a materialized feature container contains complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Iterable):
+        return any(_contains_complex_value(item) for item in value)
+    return False
+
+
 def install() -> None:
-    """Accept source aliases and preserve exact feature-scaling integers."""
+    """Accept source aliases and preserve exact, real-valued source controls."""
 
     from neureptrace.decoding import source_balancing, source_knn, source_pca, source_polynomial, source_scaling
 
@@ -88,6 +108,19 @@ def install() -> None:
         setattr(_coerce_balancing_config, _BALANCING_CONFIG_MARKER, True)
         _coerce_balancing_config.__wrapped__ = current_balancing_coercer
         source_balancing._coerce_config = _coerce_balancing_config
+
+    current_knn_feature_matrix = source_knn._feature_matrix
+    if not getattr(current_knn_feature_matrix, _SOURCE_KNN_COMPLEX_MARKER, False):
+
+        def _feature_matrix(values: Any, *, name: str) -> np.ndarray:
+            materialized = source_knn._materialize_one_pass_iterables(values)
+            if _contains_complex_value(materialized):
+                raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
+            return current_knn_feature_matrix(materialized, name=name)
+
+        setattr(_feature_matrix, _SOURCE_KNN_COMPLEX_MARKER, True)
+        _feature_matrix.__wrapped__ = current_knn_feature_matrix
+        source_knn._feature_matrix = _feature_matrix
 
     original_component_request = source_pca._component_request
     if getattr(original_component_request, _PATCH_ATTR, False):
