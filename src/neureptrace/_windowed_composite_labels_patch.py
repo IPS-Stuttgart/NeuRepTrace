@@ -1,5 +1,5 @@
 # ruff: noqa
-"""Composite-label support and real-feature validation for windowed decoding helpers."""
+"""Composite-label support and robust validation for windowed decoding helpers."""
 
 from __future__ import annotations
 
@@ -215,6 +215,7 @@ def install() -> None:
 
     original_predict_window_model = windowed.predict_window_model
     original_permutation_score_curves = windowed.permutation_score_curves
+    original_permutation_p_from_accuracy = windowed.permutation_p_from_accuracy
     _ORIGINAL_CLASS_SCORE_MATRIX = class_scores.class_score_matrix
 
     def predict_window_model(model_bundle: Any, features: Sequence[Sequence[float]] | np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -264,6 +265,11 @@ def install() -> None:
             permuted_balanced_accuracy.append(_balanced_accuracy(predictions, validation_labels))
         return np.asarray(permuted_accuracy, dtype=float), np.asarray(permuted_balanced_accuracy, dtype=float)
 
+    def permutation_p_from_accuracy(accuracy: float, permutation_accuracy: Sequence[float] | np.ndarray) -> float:
+        permutation_accuracy = np.asarray(permutation_accuracy, dtype=float)
+        finite_permutation_accuracy = permutation_accuracy[np.isfinite(permutation_accuracy)]
+        return original_permutation_p_from_accuracy(accuracy, finite_permutation_accuracy)
+
     def class_score_matrix(
         model: Any,
         features: Sequence[Sequence[float]] | np.ndarray,
@@ -286,9 +292,12 @@ def install() -> None:
     predict_window_model.__doc__ = original_predict_window_model.__doc__
     permutation_score_curves.__name__ = original_permutation_score_curves.__name__
     permutation_score_curves.__doc__ = original_permutation_score_curves.__doc__
+    permutation_p_from_accuracy.__name__ = original_permutation_p_from_accuracy.__name__
+    permutation_p_from_accuracy.__doc__ = original_permutation_p_from_accuracy.__doc__
     class_score_matrix.__name__ = _ORIGINAL_CLASS_SCORE_MATRIX.__name__
     class_score_matrix.__doc__ = _ORIGINAL_CLASS_SCORE_MATRIX.__doc__
     windowed.predict_window_model = predict_window_model
     windowed.permutation_score_curves = permutation_score_curves
+    windowed.permutation_p_from_accuracy = permutation_p_from_accuracy
     class_scores.class_score_matrix = class_score_matrix
     _INSTALLED = True
