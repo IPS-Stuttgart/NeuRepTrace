@@ -74,6 +74,12 @@ def _install_report_patch() -> None:
         effect_window: tuple[float, float] = (0.1, 0.8),
         selection_metric: str = "accuracy",
     ) -> dict[str, float | str | bool]:
+        if "accuracy_mean" in summary.columns:
+            accuracy_values = _finite_numeric_values(summary, "accuracy_mean")
+            if not bool(accuracy_values.notna().any()):
+                raise ValueError("Accuracy mean column 'accuracy_mean' contains no finite values.")
+            summary = summary.copy()
+            summary["accuracy_mean"] = accuracy_values
         if not summary.index.is_unique:
             summary = summary.reset_index(drop=True)
         return original_summarize_aggregate_time_decode(
