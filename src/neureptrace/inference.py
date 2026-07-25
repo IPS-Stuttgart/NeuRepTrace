@@ -35,6 +35,19 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
     return paths
 
 
+def _output_paths(out_time: Path | str, out_clusters: Path | str) -> tuple[Path, Path]:
+    """Normalize inference outputs and reject colliding destinations."""
+
+    paths = (Path(out_time), Path(out_clusters))
+    destinations = tuple(path.resolve(strict=False) for path in paths)
+    if destinations[0] == destinations[1]:
+        raise ValueError(
+            "Sign-flip inference output paths must be distinct; "
+            f"time inference and cluster inference both resolve to {destinations[0]}."
+        )
+    return paths
+
+
 def _condition_filters(decoder: str | None, emission_mode: str | None) -> dict[str, str]:
     filters: dict[str, str] = {}
     if decoder is not None:
@@ -382,6 +395,7 @@ def main() -> None:
     parser.add_argument("--out-time", type=Path, required=True)
     parser.add_argument("--out-clusters", type=Path, required=True)
     args = parser.parse_args()
+    out_time, out_clusters = _output_paths(args.out_time, args.out_clusters)
 
     time_table, cluster_table = sign_flip_time_inference(
         _expand_paths(args.csv),
@@ -397,12 +411,12 @@ def main() -> None:
         ece_bins=args.ece_bins,
         metric_direction=args.metric_direction,
     )
-    args.out_time.parent.mkdir(parents=True, exist_ok=True)
-    args.out_clusters.parent.mkdir(parents=True, exist_ok=True)
-    time_table.to_csv(args.out_time, index=False)
-    cluster_table.to_csv(args.out_clusters, index=False)
-    print(f"Wrote time inference CSV: {args.out_time}")
-    print(f"Wrote cluster inference CSV: {args.out_clusters}")
+    out_time.parent.mkdir(parents=True, exist_ok=True)
+    out_clusters.parent.mkdir(parents=True, exist_ok=True)
+    time_table.to_csv(out_time, index=False)
+    cluster_table.to_csv(out_clusters, index=False)
+    print(f"Wrote time inference CSV: {out_time}")
+    print(f"Wrote cluster inference CSV: {out_clusters}")
     if cluster_table.empty:
         print("No above-threshold clusters found.")
     else:
