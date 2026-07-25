@@ -8,7 +8,7 @@ used for fitting.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -255,7 +255,29 @@ def _class_index(label: object, classes: np.ndarray, *, name: str) -> int:
     raise ValueError(f"{name} contain a value absent from classes: {label!r}.")
 
 
+def _contains_complex(value: object) -> bool:
+    """Return whether a probability container contains complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.generic):
+        return False
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if not isinstance(value, Iterable):
+        return False
+    return any(_contains_complex(item) for item in value)
+
+
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, expected_columns: int | None, name: str, epsilon: float) -> np.ndarray:
+    if _contains_complex(values):
+        raise ValueError(f"{name} must contain real-valued probabilities, not complex values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix with at least two columns.")
@@ -282,7 +304,7 @@ def _positive_float(value: float | str, *, name: str) -> float:
         if value.ndim != 0:
             raise ValueError(f"{name} must be positive and finite.")
         value = value.item()
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
