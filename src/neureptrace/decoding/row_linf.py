@@ -61,8 +61,8 @@ def normalize_train_test_rows_linf(
     train_out, train_norms = normalize_rows_linf(train, epsilon=cfg.epsilon)
     test_out, test_norms = normalize_rows_linf(test, epsilon=cfg.epsilon)
     return RowLinfResult(
-        train_features=train_out.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=_compact_float32(train_out),
+        test_features=_compact_float32(test_out),
         train_norms=train_norms.astype(float, copy=False),
         test_norms=test_norms.astype(float, copy=False),
         metadata={
@@ -98,6 +98,18 @@ def normalize_rows_linf(
     norms = np.max(np.abs(matrix), axis=1)
     safe_norms = np.maximum(norms, _positive_float(epsilon, name="epsilon"))
     return matrix / safe_norms[:, None], norms
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _coerce_config(config: RowLinfConfig | Mapping[str, Any]) -> RowLinfConfig:
