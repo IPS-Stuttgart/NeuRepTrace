@@ -46,3 +46,30 @@ def test_report_selection_rejects_all_nonfinite_metric_values() -> None:
             effect_window=(0.1, 0.3),
             selection_metric="brier",
         )
+
+
+def test_report_peak_ignores_nonfinite_accuracy_candidates() -> None:
+    frame = _summary_frame()
+    frame.loc[1, "accuracy_mean"] = 1e309
+
+    summary = summarize_aggregate_time_decode(
+        frame,
+        baseline_window=(-0.1, 0.0),
+        effect_window=(0.1, 0.3),
+    )
+
+    assert summary["peak_time"] == 0.25
+    assert summary["peak_accuracy"] == 0.58
+    assert summary["effect_accuracy_mean"] == 0.58
+
+
+def test_report_peak_rejects_all_nonfinite_accuracy_values() -> None:
+    frame = _summary_frame()
+    frame["accuracy_mean"] = [float("nan"), -1e309, 1e309]
+
+    with pytest.raises(ValueError, match="accuracy_mean.*no finite values"):
+        summarize_aggregate_time_decode(
+            frame,
+            baseline_window=(-0.1, 0.0),
+            effect_window=(0.1, 0.3),
+        )
