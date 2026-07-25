@@ -9,6 +9,7 @@ import numpy as np
 
 _PATCH_ATTR = "_neureptrace_source_numpy_string_alias_config_patch"
 _INTEGER_PRECISION_MARKER = "_source_scaling_integer_precision_patched"
+_BALANCING_CONFIG_MARKER = "_source_class_balancing_config_normalized"
 _ALIAS_VALUES = {"all", "full"}
 
 
@@ -63,13 +64,30 @@ def _integer(value: Any, *, name: str) -> int:
 def install() -> None:
     """Accept source aliases and preserve exact feature-scaling integers."""
 
-    from neureptrace.decoding import source_knn, source_pca, source_polynomial, source_scaling
+    from neureptrace.decoding import source_balancing, source_knn, source_pca, source_polynomial, source_scaling
 
     current_integer = source_scaling._integer
     if not getattr(current_integer, _INTEGER_PRECISION_MARKER, False):
         setattr(_integer, _INTEGER_PRECISION_MARKER, True)
         _integer.__wrapped__ = current_integer
         source_scaling._integer = _integer
+
+    current_balancing_coercer = source_balancing._coerce_config
+    if not getattr(current_balancing_coercer, _BALANCING_CONFIG_MARKER, False):
+
+        def _coerce_balancing_config(config: Any):
+            if isinstance(config, source_balancing.SourceClassBalancingConfig):
+                return source_balancing.source_class_balancing_config(
+                    mode=config.mode,
+                    target_count=config.target_count,
+                    random_state=config.random_state,
+                    preserve_order=config.preserve_order,
+                )
+            return current_balancing_coercer(config)
+
+        setattr(_coerce_balancing_config, _BALANCING_CONFIG_MARKER, True)
+        _coerce_balancing_config.__wrapped__ = current_balancing_coercer
+        source_balancing._coerce_config = _coerce_balancing_config
 
     original_component_request = source_pca._component_request
     if getattr(original_component_request, _PATCH_ATTR, False):
