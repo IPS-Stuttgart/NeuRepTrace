@@ -53,8 +53,8 @@ def transform_train_test_signed_power(
     train_out = signed_power_transform(train, power=cfg.power)
     test_out = signed_power_transform(test, power=cfg.power)
     return SignedPowerResult(
-        train_features=train_out.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=_compact_float32(train_out),
+        test_features=_compact_float32(test_out),
         metadata={
             "signed_power_transform": True,
             "signed_power_protocol": SIGNED_POWER_PROTOCOL,
@@ -83,6 +83,18 @@ def signed_power_transform(features: Sequence[Sequence[float]] | np.ndarray, *, 
     matrix = _feature_matrix(features, name="features")
     exponent = _positive_float(power, name="power")
     return np.sign(matrix) * np.power(np.abs(matrix), exponent)
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _coerce_config(config: SignedPowerConfig | Mapping[str, Any]) -> SignedPowerConfig:
