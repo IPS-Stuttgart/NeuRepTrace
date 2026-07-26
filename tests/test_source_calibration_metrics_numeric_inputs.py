@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from neureptrace.decoding.source_calibration_metrics import source_calibration_metrics
@@ -42,3 +43,12 @@ def test_source_calibration_metrics_rejects_complex_labels_before_real_cast() ->
 
     with pytest.raises(ValueError, match="labels.*complex"):
         source_calibration_metrics([[0.5, 0.5]], labels)
+
+
+def test_source_calibration_metrics_preserves_array_like_inputs() -> None:
+    probabilities = pd.DataFrame([[0.6, 0.4], [0.2, 0.8]])
+    labels = pd.Series([0, 1])
+
+    result = source_calibration_metrics(probabilities, labels)
+
+    assert result.accuracy == 1.0
