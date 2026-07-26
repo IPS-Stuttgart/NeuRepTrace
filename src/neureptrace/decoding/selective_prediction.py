@@ -141,10 +141,12 @@ def normalize_probability_rows(probabilities: Sequence[Sequence[float]] | np.nda
         raise ValueError("probabilities must contain finite non-negative values.")
     eps = _positive_float(epsilon, name="epsilon")
     matrix = np.maximum(matrix, eps)
-    row_sums = np.sum(matrix, axis=1, keepdims=True)
-    if np.any(row_sums <= 0.0):
-        raise ValueError("probability rows must have positive mass.")
-    return matrix / row_sums
+    row_scales = np.max(matrix, axis=1, keepdims=True)
+    scaled = matrix / row_scales
+    row_sums = np.sum(scaled, axis=1, keepdims=True)
+    if not np.all(np.isfinite(row_sums)) or np.any(row_sums <= 0.0):
+        raise ValueError("probability rows must have positive finite mass.")
+    return scaled / row_sums
 
 
 def probability_entropy(probabilities: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float = DEFAULT_EPSILON) -> np.ndarray:
