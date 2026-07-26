@@ -5,6 +5,7 @@ import pytest
 
 from neureptrace.decoding.source_component_projection import (
     SOURCE_COMPONENT_CATEGORY,
+    SourceComponentConfig,
     fit_source_component_projection,
     fit_source_component_projector,
     reconstruct_from_source_components,
@@ -85,3 +86,24 @@ def test_source_component_config_validation() -> None:
 
     with pytest.raises(ValueError, match="boolean"):
         source_component_config(center="maybe")
+
+
+def test_source_component_config_instance_is_normalized() -> None:
+    source = np.asarray([[0.0, 0.0], [1.0, 100.0], [2.0, 200.0]], dtype=float)
+    test = np.asarray([[1.5, 150.0]], dtype=float)
+    config = SourceComponentConfig(n_components=1, center="false", scale="false", epsilon="1e-6")
+
+    result = fit_source_component_projection(source_features=source, test_features=test, config=config)
+
+    assert np.allclose(result.projector.mean, 0.0)
+    assert np.allclose(result.projector.scale, 1.0)
+    assert result.metadata["source_component_center"] is False
+    assert result.metadata["source_component_scale"] is False
+    assert result.metadata["source_component_epsilon"] == pytest.approx(1e-6)
+
+
+def test_source_component_config_instance_rejects_invalid_epsilon() -> None:
+    config = SourceComponentConfig(epsilon=0.0)
+
+    with pytest.raises(ValueError, match="epsilon must be positive and finite"):
+        fit_source_component_projector([[0.0, 1.0], [1.0, 0.0]], config=config)
