@@ -30,6 +30,21 @@ def test_epoch_dataset_rejects_boolean_time_values():
         _dataset(times=np.array([False, True, True], dtype=bool))
 
 
+def test_epoch_dataset_rejects_complex_data_values():
+    data = np.ones((2, 2, 3), dtype=np.complex128)
+    data[0, 0, 0] += 1.0j
+
+    with pytest.raises(ValueError, match="data.*complex"):
+        _dataset(data=data)
+
+
+def test_epoch_dataset_rejects_complex_time_values():
+    times = np.array([0.0, 0.1 + 0.01j, 0.2], dtype=np.complex128)
+
+    with pytest.raises(ValueError, match="times.*complex"):
+        _dataset(times=times)
+
+
 def test_epoch_dataset_rejects_duplicate_channel_names():
     with pytest.raises(ValueError, match="channel_names.*unique"):
         _dataset(channel_names=["MEG001", "MEG001"])
