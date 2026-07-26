@@ -18,6 +18,7 @@ from neureptrace.signal.band import (
 importlib.import_module("neureptrace._signal_sampling_rate_finite_patch").install()
 importlib.import_module("neureptrace._signal_complex_validation_patch").install()
 importlib.import_module("neureptrace._signal_band_text_validation_patch").install()
+importlib.import_module("neureptrace._signal_phase_text_validation_patch").install()
 _patched_band = importlib.import_module("neureptrace.signal.band")
 average_phases = _patched_band.average_phases
 circular_mean_phase = _patched_band.circular_mean_phase
