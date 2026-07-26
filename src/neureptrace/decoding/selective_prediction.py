@@ -72,9 +72,10 @@ def selective_predict(
         Fixed minimum gap between the largest and second-largest probability.
     target_coverage:
         Optional desired retained fraction in ``(0, 1]``.  When supplied, the
-        confidence threshold is set from the unlabeled probability batch so that
-        approximately this coverage is retained.  This is a Category-2 threshold
-        selection rule.
+        confidence threshold is set from the unlabeled probability batch and
+        exactly ``ceil(n_rows * target_coverage)`` rows are retained before any
+        entropy or margin filters.  Confidence ties are resolved by input row
+        order.  This is a Category-2 threshold selection rule.
     epsilon:
         Numerical floor for row normalization and entropy.
 
@@ -95,13 +96,16 @@ def selective_predict(
 
     threshold = None if confidence_threshold is None else _unit_interval_float(confidence_threshold, name="confidence_threshold")
     coverage_requested = None if target_coverage is None else _open_unit_interval_float(target_coverage, name="target_coverage", include_one=True)
+    coverage_mask = None
     if coverage_requested is not None:
-        threshold = confidence_threshold_for_coverage(confidence, target_coverage=coverage_requested)
+        threshold, coverage_mask = _coverage_selection(confidence, target_coverage=coverage_requested)
     max_entropy_threshold = None if max_entropy is None else _nonnegative_float(max_entropy, name="max_entropy")
     min_margin_threshold = None if min_margin is None else _unit_interval_float(min_margin, name="min_margin")
 
     selected = np.ones(probs.shape[0], dtype=bool)
-    if threshold is not None:
+    if coverage_mask is not None:
+        selected &= coverage_mask
+    elif threshold is not None:
         selected &= confidence >= threshold
     if max_entropy_threshold is not None:
         selected &= entropy <= max_entropy_threshold
@@ -168,6 +172,17 @@ def probability_margin(probabilities: Sequence[Sequence[float]] | np.ndarray) ->
 def confidence_threshold_for_coverage(confidence: Sequence[float] | np.ndarray, *, target_coverage: float | str) -> float:
     """Return the smallest confidence among the top-coverage rows."""
 
+    threshold, _ = _coverage_selection(confidence, target_coverage=target_coverage)
+    return threshold
+
+
+def _coverage_selection(
+    confidence: Sequence[float] | np.ndarray,
+    *,
+    target_coverage: float | str,
+) -> tuple[float, np.ndarray]:
+    """Return the coverage cutoff and an exact-size stable row mask."""
+
     values = np.asarray(confidence, dtype=float).reshape(-1)
     if values.size < 1:
         raise ValueError("confidence must contain at least one row.")
@@ -175,8 +190,10 @@ def confidence_threshold_for_coverage(confidence: Sequence[float] | np.ndarray, 
         raise ValueError("confidence must be finite.")
     coverage = _open_unit_interval_float(target_coverage, name="target_coverage", include_one=True)
     keep = max(1, int(np.ceil(values.size * coverage)))
-    ordered = np.sort(values)[::-1]
-    return float(ordered[keep - 1])
+    order = np.argsort(-values, kind="mergesort")
+    selected = np.zeros(values.size, dtype=bool)
+    selected[order[:keep]] = True
+    return float(values[order[keep - 1]]), selected
 
 
 def _classes(classes: Sequence[Any] | np.ndarray | None, *, n_classes: int) -> np.ndarray:
