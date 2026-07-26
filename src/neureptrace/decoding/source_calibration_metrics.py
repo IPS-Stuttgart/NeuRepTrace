@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -80,8 +80,62 @@ def _expected_calibration_error(confidence: np.ndarray, correct: np.ndarray, *, 
     return float(value)
 
 
+def _materialize_numeric_input(value: object) -> object:
+    """Materialize nested one-pass iterables before validating numeric values."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return _materialize_numeric_input(value.tolist())
+    if isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_numeric_input(item) for item in value]
+
+
+def _contains_boolean_value(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_boolean_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Iterable):
+        return any(_contains_boolean_value(item) for item in value)
+    return False
+
+
+def _contains_complex_value(value: object) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Iterable):
+        return any(_contains_complex_value(item) for item in value)
+    return False
+
+
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_numeric_input(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError("probabilities must contain numeric probability values, not boolean flags.")
+    if _contains_complex_value(materialized):
+        raise ValueError("probabilities must contain real-valued probability values, not complex values.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("probabilities must contain numeric values.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a non-empty two-dimensional matrix with at least two columns.")
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
@@ -97,14 +151,19 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsil
 
 
 def _label_indices(values: Sequence[int] | np.ndarray, *, n_rows: int, n_classes: int) -> np.ndarray:
-    array = np.asarray(values)
+    materialized = _materialize_numeric_input(values)
+    if _contains_boolean_value(materialized):
+        raise ValueError("labels must contain integer class indices, not boolean flags.")
+    if _contains_complex_value(materialized):
+        raise ValueError("labels must contain real integer class indices, not complex values.")
+    array = np.asarray(materialized)
     if array.ndim == 2 and array.shape[1] == 1:
         array = array.reshape(-1)
     if array.ndim != 1 or array.shape[0] != n_rows:
         raise ValueError("labels must contain one value per probability row.")
     try:
         numeric = array.astype(float)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("labels must contain integer class indices.") from exc
     if not np.all(np.isfinite(numeric)) or not np.all(numeric == np.floor(numeric)):
         raise ValueError("labels must contain integer class indices.")
