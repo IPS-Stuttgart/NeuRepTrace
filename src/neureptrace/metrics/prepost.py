@@ -224,7 +224,7 @@ def _iter_groups(frame: pd.DataFrame, group_columns: Sequence[str]):
     if not group_columns:
         yield (), frame
         return
-    yield from frame.groupby(list(group_columns), dropna=False, sort=True)
+    yield from frame.groupby(list(group_columns), dropna=False, sort=True, observed=True)
 
 
 def _group_row(group_columns: Sequence[str], group_key: object) -> dict[str, object]:
