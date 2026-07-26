@@ -150,6 +150,8 @@ def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, n_cla
     materialized = _materialize_iterables(values)
     if _contains_boolean_value(materialized):
         raise ValueError("probabilities must not contain boolean values.")
+    if _contains_complex_value(materialized):
+        raise ValueError("probabilities must contain real values, not complex values.")
     matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] != n_classes:
         raise ValueError(f"probabilities must have shape n_rows x {n_classes}.")
@@ -160,6 +162,8 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     materialized = _materialize_iterables(values)
     if _contains_boolean_value(materialized):
         raise ValueError("probability rows must not contain boolean values.")
+    if _contains_complex_value(materialized):
+        raise ValueError("probability rows must contain real values, not complex values.")
     matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0):
         raise ValueError("probability rows must be finite and non-negative.")
@@ -198,6 +202,24 @@ def _contains_boolean_value(values: Any) -> bool:
     except TypeError:
         return False
     return any(_contains_boolean_value(item) for item in iterator)
+
+
+def _contains_complex_value(values: Any) -> bool:
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return bool(values.size)
+        if values.dtype == object:
+            return any(_contains_complex_value(item) for item in values.flat)
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return False
+    return any(_contains_complex_value(item) for item in iterator)
 
 
 def _normalize_probability_vector(values: np.ndarray, *, epsilon: float) -> np.ndarray:
