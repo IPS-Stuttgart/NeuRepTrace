@@ -13,6 +13,8 @@ def feature_matrix(values: Any, *, name: str) -> np.ndarray:
     materialized = _materialize_iterables(values)
     if _contains_boolean_value(materialized):
         raise ValueError(f"{name} must not contain boolean values.")
+    if _contains_complex_value(materialized):
+        raise ValueError(f"{name} must contain real-valued numeric values, not complex values.")
     try:
         matrix = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -72,6 +74,28 @@ def _contains_boolean_value(values: Any) -> bool:
     except TypeError:
         return False
     return any(_contains_boolean_value(item) for item in iterator)
+
+
+def _contains_complex_value(values: Any) -> bool:
+    """Return whether a materialized feature container includes complex values."""
+
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return bool(values.size)
+        if values.dtype == object:
+            return any(_contains_complex_value(item) for item in values.flat)
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, np.generic):
+        return isinstance(values.item(), complex)
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return False
+    return any(_contains_complex_value(item) for item in iterator)
 
 
 def _is_boolean_scalar(value: Any) -> bool:
