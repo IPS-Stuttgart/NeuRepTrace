@@ -11,6 +11,8 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_weighted_probability_roundoff_patch_installed"
 _PROBABILITY_NORMALIZATION_ATOL = 1e-6
 _WEIGHTED_REDUCTION_SAFETY_FACTOR = 1024.0
+_COMPLEX_PROBABILITY_ERROR = "probabilities must contain real-valued probability values, not complex values"
+_COMPLEX_LABEL_ERROR = "labels must contain real integer class indices, not complex values"
 
 
 def _label_input_array(labels: Any) -> np.ndarray:
@@ -26,13 +28,31 @@ def _label_input_array(labels: Any) -> np.ndarray:
         raise ValueError("labels must have shape (n_samples,)") from exc
 
 
+def _contains_complex(value: object) -> bool:
+    """Return whether a materialized weighted-metric input is complex-valued."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex(item) for item in value.ravel(order="C"))
+    return False
+
+
 def _validate_probability_inputs(probabilities: Any, labels: Any) -> tuple[np.ndarray, np.ndarray]:
     weighted = importlib.import_module("neureptrace.metrics.weighted")
     raw_probabilities = weighted._probability_input_array(probabilities)
+    raw_labels = _label_input_array(labels)
+    if _contains_complex(raw_probabilities):
+        raise ValueError(_COMPLEX_PROBABILITY_ERROR)
+    if _contains_complex(raw_labels):
+        raise ValueError(_COMPLEX_LABEL_ERROR)
     if weighted._probabilities_contain_boolean(raw_probabilities):
         raise ValueError("probabilities must contain numeric probability values, not boolean flags")
     probabilities = raw_probabilities.astype(float, copy=False)
-    labels = _label_input_array(labels)
+    labels = raw_labels
     if probabilities.ndim != 2:
         raise ValueError("probabilities must have shape (n_samples, n_classes)")
     if probabilities.shape[0] == 0 or probabilities.shape[1] == 0:
