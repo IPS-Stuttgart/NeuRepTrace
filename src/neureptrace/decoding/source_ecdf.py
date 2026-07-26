@@ -187,8 +187,29 @@ def _materialize_one_pass_iterables(value: object) -> object:
     return [_materialize_one_pass_iterables(item) for item in value]
 
 
+def _contains_complex(value: object) -> bool:
+    """Return whether a materialized feature input contains complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if not isinstance(value, Iterable):
+        return False
+    return any(_contains_complex(item) for item in value)
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(_materialize_one_pass_iterables(values), dtype=float)
+    materialized = _materialize_one_pass_iterables(values)
+    if _contains_complex(materialized):
+        raise ValueError(f"{name} must contain only real-valued features.")
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
