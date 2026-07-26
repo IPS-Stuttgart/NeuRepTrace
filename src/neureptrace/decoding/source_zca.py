@@ -198,10 +198,32 @@ def _contains_boolean_value(value: object) -> bool:
     return False
 
 
+def _contains_complex_value(value: object) -> bool:
+    """Return whether a materialized feature container contains complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), complex)
+    if isinstance(value, Iterable):
+        return any(_contains_complex_value(item) for item in value)
+    return False
+
+
 def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str) -> np.ndarray:
     materialized = _materialize_one_pass_iterables(values)
     if _contains_boolean_value(materialized):
         raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    if _contains_complex_value(materialized):
+        raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
     matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
@@ -212,15 +234,15 @@ def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str
 
 def _positive_float(value: Any, *, name: str) -> float:
     message = f"{name} must be a positive finite scalar."
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(message)
     if isinstance(value, np.ndarray):
-        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
+        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_) or np.issubdtype(value.dtype, np.complexfloating):
             raise ValueError(message)
         value = value.item()
     if isinstance(value, np.generic):
         value = value.item()
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(message)
     try:
         parsed = float(value)
