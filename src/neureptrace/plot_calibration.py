@@ -87,9 +87,9 @@ def plot_reliability_diagram(
 ) -> Path:
     """Plot a reliability diagram from aggregated reliability-bin CSV output."""
     curve = summarize_reliability_curve(pd.read_csv(reliability_bins_csv), time_window=time_window)
-    groups = list(curve[["decoder", "emission_mode"]].drop_duplicates().itertuples(index=False, name=None))
-    if not groups:
+    if curve.empty:
         raise ValueError("No reliability-bin rows available to plot.")
+    groups = list(curve[["decoder", "emission_mode"]].drop_duplicates().itertuples(index=False, name=None))
 
     n_groups = len(groups)
     n_cols = min(3, n_groups)
