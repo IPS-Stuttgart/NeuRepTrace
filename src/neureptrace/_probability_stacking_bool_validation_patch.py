@@ -71,6 +71,37 @@ def _reject_boolean_probability_columns(observations: pd.DataFrame, *, context: 
         _reject_boolean_probabilities(observations.loc[:, list(prob_columns)], context=context)
 
 
+def _reject_extra_aligned_candidate_rows(
+    ps: Any,
+    observations: pd.DataFrame,
+    *,
+    candidate_column: str,
+    aligned: Any,
+) -> None:
+    """Reject candidate rows that the reference-key left join would discard."""
+
+    if not aligned.alignment_columns:
+        return
+    candidate_values = pd.Series(
+        ps._clean_nonblank_strings(observations[candidate_column], name=candidate_column),
+        index=observations.index,
+    )
+    reference_candidate = aligned.candidates[0]
+    reference_rows = len(aligned.base)
+    for candidate in aligned.candidates[1:]:
+        candidate_rows = int((candidate_values == candidate).sum())
+        if candidate_rows == reference_rows:
+            continue
+        if candidate_rows > reference_rows:
+            detail = f"has {candidate_rows - reference_rows} extra alignment-key row(s)"
+        else:
+            detail = f"has {reference_rows - candidate_rows} fewer alignment-key row(s)"
+        raise ValueError(
+            f"Candidate {candidate!r} does not align one-to-one with {reference_candidate!r}: "
+            f"{detail}. Every selected candidate must cover exactly the same alignment keys."
+        )
+
+
 def _rescale_finite_weights_if_sum_overflows(weights: Any) -> Any:
     """Rescale non-negative finite weights when their reduction overflows."""
 
@@ -165,7 +196,14 @@ def install() -> None:
     @wraps(original_align_probability_cube)
     def align_probability_cube(observations: pd.DataFrame, *args: Any, **kwargs: Any):
         _reject_boolean_probability_columns(observations)
-        return original_align_probability_cube(observations, *args, **kwargs)
+        aligned = original_align_probability_cube(observations, *args, **kwargs)
+        _reject_extra_aligned_candidate_rows(
+            ps,
+            observations,
+            candidate_column=kwargs.get("candidate_column", ps.DEFAULT_CANDIDATE_COLUMN),
+            aligned=aligned,
+        )
+        return aligned
 
     original_fit_stacking_weights = ps.fit_stacking_weights
 
