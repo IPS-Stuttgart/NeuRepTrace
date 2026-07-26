@@ -14,6 +14,7 @@ _INTEGER_PRECISION_MARKER = "_source_scaling_integer_precision_patched"
 _BALANCING_CONFIG_MARKER = "_source_class_balancing_config_normalized"
 _THRESHOLD_OUTPUT_MARKER = "_source_threshold_output_precision_patched"
 _SOURCE_KNN_COMPLEX_MARKER = "_source_knn_complex_feature_validation_patched"
+_SOURCE_KNN_ZERO_DISTANCE_MARKER = "_source_knn_zero_distance_weighting_patched"
 _ALIAS_VALUES = {"all", "full"}
 
 
@@ -150,6 +151,58 @@ def _install_source_threshold_output_patch(source_threshold: Any) -> None:
     source_threshold.fit_source_threshold_transform = fit_source_threshold_transform
 
 
+def _install_source_knn_zero_distance_patch(source_knn: Any) -> None:
+    """Make exact kNN matches exclude all nonzero-distance neighbors."""
+
+    current = source_knn.predict_source_knn_probabilities
+    if getattr(current, _SOURCE_KNN_ZERO_DISTANCE_MARKER, False):
+        return
+
+    @wraps(current)
+    def predict_source_knn_probabilities(
+        test_features: Any,
+        reference: Any,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        probabilities, neighbor_indices, neighbor_distances = current(
+            test_features,
+            reference,
+        )
+        if reference.config.weights != "distance" or neighbor_distances.size == 0:
+            return probabilities, neighbor_indices, neighbor_distances
+
+        exact_match_rows = np.any(neighbor_distances == 0.0, axis=1)
+        if not np.any(exact_match_rows):
+            return probabilities, neighbor_indices, neighbor_distances
+
+        corrected = probabilities.copy()
+        for row in np.flatnonzero(exact_match_rows):
+            corrected[row] = 0.0
+            exact_columns = np.flatnonzero(neighbor_distances[row] == 0.0)
+            for local_col in exact_columns:
+                source_index = neighbor_indices[row, local_col]
+                class_col = source_knn._label_index(
+                    reference.classes,
+                    reference.labels[source_index],
+                )
+                if class_col is None:
+                    raise ValueError(
+                        "Source kNN reference contains unknown class label "
+                        f"{reference.labels[source_index]!r}."
+                    )
+                corrected[row, class_col] += 1.0
+            corrected[row] /= np.sum(corrected[row])
+
+        return corrected, neighbor_indices, neighbor_distances
+
+    setattr(
+        predict_source_knn_probabilities,
+        _SOURCE_KNN_ZERO_DISTANCE_MARKER,
+        True,
+    )
+    predict_source_knn_probabilities.__wrapped__ = current
+    source_knn.predict_source_knn_probabilities = predict_source_knn_probabilities
+
+
 def install() -> None:
     """Accept source aliases and preserve exact, real-valued controls."""
 
@@ -205,6 +258,7 @@ def install() -> None:
         _feature_matrix.__wrapped__ = current_knn_feature_matrix
         source_knn._feature_matrix = _feature_matrix
 
+    _install_source_knn_zero_distance_patch(source_knn)
     _install_source_threshold_output_patch(source_threshold)
 
     original_component_request = source_pca._component_request
