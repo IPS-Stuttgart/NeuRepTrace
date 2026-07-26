@@ -78,6 +78,8 @@ def _materialize_one_pass_iterables(value):
         return _materialize_one_pass_iterables(value.tolist())
     if isinstance(value, (str, bytes)):
         return value
+    if hasattr(value, "__array__"):
+        return value
     if not isinstance(value, Iterable):
         return value
     return [_materialize_one_pass_iterables(item) for item in value]
@@ -94,6 +96,11 @@ def _contains_boolean_values(value) -> bool:
         return False
     if isinstance(value, (str, bytes)):
         return False
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_boolean_values(np.asarray(value, dtype=object))
+        except (TypeError, ValueError):
+            return False
     if isinstance(value, Iterable):
         return any(_contains_boolean_values(item) for item in value)
     return False
