@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from neureptrace._object_label_utils import label_accuracy, values_equal
+
 
 @dataclass(frozen=True)
 class TemporalFeatureWindow:
@@ -61,7 +63,7 @@ def compute_temporal_generalization_matrix(
                     "Predicted label count must match test label count "
                     f"for test window {test_window.center}: {len(predictions)} != {len(labels)}."
                 )
-            accuracy = float(np.mean(predictions == labels)) if len(labels) else np.nan
+            accuracy = label_accuracy(labels, predictions)
             chance = _chance_accuracy(fixed_chance_accuracy, labels)
             rows.append(
                 {
@@ -195,19 +197,7 @@ def _unique_label_count(labels: Sequence) -> int:
 
 
 def _label_equal(left: Any, right: Any) -> bool:
-    if _is_nan_scalar(left) and _is_nan_scalar(right):
-        return True
-    try:
-        return bool(left == right)
-    except ValueError:
-        return False
-
-
-def _is_nan_scalar(value: Any) -> bool:
-    try:
-        return bool(np.isscalar(value) and np.isnan(value))
-    except TypeError:
-        return False
+    return values_equal(left, right)
 
 
 def _validate_center_decimals(value: Any) -> int:
