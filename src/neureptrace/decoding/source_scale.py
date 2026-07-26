@@ -91,24 +91,31 @@ def fit_source_feature_scale_stats(
 
     cfg = source_feature_scale_config() if config is None else _coerce_config(config)
     source = _feature_matrix(source_features, name="source_features")
+    working = np.asarray(source, dtype=np.longdouble)
     if cfg.method == "standard":
-        mean, standard_scale = _stable_column_mean_and_std(source)
-        offset = mean if cfg.center else np.zeros(source.shape[1], dtype=float)
-        scale = standard_scale if cfg.scale else np.ones(source.shape[1], dtype=float)
+        mean, standard_scale = _stable_column_mean_and_std(working)
+        offset = mean if cfg.center else np.zeros(source.shape[1], dtype=working.dtype)
+        scale = standard_scale if cfg.scale else np.ones(source.shape[1], dtype=working.dtype)
     elif cfg.method == "robust":
-        offset = np.median(source, axis=0) if cfg.center else np.zeros(source.shape[1], dtype=float)
-        q75 = np.percentile(source, 75.0, axis=0)
-        q25 = np.percentile(source, 25.0, axis=0)
-        scale = (q75 - q25) / 1.349 if cfg.scale else np.ones(source.shape[1], dtype=float)
+        offset = np.median(working, axis=0) if cfg.center else np.zeros(source.shape[1], dtype=working.dtype)
+        q75 = np.percentile(working, 75.0, axis=0)
+        q25 = np.percentile(working, 25.0, axis=0)
+        scale = (q75 - q25) / np.longdouble("1.349") if cfg.scale else np.ones(source.shape[1], dtype=working.dtype)
     elif cfg.method == "minmax":
-        minimum = np.min(source, axis=0)
-        maximum = np.max(source, axis=0)
-        offset = minimum if cfg.center else np.zeros(source.shape[1], dtype=float)
-        scale = (maximum - minimum) if cfg.scale else np.ones(source.shape[1], dtype=float)
+        minimum = np.min(working, axis=0)
+        maximum = np.max(working, axis=0)
+        offset = minimum if cfg.center else np.zeros(source.shape[1], dtype=working.dtype)
+        scale = (maximum - minimum) if cfg.scale else np.ones(source.shape[1], dtype=working.dtype)
     else:  # pragma: no cover - guarded by config normalization
         raise ValueError(f"Unhandled source scaling method {cfg.method!r}.")
-    scale = np.maximum(np.asarray(scale, dtype=float), cfg.epsilon)
-    return SourceFeatureScaleStats(offset=np.asarray(offset, dtype=float), scale=scale, method=cfg.method, n_fit_rows=int(source.shape[0]))
+    scale = np.maximum(np.asarray(scale, dtype=working.dtype), np.longdouble(cfg.epsilon))
+    stats_dtype = _float64_or_wide_dtype(offset, scale)
+    return SourceFeatureScaleStats(
+        offset=np.asarray(offset, dtype=stats_dtype),
+        scale=np.asarray(scale, dtype=stats_dtype),
+        method=cfg.method,
+        n_fit_rows=int(source.shape[0]),
+    )
 
 
 def _stable_column_mean_and_std(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -130,7 +137,11 @@ def apply_source_feature_scale(features: Iterable[Iterable[float]] | np.ndarray,
     matrix = _feature_matrix(features, name="features")
     if matrix.shape[1] != stats.offset.shape[0] or matrix.shape[1] != stats.scale.shape[0]:
         raise ValueError("features width must match fitted source scaling statistics.")
-    return (matrix - stats.offset) / stats.scale
+    working_dtype = np.result_type(matrix.dtype, stats.offset.dtype, stats.scale.dtype)
+    working = np.asarray(matrix, dtype=working_dtype)
+    offset = np.asarray(stats.offset, dtype=working_dtype)
+    scale = np.asarray(stats.scale, dtype=working_dtype)
+    return (working - offset) / scale
 
 
 def source_feature_scale_config(
@@ -178,18 +189,35 @@ def _coerce_config(config: SourceFeatureScaleConfig | Mapping[str, Any]) -> Sour
     return source_feature_scale_config(**raw)
 
 
-def _compact_float_dtype(*arrays: np.ndarray) -> np.dtype:
-    """Use float32 only when down-casting preserves finite, nonzero values."""
+def _cast_preserves_finite_nonzero(values: np.ndarray, dtype: np.dtype) -> bool:
+    """Return whether casting keeps finite values finite and nonzero values nonzero."""
 
-    for values in arrays:
-        array = np.asarray(values, dtype=float)
-        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-            compact = array.astype(np.float32)
-        if not np.all(np.isfinite(compact)):
-            return np.dtype(float)
-        if np.any((array != 0.0) & (compact == 0.0)):
-            return np.dtype(float)
-    return np.dtype(np.float32)
+    array = np.asarray(values)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        cast = array.astype(dtype)
+    if np.any(np.isfinite(array) & ~np.isfinite(cast)):
+        return False
+    if np.any((array != 0.0) & (cast == 0.0)):
+        return False
+    return True
+
+
+def _float64_or_wide_dtype(*arrays: np.ndarray) -> np.dtype:
+    """Keep ordinary statistics in float64 and widen only when required."""
+
+    float64 = np.dtype(float)
+    if all(_cast_preserves_finite_nonzero(values, float64) for values in arrays):
+        return float64
+    return np.result_type(*(np.asarray(values).dtype for values in arrays))
+
+
+def _compact_float_dtype(*arrays: np.ndarray) -> np.dtype:
+    """Use the narrowest float type that preserves finite, nonzero values."""
+
+    for dtype in (np.dtype(np.float32), np.dtype(float)):
+        if all(_cast_preserves_finite_nonzero(values, dtype) for values in arrays):
+            return dtype
+    return np.result_type(*(np.asarray(values).dtype for values in arrays))
 
 
 def _metadata(cfg: SourceFeatureScaleConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int) -> dict[str, Any]:
