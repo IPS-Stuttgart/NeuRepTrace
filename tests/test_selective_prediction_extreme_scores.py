@@ -17,11 +17,14 @@ def test_selective_prediction_normalizes_extreme_finite_scores_without_overflow(
     )
 
     assert result.probabilities.sum(axis=1).tolist() == pytest.approx([1.0, 1.0])
-    assert result.probabilities.tolist() == pytest.approx(
-        [
-            [0.5, 0.5],
-            [2.0 / 3.0, 1.0 / 3.0],
-        ]
+    np.testing.assert_allclose(
+        result.probabilities,
+        np.asarray(
+            [
+                [0.5, 0.5],
+                [2.0 / 3.0, 1.0 / 3.0],
+            ]
+        ),
     )
     assert result.confidence.tolist() == pytest.approx([0.5, 2.0 / 3.0])
     assert result.margin.tolist() == pytest.approx([0.0, 1.0 / 3.0])
