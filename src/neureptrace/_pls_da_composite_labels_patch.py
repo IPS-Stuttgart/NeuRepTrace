@@ -1,4 +1,4 @@
-"""Preserve composite row labels in PLS-DA preprocessing."""
+"""Preserve composite row labels and reject complex PLS-DA features."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 _PATCH_MARKER = "_neureptrace_pls_da_composite_labels_patch_installed"
+_TRANSFORM_PATCH_MARKER = "_neureptrace_pls_da_complex_transform_patch_installed"
 
 
 def _object_value_vector(values: Iterable[Any]) -> np.ndarray:
@@ -31,6 +32,36 @@ def _labels_equal(left: Any, right: Any) -> bool:
         return bool(np.all(result))
     except Exception:  # pragma: no cover - defensive for unusual label objects
         return False
+
+
+def _contains_complex_feature(value: object) -> bool:
+    """Return whether a feature container contains complex-valued entries."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_feature(item) for item in value.ravel(order="C"))
+        return False
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_complex_feature(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Sequence):
+        return any(_contains_complex_feature(item) for item in value)
+    return False
+
+
+def _validate_real_features(features: object) -> None:
+    if _contains_complex_feature(features):
+        raise ValueError(
+            "PLSDiscriminantTransformer features must contain real-valued values, not complex values."
+        )
 
 
 def _atomic_label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
@@ -80,32 +111,43 @@ def _encode_atomic_labels(values: Sequence[Any] | np.ndarray, *, expected_length
 
 
 def install() -> None:
-    """Patch PLS-DA label encoding for composite row labels."""
+    """Patch PLS-DA label encoding and reject complex feature values."""
 
     decoding = importlib.import_module("neureptrace.decoding")
     cls = decoding.PLSDiscriminantTransformer
     original_fit = cls.fit
-    if getattr(original_fit, _PATCH_MARKER, False):
-        return
+    if not getattr(original_fit, _PATCH_MARKER, False):
 
-    @wraps(original_fit)
-    def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence[Any] | np.ndarray):
-        feature_array = np.asarray(features)
-        expected_length = int(feature_array.shape[0]) if feature_array.ndim >= 1 else 0
-        if not _has_rectangular_row_labels(labels, expected_length=expected_length):
-            return original_fit(self, features, labels)
+        @wraps(original_fit)
+        def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence[Any] | np.ndarray):
+            _validate_real_features(features)
+            feature_array = np.asarray(features)
+            expected_length = int(feature_array.shape[0]) if feature_array.ndim >= 1 else 0
+            if not _has_rectangular_row_labels(labels, expected_length=expected_length):
+                return original_fit(self, features, labels)
 
-        classes, encoded = _encode_atomic_labels(
-            labels,
-            expected_length=expected_length,
-            name="PLSDiscriminantTransformer labels",
-        )
-        result = original_fit(self, features, encoded)
-        self.classes_ = classes
-        return result
+            classes, encoded = _encode_atomic_labels(
+                labels,
+                expected_length=expected_length,
+                name="PLSDiscriminantTransformer labels",
+            )
+            result = original_fit(self, features, encoded)
+            self.classes_ = classes
+            return result
 
-    setattr(fit, _PATCH_MARKER, True)
-    cls.fit = fit
+        setattr(fit, _PATCH_MARKER, True)
+        cls.fit = fit
+
+    original_transform = cls.transform
+    if not getattr(original_transform, _TRANSFORM_PATCH_MARKER, False):
+
+        @wraps(original_transform)
+        def transform(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+            _validate_real_features(features)
+            return original_transform(self, features)
+
+        setattr(transform, _TRANSFORM_PATCH_MARKER, True)
+        cls.transform = transform
 
 
 __all__ = ["install"]
