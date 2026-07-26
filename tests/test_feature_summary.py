@@ -81,3 +81,16 @@ def test_summarize_features_rejects_non_scalar_ddof() -> None:
 def test_summarize_features_accepts_numpy_scalar_ddof() -> None:
     result = summarize_features([[1.0], [2.0]], ddof=np.asarray(0))
     assert result.metadata["feature_summary_ddof"] == 0
+
+
+@pytest.mark.parametrize(
+    "features",
+    [
+        np.asarray([[1.0 + 2.0j, 3.0], [4.0, 5.0]], dtype=complex),
+        np.asarray([[1.0 + 2.0j, 3.0], [4.0, 5.0]], dtype=object),
+        [[np.complex128(1.0 + 2.0j), 3.0], [4.0, 5.0]],
+    ],
+)
+def test_summarize_features_rejects_complex_values(features) -> None:
+    with pytest.raises(ValueError, match="features must contain real-valued values"):
+        summarize_features(features)
