@@ -89,6 +89,8 @@ def _materialize_numeric_input(value: object) -> object:
         return _materialize_numeric_input(value.tolist())
     if isinstance(value, (str, bytes)):
         return value
+    if hasattr(value, "__array__"):
+        return value
     if not isinstance(value, Iterable):
         return value
     return [_materialize_numeric_input(item) for item in value]
@@ -103,6 +105,11 @@ def _contains_boolean_value(value: object) -> bool:
         if value.dtype == object:
             return any(_contains_boolean_value(item) for item in value.ravel(order="C"))
         return False
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_boolean_value(np.asarray(value, dtype=object))
+        except (TypeError, ValueError):
+            return False
     if isinstance(value, (str, bytes)):
         return False
     if isinstance(value, Iterable):
@@ -119,6 +126,11 @@ def _contains_complex_value(value: object) -> bool:
         if value.dtype == object:
             return any(_contains_complex_value(item) for item in value.ravel(order="C"))
         return False
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_complex_value(np.asarray(value, dtype=object))
+        except (TypeError, ValueError):
+            return False
     if isinstance(value, (str, bytes)):
         return False
     if isinstance(value, Iterable):
