@@ -41,6 +41,27 @@ def _contains_boolean_values(values: Any) -> bool:
     return False
 
 
+def _contains_complex_values(values: Any) -> bool:
+    """Return whether an array-like value contains complex numeric values."""
+
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, pd.DataFrame):
+        return any(_contains_complex_values(values[column]) for column in values.columns)
+    if isinstance(values, (pd.Series, pd.Index)):
+        values = values.to_numpy()
+
+    try:
+        array = np.asarray(values)
+    except (TypeError, ValueError):
+        return False
+    if np.issubdtype(array.dtype, np.complexfloating):
+        return bool(array.size)
+    if array.dtype == object:
+        return any(isinstance(value, (complex, np.complexfloating)) for value in array.ravel())
+    return False
+
+
 def _is_array_valued_scalar_control(value: Any) -> bool:
     """Return whether a scalar config value was supplied as an array-like container."""
 
@@ -52,12 +73,18 @@ def _reject_boolean_values(values: Any, *, message: str) -> None:
         raise ValueError(message)
 
 
+def _reject_complex_values(values: Any, *, message: str) -> None:
+    if _contains_complex_values(values):
+        raise ValueError(message)
+
+
 def _reject_boolean_label_values(values: Any, *, name: str) -> None:
     _reject_boolean_values(values, message=f"{name} values must be numeric, not boolean.")
 
 
-def _reject_boolean_probabilities(values: Any, *, context: str = "Probability values") -> None:
+def _reject_invalid_probabilities(values: Any, *, context: str = "Probability values") -> None:
     _reject_boolean_values(values, message=f"{context} must be numeric, not boolean.")
+    _reject_complex_values(values, message=f"{context} must contain real-valued probabilities, not complex values.")
 
 
 def _reject_array_scalar_control(value: Any, *, name: str) -> None:
@@ -65,10 +92,15 @@ def _reject_array_scalar_control(value: Any, *, name: str) -> None:
         raise ValueError(f"{name} must be a scalar, not an array.")
 
 
-def _reject_boolean_probability_columns(observations: pd.DataFrame, *, context: str = "Probability values") -> None:
+def _reject_complex_scalar_control(value: Any, *, message: str) -> None:
+    if isinstance(value, (complex, np.complexfloating)):
+        raise ValueError(message)
+
+
+def _reject_invalid_probability_columns(observations: pd.DataFrame, *, context: str = "Probability values") -> None:
     prob_columns = _probability_columns(observations)
     if prob_columns:
-        _reject_boolean_probabilities(observations.loc[:, list(prob_columns)], context=context)
+        _reject_invalid_probabilities(observations.loc[:, list(prob_columns)], context=context)
 
 
 def _rescale_finite_weights_if_sum_overflows(weights: Any) -> Any:
@@ -91,7 +123,7 @@ def _rescale_finite_weights_if_sum_overflows(weights: Any) -> Any:
 
 
 def install() -> None:
-    """Install boolean and scalar guards on probability-stacking public numeric paths."""
+    """Install real-numeric and scalar guards on probability-stacking public numeric paths."""
 
     _group_completion_patch.install()
     ps = importlib.import_module(_STACKING_MODULE)
@@ -111,6 +143,7 @@ def install() -> None:
     @wraps(original_validate_positive_integer)
     def _validate_positive_integer(value: Any, *, name: str):
         _reject_array_scalar_control(value, name=name)
+        _reject_complex_scalar_control(value, message=f"{name} must be a positive integer.")
         return original_validate_positive_integer(value, name=name)
 
     original_validate_positive_finite_float = ps._validate_positive_finite_float
@@ -118,6 +151,7 @@ def install() -> None:
     @wraps(original_validate_positive_finite_float)
     def _validate_positive_finite_float(value: Any, *, name: str):
         _reject_array_scalar_control(value, name=name)
+        _reject_complex_scalar_control(value, message=f"{name} must be positive and finite.")
         return original_validate_positive_finite_float(value, name=name)
 
     original_renormalize_probabilities = ps._renormalize_probabilities
@@ -129,8 +163,9 @@ def install() -> None:
         min_probability: float = ps.DEFAULT_MIN_PROBABILITY,
         require_normalized: bool = True,
     ):
-        _reject_boolean_probabilities(values)
+        _reject_invalid_probabilities(values)
         _reject_array_scalar_control(min_probability, name="min_probability")
+        _reject_complex_scalar_control(min_probability, message="min_probability must lie in (0, 1).")
         return original_renormalize_probabilities(
             values,
             min_probability=min_probability,
@@ -141,14 +176,14 @@ def install() -> None:
 
     @wraps(original_validate_probability_matrix)
     def _validate_probability_matrix(values: Any, *, context: str = "Probability values"):
-        _reject_boolean_probabilities(values, context=context)
+        _reject_invalid_probabilities(values, context=context)
         return original_validate_probability_matrix(values, context=context)
 
     original_top_k_accuracy = ps._top_k_accuracy
 
     @wraps(original_top_k_accuracy)
     def _top_k_accuracy(probabilities: Any, labels: Any, *, k: int):
-        _reject_boolean_probabilities(probabilities)
+        _reject_invalid_probabilities(probabilities)
         _reject_boolean_label_values(labels, name="labels")
         return original_top_k_accuracy(probabilities, labels, k=k)
 
@@ -156,7 +191,7 @@ def install() -> None:
 
     @wraps(original_top_k_accuracy_from_label_values)
     def _top_k_accuracy_from_label_values(probabilities: Any, true_labels: Any, label_values: Any, *, k: int):
-        _reject_boolean_probabilities(probabilities)
+        _reject_invalid_probabilities(probabilities)
         _reject_boolean_label_values(true_labels, name="true_labels")
         return original_top_k_accuracy_from_label_values(probabilities, true_labels, label_values, k=k)
 
@@ -164,14 +199,14 @@ def install() -> None:
 
     @wraps(original_align_probability_cube)
     def align_probability_cube(observations: pd.DataFrame, *args: Any, **kwargs: Any):
-        _reject_boolean_probability_columns(observations)
+        _reject_invalid_probability_columns(observations)
         return original_align_probability_cube(observations, *args, **kwargs)
 
     original_fit_stacking_weights = ps.fit_stacking_weights
 
     @wraps(original_fit_stacking_weights)
     def fit_stacking_weights(probability_cube: Any, labels: Any, *args: Any, **kwargs: Any):
-        _reject_boolean_probabilities(probability_cube)
+        _reject_invalid_probabilities(probability_cube)
         _reject_boolean_label_values(labels, name="labels")
         return original_fit_stacking_weights(probability_cube, labels, *args, **kwargs)
 
@@ -179,7 +214,7 @@ def install() -> None:
 
     @wraps(original_fit_source_oof_stacking)
     def fit_source_oof_stacking(source_probability_cube: Any, source_labels: Any, *args: Any, **kwargs: Any):
-        _reject_boolean_probabilities(source_probability_cube)
+        _reject_invalid_probabilities(source_probability_cube)
         _reject_boolean_label_values(source_labels, name="source_labels")
         return original_fit_source_oof_stacking(source_probability_cube, source_labels, *args, **kwargs)
 
@@ -187,8 +222,9 @@ def install() -> None:
 
     @wraps(original_combine_probability_cube)
     def combine_probability_cube(probability_cube: Any, weights: Any, *args: Any, **kwargs: Any):
-        _reject_boolean_probabilities(probability_cube)
+        _reject_invalid_probabilities(probability_cube)
         _reject_boolean_values(weights, message="weights must be numeric, not boolean.")
+        _reject_complex_values(weights, message="weights must be real-valued, not complex.")
         safe_weights = _rescale_finite_weights_if_sum_overflows(weights)
         return original_combine_probability_cube(probability_cube, safe_weights, *args, **kwargs)
 
@@ -198,7 +234,7 @@ def install() -> None:
     def summarize_stacked_metrics(observations: pd.DataFrame):
         prob_columns = _probability_columns(observations)
         if prob_columns:
-            _reject_boolean_probability_columns(observations, context="Probability values")
+            _reject_invalid_probability_columns(observations, context="Probability values")
             if "true_label" in observations.columns:
                 _reject_boolean_label_values(observations["true_label"], name="true_label")
         return original_summarize_stacked_metrics(observations)
