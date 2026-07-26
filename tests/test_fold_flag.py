@@ -40,6 +40,20 @@ def test_absolute_value_features_rejects_boolean_features(features) -> None:
         absolute_value_features(features)
 
 
+@pytest.mark.parametrize(
+    "features",
+    [
+        [[3.0 + 4.0j, -5.0 + 12.0j]],
+        np.asarray([[3.0 + 4.0j, -5.0 + 12.0j]], dtype=np.complex128),
+        np.asarray([[1.0, np.complex128(2.0 + 1.0j)]], dtype=object),
+        (iter(row) for row in [[1.0 + 2.0j, 3.0], [4.0, 5.0]]),
+    ],
+)
+def test_absolute_value_features_rejects_complex_features(features) -> None:
+    with pytest.raises(ValueError, match="real-valued.*complex"):
+        absolute_value_features(features)
+
+
 def test_absolute_value_features_rejects_non_matrix() -> None:
     with pytest.raises(ValueError, match="two-dimensional"):
         absolute_value_features([1.0, -2.0])
