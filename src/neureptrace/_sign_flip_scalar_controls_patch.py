@@ -15,6 +15,34 @@ _PATCH_MARKER = "_sign_flip_scalar_controls_patched"
 _T_STATISTIC_PATCH_MARKER = "_sign_flip_zero_variance_t_patched"
 
 
+class _NanSafeQuantileNumpyProxy:
+    """Delegate NumPy operations while avoiding NaN quantiles over infinities."""
+
+    def __init__(self, numpy_module: object) -> None:
+        self._numpy = numpy_module
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._numpy, name)
+
+    def quantile(self, values: object, quantile: object, *args: object, **kwargs: object) -> object:
+        """Use the existing interpolation unless infinities make it return NaN."""
+
+        with self._numpy.errstate(invalid="ignore"):
+            threshold = self._numpy.quantile(values, quantile, *args, **kwargs)
+        if not self._numpy.isnan(threshold).any():
+            return threshold
+
+        fallback_args = list(args)
+        fallback_kwargs = dict(kwargs)
+        fallback_kwargs.pop("interpolation", None)
+        if len(fallback_args) >= 4:
+            fallback_args[3] = "higher"
+            fallback_kwargs.pop("method", None)
+        else:
+            fallback_kwargs["method"] = "higher"
+        return self._numpy.quantile(values, quantile, *fallback_args, **fallback_kwargs)
+
+
 def _scalar_value(value: object, error_message: str) -> object:
     """Return a zero-dimensional scalar value, rejecting arrays and booleans."""
     if isinstance(value, (bool, np.bool_)):
@@ -142,6 +170,9 @@ def _t_statistic(effects: np.ndarray) -> np.ndarray:
 
 def _patch_inference() -> None:
     import neureptrace.inference as inference
+
+    if not isinstance(inference.np, _NanSafeQuantileNumpyProxy):
+        inference.np = _NanSafeQuantileNumpyProxy(inference.np)
 
     if not getattr(inference._validate_positive_permutation_count, _PATCH_MARKER, False):
         _validate_positive_permutation_count._sign_flip_scalar_controls_patched = True  # type: ignore[attr-defined]
