@@ -84,10 +84,10 @@ def fit_source_variance_filter(
         "source_variance_filter_selected_indices": "|".join(str(int(index)) for index in selected.tolist()),
     }
     return SourceVarianceFilterResult(
-        train_features=source[:, selected].astype(np.float32, copy=False),
-        test_features=test[:, selected].astype(np.float32, copy=False),
+        train_features=_compact_float32(source[:, selected]),
+        test_features=_compact_float32(test[:, selected]),
         selected_indices=selected.astype(int, copy=False),
-        variances=variances.astype(np.float32, copy=False),
+        variances=_compact_float32(variances),
         metadata=metadata,
     )
 
@@ -114,7 +114,7 @@ def source_feature_variances(source_features: Sequence[Sequence[float]] | np.nda
     resolved_ddof = _nonnegative_int(ddof, name="ddof")
     if source.shape[0] <= resolved_ddof:
         resolved_ddof = 0
-    return np.var(source, axis=0, ddof=resolved_ddof).astype(float, copy=False)
+    return _stable_column_variances(source, ddof=resolved_ddof)
 
 
 def select_variance_features(
@@ -137,6 +137,40 @@ def select_variance_features(
     if selected.size == 0:
         selected = np.asarray([int(np.argmax(values))], dtype=int)
     return np.sort(selected).astype(int, copy=False)
+
+
+def _stable_column_variances(matrix: np.ndarray, *, ddof: int) -> np.ndarray:
+    """Compute finite column variances without overflowing intermediate moments."""
+
+    magnitude = np.max(np.abs(matrix), axis=0)
+    normalized = np.zeros_like(matrix)
+    nonzero = magnitude > 0.0
+    normalized[:, nonzero] = matrix[:, nonzero] / magnitude[nonzero]
+    normalized_variance = np.var(normalized, axis=0, ddof=ddof)
+
+    variances = np.zeros_like(magnitude)
+    positive = nonzero & (normalized_variance > 0.0)
+    if np.any(positive):
+        normalized_positive = normalized_variance[positive]
+        magnitude_positive = magnitude[positive]
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            maximum_magnitude = np.sqrt(np.finfo(float).max / normalized_positive)
+            scaled = normalized_positive * magnitude_positive * magnitude_positive
+        scaled[magnitude_positive > maximum_magnitude] = np.finfo(float).max
+        variances[positive] = scaled
+    return variances
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _coerce_config(config: SourceVarianceFilterConfig | Mapping[str, Any]) -> SourceVarianceFilterConfig:
