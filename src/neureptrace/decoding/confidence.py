@@ -136,10 +136,34 @@ def _contains_boolean_value(values: Any) -> bool:
     return False
 
 
+def _contains_complex_value(values: Any) -> bool:
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return True
+        if values.dtype == object:
+            return any(_contains_complex_value(value) for value in values.reshape(-1))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            array = np.asarray(values)
+        except (TypeError, ValueError):
+            return False
+        return _contains_complex_value(array)
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, Iterable):
+        return any(_contains_complex_value(value) for value in values)
+    return False
+
+
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
     materialized = _materialize_nested_iterables(values)
     if _contains_boolean_value(materialized):
         raise ValueError("probabilities must contain numeric scores, not booleans.")
+    if _contains_complex_value(materialized):
+        raise ValueError("probabilities must contain real-valued scores, not complex values.")
     matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError("probabilities must be a two-dimensional matrix with at least two columns.")
@@ -164,6 +188,8 @@ def _unit_interval(value: float | str | np.ndarray, *, name: str) -> float:
     value = _scalar_value(value, name=name)
     if isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be in [0, 1].")
+    if isinstance(value, (complex, np.complexfloating)):
+        raise ValueError(f"{name} must be a real scalar in [0, 1].")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
