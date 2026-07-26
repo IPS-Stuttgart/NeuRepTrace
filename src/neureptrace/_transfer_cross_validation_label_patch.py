@@ -1,4 +1,4 @@
-"""Preserve non-numeric labels in feature-level cross-validation."""
+"""Preserve non-numeric and precision-sensitive labels in feature-level cross-validation."""
 
 from __future__ import annotations
 
@@ -83,9 +83,13 @@ def _ordered_unique(values: Sequence | np.ndarray) -> np.ndarray:
 
 
 def _needs_object_predictions(labels: np.ndarray) -> bool:
-    """Return true when labels cannot be stored losslessly in a float array."""
+    """Return true when a float prediction array cannot store labels losslessly."""
 
-    return not np.issubdtype(labels.dtype, np.number)
+    if not np.issubdtype(labels.dtype, np.number):
+        return True
+    if not np.issubdtype(labels.dtype, np.integer):
+        return False
+    return any(int(value) != int(float(value)) for value in labels.reshape(-1))
 
 
 def _coerced_null_label(null_label: object, labels: np.ndarray) -> object:
