@@ -36,12 +36,30 @@ def _contains_boolean(value: object) -> bool:
     return any(_contains_boolean(item) for item in value)
 
 
+def _contains_complex(value: object) -> bool:
+    """Return whether a materialized feature container has complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype != object:
+            return False
+        return any(_contains_complex(item) for item in value.ravel())
+    if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+        return False
+    return any(_contains_complex(item) for item in value)
+
+
 def absolute_value_features(features):
     """Return absolute-valued feature rows."""
 
     raw_features = _materialize_nested_iterables(features)
     if _contains_boolean(raw_features):
         raise ValueError("features must contain numeric values, not boolean flags")
+    if _contains_complex(raw_features):
+        raise ValueError("features must contain real-valued numeric values, not complex values")
     try:
         matrix = np.asarray(raw_features, dtype=float)
     except (TypeError, ValueError) as exc:
