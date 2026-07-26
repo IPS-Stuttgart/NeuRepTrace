@@ -32,6 +32,10 @@ class EpochDataset:
             raise ValueError("EpochDataset.data must contain numeric signal values, not boolean flags.")
         if _contains_boolean_values(self.times):
             raise ValueError("EpochDataset.times must contain numeric time values, not boolean flags.")
+        if _contains_complex_values(self.data):
+            raise ValueError("EpochDataset.data must contain real-valued signal values, not complex values.")
+        if _contains_complex_values(self.times):
+            raise ValueError("EpochDataset.times must contain real-valued time values, not complex values.")
 
         self.data = np.asarray(self.data, dtype=float)
         self.times = np.asarray(self.times, dtype=float)
@@ -200,6 +204,18 @@ def _contains_boolean_values(values: object) -> bool:
     if array.ndim == 0:
         return isinstance(array.item(), (bool, np.bool_))
     return any(isinstance(value, (bool, np.bool_)) for value in array.ravel(order="C"))
+
+
+def _contains_complex_values(values: object) -> bool:
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    try:
+        array = np.asarray(values, dtype=object)
+    except (TypeError, ValueError):
+        return False
+    if array.ndim == 0:
+        return isinstance(array.item(), (complex, np.complexfloating))
+    return any(isinstance(value, (complex, np.complexfloating)) for value in array.ravel(order="C"))
 
 
 def _find_duplicate_string(values: list[str]) -> str | None:
