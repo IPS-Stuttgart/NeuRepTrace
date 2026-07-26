@@ -13,6 +13,10 @@ def feature_matrix(values: Any, *, name: str) -> np.ndarray:
     materialized = _materialize_iterables(values)
     if _contains_boolean_value(materialized):
         raise ValueError(f"{name} must not contain boolean values.")
+    if _contains_complex_value(materialized):
+        raise ValueError(
+            f"{name} must contain real-valued numeric values, not complex values."
+        )
     try:
         matrix = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -27,15 +31,15 @@ def feature_matrix(values: Any, *, name: str) -> np.ndarray:
 
 
 def positive_float(value: float | str, *, name: str) -> float:
-    """Return a positive finite scalar without accepting boolean values."""
+    """Return a positive finite real scalar without accepting boolean values."""
 
-    if _is_boolean_scalar(value):
+    if _is_boolean_scalar(value) or _is_complex_scalar(value):
         raise ValueError(f"{name} must be positive and finite.")
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
             raise ValueError(f"{name} must be positive and finite.")
         value = value.item()
-        if _is_boolean_scalar(value):
+        if _is_boolean_scalar(value) or _is_complex_scalar(value):
             raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
@@ -74,9 +78,35 @@ def _contains_boolean_value(values: Any) -> bool:
     return any(_contains_boolean_value(item) for item in iterator)
 
 
+def _contains_complex_value(values: Any) -> bool:
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return bool(values.size)
+        if values.dtype == object:
+            return any(_contains_complex_value(item) for item in values.flat)
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return False
+    return any(_contains_complex_value(item) for item in iterator)
+
+
 def _is_boolean_scalar(value: Any) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return True
     if isinstance(value, np.ndarray) and value.shape == ():
         return isinstance(value.item(), (bool, np.bool_))
+    return False
+
+
+def _is_complex_scalar(value: Any) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray) and value.shape == ():
+        return isinstance(value.item(), complex)
     return False
