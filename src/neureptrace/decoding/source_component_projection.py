@@ -157,7 +157,12 @@ def reconstruct_from_source_components(scores: Sequence[Sequence[float]] | np.nd
 
 def _coerce_config(config: SourceComponentConfig | Mapping[str, Any]) -> SourceComponentConfig:
     if isinstance(config, SourceComponentConfig):
-        return config
+        return source_component_config(
+            n_components=config.n_components,
+            center=config.center,
+            scale=config.scale,
+            epsilon=config.epsilon,
+        )
     return source_component_config(**dict(config))
 
 
