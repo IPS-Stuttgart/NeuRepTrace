@@ -1,10 +1,12 @@
-"""Resolve tied temporal-smoothing top-k metrics with exact-k semantics."""
+"""Install temporal-model baseline validation and exact-k tie handling."""
 
 from __future__ import annotations
 
 import importlib
 
 import numpy as np
+
+from . import _temporal_model_baseline_duplicate_patch
 
 _PATCH_MARKER = "_neureptrace_temporal_smoothing_topk_tie_patch_installed"
 
@@ -55,7 +57,9 @@ def _top_k_accuracy_from_label_values(probabilities: np.ndarray, labels: np.ndar
 
 
 def install() -> None:
-    """Patch temporal-smoothing top-k metrics to keep tied rows exact-k."""
+    """Install temporal baseline validation and stable exact-k metrics."""
+
+    _temporal_model_baseline_duplicate_patch.install()
 
     temporal_smoothing = importlib.import_module("neureptrace.temporal_smoothing")
     if getattr(temporal_smoothing, _PATCH_MARKER, False):
