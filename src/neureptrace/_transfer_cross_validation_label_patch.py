@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from numbers import Integral
 from typing import Any
 
 import numpy as np
@@ -100,6 +101,27 @@ def _coerced_null_label(null_label: object, labels: np.ndarray) -> object:
     return np.asarray([null_label], dtype=labels.dtype)[0]
 
 
+def _positive_integer(value: object, *, name: str) -> int:
+    """Return an exact positive integer without accepting boolean or array controls."""
+
+    message = f"{name} must be a positive integer."
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating, np.ndarray)):
+        raise ValueError(message)
+    if isinstance(value, Integral):
+        integer = int(value)
+    else:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(message) from exc
+        if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+            raise ValueError(message)
+        integer = int(numeric)
+    if integer < 1:
+        raise ValueError(message)
+    return integer
+
+
 def _install_null_fallback_patch() -> None:
     null_fallback_patch = importlib.import_module("neureptrace._transfer_null_fallback_patch")
     null_fallback_patch.install()
@@ -120,9 +142,11 @@ def install() -> None:
     transfer._label_vector = _atomic_label_vector
 
     def _sequential_fold_ids(n_trials: int, n_folds: int) -> np.ndarray:
-        if n_folds > n_trials:
+        trial_count = _positive_integer(n_trials, name="n_trials")
+        fold_count = _positive_integer(n_folds, name="n_folds")
+        if fold_count > trial_count:
             raise ValueError("n_folds must not exceed n_trials.")
-        return original_sequential_fold_ids(n_trials, n_folds)
+        return original_sequential_fold_ids(trial_count, fold_count)
 
     _sequential_fold_ids.__name__ = original_sequential_fold_ids.__name__
     _sequential_fold_ids.__doc__ = original_sequential_fold_ids.__doc__
@@ -175,6 +199,9 @@ def install() -> None:
         null_label: int | float = 0,
         generative_augmentation: GenerativeAugmentationConfig | Mapping[str, Any] | None = None,
     ) -> transfer.CrossValidationResult:
+        fold_count = _positive_integer(n_folds, name="n_folds")
+        if fold_count < 2:
+            raise ValueError("n_folds must be at least 2 for cross-validation.")
         stimulus_features_array = transfer._feature_matrix(stimulus_features, name="stimulus_features")
         label_vector = transfer._label_vector(labels, expected_length=stimulus_features_array.shape[0], name="labels")
         if not _needs_object_predictions(label_vector):
@@ -182,7 +209,7 @@ def install() -> None:
                 stimulus_features_array,
                 label_vector,
                 null_features=null_features,
-                n_folds=n_folds,
+                n_folds=fold_count,
                 classifier=classifier,
                 classifier_param=classifier_param,
                 components_pca=components_pca,
@@ -193,7 +220,7 @@ def install() -> None:
             )
 
         n_trials = len(label_vector)
-        fold_ids = transfer.sequential_fold_ids(n_trials, n_folds)
+        fold_ids = transfer.sequential_fold_ids(n_trials, fold_count)
         features, augmented_labels = transfer.append_null_class_features(stimulus_features_array, label_vector, null_features, null_label=null_label)
         null_label_value = _coerced_null_label(null_label, augmented_labels)
         augmented_folds = fold_ids
@@ -207,7 +234,7 @@ def install() -> None:
         predictions[:] = None
         class_labels = _ordered_unique(label_vector)
         fallback_label = class_labels[0] if len(class_labels) else null_label_value
-        for fold in range(1, n_folds + 1):
+        for fold in range(1, fold_count + 1):
             train_mask = augmented_folds != fold
             test_mask = (augmented_folds == fold) & ~_label_equal_mask(augmented_labels, null_label_value)
             if not np.any(test_mask):
@@ -247,3 +274,6 @@ def install() -> None:
     transfer.cross_validate_feature_decoding = _cross_validate_feature_decoding
     _install_null_fallback_patch()
     _INSTALLED = True
+
+
+__all__ = ["install"]
