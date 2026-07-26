@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from functools import wraps
+from numbers import Integral
 
 import numpy as np
 
@@ -37,6 +38,24 @@ def _validate_positive_integer(value: object, name: str) -> int:
     if not np.isfinite(numeric) or numeric < 1.0 or numeric % 1.0 != 0.0:
         raise ValueError(message)
     return int(numeric)
+
+
+def _validate_top_k(value: object) -> int:
+    """Validate top-k limits without rounding exact integer inputs through float."""
+
+    message = "k must be a positive integer"
+    if isinstance(value, np.ndarray) or isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(message)
+    if isinstance(value, Integral):
+        integer = int(value)
+    else:
+        numeric = _coerce_non_array_scalar(value, message)
+        if not np.isfinite(numeric) or numeric % 1.0 != 0.0:
+            raise ValueError(message)
+        integer = int(numeric)
+    if integer < 1:
+        raise ValueError(message)
+    return integer
 
 
 def _validate_eps(eps: object) -> float:
@@ -165,7 +184,7 @@ def install() -> None:
 
     @wraps(original_top_k_accuracy)
     def top_k_accuracy(probabilities: np.ndarray, labels: np.ndarray, *, k: int = 1) -> float:
-        return original_top_k_accuracy(probabilities, labels, k=_validate_positive_integer(k, "k"))
+        return original_top_k_accuracy(probabilities, labels, k=_validate_top_k(k))
 
     @wraps(original_weighted_expected_calibration_error)
     def weighted_expected_calibration_error(
@@ -219,7 +238,7 @@ def install() -> None:
             probabilities,
             labels,
             sample_weight,
-            k=_validate_positive_integer(k, "k"),
+            k=_validate_top_k(k),
         )
 
     for patched in (
