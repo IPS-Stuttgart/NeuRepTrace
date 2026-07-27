@@ -41,9 +41,24 @@ STANDARD_OBSERVATION_COLUMNS: tuple[str, ...] = (
 )
 
 
+def _stable_json_default(value: object) -> object:
+    """Return a deterministic JSON representation for otherwise unsupported values."""
+    if isinstance(value, (set, frozenset)):
+        return sorted(
+            value,
+            key=lambda item: json.dumps(
+                item,
+                sort_keys=True,
+                default=_stable_json_default,
+                separators=(",", ":"),
+            ),
+        )
+    return str(value)
+
+
 def stable_hash(payload: object, *, length: int = 16) -> str:
     """Return a deterministic short hash for model/preprocessing provenance."""
-    encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    encoded = json.dumps(payload, sort_keys=True, default=_stable_json_default, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:length]
 
 
