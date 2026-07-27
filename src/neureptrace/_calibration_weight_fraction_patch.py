@@ -75,6 +75,8 @@ def install() -> None:
         @wraps(original_summary_validator)
         def _validate_calibration_summary(frame):
             validated = original_summary_validator(frame)
+            if validated.empty:
+                raise ValueError("Summary must contain at least one data row.")
             return _normalise_present_group_columns(validated)
 
         setattr(_validate_calibration_summary, _SUMMARY_GROUP_METADATA_PATCH_ATTR, True)
