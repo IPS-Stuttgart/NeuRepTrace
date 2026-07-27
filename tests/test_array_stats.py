@@ -64,3 +64,16 @@ def test_column_stats_rejects_non_positive_or_non_finite_scale_floor(scale_floor
 def test_column_stats_rejects_container_scale_floor(scale_floor):
     with pytest.raises(ValueError, match="scale_floor"):
         column_stats([[1.0]], scale_floor=scale_floor)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        np.asarray([[1.0 + 2.0j, 3.0], [4.0, 5.0]], dtype=np.complex128),
+        np.asarray([[1.0 + 2.0j, 3.0], [4.0, 5.0]], dtype=object),
+        [[np.complex128(1.0 + 2.0j), 3.0], [4.0, 5.0]],
+    ],
+)
+def test_column_stats_rejects_complex_values(values):
+    with pytest.raises(ValueError, match="values must contain real-valued entries"):
+        column_stats(values)
