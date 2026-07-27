@@ -98,11 +98,11 @@ def fit_source_clip_then_standardize(
 
     eps = _positive_float(epsilon, name="epsilon")
     clipped = fit_source_clip(source_features=source_features, test_features=test_features, config=config)
-    center = np.mean(clipped.train_features, axis=0)
-    scale = np.std(clipped.train_features - center, axis=0, ddof=1 if clipped.train_features.shape[0] > 1 else 0)
-    scale = np.maximum(scale, eps)
-    train_scaled = (clipped.train_features - center) / scale
-    test_scaled = (clipped.test_features - center) / scale
+    train_values = np.asarray(clipped.train_features)
+    test_values = np.asarray(clipped.test_features)
+    center, scale = _fit_finite_standardizer(train_values, epsilon=eps)
+    train_scaled = _standardize_finite(train_values, center=center, scale=scale)
+    test_scaled = _standardize_finite(test_values, center=center, scale=scale)
     metadata = dict(clipped.metadata)
     metadata.update(
         {
@@ -186,12 +186,87 @@ def _upper_sample_quantile(values: np.ndarray, quantile: float) -> np.ndarray:
 
 def _center_vector(source: np.ndarray, *, mode: str) -> np.ndarray:
     if mode == "median":
-        return np.median(source, axis=0)
+        with np.errstate(over="ignore", invalid="ignore"):
+            center = np.median(source, axis=0)
+        return center if np.all(np.isfinite(center)) else _finite_column_median(source)
     if mode == "mean":
-        return np.mean(source, axis=0)
+        with np.errstate(over="ignore", invalid="ignore"):
+            center = np.mean(source, axis=0)
+        return center if np.all(np.isfinite(center)) else _finite_column_mean(source)
     if mode == "zero":
         return np.zeros(source.shape[1], dtype=float)
     raise ValueError(f"Unhandled center mode {mode!r}.")
+
+
+def _finite_column_mean(values: np.ndarray) -> np.ndarray:
+    """Return column means without overflowing on finite same-sign values."""
+
+    reference = np.max(np.abs(values), axis=0)
+    normalized = np.divide(values, reference, out=np.zeros_like(values), where=reference != 0.0)
+    return np.mean(normalized, axis=0) * reference
+
+
+def _finite_column_median(values: np.ndarray) -> np.ndarray:
+    """Return column medians with an overflow-safe midpoint for even row counts."""
+
+    ordered = np.sort(values, axis=0)
+    midpoint = ordered.shape[0] // 2
+    if ordered.shape[0] % 2:
+        return ordered[midpoint].copy()
+
+    lower = ordered[midpoint - 1]
+    upper = ordered[midpoint]
+    result = np.empty_like(lower)
+    same_sign = np.signbit(lower) == np.signbit(upper)
+    result[same_sign] = lower[same_sign] + (upper[same_sign] - lower[same_sign]) / 2.0
+    result[~same_sign] = lower[~same_sign] / 2.0 + upper[~same_sign] / 2.0
+    return result
+
+
+def _fit_finite_standardizer(values: np.ndarray, *, epsilon: float) -> tuple[np.ndarray, np.ndarray]:
+    """Fit mean and sample scale, falling back to normalized coordinates on overflow."""
+
+    ddof = 1 if values.shape[0] > 1 else 0
+    with np.errstate(over="ignore", invalid="ignore"):
+        center = np.mean(values, axis=0)
+        raw_scale = np.std(values - center, axis=0, ddof=ddof)
+    if np.all(np.isfinite(center)) and np.all(np.isfinite(raw_scale)):
+        return center, np.maximum(raw_scale, epsilon)
+
+    finite_values = np.asarray(values, dtype=float)
+    reference = np.max(np.abs(finite_values), axis=0)
+    normalized = np.divide(finite_values, reference, out=np.zeros_like(finite_values), where=reference != 0.0)
+    center_normalized = np.mean(normalized, axis=0)
+    center = center_normalized * reference
+    centered_normalized = normalized - center_normalized
+    scale_normalized = np.std(centered_normalized, axis=0, ddof=ddof)
+    with np.errstate(over="ignore", invalid="ignore"):
+        raw_scale = scale_normalized * reference
+    raw_scale = np.nan_to_num(raw_scale, nan=0.0, posinf=np.finfo(float).max, neginf=0.0)
+    return center, np.maximum(raw_scale, epsilon)
+
+
+def _standardize_finite(values: np.ndarray, *, center: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    """Apply a fitted standardizer, falling back only when direct arithmetic overflows."""
+
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        standardized = (values - center) / scale
+    if np.all(np.isfinite(standardized)):
+        return standardized
+
+    finite_values = np.asarray(values, dtype=float)
+    finite_center = np.asarray(center, dtype=float)
+    finite_scale = np.asarray(scale, dtype=float)
+    reference = np.maximum(np.max(np.abs(finite_values), axis=0), np.abs(finite_center))
+    normalized_values = np.divide(finite_values, reference, out=np.zeros_like(finite_values), where=reference != 0.0)
+    normalized_center = np.divide(finite_center, reference, out=np.zeros_like(finite_center), where=reference != 0.0)
+    normalized_scale = np.divide(finite_scale, reference, out=np.full_like(finite_scale, np.inf), where=reference != 0.0)
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        standardized = (normalized_values - normalized_center) / normalized_scale
+    limit = np.finfo(float).max
+    standardized = np.nan_to_num(standardized, nan=0.0, posinf=limit, neginf=-limit)
+    standardized[finite_values == finite_center] = 0.0
+    return standardized
 
 
 def _repair_bounds(lower: np.ndarray, upper: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
