@@ -162,6 +162,8 @@ def _coerce_config(config: SourceConfidenceWeightConfig | Mapping[str, Any]) -> 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, epsilon: float) -> np.ndarray:
     eps = _positive_float(epsilon, name="epsilon")
     values = _materialize_reusable_probability_input(values)
+    if _contains_complex_value(values):
+        raise ValueError("source_probabilities must contain real-valued probability values, not complex values.")
     if _contains_boolean_probability_value(values):
         raise ValueError("source_probabilities must contain numeric probability values, not boolean flags.")
     matrix = np.asarray(values, dtype=float)
@@ -194,6 +196,36 @@ def _materialize_reusable_probability_input(values: Any) -> Any:
     if not isinstance(values, Iterable):
         return values
     return [_materialize_reusable_probability_input(value) for value in values]
+
+
+def _contains_complex_value(values: Any) -> bool:
+    """Return whether a materialized numeric input contains complex values."""
+
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.generic):
+        return False
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return bool(values.size)
+        if values.dtype != object:
+            return False
+        return any(_contains_complex_value(item) for item in values.ravel())
+    if hasattr(values, "__array__"):
+        try:
+            return _contains_complex_value(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, Mapping):
+        iterable = values.values()
+    else:
+        try:
+            iterable = iter(values)
+        except TypeError:
+            return False
+    return any(_contains_complex_value(item) for item in iterable)
 
 
 def _contains_boolean_probability_value(values: Any) -> bool:
@@ -229,6 +261,8 @@ def _label_indices(values: Sequence[int] | np.ndarray, *, expected_length: int, 
         raw = np.asarray(values)
     except (TypeError, ValueError) as exc:
         raise ValueError(value_message) from exc
+    if _contains_complex_value(raw):
+        raise ValueError("source_labels must contain real integer class indices, not complex values.")
     if raw.dtype == np.dtype(bool) or _contains_boolean_label(raw):
         raise ValueError(value_message)
     raw = np.squeeze(raw)
