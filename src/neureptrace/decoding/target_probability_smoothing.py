@@ -131,7 +131,10 @@ def rbf_affinity(features: Sequence[Sequence[float]] | np.ndarray, *, gamma: flo
     matrix = _feature_matrix(features, name="features")
     squared = _squared_euclidean(matrix, matrix)
     resolved_gamma = _auto_gamma(squared, epsilon=epsilon) if gamma == "auto" else _positive_float(gamma, name="gamma")
-    affinity = np.exp(-resolved_gamma * squared)
+    exponent = np.zeros_like(squared)
+    with np.errstate(over="ignore"):
+        np.multiply(resolved_gamma, squared, out=exponent, where=squared > 0.0)
+    affinity = np.exp(-exponent)
     np.fill_diagonal(affinity, 0.0)
     if n_neighbors is not None and affinity.shape[0] > 1:
         k = min(_positive_int(n_neighbors, name="n_neighbors"), affinity.shape[0] - 1)
@@ -204,9 +207,20 @@ def _coerce_config(config: TargetProbabilitySmoothingConfig | Mapping[str, Any])
 def _standardize(features: np.ndarray, *, enabled: bool, epsilon: float) -> np.ndarray:
     if not enabled:
         return features.astype(float, copy=False)
-    mean = np.mean(features, axis=0)
-    scale = np.maximum(np.std(features - mean, axis=0, ddof=1 if features.shape[0] > 1 else 0), float(epsilon))
-    return (features - mean) / scale
+    column_maxima = np.max(np.abs(features), axis=0)
+    safe_maxima = np.where(column_maxima > 0.0, column_maxima, 1.0)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        scaled = features / safe_maxima
+        centered = scaled - np.mean(scaled, axis=0)
+        scale = np.std(centered, axis=0, ddof=1 if features.shape[0] > 1 else 0)
+        epsilon_scaled = np.divide(
+            float(epsilon),
+            safe_maxima,
+            out=np.zeros_like(safe_maxima),
+            where=safe_maxima > 0.0,
+        )
+    scale = np.maximum(scale, epsilon_scaled)
+    return np.divide(centered, scale, out=np.zeros_like(centered), where=scale > 0.0)
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, expected_rows: int, epsilon: float) -> np.ndarray:
@@ -233,11 +247,48 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
 
 def _auto_gamma(squared_distances: np.ndarray, *, epsilon: float) -> float:
     positive = squared_distances[squared_distances > float(epsilon)]
-    return 1.0 if positive.size == 0 else float(1.0 / (2.0 * max(float(np.median(positive)), float(epsilon))))
+    if positive.size == 0:
+        return 1.0
+    median = _nonnegative_median(positive)
+    return float(0.5 / max(median, float(epsilon)))
+
+
+def _nonnegative_median(values: np.ndarray) -> float:
+    """Return the median of non-negative values without overflowing an even average."""
+
+    flattened = np.asarray(values, dtype=float).reshape(-1)
+    middle = flattened.size // 2
+    if flattened.size % 2:
+        return float(np.partition(flattened, middle)[middle])
+    partitioned = np.partition(flattened, (middle - 1, middle))
+    lower = float(partitioned[middle - 1])
+    upper = float(partitioned[middle])
+    return lower + 0.5 * (upper - lower)
 
 
 def _squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    return np.maximum(np.sum(left * left, axis=1, keepdims=True) + np.sum(right * right, axis=1, keepdims=True).T - 2.0 * (left @ right.T), 0.0)
+    """Return pairwise squared distances, saturating unrepresentable results."""
+
+    maximum = np.finfo(float).max
+    sqrt_maximum = np.sqrt(maximum)
+    right_maxima = np.max(np.abs(right), axis=1)
+    output = np.empty((left.shape[0], right.shape[0]), dtype=float)
+    for row_index, row in enumerate(left):
+        pair_scales = np.maximum(np.max(np.abs(row)), right_maxima)
+        safe_scales = np.where(pair_scales > 0.0, pair_scales, 1.0)
+        with np.errstate(over="ignore", under="ignore", divide="ignore", invalid="ignore"):
+            scaled_difference = right / safe_scales[:, None] - row / safe_scales[:, None]
+            scaled_norm = np.sqrt(np.einsum("ij,ij->i", scaled_difference, scaled_difference))
+            maximum_safe_scale = np.full_like(scaled_norm, np.inf)
+            np.divide(sqrt_maximum, scaled_norm, out=maximum_safe_scale, where=scaled_norm > 0.0)
+        safe = safe_scales <= maximum_safe_scale
+        distances = np.full(right.shape[0], maximum, dtype=float)
+        distances[scaled_norm == 0.0] = 0.0
+        positive_safe = safe & (scaled_norm > 0.0)
+        norms = np.minimum(safe_scales[positive_safe] * scaled_norm[positive_safe], sqrt_maximum)
+        distances[positive_safe] = norms * norms
+        output[row_index] = distances
+    return output
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
