@@ -99,10 +99,25 @@ def accepted_probability_rows(probabilities: Sequence[Sequence[float]] | np.ndar
     """Return only rows accepted by a previous confidence selection result."""
 
     matrix = _probability_matrix(probabilities)
-    mask = np.asarray(selection.accepted_mask, dtype=bool).reshape(-1)
+    mask = _selection_mask(selection.accepted_mask)
     if mask.shape[0] != matrix.shape[0]:
         raise ValueError("selection mask length must match probability rows.")
     return _compact_float32(matrix[mask])
+
+
+def _selection_mask(values: Any) -> np.ndarray:
+    """Return a flattened Boolean selection mask without truthiness coercion."""
+
+    materialized = _materialize_nested_iterables(values)
+    try:
+        mask = np.asarray(materialized)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("selection mask must contain only boolean values.") from exc
+    if np.issubdtype(mask.dtype, np.bool_):
+        return mask.astype(bool, copy=False).reshape(-1)
+    if mask.dtype == object and all(isinstance(value, (bool, np.bool_)) for value in mask.reshape(-1)):
+        return mask.astype(bool, copy=False).reshape(-1)
+    raise ValueError("selection mask must contain only boolean values.")
 
 
 def _materialize_nested_iterables(values: Any) -> Any:
