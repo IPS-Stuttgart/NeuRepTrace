@@ -51,8 +51,8 @@ def transform_train_test_signed_log1p(
             f"{train.shape[1]} != {test.shape[1]}."
         )
     return SignedLog1pResult(
-        train_features=signed_log1p_transform(train, scale=cfg.scale).astype(np.float32, copy=False),
-        test_features=signed_log1p_transform(test, scale=cfg.scale).astype(np.float32, copy=False),
+        train_features=_compact_float32(signed_log1p_transform(train, scale=cfg.scale)),
+        test_features=_compact_float32(signed_log1p_transform(test, scale=cfg.scale)),
         metadata={
             "signed_log1p_transform": True,
             "signed_log1p_protocol": SIGNED_LOG1P_PROTOCOL,
@@ -80,7 +80,22 @@ def signed_log1p_transform(features: Sequence[Sequence[float]] | np.ndarray, *, 
 
     matrix = _feature_matrix(features, name="features")
     resolved_scale = _positive_float(scale, name="scale")
-    return np.sign(matrix) * np.log1p(np.abs(matrix) / resolved_scale)
+    with np.errstate(divide="ignore"):
+        log_ratio = np.log(np.abs(matrix)) - np.log(resolved_scale)
+    magnitude = np.logaddexp(0.0, log_ratio)
+    return np.sign(matrix) * magnitude
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _coerce_config(config: SignedLog1pConfig | Mapping[str, Any]) -> SignedLog1pConfig:
