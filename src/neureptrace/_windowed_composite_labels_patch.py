@@ -13,6 +13,7 @@ from neureptrace._object_label_utils import label_accuracy, label_counts, values
 _INSTALLED = False
 _ORIGINAL_LABEL_VECTOR = None
 _ORIGINAL_CLASS_SCORE_MATRIX = None
+_ORIGINAL_AS_CLASS_SCORE_MATRIX = None
 _ORIGINAL_FEATURE_MATRIX = None
 
 
@@ -201,7 +202,7 @@ def _class_score_feature_matrix(features: Sequence[Sequence[float]] | np.ndarray
 def install() -> None:
     """Install the composite-label-safe windowed decoding patch."""
 
-    global _INSTALLED, _ORIGINAL_LABEL_VECTOR, _ORIGINAL_CLASS_SCORE_MATRIX, _ORIGINAL_FEATURE_MATRIX
+    global _INSTALLED, _ORIGINAL_LABEL_VECTOR, _ORIGINAL_CLASS_SCORE_MATRIX, _ORIGINAL_AS_CLASS_SCORE_MATRIX, _ORIGINAL_FEATURE_MATRIX
     if _INSTALLED:
         return
 
@@ -217,6 +218,7 @@ def install() -> None:
     original_permutation_score_curves = windowed.permutation_score_curves
     original_permutation_p_from_accuracy = windowed.permutation_p_from_accuracy
     _ORIGINAL_CLASS_SCORE_MATRIX = class_scores.class_score_matrix
+    _ORIGINAL_AS_CLASS_SCORE_MATRIX = class_scores.as_class_score_matrix
 
     def predict_window_model(model_bundle: Any, features: Sequence[Sequence[float]] | np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         transformed_features = windowed.transform_window_features(model_bundle, features)
@@ -270,6 +272,17 @@ def install() -> None:
         finite_permutation_accuracy = permutation_accuracy[np.isfinite(permutation_accuracy)]
         return original_permutation_p_from_accuracy(accuracy, finite_permutation_accuracy)
 
+    def as_class_score_matrix(
+        raw_scores: Sequence[Sequence[float]] | Sequence[float] | np.ndarray,
+        classes: Sequence | np.ndarray,
+        *,
+        n_samples: int,
+    ) -> np.ndarray | None:
+        materialized = _materialize_feature_input(raw_scores)
+        if _features_contain_complex(materialized):
+            raise ValueError("raw_scores must contain real-valued scores, not complex values.")
+        return _ORIGINAL_AS_CLASS_SCORE_MATRIX(materialized, classes, n_samples=n_samples)
+
     def class_score_matrix(
         model: Any,
         features: Sequence[Sequence[float]] | np.ndarray,
@@ -294,10 +307,13 @@ def install() -> None:
     permutation_score_curves.__doc__ = original_permutation_score_curves.__doc__
     permutation_p_from_accuracy.__name__ = original_permutation_p_from_accuracy.__name__
     permutation_p_from_accuracy.__doc__ = original_permutation_p_from_accuracy.__doc__
+    as_class_score_matrix.__name__ = _ORIGINAL_AS_CLASS_SCORE_MATRIX.__name__
+    as_class_score_matrix.__doc__ = _ORIGINAL_AS_CLASS_SCORE_MATRIX.__doc__
     class_score_matrix.__name__ = _ORIGINAL_CLASS_SCORE_MATRIX.__name__
     class_score_matrix.__doc__ = _ORIGINAL_CLASS_SCORE_MATRIX.__doc__
     windowed.predict_window_model = predict_window_model
     windowed.permutation_score_curves = permutation_score_curves
     windowed.permutation_p_from_accuracy = permutation_p_from_accuracy
+    class_scores.as_class_score_matrix = as_class_score_matrix
     class_scores.class_score_matrix = class_score_matrix
     _INSTALLED = True
