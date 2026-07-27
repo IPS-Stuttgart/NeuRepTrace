@@ -78,8 +78,8 @@ def fit_source_clip(
     train_clipped, train_mask = apply_source_clip(source, bounds)
     test_clipped, test_mask = apply_source_clip(test, bounds)
     return SourceClipResult(
-        train_features=train_clipped.astype(np.float32, copy=False),
-        test_features=test_clipped.astype(np.float32, copy=False),
+        train_features=_compact_float32(train_clipped),
+        test_features=_compact_float32(test_clipped),
         bounds=bounds,
         train_clipped_mask=train_mask,
         test_clipped_mask=test_mask,
@@ -120,8 +120,8 @@ def fit_source_clip_then_standardize(
         }
     )
     return SourceClipStandardizeResult(
-        train_features=train_scaled.astype(np.float32, copy=False),
-        test_features=test_scaled.astype(np.float32, copy=False),
+        train_features=_compact_float32(train_scaled),
+        test_features=_compact_float32(test_scaled),
         clip_result=clipped,
         center=center.astype(float, copy=False),
         scale=scale.astype(float, copy=False),
@@ -202,6 +202,18 @@ def _repair_bounds(lower: np.ndarray, upper: np.ndarray) -> tuple[np.ndarray, np
         fixed_upper = fixed_upper.copy()
         fixed_upper[equal] = fixed_lower[equal] + np.finfo(float).eps
     return fixed_lower, fixed_upper
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _metadata(cfg: SourceClipConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int, train_mask: np.ndarray, test_mask: np.ndarray) -> dict[str, Any]:
