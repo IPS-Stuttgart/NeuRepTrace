@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from neureptrace.validate_manifest import validate_manifest, validation_report_frame
 
@@ -12,6 +13,14 @@ class FakeEpochs:
 
     def __len__(self):
         return self._n_epochs
+
+
+def test_validate_manifest_rejects_empty_manifest(tmp_path: Path):
+    manifest = tmp_path / "manifest.csv"
+    pd.DataFrame(columns=["subject", "epochs"]).to_csv(manifest, index=False)
+
+    with pytest.raises(ValueError, match="at least one data row"):
+        validate_manifest(manifest)
 
 
 def test_validate_manifest_reports_missing_files(tmp_path: Path):
