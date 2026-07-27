@@ -64,6 +64,20 @@ def test_train_test_signed_log_metadata_and_iterables() -> None:
     assert result.metadata["signed_log_scale"] == 2.0
 
 
+def test_train_test_signed_log_preserves_subnormal_nonzero_outputs() -> None:
+    minimum = np.nextafter(0.0, 1.0)
+
+    result = transform_train_test_signed_log(
+        train_features=[[minimum]],
+        test_features=[[-minimum]],
+    )
+
+    assert result.train_features[0, 0] == minimum
+    assert result.test_features[0, 0] == -minimum
+    assert result.train_features.dtype == np.float64
+    assert result.test_features.dtype == np.float64
+
+
 def test_train_test_signed_log_revalidates_dataclass_config() -> None:
     with pytest.raises(ValueError, match="scale"):
         transform_train_test_signed_log(
