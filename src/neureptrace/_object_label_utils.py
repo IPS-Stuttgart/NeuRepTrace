@@ -235,6 +235,8 @@ def replace_null_class_predictions(predictions: Sequence | np.ndarray, *, null_l
 def label_accuracy(labels: Sequence | np.ndarray, predictions: Sequence | np.ndarray) -> float:
     """Return mean equality for labels that may be composite objects."""
 
+    if len(labels) != len(predictions):
+        raise ValueError(f"labels and predictions must have the same length: {len(labels)} != {len(predictions)}.")
     if len(labels) == 0:
         return np.nan
     return float(np.mean([values_equal(label, prediction) for label, prediction in zip(labels, predictions, strict=True)]))
