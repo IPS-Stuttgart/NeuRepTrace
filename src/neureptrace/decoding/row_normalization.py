@@ -14,6 +14,10 @@ from typing import Any
 
 import numpy as np
 
+from ._row_normalization_validation import (
+    feature_matrix as _validated_feature_matrix,
+    positive_float as _validated_positive_float,
+)
 from .row_l1 import normalize_rows_l1
 from .row_l2 import normalize_rows_l2
 
@@ -181,30 +185,11 @@ def _coerce_config(config: RowNormalizationConfig | Mapping[str, Any]) -> RowNor
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
-    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
-        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
-    if not np.all(np.isfinite(matrix)):
-        raise ValueError(f"{name} must contain finite values.")
-    return matrix
+    return _validated_feature_matrix(values, name=name)
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, np.ndarray):
-        if value.ndim != 0 or np.issubdtype(value.dtype, np.bool_):
-            raise ValueError(f"{name} must be positive and finite.")
-        value = value.item()
-    if isinstance(value, np.generic):
-        value = value.item()
-    if isinstance(value, (bool, np.bool_, list, tuple, dict, set)):
-        raise ValueError(f"{name} must be positive and finite.")
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive and finite.") from exc
-    if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
-    return parsed
+    return _validated_positive_float(value, name=name)
 
 
 def _bool_value(value: bool | int | str, *, name: str) -> bool:
