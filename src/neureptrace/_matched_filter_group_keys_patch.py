@@ -1,4 +1,4 @@
-"""Preserve exact matched-filter identifiers and template-owned score metadata."""
+"""Preserve exact matched-filter identifiers, class labels, and score metadata."""
 
 from __future__ import annotations
 
@@ -61,6 +61,65 @@ def _filter_by_values(frame: pd.DataFrame, values: dict[str, object]) -> pd.Data
             mask = label_equal_mask(filtered[column].to_numpy(dtype=object), value)
         filtered = filtered.loc[mask]
     return filtered
+
+
+def _class_label_mask(values: pd.Series, label: object) -> pd.Series:
+    """Compare public class labels without lossy string conversion."""
+
+    mask = label_equal_mask(values.to_numpy(dtype=object), label)
+    return pd.Series(mask, index=values.index, dtype=bool)
+
+
+def _score_values(
+    frame: pd.DataFrame,
+    *,
+    stimulus_label: int | str,
+    stimulus_class: str,
+    score_column: str,
+    score_mode: str,
+) -> pd.Series:
+    """Score one class while preserving numeric label equivalence."""
+
+    from neureptrace import matched_filter_detection as matched_filter
+
+    if score_mode == "class_probability":
+        if score_column not in frame.columns:
+            raise ValueError(f"Score column '{score_column}' is missing.")
+        return matched_filter._validated_probability_frame(frame)[score_column]
+    if score_mode != "predicted_class_confidence":
+        raise ValueError("score_mode must be 'class_probability' or 'predicted_class_confidence'.")
+
+    confidence = matched_filter._validated_confidence(frame)
+    if "predicted_label" in frame.columns:
+        matches = _class_label_mask(frame["predicted_label"], stimulus_label)
+    elif "predicted_class" in frame.columns:
+        matches = frame["predicted_class"].astype(str).eq(str(stimulus_class))
+    else:
+        probability_columns = matched_filter._probability_columns(frame)
+        probabilities = matched_filter._validated_probability_frame(frame).to_numpy(dtype=float)
+        predicted_indices = probabilities.argmax(axis=1)
+        probability_labels = np.asarray(
+            [matched_filter._probability_label_from_column(column) for column in probability_columns],
+            dtype=object,
+        )
+        predicted_labels = pd.Series(probability_labels[predicted_indices], index=frame.index, dtype=object)
+        matches = _class_label_mask(predicted_labels, stimulus_label)
+    return confidence.where(matches, 0.0)
+
+
+def _annotation_class_mask(
+    annotations: pd.DataFrame,
+    *,
+    stimulus_label: int | str,
+    stimulus_class: str,
+) -> pd.Series:
+    """Match numeric annotation labels without depending on their pandas dtype."""
+
+    if "stimulus_class" in annotations.columns:
+        return annotations["stimulus_class"].astype(str).eq(str(stimulus_class))
+    if "stimulus_label" in annotations.columns:
+        return _class_label_mask(annotations["stimulus_label"], stimulus_label)
+    raise ValueError("Template annotations must contain stimulus_class or stimulus_label.")
 
 
 def fit_stimulus_event_templates(
@@ -254,7 +313,7 @@ def _sync_public_alias() -> None:
 
 
 def install() -> None:
-    """Install robust matched-filter identifiers and score metadata handling."""
+    """Install robust matched-filter identifiers, class labels, and metadata handling."""
 
     from neureptrace import matched_filter_detection
 
@@ -262,6 +321,8 @@ def install() -> None:
         matched_filter_detection._grouped = _grouped  # noqa: SLF001
         matched_filter_detection._key_values = _key_values  # noqa: SLF001
         matched_filter_detection._filter_by_values = _filter_by_values  # noqa: SLF001
+        matched_filter_detection._score_values = _score_values  # noqa: SLF001
+        matched_filter_detection._annotation_class_mask = _annotation_class_mask  # noqa: SLF001
         matched_filter_detection.fit_stimulus_event_templates = fit_stimulus_event_templates
         matched_filter_detection.score_stimulus_event_templates = score_stimulus_event_templates
         setattr(matched_filter_detection, _PATCH_MARKER, True)
