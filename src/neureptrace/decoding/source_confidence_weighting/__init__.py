@@ -203,6 +203,8 @@ def _contains_complex_value(values: Any) -> bool:
 
     if isinstance(values, (complex, np.complexfloating)):
         return True
+    if isinstance(values, np.generic):
+        return False
     if isinstance(values, np.ndarray):
         if np.issubdtype(values.dtype, np.complexfloating):
             return bool(values.size)
