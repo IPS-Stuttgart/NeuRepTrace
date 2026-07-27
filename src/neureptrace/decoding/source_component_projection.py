@@ -91,7 +91,7 @@ def source_component_config(
     """Normalize public component-projection options."""
 
     return SourceComponentConfig(
-        n_components=n_components,
+        n_components=_component_request(n_components),
         center=_bool_config(center, name="center"),
         scale=_bool_config(scale, name="scale"),
         epsilon=_positive_float(epsilon, name="epsilon"),
@@ -166,7 +166,35 @@ def _coerce_config(config: SourceComponentConfig | Mapping[str, Any]) -> SourceC
     return source_component_config(**dict(config))
 
 
+def _component_request(value: Any) -> int | str | float:
+    """Validate a component request without changing documented string values."""
+
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError("n_components must be a positive integer or 'all'.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError("n_components must be a positive integer or 'all'.")
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"", "all", "full", "inf", "infinity"}:
+            return value
+        candidate: Any = text
+    else:
+        candidate = value
+    try:
+        requested = float(candidate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("n_components must be a positive integer or 'all'.") from exc
+    if not np.isfinite(requested) or requested % 1.0 != 0.0 or requested < 1.0:
+        raise ValueError("n_components must be a positive integer or 'all'.")
+    return value
+
+
 def _effective_components(value: int | str | float, *, max_components: int) -> int:
+    value = _component_request(value)
     if isinstance(value, str):
         text = value.strip().lower()
         if text in {"", "all", "full", "inf", "infinity"}:
@@ -174,8 +202,6 @@ def _effective_components(value: int | str | float, *, max_components: int) -> i
         requested = float(text)
     else:
         requested = float(value)
-    if not np.isfinite(requested) or requested % 1.0 != 0.0 or requested < 1.0:
-        raise ValueError("n_components must be a positive integer or 'all'.")
     return min(int(requested), int(max_components))
 
 
@@ -235,6 +261,14 @@ def _bool_config(value: bool | str | int | float, *, name: str) -> bool:
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be positive and finite.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
