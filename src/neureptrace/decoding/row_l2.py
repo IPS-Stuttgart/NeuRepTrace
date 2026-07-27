@@ -58,8 +58,8 @@ def normalize_train_test_rows_l2(
     train_out, train_norms = normalize_rows_l2(train, epsilon=cfg.epsilon)
     test_out, test_norms = normalize_rows_l2(test, epsilon=cfg.epsilon)
     return RowL2Result(
-        train_features=train_out.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=_compact_float32(train_out),
+        test_features=_compact_float32(test_out),
         train_norms=train_norms.astype(float, copy=False),
         test_norms=test_norms.astype(float, copy=False),
         metadata={
@@ -119,6 +119,18 @@ def _stable_row_l2_norms(matrix: np.ndarray) -> np.ndarray:
     with np.errstate(over="ignore"):
         norms[nonzero] = scales[nonzero] * scaled_norms
     return norms
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _coerce_config(config: RowL2Config | Mapping[str, Any]) -> RowL2Config:
