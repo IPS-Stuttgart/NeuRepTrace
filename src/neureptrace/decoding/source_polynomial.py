@@ -86,9 +86,10 @@ def fit_source_polynomial_transform(
         output_dim=train.shape[1],
         n_interactions=len(reference.interaction_pairs),
     )
+    output_dtype = np.result_type(train.dtype, test_out.dtype)
     return SourcePolynomialResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=train.astype(output_dtype, copy=False),
+        test_features=test_out.astype(output_dtype, copy=False),
         reference=reference,
         metadata=metadata,
     )
@@ -129,7 +130,19 @@ def apply_source_polynomial_transform(features: Sequence[Sequence[float]] | np.n
         blocks.append(interactions)
     if not blocks:
         raise ValueError("Polynomial reference does not contain any output blocks.")
-    return np.hstack(blocks).astype(np.float32, copy=False)
+    return _compact_float32(np.hstack(blocks))
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def source_polynomial_config(
