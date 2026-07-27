@@ -50,6 +50,29 @@ def _contains_boolean_values(values: Any) -> bool:
     return False
 
 
+def _contains_complex_values(values: Any) -> bool:
+    """Return whether an array-like value contains complex-valued scalars."""
+
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return bool(values.size)
+        if values.dtype == object:
+            return any(_contains_complex_values(value) for value in values.ravel(order="C"))
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, (list, tuple)):
+        return any(_contains_complex_values(value) for value in values)
+    if hasattr(values, "__array__"):
+        try:
+            return _contains_complex_values(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
 def _validate_observation_probabilities(
     probabilities: pd.DataFrame,
     issues: list[Any],
@@ -174,6 +197,8 @@ def _validate_decoded_fold_probabilities(probabilities: Any) -> None:
 
     if _contains_boolean_values(probabilities):
         raise ValueError("from_decoded_fold probabilities must be numeric, not boolean.")
+    if _contains_complex_values(probabilities):
+        raise ValueError("from_decoded_fold probabilities must be real-valued, not complex.")
     try:
         values = np.asarray(probabilities, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -201,6 +226,8 @@ def _validate_decoded_fold_integer_values(values: Any, *, name: str) -> None:
 
     if _contains_boolean_values(values):
         raise ValueError(f"from_decoded_fold {name} must be integer-valued, not boolean.")
+    if _contains_complex_values(values):
+        raise ValueError(f"from_decoded_fold {name} must contain real integer-valued values, not complex values.")
     try:
         numeric = np.asarray(values, dtype=float)
     except (TypeError, ValueError, OverflowError) as exc:
