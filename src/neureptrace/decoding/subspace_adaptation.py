@@ -67,9 +67,9 @@ def fit_subspace_adaptation(
     n_components: int | str | None = None,
     regularization: float | str | None = None,
     eigen_ridge: float | str | None = None,
-    standardize: bool | None = None,
-    class_balance_source: bool | None = None,
-    normalize_latent: bool | None = None,
+    standardize: bool | int | str | None = None,
+    class_balance_source: bool | int | str | None = None,
+    normalize_latent: bool | int | str | None = None,
 ) -> SubspaceAdaptationResult:
     """Fit a TCA-style subspace using source and unlabeled target features.
 
@@ -184,22 +184,25 @@ def subspace_adaptation_config(
     n_components: int | str | None = DEFAULT_SUBSPACE_COMPONENTS,
     regularization: float | str = DEFAULT_SUBSPACE_REGULARIZATION,
     eigen_ridge: float | str = DEFAULT_SUBSPACE_EIGEN_RIDGE,
-    standardize: bool = True,
-    class_balance_source: bool = False,
-    normalize_latent: bool = False,
+    standardize: bool | int | str = True,
+    class_balance_source: bool | int | str = False,
+    normalize_latent: bool | int | str = False,
 ) -> SubspaceAdaptationConfig:
     """Normalize public configuration values."""
 
     normalized_method = normalize_subspace_method(method)
-    balance = bool(class_balance_source or normalized_method == "balanced_tca")
+    standardize_value = _bool_value(standardize, name="standardize")
+    balance_requested = _bool_value(class_balance_source, name="class_balance_source")
+    normalize_value = _bool_value(normalize_latent, name="normalize_latent")
+    balance = balance_requested or normalized_method == "balanced_tca"
     return SubspaceAdaptationConfig(
         method=normalized_method,
         n_components=_normalize_components_request(n_components),
         regularization=_nonnegative_float(regularization, name="regularization"),
         eigen_ridge=_positive_float(eigen_ridge, name="eigen_ridge"),
-        standardize=bool(standardize),
+        standardize=standardize_value,
         class_balance_source=balance,
-        normalize_latent=bool(normalize_latent),
+        normalize_latent=normalize_value,
     )
 
 
@@ -357,6 +360,26 @@ def _metadata(
         "subspace_adaptation_latent_mean_gap": float(latent_gap),
         "subspace_adaptation_eigenvalues": "|".join(f"{float(v):.12g}" for v in eigenvalues),
     }
+
+
+def _bool_value(value: bool | int | str, *, name: str) -> bool:
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(f"{name} must be a boolean.")
+        value = value.item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)) and int(value) in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean.")
 
 
 def _positive_float(value: float | str, *, name: str) -> float:
