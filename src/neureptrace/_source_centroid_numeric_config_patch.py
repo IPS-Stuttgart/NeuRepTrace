@@ -11,6 +11,7 @@ import numpy as np
 _ORIGINAL_COERCE_CONFIG = None
 _INSTALLED = False
 _SOURCE_KNN_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_knn_dataclass_init_patch_installed"
+_SOURCE_KNN_DISTANCE_WEIGHT_PATCH_MARKER = "_neureptrace_source_knn_distance_weight_patch_installed"
 _SOURCE_TEMPERATURE_DATACLASS_INIT_PATCH_MARKER = "_neureptrace_source_temperature_dataclass_init_patch_installed"
 
 
@@ -40,24 +41,56 @@ def _install_source_centroid_patch() -> None:
 
 
 def _install_source_knn_patch() -> None:
-    """Normalize direct SourceKNNConfig construction like source_knn_config(...)."""
+    """Normalize source-kNN configuration and stabilize distance weighting."""
 
     from neureptrace.decoding import source_knn as module
 
     original_init = module.SourceKNNConfig.__init__
-    if getattr(original_init, _SOURCE_KNN_DATACLASS_INIT_PATCH_MARKER, False):
+    if not getattr(original_init, _SOURCE_KNN_DATACLASS_INIT_PATCH_MARKER, False):
+
+        @wraps(original_init)
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+            original_init(self, *args, **kwargs)
+            object.__setattr__(self, "k", module._normalize_k_request(self.k))
+            object.__setattr__(self, "weights", module.normalize_weight_mode(self.weights))
+            object.__setattr__(self, "standardize", module._bool_value(self.standardize, name="standardize"))
+            object.__setattr__(self, "epsilon", module._positive_float(self.epsilon, name="epsilon"))
+
+        setattr(__init__, _SOURCE_KNN_DATACLASS_INIT_PATCH_MARKER, True)
+        module.SourceKNNConfig.__init__ = __init__
+
+    original_predict = module.predict_source_knn_probabilities
+    if getattr(original_predict, _SOURCE_KNN_DISTANCE_WEIGHT_PATCH_MARKER, False):
         return
 
-    @wraps(original_init)
-    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
-        original_init(self, *args, **kwargs)
-        object.__setattr__(self, "k", module._normalize_k_request(self.k))
-        object.__setattr__(self, "weights", module.normalize_weight_mode(self.weights))
-        object.__setattr__(self, "standardize", module._bool_value(self.standardize, name="standardize"))
-        object.__setattr__(self, "epsilon", module._positive_float(self.epsilon, name="epsilon"))
+    @wraps(original_predict)
+    def predict_source_knn_probabilities(test_features: Any, reference: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+            probabilities, neighbor_indices, neighbor_distances = original_predict(test_features, reference)
+        if reference.config.weights != "distance" or neighbor_distances.size == 0:
+            return probabilities, neighbor_indices, neighbor_distances
 
-    setattr(__init__, _SOURCE_KNN_DATACLASS_INIT_PATCH_MARKER, True)
-    module.SourceKNNConfig.__init__ = __init__
+        denominators = np.maximum(neighbor_distances, reference.config.epsilon)
+        row_scale = np.min(denominators, axis=1, keepdims=True)
+        stable_weights = row_scale / denominators
+
+        exact_matches = neighbor_distances == 0.0
+        rows_with_exact_matches = np.any(exact_matches, axis=1, keepdims=True)
+        stable_weights = np.where(rows_with_exact_matches, exact_matches, stable_weights)
+
+        corrected = np.zeros_like(probabilities, dtype=float)
+        for row in range(neighbor_indices.shape[0]):
+            for local_col, source_index in enumerate(neighbor_indices[row]):
+                class_col = module._label_index(reference.classes, reference.labels[source_index])
+                if class_col is None:
+                    raise ValueError(f"Source kNN reference contains unknown class label {reference.labels[source_index]!r}.")
+                corrected[row, class_col] += stable_weights[row, local_col]
+        corrected /= np.sum(corrected, axis=1, keepdims=True)
+        return corrected, neighbor_indices, neighbor_distances
+
+    setattr(predict_source_knn_probabilities, _SOURCE_KNN_DISTANCE_WEIGHT_PATCH_MARKER, True)
+    predict_source_knn_probabilities.__wrapped__ = original_predict
+    module.predict_source_knn_probabilities = predict_source_knn_probabilities
 
 
 def _install_source_temperature_patch() -> None:
