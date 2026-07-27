@@ -71,8 +71,8 @@ def fit_source_asinh_transform(
     train = apply_source_asinh_transform(source, transform_map)
     test_out = apply_source_asinh_transform(test, transform_map)
     return SourceAsinhResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=_compact_float32(train),
+        test_features=_compact_float32(test_out),
         transform_map=transform_map,
         metadata=_metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], feature_dim=source.shape[1]),
     )
@@ -135,9 +135,17 @@ def apply_source_asinh_transform(features: Sequence[Sequence[float]] | np.ndarra
     """Apply a source-fitted asinh compression map."""
 
     matrix = _feature_matrix(features, name="features")
-    if matrix.shape[1] != transform_map.scale.shape[0]:
+    scale = np.asarray(transform_map.scale, dtype=float)
+    if scale.ndim != 1 or matrix.shape[1] != scale.shape[0]:
         raise ValueError("features width must match asinh transform width.")
-    return np.arcsinh(matrix / transform_map.scale[None, :])
+    if not np.all(np.isfinite(scale)) or np.any(scale <= 0.0):
+        raise ValueError("asinh transform scale must contain only positive finite values.")
+
+    with np.errstate(divide="ignore"):
+        log_ratio = np.log(np.abs(matrix)) - np.log(scale)[None, :]
+    sqrt_log = 0.5 * np.logaddexp(2.0 * log_ratio, 0.0)
+    magnitude = np.logaddexp(log_ratio, sqrt_log)
+    return np.sign(matrix) * magnitude
 
 
 def _coerce_config(config: SourceAsinhConfig | Mapping[str, Any]) -> SourceAsinhConfig:
@@ -159,6 +167,18 @@ def _feature_scale(source: np.ndarray, *, mode: str, epsilon: float) -> np.ndarr
         q25 = np.percentile(source, 25.0, axis=0)
         return np.maximum((q75 - q25) / 1.349, epsilon)
     raise ValueError(f"Unhandled scale mode {mode!r}.")
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _metadata(cfg: SourceAsinhConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int) -> dict[str, Any]:
