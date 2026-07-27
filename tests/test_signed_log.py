@@ -38,6 +38,20 @@ def test_signed_log_transform_handles_extreme_finite_scale_ratios() -> None:
     assert transformed[0, 6] == 0.0
 
 
+def test_train_test_signed_log_preserves_subnormal_nonzero_outputs() -> None:
+    minimum = np.nextafter(0.0, 1.0)
+
+    result = transform_train_test_signed_log(
+        train_features=[[minimum]],
+        test_features=[[-minimum]],
+    )
+
+    assert result.train_features[0, 0] != 0.0
+    assert result.test_features[0, 0] != 0.0
+    assert np.all(np.isfinite(result.train_features))
+    assert np.all(np.isfinite(result.test_features))
+
+
 def test_signed_log_accepts_one_pass_feature_iterables() -> None:
     values = (row for row in [[-3.0, 0.0, 3.0]])
 
