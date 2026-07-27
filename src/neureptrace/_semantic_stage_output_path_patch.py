@@ -15,6 +15,7 @@ _SEQUENCE_KEY_PATCH_MARKER = "_neureptrace_semantic_stage_sequence_key_patch_ins
 _STATE_NAME_PATCH_MARKER = "_neureptrace_semantic_stage_state_name_patch_installed"
 _TEMPORAL_STATE_PEAK_PATCH_MARKER = "_neureptrace_temporal_state_peak_selection_patch_installed"
 _SUBJECT_FALLBACK_PATCH_MARKER = "_neureptrace_semantic_stage_subject_fallback_patch_installed"
+_NUMERIC_COLUMN_PATCH_MARKER = "_neureptrace_semantic_stage_numeric_column_patch_installed"
 _MISSING_SEQUENCE_COMPONENT = object()
 
 
@@ -52,6 +53,14 @@ def _is_missing_scalar(value: object) -> bool:
     except (TypeError, ValueError):
         return False
     return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
+def _is_boolean_or_complex_scalar(value: object) -> bool:
+    """Return whether numeric coercion would alter an unsupported scalar."""
+
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return _is_boolean_or_complex_scalar(value.item())
+    return isinstance(value, (bool, np.bool_, complex, np.complexfloating))
 
 
 def _state_trace_subject_fallbacks(
@@ -177,6 +186,25 @@ def install() -> None:
     """Patch semantic-stage identities, state labels, output destinations, and summaries."""
 
     semantic_stages = importlib.import_module("neureptrace.semantic_stages")
+
+    original_coerce_finite_numeric_column = semantic_stages._coerce_finite_numeric_column
+    if not getattr(original_coerce_finite_numeric_column, _NUMERIC_COLUMN_PATCH_MARKER, False):
+
+        @wraps(original_coerce_finite_numeric_column)
+        def coerce_finite_numeric_column(
+            frame: pd.DataFrame,
+            column: str,
+            *,
+            source: Path | None = None,
+        ) -> None:
+            values = frame[column]
+            if isinstance(values, pd.Series) and bool(values.map(_is_boolean_or_complex_scalar).any()):
+                prefix = f"{source} " if source is not None else ""
+                raise ValueError(f"{prefix}{column} values must be numeric.")
+            original_coerce_finite_numeric_column(frame, column, source=source)
+
+        setattr(coerce_finite_numeric_column, _NUMERIC_COLUMN_PATCH_MARKER, True)
+        semantic_stages._coerce_finite_numeric_column = coerce_finite_numeric_column
 
     original_read_state_traces = semantic_stages.read_state_traces
     if not getattr(original_read_state_traces, _SUBJECT_FALLBACK_PATCH_MARKER, False):
