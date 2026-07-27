@@ -154,6 +154,8 @@ def validate_manifest(
     missing_columns = sorted(required.difference(manifest.columns))
     if missing_columns:
         raise ValueError(f"Manifest is missing required columns: {missing_columns}")
+    if manifest.empty:
+        raise ValueError("Manifest must contain at least one data row.")
 
     base_dir = manifest_csv.parent
     validations: list[ManifestValidation] = []
@@ -216,7 +218,7 @@ def validation_report_frame(validations: list[ManifestValidation]) -> pd.DataFra
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate files and metadata referenced by a NeuRepTrace benchmark manifest.")
+    parser = argparse.ArgumentParser(description="Validate files and metadata referenced by a benchmark manifest.")
     parser.add_argument("manifest_csv", type=Path)
     parser.add_argument("--label-column")
     parser.add_argument("--group-column")
