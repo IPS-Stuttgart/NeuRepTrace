@@ -8,6 +8,7 @@ from functools import wraps
 import numpy as np
 
 _EPS_ERROR = "eps must be a positive finite value"
+_BOOLEAN_PROBABILITY_ERROR = "probabilities must contain numeric probability values, not boolean flags"
 _COMPLEX_PROBABILITY_ERROR = "probabilities must contain real-valued probability values, not complex values"
 _COMPLEX_LABEL_ERROR = "labels must contain real integer class indices, not complex values"
 
@@ -44,6 +45,31 @@ def _validate_eps(eps: object) -> float:
     if not np.isfinite(numeric) or numeric <= 0.0 or numeric >= 1.0:
         raise ValueError(_EPS_ERROR)
     return numeric
+
+
+def _contains_boolean(value: object) -> bool:
+    """Return whether a materialized metric input contains Boolean values."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.generic):
+        return False
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_boolean(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_boolean(np.asarray(value, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(value, Iterable):
+        return False
+    return any(_contains_boolean(item) for item in value)
 
 
 def _contains_complex(value: object) -> bool:
@@ -128,6 +154,8 @@ def install() -> None:
         validated_atol = _validate_non_negative_finite_float(normalization_atol, "normalization_atol")
         materialized_probabilities = metrics._materialize_one_pass_iterables(probabilities)
         materialized_labels = metrics._materialize_one_pass_iterables(labels) if labels is not None else None
+        if _contains_boolean(materialized_probabilities):
+            raise ValueError(_BOOLEAN_PROBABILITY_ERROR)
         if _contains_complex(materialized_probabilities):
             raise ValueError(_COMPLEX_PROBABILITY_ERROR)
         if materialized_labels is not None and _contains_complex(materialized_labels):
