@@ -12,6 +12,7 @@ import pandas as pd
 
 _REQUIRED_COLUMNS = {"decoder_a_mean", "decoder_b_mean", "better_decoder_by_mean"}
 _COMPLEX_DIFFERENCES_ERROR = "differences must contain only real values."
+_BOOLEAN_DIFFERENCES_ERROR = "differences must not contain boolean values."
 
 
 def _validate_unique_metric_names(metrics: tuple[str, ...] | None) -> tuple[str, ...] | None:
@@ -37,6 +38,37 @@ def _validate_complete_pairing_identifiers(subject_metrics: pd.DataFrame) -> Non
             "Subject metrics must not contain missing decoder or subject identifiers. "
             f"Columns with missing values: {missing_columns}"
         )
+
+
+def _is_boolean_scalar(value: object) -> bool:
+    """Return whether a scalar-like value uses a Boolean dtype."""
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        return value.ndim == 0 and isinstance(value.item(), (bool, np.bool_))
+    return False
+
+
+def _boolean_value_mask(values: pd.Series) -> pd.Series:
+    """Return a row-aligned mask for Boolean scalar values."""
+    return values.map(_is_boolean_scalar).fillna(False).astype(bool)
+
+
+def _validate_non_boolean_metric_values(
+    subject_metrics: pd.DataFrame,
+    metric_names: tuple[str, ...],
+) -> None:
+    """Reject Boolean metrics before float conversion changes them to zero or one."""
+    for metric in metric_names:
+        if metric not in subject_metrics.columns:
+            continue
+        boolean_values = _boolean_value_mask(subject_metrics[metric])
+        if boolean_values.any():
+            bad_rows = boolean_values[boolean_values].index.tolist()[:5]
+            raise ValueError(
+                f"Subject metrics contain boolean values in metric '{metric}' at row(s) {bad_rows}; "
+                "paired statistics require real-valued, non-boolean metrics."
+            )
 
 
 def _is_complex_scalar(value: object) -> bool:
@@ -70,6 +102,16 @@ def _validate_real_metric_values(
                 f"Subject metrics contain complex values in metric '{metric}' at row(s) {bad_rows}; "
                 "paired statistics require real-valued metrics."
             )
+
+
+def _validate_non_boolean_differences(differences: object) -> None:
+    """Reject Boolean sign-flip inputs before numeric coercion."""
+    try:
+        values = np.asarray(differences)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_BOOLEAN_DIFFERENCES_ERROR) from exc
+    if any(_is_boolean_scalar(value) for value in values.flat):
+        raise ValueError(_BOOLEAN_DIFFERENCES_ERROR)
 
 
 def _validate_real_differences(differences: object) -> None:
@@ -116,6 +158,7 @@ def install() -> None:
             n_permutations: int = 10_000,
             random_state: int = 13,
         ) -> float:
+            _validate_non_boolean_differences(differences)
             _validate_real_differences(differences)
             return original_sign_flip_p_value(
                 differences,
@@ -144,6 +187,7 @@ def install() -> None:
                 if metric_names is not None
                 else tuple(metric for metric in paired_stats.METRIC_DIRECTIONS if metric in subject_metrics.columns)
             )
+            _validate_non_boolean_metric_values(subject_metrics, selected_metrics)
             _validate_real_metric_values(subject_metrics, selected_metrics)
             statistics = original_paired_decoder_statistics(
                 subject_metrics,
