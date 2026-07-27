@@ -12,6 +12,7 @@ _PATCH_ATTR = "_neureptrace_rejects_boolean_source_selection_temperature"
 _SOURCE_TEMPERATURE_CLASS_INDEX_PATCH_ATTR = "_neureptrace_source_temperature_sparse_integer_indices_patch"
 _SOURCE_TEMPERATURE_NORMALIZATION_PATCH_ATTR = "_neureptrace_source_temperature_stable_probability_normalization_patch"
 _SOURCE_TEMPERATURE_COMPLEX_SCALAR_PATCH_ATTR = "_neureptrace_source_temperature_complex_scalar_patch"
+_SOURCE_TEMPERATURE_COMPLEX_LABEL_PATCH_ATTR = "_neureptrace_source_temperature_complex_label_patch"
 
 
 def _contains_complex(value: object) -> bool:
@@ -106,6 +107,27 @@ def _install_source_temperature_complex_scalar_patch() -> None:
     source_temperature._positive_float = _positive_float
 
 
+def _install_source_temperature_complex_label_patch() -> None:
+    """Reject complex class-index labels before NumPy discards imaginary parts."""
+
+    from neureptrace.decoding import source_temperature
+
+    original = source_temperature._label_index_vector
+    if getattr(original, _SOURCE_TEMPERATURE_COMPLEX_LABEL_PATCH_ATTR, False):
+        return
+
+    @wraps(original)
+    def _label_index_vector(labels, *, n_rows: int, n_classes: int) -> np.ndarray:
+        materialized = source_temperature._materialize_one_pass_iterable(labels)
+        if _contains_complex(materialized):
+            raise ValueError("labels must contain finite integer class indices.")
+        return original(materialized, n_rows=n_rows, n_classes=n_classes)
+
+    setattr(_label_index_vector, _SOURCE_TEMPERATURE_COMPLEX_LABEL_PATCH_ATTR, True)
+    _label_index_vector.__wrapped__ = original
+    source_temperature._label_index_vector = _label_index_vector
+
+
 def _install_source_temperature_probability_normalization_patch() -> None:
     """Normalize finite source-temperature score rows without overflowing."""
 
@@ -166,4 +188,5 @@ def install() -> None:
 
     _install_source_temperature_class_index_patch()
     _install_source_temperature_complex_scalar_patch()
+    _install_source_temperature_complex_label_patch()
     _install_source_temperature_probability_normalization_patch()
