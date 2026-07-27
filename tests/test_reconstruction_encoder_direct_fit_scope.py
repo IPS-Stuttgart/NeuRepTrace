@@ -44,6 +44,38 @@ def test_direct_reconstruction_config_normalizes_source_only_alias():
     assert result.metadata["representation_fit_rows"] == source.shape[0]
 
 
+def test_direct_reconstruction_config_normalizes_standardize_false_string():
+    source, target = _source_target_features()
+
+    result = fit_reconstruction_latent_space(
+        train_features=source,
+        test_features=target,
+        config=ReconstructionEncoderConfig(
+            n_components=1,
+            fit_scope=RECONSTRUCTION_SOURCE_ONLY,
+            standardize="false",
+        ),
+    )
+
+    assert result.metadata["representation_standardized"] is False
+    np.testing.assert_array_equal(result.encoder.scale_, np.ones(source.shape[1]))
+
+
+def test_direct_reconstruction_config_rejects_invalid_standardize_value():
+    source, target = _source_target_features()
+
+    with pytest.raises(ValueError, match="standardize must be a boolean value"):
+        fit_reconstruction_latent_space(
+            train_features=source,
+            test_features=target,
+            config=ReconstructionEncoderConfig(
+                n_components=1,
+                fit_scope=RECONSTRUCTION_SOURCE_ONLY,
+                standardize="sometimes",
+            ),
+        )
+
+
 def test_direct_reconstruction_config_rejects_unknown_fit_scope():
     source, target = _source_target_features()
 
