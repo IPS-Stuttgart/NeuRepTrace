@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import replace
 from functools import wraps
 from typing import Any
 
@@ -12,6 +11,7 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_reconstruction_encoder_config_patch_installed"
 _HIDDEN_UNITS_PATCH_MARKER = "_neureptrace_reconstruction_hidden_units_patch_installed"
 _FIT_SCOPE_PATCH_MARKER = "_neureptrace_reconstruction_fit_scope_patch_installed"
+_CLASSIFIER_CONFIG_PATCH_MARKER = "_neureptrace_reconstruction_classifier_config_patch_installed"
 
 
 def _normalize_bool(value: Any, *, name: str) -> bool:
@@ -29,6 +29,32 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
         if normalized in {"0", "false", "f", "no", "n", "off"}:
             return False
     raise ValueError(f"{name} must be a boolean value.")
+
+
+def _normalize_config(reconstruction_encoder: Any, config: Any) -> Any:
+    """Run direct dataclass configs through the public normalization factory."""
+
+    return reconstruction_encoder.reconstruction_encoder_config(
+        n_components=config.n_components,
+        fit_scope=config.fit_scope,
+        standardize=config.standardize,
+        encoder_kind=config.encoder_kind,
+        hidden_units=config.hidden_units,
+        mask_fraction=config.mask_fraction,
+        noise_std=config.noise_std,
+        max_epochs=config.max_epochs,
+        batch_size=config.batch_size,
+        learning_rate=config.learning_rate,
+        weight_decay=config.weight_decay,
+        validation_fraction=config.validation_fraction,
+        patience=config.patience,
+        dropout=config.dropout,
+        classifier_max_iter=config.classifier_max_iter,
+        classifier_C=config.classifier_C,
+        classifier_class_weight=config.classifier_class_weight,
+        random_state=config.random_state,
+        device=config.device,
+    )
 
 
 def _install_hidden_units_normalizer(reconstruction_encoder: Any) -> None:
@@ -59,16 +85,26 @@ def _install_fit_scope_normalizer(reconstruction_encoder: Any) -> None:
     @wraps(original)
     def fit_reconstruction_latent_space(*, config=None, **kwargs: Any):
         if config is not None:
-            config = replace(
-                config,
-                fit_scope=reconstruction_encoder.normalize_reconstruction_fit_scope(config.fit_scope),
-                encoder_kind=reconstruction_encoder.normalize_reconstruction_encoder_kind(config.encoder_kind),
-                standardize=_normalize_bool(config.standardize, name="standardize"),
-            )
+            config = _normalize_config(reconstruction_encoder, config)
         return original(config=config, **kwargs)
 
     setattr(fit_reconstruction_latent_space, _FIT_SCOPE_PATCH_MARKER, True)
     reconstruction_encoder.fit_reconstruction_latent_space = fit_reconstruction_latent_space
+
+
+def _install_classifier_config_normalizer(reconstruction_encoder: Any) -> None:
+    original = reconstruction_encoder.fit_reconstruction_latent_classifier
+    if getattr(original, _CLASSIFIER_CONFIG_PATCH_MARKER, False):
+        return
+
+    @wraps(original)
+    def fit_reconstruction_latent_classifier(*, config=None, **kwargs: Any):
+        if config is not None:
+            config = _normalize_config(reconstruction_encoder, config)
+        return original(config=config, **kwargs)
+
+    setattr(fit_reconstruction_latent_classifier, _CLASSIFIER_CONFIG_PATCH_MARKER, True)
+    reconstruction_encoder.fit_reconstruction_latent_classifier = fit_reconstruction_latent_classifier
 
 
 def install() -> None:
@@ -80,6 +116,7 @@ def install() -> None:
 
     _install_hidden_units_normalizer(reconstruction_encoder)
     _install_fit_scope_normalizer(reconstruction_encoder)
+    _install_classifier_config_normalizer(reconstruction_encoder)
     original = reconstruction_encoder.reconstruction_encoder_config
 
     @wraps(original)

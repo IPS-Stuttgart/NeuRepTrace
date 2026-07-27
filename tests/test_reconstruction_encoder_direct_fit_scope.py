@@ -6,6 +6,7 @@ from neureptrace.decoding.reconstruction_encoder import (
     RECONSTRUCTION_SOURCE_ONLY,
     RECONSTRUCTION_STRICT_SOURCE_ONLY_PROTOCOL,
     ReconstructionEncoderConfig,
+    fit_reconstruction_latent_classifier,
     fit_reconstruction_latent_space,
 )
 
@@ -76,6 +77,27 @@ def test_direct_reconstruction_config_normalizes_standardize_false_string():
 
     assert result.metadata["representation_standardized"] is False
     np.testing.assert_array_equal(result.encoder.scale_, np.ones(source.shape[1]))
+
+
+def test_direct_reconstruction_classifier_config_normalizes_numeric_fields():
+    source, target = _source_target_features()
+
+    result = fit_reconstruction_latent_classifier(
+        train_features=source,
+        train_labels=np.array([0, 1, 0]),
+        test_features=target,
+        config=ReconstructionEncoderConfig(
+            n_components=1,
+            fit_scope=RECONSTRUCTION_SOURCE_ONLY,
+            classifier_max_iter="25",
+            classifier_C="2.5",
+            random_state="7",
+        ),
+    )
+
+    assert result.classifier.max_iter == 25
+    assert result.classifier.C == pytest.approx(2.5)
+    assert result.classifier.random_state == 7
 
 
 def test_direct_reconstruction_config_rejects_invalid_standardize_value():
