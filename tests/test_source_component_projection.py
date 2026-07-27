@@ -88,6 +88,48 @@ def test_source_component_config_validation() -> None:
         source_component_config(center="maybe")
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        np.bool_(True),
+        np.asarray(True),
+        np.asarray([True]),
+    ],
+)
+def test_source_component_config_rejects_boolean_component_counts(value: object) -> None:
+    with pytest.raises(ValueError, match="n_components"):
+        source_component_config(n_components=value)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        np.bool_(True),
+        np.asarray(True),
+        np.asarray([True]),
+    ],
+)
+def test_source_component_config_rejects_boolean_epsilon(value: object) -> None:
+    with pytest.raises(ValueError, match="epsilon"):
+        source_component_config(epsilon=value)  # type: ignore[arg-type]
+
+
+def test_source_component_config_accepts_numpy_numeric_scalars() -> None:
+    config = source_component_config(n_components=np.int64(1), epsilon=np.asarray(1e-6))
+
+    assert config.n_components == 1
+    assert config.epsilon == pytest.approx(1e-6)
+
+
+def test_source_component_dataclass_rejects_boolean_component_count_when_used() -> None:
+    config = SourceComponentConfig(n_components=True)
+
+    with pytest.raises(ValueError, match="n_components"):
+        fit_source_component_projector([[0.0, 1.0], [1.0, 0.0]], config=config)
+
+
 def test_source_component_config_instance_is_normalized() -> None:
     source = np.asarray([[0.0, 0.0], [1.0, 100.0], [2.0, 200.0]], dtype=float)
     test = np.asarray([[1.5, 150.0]], dtype=float)
