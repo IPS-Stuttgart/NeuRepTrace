@@ -62,6 +62,7 @@ def _install_fit_scope_normalizer(reconstruction_encoder: Any) -> None:
             config = replace(
                 config,
                 fit_scope=reconstruction_encoder.normalize_reconstruction_fit_scope(config.fit_scope),
+                encoder_kind=reconstruction_encoder.normalize_reconstruction_encoder_kind(config.encoder_kind),
                 standardize=_normalize_bool(config.standardize, name="standardize"),
             )
         return original(config=config, **kwargs)
