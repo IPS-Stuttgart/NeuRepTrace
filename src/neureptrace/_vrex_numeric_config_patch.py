@@ -36,8 +36,27 @@ def _is_boolean_scalar_like(value: Any) -> bool:
     return isinstance(item, (bool, np.bool_))
 
 
+def _is_complex_scalar_like(value: Any) -> bool:
+    """Return true for scalar or single-item array complex config values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if not isinstance(value, np.ndarray):
+        return False
+    try:
+        array = np.asarray(value, dtype=object)
+    except (TypeError, ValueError):
+        return False
+    if array.size != 1:
+        return False
+    item = array.reshape(-1)[0]
+    if isinstance(item, np.generic):
+        item = item.item()
+    return isinstance(item, (complex, np.complexfloating))
+
+
 def _positive_int(value: Any, *, name: str) -> int:
-    if _is_boolean_scalar_like(value):
+    if _is_boolean_scalar_like(value) or _is_complex_scalar_like(value):
         raise ValueError(f"{name} must be a positive integer.")
     try:
         parsed = float(value)
@@ -49,7 +68,7 @@ def _positive_int(value: Any, *, name: str) -> int:
 
 
 def _positive_float(value: Any, *, name: str) -> float:
-    if _is_boolean_scalar_like(value):
+    if _is_boolean_scalar_like(value) or _is_complex_scalar_like(value):
         raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
@@ -61,7 +80,7 @@ def _positive_float(value: Any, *, name: str) -> float:
 
 
 def _nonnegative_float(value: Any, *, name: str) -> float:
-    if _is_boolean_scalar_like(value):
+    if _is_boolean_scalar_like(value) or _is_complex_scalar_like(value):
         raise ValueError(f"{name} must be finite and non-negative.")
     try:
         parsed = float(value)
@@ -111,12 +130,37 @@ def _contains_boolean_feature(value: Any) -> bool:
     return False
 
 
+def _contains_complex_feature(value: Any) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_feature(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), (complex, np.complexfloating))
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_complex_feature(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, Iterable):
+        return any(_contains_complex_feature(item) for item in value)
+    return False
+
+
 def _linear_vrex_feature_matrix(values: Any, *, name: str) -> np.ndarray:
     """Convert array-like or one-pass feature rows into a finite 2-D matrix."""
 
     raw_values = _materialize_feature_values(values)
     if _contains_boolean_feature(raw_values):
         raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    if _contains_complex_feature(raw_values):
+        raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
 
     try:
         matrix = np.asarray(raw_values, dtype=float)
