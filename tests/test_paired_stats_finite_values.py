@@ -17,6 +17,18 @@ def test_sign_flip_p_value_rejects_infinite_difference() -> None:
         sign_flip_p_value(np.array([0.1, float("inf")], dtype=float))
 
 
+@pytest.mark.parametrize(
+    "differences",
+    [
+        np.array([0.1 + 0.2j, -0.2 + 0.0j]),
+        np.array([np.asarray(0.1 + 0.2j), np.asarray(-0.2 + 0.0j)], dtype=object),
+    ],
+)
+def test_sign_flip_p_value_rejects_complex_differences(differences: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="differences must contain only real values"):
+        sign_flip_p_value(differences)
+
+
 def test_sign_flip_p_value_rejects_boolean_random_state() -> None:
     with pytest.raises(ValueError, match="random_state must be a non-negative integer seed"):
         sign_flip_p_value(np.array([0.1, -0.2, 0.3], dtype=float), n_permutations=2, random_state=True)
@@ -48,4 +60,32 @@ def test_paired_decoder_statistics_rejects_non_finite_metric_values() -> None:
     )
 
     with pytest.raises(ValueError, match="finite"):
+        paired_decoder_statistics(subject_metrics, metrics=("effect_accuracy",))
+
+
+@pytest.mark.parametrize(
+    "metric_values",
+    [
+        np.array([0.8 + 0.1j, 0.7 + 0.0j, 0.6 + 0.0j, 0.5 + 0.0j]),
+        np.array(
+            [
+                np.asarray(0.8 + 0.1j),
+                np.asarray(0.7 + 0.0j),
+                np.asarray(0.6 + 0.0j),
+                np.asarray(0.5 + 0.0j),
+            ],
+            dtype=object,
+        ),
+    ],
+)
+def test_paired_decoder_statistics_rejects_complex_metric_values(metric_values: np.ndarray) -> None:
+    subject_metrics = pd.DataFrame(
+        {
+            "decoder": ["a", "a", "b", "b"],
+            "subject": ["s1", "s2", "s1", "s2"],
+            "effect_accuracy": metric_values,
+        }
+    )
+
+    with pytest.raises(ValueError, match="complex values in metric 'effect_accuracy'"):
         paired_decoder_statistics(subject_metrics, metrics=("effect_accuracy",))
