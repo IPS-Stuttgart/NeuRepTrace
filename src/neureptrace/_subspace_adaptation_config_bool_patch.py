@@ -46,6 +46,18 @@ def _normalize_bool(value: Any, *, name: str) -> bool:
     raise _bool_error(name)
 
 
+def _normalize_components(value: Any) -> Any:
+    """Reject boolean component counts before Python coerces them to zero or one."""
+
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError("n_components must be a positive integer or 'all'.")
+        value = value.item()
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("n_components must be a positive integer or 'all'.")
+    return value
+
+
 def install() -> None:
     """Install strict boolean normalization for subspace-adaptation config values."""
 
@@ -67,7 +79,7 @@ def install() -> None:
     ):
         return original_config(
             method=method,
-            n_components=n_components,
+            n_components=_normalize_components(n_components),
             regularization=regularization,
             eigen_ridge=eigen_ridge,
             standardize=_normalize_bool(standardize, name="standardize"),
