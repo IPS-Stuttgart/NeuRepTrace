@@ -95,3 +95,31 @@ def test_source_range_selector_rejects_boolean_test_features() -> None:
 def test_select_source_range_features_rejects_boolean_ranges() -> None:
     with pytest.raises(ValueError, match="ranges.*non-boolean"):
         select_source_range_features([False, True])
+
+
+@pytest.mark.parametrize(
+    "bad_source_features",
+    [
+        [[1.0 + 2.0j, 0.0], [2.0, 1.0]],
+        np.asarray([[1.0 + 2.0j, 0.0], [2.0, 1.0]], dtype=np.complex128),
+        np.asarray([[1.0 + 2.0j, 0.0], [2.0, 1.0]], dtype=object),
+        (iter(row) for row in ([1.0 + 2.0j, 0.0], [2.0, 1.0])),
+    ],
+)
+def test_source_range_selector_rejects_complex_source_features(bad_source_features) -> None:
+    with pytest.raises(ValueError, match="source_features.*complex"):
+        fit_source_range_selector(source_features=bad_source_features, test_features=[[0.0, 1.0]])
+
+
+def test_source_range_selector_rejects_complex_test_features() -> None:
+    complex_test = np.asarray([[1.0 + 2.0j, 0.0]], dtype=np.complex128)
+
+    with pytest.raises(ValueError, match="test_features.*complex"):
+        fit_source_range_selector(source_features=[[0.0, 1.0], [1.0, 2.0]], test_features=complex_test)
+
+
+def test_select_source_range_features_rejects_complex_ranges() -> None:
+    complex_ranges = np.asarray([1.0 + 2.0j, 3.0], dtype=np.complex128)
+
+    with pytest.raises(ValueError, match="ranges.*complex"):
+        select_source_range_features(complex_ranges)
