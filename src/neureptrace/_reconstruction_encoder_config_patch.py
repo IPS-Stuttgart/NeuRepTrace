@@ -59,9 +59,11 @@ def _install_fit_scope_normalizer(reconstruction_encoder: Any) -> None:
     @wraps(original)
     def fit_reconstruction_latent_space(*, config=None, **kwargs: Any):
         if config is not None:
-            normalized_scope = reconstruction_encoder.normalize_reconstruction_fit_scope(config.fit_scope)
-            if normalized_scope != config.fit_scope:
-                config = replace(config, fit_scope=normalized_scope)
+            config = replace(
+                config,
+                fit_scope=reconstruction_encoder.normalize_reconstruction_fit_scope(config.fit_scope),
+                standardize=_normalize_bool(config.standardize, name="standardize"),
+            )
         return original(config=config, **kwargs)
 
     setattr(fit_reconstruction_latent_space, _FIT_SCOPE_PATCH_MARKER, True)
