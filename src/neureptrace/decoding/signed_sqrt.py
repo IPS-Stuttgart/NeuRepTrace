@@ -111,6 +111,8 @@ def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str
         object_values = None
     if object_values is not None and any(isinstance(value, (bool, np.bool_)) for value in object_values.flat):
         raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    if object_values is not None and any(isinstance(value, (complex, np.complexfloating)) for value in object_values.flat):
+        raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
     try:
         matrix = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
