@@ -175,6 +175,8 @@ def _materialize_one_pass_iterables(value: object) -> object:
         return _materialize_one_pass_iterables(value.tolist())
     if isinstance(value, (str, bytes)):
         return value
+    if hasattr(value, "__array__"):
+        return value
     if not isinstance(value, Iterable):
         return value
     return [_materialize_one_pass_iterables(item) for item in value]
@@ -193,6 +195,11 @@ def _contains_boolean_value(value: object) -> bool:
         return False
     if isinstance(value, np.generic):
         return isinstance(value.item(), (bool, np.bool_))
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_boolean_value(np.asarray(value, dtype=object))
+        except (TypeError, ValueError):
+            return False
     if isinstance(value, Iterable):
         return any(_contains_boolean_value(item) for item in value)
     return False
@@ -213,6 +220,11 @@ def _contains_complex_value(value: object) -> bool:
         return False
     if isinstance(value, np.generic):
         return isinstance(value.item(), complex)
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_complex_value(np.asarray(value, dtype=object))
+        except (TypeError, ValueError):
+            return False
     if isinstance(value, Iterable):
         return any(_contains_complex_value(item) for item in value)
     return False
