@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from neureptrace._object_label_utils import values_equal
 from neureptrace.temporal_model import _normalize_probabilities
 
 DEFAULT_THRESHOLD_WINDOW = (-0.35, -0.05)
@@ -53,7 +54,7 @@ def _filter_by_values(frame: pd.DataFrame, values: dict[str, object]) -> pd.Data
     filtered = frame
     for column, value in values.items():
         if column in filtered.columns:
-            filtered = filtered.loc[filtered[column].astype(str) == str(value)]
+            filtered = filtered.loc[filtered[column].map(lambda candidate: values_equal(candidate, value))]
     return filtered
 
 
@@ -239,7 +240,7 @@ def fit_stimulus_event_templates(
                     matching_streams = [
                         (stream_key, stream_frame)
                         for stream_key, stream_frame in stream_groups.items()
-                        if all(str(_key_values(stream_key, streams)[column]) == str(value) for column, value in annotation_stream_values.items())
+                        if all(values_equal(_key_values(stream_key, streams)[column], value) for column, value in annotation_stream_values.items())
                     ]
                 for _, stream_frame in matching_streams:
                     table = _time_score_table(stream_frame, scores.loc[stream_frame.index])
