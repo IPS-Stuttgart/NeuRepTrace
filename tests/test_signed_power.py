@@ -32,6 +32,15 @@ def test_signed_power_power_changes_output() -> None:
     assert np.allclose(transformed, np.asarray([[4.0, -4.0]]))
 
 
+@pytest.mark.parametrize(
+    "value",
+    [np.finfo(float).max, np.nextafter(0.0, 1.0)],
+)
+def test_signed_power_rejects_unrepresentable_results(value: float) -> None:
+    with pytest.raises(ValueError, match="not representable"):
+        signed_power_transform([[value]], power=2.0)
+
+
 def test_transform_train_test_signed_power_metadata() -> None:
     result = transform_train_test_signed_power(
         train_features=[[4.0, 9.0]],
