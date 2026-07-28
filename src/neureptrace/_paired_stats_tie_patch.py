@@ -126,6 +126,28 @@ def _validate_real_differences(differences: object) -> None:
         raise ValueError(_COMPLEX_DIFFERENCES_ERROR)
 
 
+def _overflow_safe_sign_flip_differences(differences: object) -> object:
+    """Scale finite one-dimensional effects only when their reductions can overflow."""
+
+    try:
+        values = np.asarray(differences)
+    except (TypeError, ValueError):
+        return differences
+    if values.ndim != 1 or values.size == 0 or values.dtype.kind in {"S", "U"}:
+        return values
+    try:
+        numeric = values.astype(float, copy=False)
+    except (TypeError, ValueError, OverflowError):
+        return values
+    if not np.all(np.isfinite(numeric)):
+        return numeric
+
+    max_abs = float(np.max(np.abs(numeric)))
+    if max_abs == 0.0 or max_abs <= np.finfo(float).max / numeric.size:
+        return numeric
+    return numeric / max_abs
+
+
 def _mark_exact_mean_ties(statistics: pd.DataFrame) -> pd.DataFrame:
     """Return statistics with exact mean ties labeled explicitly."""
     if not _REQUIRED_COLUMNS.issubset(statistics.columns):
@@ -160,8 +182,9 @@ def install() -> None:
         ) -> float:
             _validate_non_boolean_differences(differences)
             _validate_real_differences(differences)
+            safe_differences = _overflow_safe_sign_flip_differences(differences)
             return original_sign_flip_p_value(
-                differences,
+                safe_differences,
                 n_permutations=n_permutations,
                 random_state=random_state,
             )
