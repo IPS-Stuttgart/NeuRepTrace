@@ -106,10 +106,35 @@ def _contains_boolean_values(value) -> bool:
     return False
 
 
+def _contains_complex_values(value) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return value.size > 0
+        if value.dtype == object:
+            return any(_contains_complex_values(item) for item in value.flat)
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), complex)
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_complex_values(np.asarray(value, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, Iterable):
+        return any(_contains_complex_values(item) for item in value)
+    return False
+
+
 def _feature_matrix(values, *, name: str):
     materialized = _materialize_one_pass_iterables(values)
     if _contains_boolean_values(materialized):
         raise ValueError(f"{name} must contain numeric, non-boolean values.")
+    if _contains_complex_values(materialized):
+        raise ValueError(f"{name} must contain real-valued values, not complex values.")
     matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
@@ -122,4 +147,6 @@ def _bound_vector(values, *, name: str):
     materialized = _materialize_one_pass_iterables(values)
     if _contains_boolean_values(materialized):
         raise ValueError(f"{name} must contain numeric, non-boolean values.")
+    if _contains_complex_values(materialized):
+        raise ValueError(f"{name} must contain real-valued values, not complex values.")
     return np.asarray(materialized, dtype=float).reshape(-1)
