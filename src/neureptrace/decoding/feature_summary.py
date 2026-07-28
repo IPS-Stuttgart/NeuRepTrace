@@ -80,6 +80,29 @@ def _rescale_finite(values: np.ndarray, scales: np.ndarray) -> np.ndarray:
     return output
 
 
+def _contains_boolean(value: object) -> bool:
+    """Return whether a feature container contains Boolean-valued entries."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_boolean(item) for item in value.ravel(order="C"))
+        return False
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_boolean(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Sequence):
+        return any(_contains_boolean(item) for item in value)
+    return False
+
+
 def _contains_complex(value: object) -> bool:
     """Return whether a feature container contains complex-valued entries."""
 
@@ -104,6 +127,8 @@ def _contains_complex(value: object) -> bool:
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+    if _contains_boolean(values):
+        raise ValueError("features must contain numeric values, not boolean flags.")
     if _contains_complex(values):
         raise ValueError("features must contain real-valued values.")
     matrix = np.asarray(values, dtype=float)
