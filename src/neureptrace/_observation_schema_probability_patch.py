@@ -286,3 +286,80 @@ def install() -> None:
     setattr(observation_schema, _PATCH_MARKER, True)
     _install_probability_validation_guard()
     _install_decoded_fold_probability_guard()
+
+
+__all__ = ["install"]
+
+
+_BASE_INSTALL = install
+_ONSET_PROBABILITY_PATCH_MARKER = "_neureptrace_onset_probability_domain_patch"
+_PROBABILITY_BOOLEAN_ERROR = "Probability observations must be numeric, not boolean."
+_PROBABILITY_COMPLEX_ERROR = "Probability observations must be real-valued, not complex."
+
+
+def _validate_probability_domain(values: Any) -> None:
+    """Reject values that NumPy would silently coerce into real probabilities."""
+
+    if _contains_boolean_values(values):
+        raise ValueError(_PROBABILITY_BOOLEAN_ERROR)
+    if _contains_complex_values(values):
+        raise ValueError(_PROBABILITY_COMPLEX_ERROR)
+
+
+def _install_detection_probability_guards(
+    module: Any,
+    *,
+    score_name: str,
+    prediction_name: str,
+) -> None:
+    """Guard one onset-style module before probability columns are cast to float."""
+
+    original_score_values = getattr(module, score_name)
+    if not getattr(original_score_values, _ONSET_PROBABILITY_PATCH_MARKER, False):
+
+        @wraps(original_score_values)
+        def score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
+            if score_column not in frame.columns:
+                columns = module.probability_columns(frame)
+                _validate_probability_domain(frame[columns].to_numpy())
+            return original_score_values(frame, score_column)
+
+        setattr(score_values, _ONSET_PROBABILITY_PATCH_MARKER, True)
+        setattr(module, score_name, score_values)
+
+    original_ensure_prediction_columns = getattr(module, prediction_name)
+    if not getattr(original_ensure_prediction_columns, _ONSET_PROBABILITY_PATCH_MARKER, False):
+
+        @wraps(original_ensure_prediction_columns)
+        def ensure_prediction_columns(frame: pd.DataFrame) -> pd.DataFrame:
+            if not ({"predicted_label", "predicted_class"} <= set(frame.columns)):
+                columns = module.probability_columns(frame)
+                _validate_probability_domain(frame[columns].to_numpy())
+            return original_ensure_prediction_columns(frame)
+
+        setattr(ensure_prediction_columns, _ONSET_PROBABILITY_PATCH_MARKER, True)
+        setattr(module, prediction_name, ensure_prediction_columns)
+
+
+def _install_onset_probability_guards() -> None:
+    """Prevent onset helpers from discarding imaginary parts or Boolean types."""
+
+    from neureptrace import _onset_utils, onset_detection
+
+    _install_detection_probability_guards(
+        _onset_utils,
+        score_name="score_values",
+        prediction_name="ensure_prediction_columns",
+    )
+    _install_detection_probability_guards(
+        onset_detection,
+        score_name="_score_values",
+        prediction_name="_ensure_prediction_columns",
+    )
+
+
+def install() -> None:
+    """Install schema and onset probability-domain guards."""
+
+    _BASE_INSTALL()
+    _install_onset_probability_guards()
