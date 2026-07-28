@@ -1,8 +1,9 @@
-"""Normalize SourceRFF none-like random-state config values."""
+"""Normalize SourceRFF configuration and reject complex feature inputs."""
 
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterable
 from functools import wraps
 from typing import Any
 
@@ -11,6 +12,7 @@ import numpy as np
 _INSTALLED = False
 _CONFIG_PATCH_MARKER = "_neureptrace_source_rff_none_random_state_config_patch_installed"
 _INIT_PATCH_MARKER = "_neureptrace_source_rff_none_random_state_init_patch_installed"
+_FEATURE_MATRIX_PATCH_MARKER = "_neureptrace_source_rff_complex_feature_validation_patch_installed"
 _NONE_RANDOM_STATE_TOKENS = {"", "none", "null"}
 
 
@@ -55,6 +57,67 @@ def _normalize_optional_random_state(source_rff: Any, value: Any, *, name: str =
     return source_rff._nonnegative_int(scalar_value, name=name)
 
 
+def _materialize_reusable_feature_input(value: object) -> object:
+    """Materialize nested one-pass feature iterables before validation."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = np.empty(value.shape, dtype=object)
+        for index in np.ndindex(value.shape):
+            materialized[index] = _materialize_reusable_feature_input(value[index])
+        return materialized
+    if isinstance(value, (str, bytes)):
+        return value
+    if hasattr(value, "__array__"):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_reusable_feature_input(item) for item in value]
+
+
+def _contains_complex_value(value: object) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), complex)
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_complex_value(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, Iterable):
+        return any(_contains_complex_value(item) for item in value)
+    return False
+
+
+def _patch_feature_matrix(source_rff: Any) -> None:
+    implementation = getattr(source_rff, "_impl", source_rff)
+    original_feature_matrix = implementation._feature_matrix
+    if getattr(original_feature_matrix, _FEATURE_MATRIX_PATCH_MARKER, False):
+        source_rff._feature_matrix = original_feature_matrix
+        return
+
+    @wraps(original_feature_matrix)
+    def _feature_matrix(values: object, *, name: str) -> np.ndarray:
+        materialized = _materialize_reusable_feature_input(values)
+        if _contains_complex_value(materialized):
+            raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
+        return original_feature_matrix(materialized, name=name)
+
+    setattr(_feature_matrix, _FEATURE_MATRIX_PATCH_MARKER, True)
+    implementation._feature_matrix = _feature_matrix
+    source_rff._feature_matrix = _feature_matrix
+
+
 def _patch_config_init(source_rff: Any) -> None:
     original_init = source_rff.SourceRFFConfig.__init__
     if getattr(original_init, _INIT_PATCH_MARKER, False):
@@ -80,13 +143,14 @@ def _patch_config_init(source_rff: Any) -> None:
 
 
 def install() -> None:
-    """Install SourceRFF random-state config normalization."""
+    """Install SourceRFF input and random-state normalization."""
 
     global _INSTALLED
     if _INSTALLED:
         return
 
     source_rff = importlib.import_module("neureptrace.decoding.source_rff")
+    _patch_feature_matrix(source_rff)
     _patch_config_init(source_rff)
 
     original_config = source_rff.source_rff_config
