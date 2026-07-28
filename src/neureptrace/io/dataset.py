@@ -46,6 +46,8 @@ class EpochDataset:
             raise ValueError("EpochDataset.data must have shape n_epochs × n_channels × n_times.")
         if self.times.ndim != 1:
             raise ValueError("EpochDataset.times must be one-dimensional.")
+        if not np.all(np.isfinite(self.data)):
+            raise ValueError("EpochDataset.data must contain only finite values.")
         if not np.all(np.isfinite(self.times)):
             raise ValueError("EpochDataset.times must contain only finite values.")
         duplicate_channel = _find_duplicate_string(self.channel_names)
