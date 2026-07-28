@@ -63,8 +63,10 @@ def _materialize_reusable_feature_input(value: object) -> object:
     if isinstance(value, np.ndarray):
         if value.dtype != object:
             return value
-        materialized = [_materialize_reusable_feature_input(item) for item in value.ravel(order="C")]
-        return np.asarray(materialized, dtype=object).reshape(value.shape)
+        materialized = np.empty(value.shape, dtype=object)
+        for index in np.ndindex(value.shape):
+            materialized[index] = _materialize_reusable_feature_input(value[index])
+        return materialized
     if isinstance(value, (str, bytes)):
         return value
     if hasattr(value, "__array__"):
