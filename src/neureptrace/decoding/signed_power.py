@@ -78,11 +78,17 @@ def signed_power_config(*, power: float | str = DEFAULT_POWER) -> SignedPowerCon
 
 
 def signed_power_transform(features: Sequence[Sequence[float]] | np.ndarray, *, power: float = DEFAULT_POWER) -> np.ndarray:
-    """Return sign(x) * abs(x)**power for every feature value."""
+    """Return sign(x) * abs(x)**power for every representable feature value."""
 
     matrix = _feature_matrix(features, name="features")
     exponent = _positive_float(power, name="power")
-    return np.sign(matrix) * np.power(np.abs(matrix), exponent)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        magnitude = np.power(np.abs(matrix), exponent)
+    if not np.all(np.isfinite(magnitude)) or np.any((matrix != 0.0) & (magnitude == 0.0)):
+        raise ValueError(
+            "signed power transform is not representable for the supplied feature values and power."
+        )
+    return np.sign(matrix) * magnitude
 
 
 def _compact_float32(values: np.ndarray) -> np.ndarray:
