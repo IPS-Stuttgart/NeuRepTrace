@@ -120,6 +120,8 @@ def _prior_vector(values: Sequence[float] | np.ndarray | None, *, n_classes: int
     if values is None:
         prior = np.full(n_classes, 1.0 / n_classes, dtype=float)
     else:
+        if _contains_complex_values(values):
+            raise ValueError("source_prior must contain real-valued probabilities, not complex values.")
         prior = np.asarray(values, dtype=float).reshape(-1)
         if prior.shape[0] != n_classes:
             raise ValueError(f"source_prior must contain one value per probability column: {prior.shape[0]} != {n_classes}.")
@@ -127,6 +129,8 @@ def _prior_vector(values: Sequence[float] | np.ndarray | None, *, n_classes: int
 
 
 def _probability_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str, epsilon: float) -> np.ndarray:
+    if _contains_complex_values(values):
+        raise ValueError(f"{name} must contain real-valued probabilities, not complex values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 2:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix with at least two columns.")
@@ -146,7 +150,34 @@ def _normalize_probability_rows(values: np.ndarray, *, epsilon: float) -> np.nda
     return scaled / row_sums
 
 
+def _contains_complex_values(value: object) -> bool:
+    """Return whether an array-like input contains Python or NumPy complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_values(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, np.generic):
+        return isinstance(value.item(), complex)
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_complex_values(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, Sequence):
+        return any(_contains_complex_values(item) for item in value)
+    return False
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
+    if _contains_complex_values(value):
+        raise ValueError(f"{name} must be positive and finite.")
     parsed = float(value)
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be positive and finite.")
