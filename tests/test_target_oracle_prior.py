@@ -96,3 +96,36 @@ def test_oracle_target_prior_handles_extreme_finite_probability_rows() -> None:
     np.testing.assert_allclose(result.probabilities.sum(axis=1), [1.0])
     assert result.probabilities[0, 0] > 0.999999
     assert result.probabilities[0, 1] > 0.0
+
+
+@pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
+def test_oracle_target_prior_rejects_complex_probability_rows(dtype) -> None:
+    probabilities = np.asarray([[0.5 + 0.25j, 0.5 - 0.25j]], dtype=dtype)
+
+    with pytest.raises(ValueError, match="probabilities.*real-valued.*complex"):
+        apply_oracle_target_prior(probabilities, ["a"], classes=["a", "b"])
+
+
+@pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
+def test_oracle_target_prior_rejects_complex_source_prior(dtype) -> None:
+    source_prior = np.asarray([0.5 + 0.25j, 0.5 - 0.25j], dtype=dtype)
+
+    with pytest.raises(ValueError, match="source_prior.*real-valued.*complex"):
+        apply_oracle_target_prior(
+            [[0.5, 0.5]],
+            ["a"],
+            classes=["a", "b"],
+            source_prior=source_prior,
+        )
+
+
+@pytest.mark.parametrize(
+    "epsilon",
+    [np.complex64(1e-12 + 0.25j), np.complex128(1e-12 + 0.25j)],
+)
+def test_oracle_target_prior_rejects_complex_epsilon(epsilon) -> None:
+    with pytest.raises(ValueError, match="epsilon must be positive and finite"):
+        apply_oracle_target_prior([[0.5, 0.5]], ["a"], classes=["a", "b"], epsilon=epsilon)
+
+    with pytest.raises(ValueError, match="epsilon must be positive and finite"):
+        oracle_target_prior(["a"], classes=["a", "b"], epsilon=epsilon)
