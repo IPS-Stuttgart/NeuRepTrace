@@ -15,6 +15,7 @@ _BALANCING_CONFIG_MARKER = "_source_class_balancing_config_normalized"
 _THRESHOLD_OUTPUT_MARKER = "_source_threshold_output_precision_patched"
 _SOURCE_KNN_COMPLEX_MARKER = "_source_knn_complex_feature_validation_patched"
 _SOURCE_KNN_ZERO_DISTANCE_MARKER = "_source_knn_zero_distance_weighting_patched"
+_SOURCE_ECDF_COMPLEX_EPSILON_MARKER = "_source_ecdf_complex_epsilon_validation_patched"
 _ALIAS_VALUES = {"all", "full"}
 
 
@@ -97,6 +98,33 @@ def _compact_float32(values: np.ndarray) -> np.ndarray:
     if np.any((array != 0.0) & (compact == 0.0)):
         return array
     return compact
+
+
+def _install_source_ecdf_complex_epsilon_patch(
+    module: Any,
+    *,
+    helper_name: str,
+) -> None:
+    """Reject complex ECDF epsilon controls before float coercion."""
+
+    current = getattr(module, helper_name)
+    if getattr(current, _SOURCE_ECDF_COMPLEX_EPSILON_MARKER, False):
+        return
+
+    @wraps(current)
+    def _real_open_unit_float(value: Any, *, name: str) -> float:
+        scalar = _scalar_or_original(value)
+        if isinstance(scalar, complex):
+            raise ValueError(f"{name} must be in (0, 0.5).")
+        return current(scalar, name=name)
+
+    setattr(
+        _real_open_unit_float,
+        _SOURCE_ECDF_COMPLEX_EPSILON_MARKER,
+        True,
+    )
+    _real_open_unit_float.__wrapped__ = current
+    setattr(module, helper_name, _real_open_unit_float)
 
 
 def _install_source_threshold_output_patch(source_threshold: Any) -> None:
@@ -208,6 +236,8 @@ def install() -> None:
 
     from neureptrace.decoding import (
         source_balancing,
+        source_ecdf,
+        source_ecdf_uniform,
         source_knn,
         source_pca,
         source_polynomial,
@@ -260,6 +290,14 @@ def install() -> None:
 
     _install_source_knn_zero_distance_patch(source_knn)
     _install_source_threshold_output_patch(source_threshold)
+    _install_source_ecdf_complex_epsilon_patch(
+        source_ecdf,
+        helper_name="_unit_interval_open_float",
+    )
+    _install_source_ecdf_complex_epsilon_patch(
+        source_ecdf_uniform,
+        helper_name="_open_unit_float",
+    )
 
     original_component_request = source_pca._component_request
     if getattr(original_component_request, _PATCH_ATTR, False):
