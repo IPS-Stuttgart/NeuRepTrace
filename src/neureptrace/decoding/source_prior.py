@@ -366,7 +366,7 @@ def _object_mask(values: Sequence[Any] | np.ndarray, target: Any) -> np.ndarray:
 
 def _positive_float(value: float | str, *, name: str) -> float:
     message = f"{name} must be positive and finite."
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(message)
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
@@ -383,7 +383,7 @@ def _positive_float(value: float | str, *, name: str) -> float:
 
 def _nonnegative_float(value: float | str, *, name: str) -> float:
     message = f"{name} must be non-negative and finite."
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(message)
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
