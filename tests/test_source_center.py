@@ -58,6 +58,28 @@ def test_source_center_transform_rejects_boolean_test_features() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "features",
+    [
+        np.asarray([[1.0 + 2.0j, 3.0], [4.0, 5.0]], dtype=complex),
+        np.asarray([[1.0 + 2.0j, 3.0], [4.0, 5.0]], dtype=object),
+        [[1.0 + 2.0j, 3.0], [4.0, 5.0]],
+        ((value for value in row) for row in [[1.0 + 2.0j, 3.0], [4.0, 5.0]]),
+    ],
+)
+def test_source_center_rejects_complex_source_features(features) -> None:
+    with pytest.raises(ValueError, match="source_features.*complex values"):
+        fit_source_center_map(features)
+
+
+def test_source_center_transform_rejects_complex_test_features() -> None:
+    with pytest.raises(ValueError, match="test_features.*complex values"):
+        fit_source_center_transform(
+            source_features=[[0.0, 1.0], [1.0, 0.0]],
+            test_features=np.asarray([[1.0 + 2.0j, 0.0]], dtype=complex),
+        )
+
+
 def test_source_center_accepts_one_pass_numeric_iterables() -> None:
     source = ((float(i + offset) for offset in (0, 2)) for i in range(3))
     test = ((float(i + offset) for offset in (1, 3)) for i in range(2))
