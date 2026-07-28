@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
+from functools import wraps
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ _READ_PATCH_ATTR = "_neureptrace_results_observation_condition_attrs"
 _EXPLICIT_COLUMNS_ATTR = "_neureptrace_explicit_observation_columns"
 _POSITIVE_INTEGER_ARRAYLIKE_ATTR = "_neureptrace_results_rejects_arraylike_positive_integer_controls"
 _FINITE_SCALAR_ARRAYLIKE_ATTR = "_neureptrace_results_rejects_arraylike_finite_numeric_scalar_controls"
+_COMPLEX_METRIC_TABLE_ATTR = "_neureptrace_results_rejects_complex_metric_table_values"
 _EXACT_OBSERVATION_LABEL_ATTR = "_neureptrace_results_exact_probability_observation_labels"
 _MAX_EXACT_FLOAT_INTEGER = 2**53
 
@@ -34,6 +36,27 @@ def _is_boolean_scalar(value: object) -> bool:
 def _boolean_rows(values: pd.Series) -> list[object]:
     mask = values.map(_is_boolean_scalar).fillna(False).astype(bool)
     return mask[mask].index.tolist()[:5]
+
+
+def _is_complex_scalar(value: object) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return isinstance(value.item(), (complex, np.complexfloating))
+    return False
+
+
+def _complex_rows(values: pd.Series) -> list[object]:
+    mask = values.map(_is_complex_scalar).fillna(False).astype(bool)
+    return mask[mask].index.tolist()[:5]
+
+
+def _column_names(columns: Sequence[str] | str | None) -> tuple[str, ...]:
+    if columns is None:
+        return ()
+    if isinstance(columns, str):
+        return (columns,)
+    return tuple(dict.fromkeys(columns))
 
 
 def _exact_integer_label(value: object, *, name: str) -> int:
@@ -229,6 +252,68 @@ def _install_scalar_arraylike_guards() -> None:
         tables._finite_numeric_scalar = _finite_numeric_scalar_checked
 
 
+def _install_complex_metric_table_guards() -> None:
+    results = importlib.import_module("neureptrace.results")
+    tables = importlib.import_module("neureptrace.results.tables")
+    original = tables.summarize_metric_table
+    if getattr(original, _COMPLEX_METRIC_TABLE_ATTR, False):
+        results.summarize_metric_table = original
+        return
+
+    @wraps(original)
+    def summarize_metric_table_checked(
+        frame: pd.DataFrame,
+        value_column: str,
+        group_columns: Sequence[str] | str | None,
+        participant_column: str | None = None,
+        chance_column: str | None = None,
+        scale: float = 1.0,
+        *,
+        percent_scale: float | None = None,
+        percent_prefix: str = "percent",
+        chance_percent_column: str | None = None,
+        chance_class_columns: Sequence[str] | str | None = None,
+        permutation_p_column: str | None = None,
+        p_value_thresholds: Sequence[float] = (0.05, 0.01),
+        zero_singleton_dispersion: bool = False,
+    ) -> pd.DataFrame:
+        columns = (
+            value_column,
+            chance_column,
+            permutation_p_column,
+            *_column_names(chance_class_columns),
+        )
+        for column in columns:
+            if column is None or column not in frame.columns:
+                continue
+            rows = _complex_rows(frame[column])
+            if rows:
+                raise ValueError(
+                    f"Metric table column '{column}' must contain real-valued numeric values; "
+                    f"complex value row(s): {rows}."
+                )
+        return original(
+            frame,
+            value_column,
+            group_columns,
+            participant_column=participant_column,
+            chance_column=chance_column,
+            scale=scale,
+            percent_scale=percent_scale,
+            percent_prefix=percent_prefix,
+            chance_percent_column=chance_percent_column,
+            chance_class_columns=chance_class_columns,
+            permutation_p_column=permutation_p_column,
+            p_value_thresholds=p_value_thresholds,
+            zero_singleton_dispersion=zero_singleton_dispersion,
+        )
+
+    setattr(summarize_metric_table_checked, _COMPLEX_METRIC_TABLE_ATTR, True)
+    summarize_metric_table_checked.__wrapped__ = original
+    tables.summarize_metric_table = summarize_metric_table_checked
+    results.summarize_metric_table = summarize_metric_table_checked
+
+
 def _install_exact_probability_observation_labels() -> None:
     results = importlib.import_module("neureptrace.results")
     original = results._probability_ece_by_group
@@ -244,6 +329,7 @@ def install() -> None:
     """Install singleton-aware condition alignment and result scalar guards."""
 
     _install_scalar_arraylike_guards()
+    _install_complex_metric_table_guards()
     _install_exact_probability_observation_labels()
 
     results = importlib.import_module("neureptrace.results")
