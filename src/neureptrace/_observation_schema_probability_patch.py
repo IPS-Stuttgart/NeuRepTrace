@@ -292,7 +292,6 @@ __all__ = ["install"]
 
 
 _BASE_INSTALL = install
-_TEMPORAL_PROBABILITY_PATCH_MARKER = "_neureptrace_temporal_probability_domain_patch"
 _ONSET_PROBABILITY_PATCH_MARKER = "_neureptrace_onset_probability_domain_patch"
 _PROBABILITY_BOOLEAN_ERROR = "Probability observations must be numeric, not boolean."
 _PROBABILITY_COMPLEX_ERROR = "Probability observations must be real-valued, not complex."
@@ -307,59 +306,60 @@ def _validate_probability_domain(values: Any) -> None:
         raise ValueError(_PROBABILITY_COMPLEX_ERROR)
 
 
-def _install_temporal_probability_guard() -> None:
-    """Guard the central probability validator before its float conversion."""
+def _install_detection_probability_guards(
+    module: Any,
+    *,
+    score_name: str,
+    prediction_name: str,
+) -> None:
+    """Guard one onset-style module before probability columns are cast to float."""
 
-    from neureptrace import temporal_model
-
-    original = temporal_model._validate_probability_matrix
-    if getattr(original, _TEMPORAL_PROBABILITY_PATCH_MARKER, False):
-        return
-
-    @wraps(original)
-    def validate_probability_matrix(probabilities: np.ndarray) -> np.ndarray:
-        _validate_probability_domain(probabilities)
-        return original(probabilities)
-
-    setattr(validate_probability_matrix, _TEMPORAL_PROBABILITY_PATCH_MARKER, True)
-    temporal_model._validate_probability_matrix = validate_probability_matrix
-
-
-def _install_onset_probability_guards() -> None:
-    """Prevent onset helpers from discarding imaginary parts during conversion."""
-
-    from neureptrace import _onset_utils
-
-    original_score_values = _onset_utils.score_values
+    original_score_values = getattr(module, score_name)
     if not getattr(original_score_values, _ONSET_PROBABILITY_PATCH_MARKER, False):
 
         @wraps(original_score_values)
         def score_values(frame: pd.DataFrame, score_column: str) -> pd.Series:
             if score_column not in frame.columns:
-                columns = _onset_utils.probability_columns(frame)
+                columns = module.probability_columns(frame)
                 _validate_probability_domain(frame[columns].to_numpy())
             return original_score_values(frame, score_column)
 
         setattr(score_values, _ONSET_PROBABILITY_PATCH_MARKER, True)
-        _onset_utils.score_values = score_values
+        setattr(module, score_name, score_values)
 
-    original_ensure_prediction_columns = _onset_utils.ensure_prediction_columns
+    original_ensure_prediction_columns = getattr(module, prediction_name)
     if not getattr(original_ensure_prediction_columns, _ONSET_PROBABILITY_PATCH_MARKER, False):
 
         @wraps(original_ensure_prediction_columns)
         def ensure_prediction_columns(frame: pd.DataFrame) -> pd.DataFrame:
             if not ({"predicted_label", "predicted_class"} <= set(frame.columns)):
-                columns = _onset_utils.probability_columns(frame)
+                columns = module.probability_columns(frame)
                 _validate_probability_domain(frame[columns].to_numpy())
             return original_ensure_prediction_columns(frame)
 
         setattr(ensure_prediction_columns, _ONSET_PROBABILITY_PATCH_MARKER, True)
-        _onset_utils.ensure_prediction_columns = ensure_prediction_columns
+        setattr(module, prediction_name, ensure_prediction_columns)
+
+
+def _install_onset_probability_guards() -> None:
+    """Prevent onset helpers from discarding imaginary parts or Boolean types."""
+
+    from neureptrace import _onset_utils, onset_detection
+
+    _install_detection_probability_guards(
+        _onset_utils,
+        score_name="score_values",
+        prediction_name="ensure_prediction_columns",
+    )
+    _install_detection_probability_guards(
+        onset_detection,
+        score_name="_score_values",
+        prediction_name="_ensure_prediction_columns",
+    )
 
 
 def install() -> None:
-    """Install schema, temporal-model, and onset probability-domain guards."""
+    """Install schema and onset probability-domain guards."""
 
     _BASE_INSTALL()
-    _install_temporal_probability_guard()
     _install_onset_probability_guards()
