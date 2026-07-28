@@ -100,8 +100,10 @@ def _contains_complex_value(value: object) -> bool:
 
 
 def _patch_feature_matrix(source_rff: Any) -> None:
-    original_feature_matrix = source_rff._feature_matrix
+    implementation = getattr(source_rff, "_impl", source_rff)
+    original_feature_matrix = implementation._feature_matrix
     if getattr(original_feature_matrix, _FEATURE_MATRIX_PATCH_MARKER, False):
+        source_rff._feature_matrix = original_feature_matrix
         return
 
     @wraps(original_feature_matrix)
@@ -112,6 +114,7 @@ def _patch_feature_matrix(source_rff: Any) -> None:
         return original_feature_matrix(materialized, name=name)
 
     setattr(_feature_matrix, _FEATURE_MATRIX_PATCH_MARKER, True)
+    implementation._feature_matrix = _feature_matrix
     source_rff._feature_matrix = _feature_matrix
 
 
