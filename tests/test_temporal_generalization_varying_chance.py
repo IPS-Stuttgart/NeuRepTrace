@@ -6,6 +6,7 @@ from neureptrace.decoding.temporal_generalization import summarize_temporal_gene
 
 
 def test_summary_compares_each_accuracy_with_its_own_chance_level() -> None:
+    # Different class availability gives each participant a distinct chance baseline.
     rows = pd.DataFrame(
         {
             "participant": ["S01", "S02"],
