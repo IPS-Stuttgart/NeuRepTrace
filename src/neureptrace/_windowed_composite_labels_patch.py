@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -64,6 +65,14 @@ def _sequence_atomic_vector(values: Sequence | np.ndarray) -> np.ndarray | None:
     if not items or not any(_is_composite_label(value) for value in items):
         return None
     return _object_vector(_as_atomic_label(value) for value in items)
+
+
+def _materialize_label_input(values: Sequence | np.ndarray) -> Sequence | np.ndarray:
+    """Keep reusable labels intact and materialize one-pass iterables once."""
+
+    if isinstance(values, (np.ndarray, str, bytes, Sequence)):
+        return values
+    return list(values)
 
 
 def _label_vector(labels: Sequence | np.ndarray, *, expected_length: int, name: str) -> np.ndarray:
@@ -206,7 +215,7 @@ def install() -> None:
     if _INSTALLED:
         return
 
-    from neureptrace.decoding import class_scores, windowed
+    from neureptrace.decoding import class_scores, transfer, windowed
 
     _ORIGINAL_LABEL_VECTOR = windowed._label_vector
     _ORIGINAL_FEATURE_MATRIX = windowed._feature_matrix
@@ -215,8 +224,10 @@ def install() -> None:
     windowed._balanced_accuracy = _balanced_accuracy
 
     original_predict_window_model = windowed.predict_window_model
+    original_score_windowed_decoding = windowed.score_windowed_decoding
     original_permutation_score_curves = windowed.permutation_score_curves
     original_permutation_p_from_accuracy = windowed.permutation_p_from_accuracy
+    original_cross_validate_feature_decoding = transfer.cross_validate_feature_decoding
     _ORIGINAL_CLASS_SCORE_MATRIX = class_scores.class_score_matrix
     _ORIGINAL_AS_CLASS_SCORE_MATRIX = class_scores.as_class_score_matrix
 
@@ -229,6 +240,37 @@ def install() -> None:
         )
         scores = windowed.prediction_scores(model_bundle.model, transformed_features)
         return predictions, scores
+
+    def score_windowed_decoding(
+        train_features: Sequence[Sequence[float]] | np.ndarray,
+        train_labels: Sequence | np.ndarray,
+        validation_features: Sequence[Sequence[float]] | np.ndarray,
+        validation_labels: Sequence | np.ndarray,
+        *,
+        fit_model: windowed.FitModel,
+        components_pca: int | float | str | None = float("inf"),
+        train_window: tuple[float, float] | None = None,
+        n_permutations: int = 0,
+        permutation_rng: np.random.Generator | None = None,
+    ) -> windowed.WindowedDecodingResult:
+        materialized_validation_labels = _materialize_label_input(validation_labels)
+        result = original_score_windowed_decoding(
+            train_features,
+            train_labels,
+            validation_features,
+            materialized_validation_labels,
+            fit_model=fit_model,
+            components_pca=components_pca,
+            train_window=train_window,
+            n_permutations=n_permutations,
+            permutation_rng=permutation_rng,
+        )
+        normalized_labels = _label_vector(
+            materialized_validation_labels,
+            expected_length=result.predictions.shape[0],
+            name="validation_labels",
+        )
+        return replace(result, accuracy=label_accuracy(normalized_labels, result.predictions))
 
     def permutation_score_curves(
         train_features: Sequence[Sequence[float]] | np.ndarray,
@@ -272,6 +314,41 @@ def install() -> None:
         finite_permutation_accuracy = permutation_accuracy[np.isfinite(permutation_accuracy)]
         return original_permutation_p_from_accuracy(accuracy, finite_permutation_accuracy)
 
+    def cross_validate_feature_decoding(
+        stimulus_features: Sequence[Sequence[float]] | np.ndarray,
+        labels: Sequence | np.ndarray,
+        *,
+        null_features: Sequence[Sequence[float]] | np.ndarray | None = None,
+        n_folds: int = 10,
+        classifier: str = "multiclass-svm",
+        classifier_param: Any = 0.5,
+        components_pca: int | float = float("inf"),
+        random_state: int | None = None,
+        fit_model: Any = None,
+        null_label: int | float = 0,
+        generative_augmentation: Any = None,
+    ) -> Any:
+        materialized_labels = _materialize_label_input(labels)
+        result = original_cross_validate_feature_decoding(
+            stimulus_features,
+            materialized_labels,
+            null_features=null_features,
+            n_folds=n_folds,
+            classifier=classifier,
+            classifier_param=classifier_param,
+            components_pca=components_pca,
+            random_state=random_state,
+            fit_model=fit_model,
+            null_label=null_label,
+            generative_augmentation=generative_augmentation,
+        )
+        normalized_labels = transfer._label_vector(
+            materialized_labels,
+            expected_length=result.predictions.shape[0],
+            name="labels",
+        )
+        return replace(result, accuracy=label_accuracy(normalized_labels, result.predictions))
+
     def as_class_score_matrix(
         raw_scores: Sequence[Sequence[float]] | Sequence[float] | np.ndarray,
         classes: Sequence | np.ndarray,
@@ -303,17 +380,25 @@ def install() -> None:
 
     predict_window_model.__name__ = original_predict_window_model.__name__
     predict_window_model.__doc__ = original_predict_window_model.__doc__
+    score_windowed_decoding.__name__ = original_score_windowed_decoding.__name__
+    score_windowed_decoding.__doc__ = original_score_windowed_decoding.__doc__
     permutation_score_curves.__name__ = original_permutation_score_curves.__name__
     permutation_score_curves.__doc__ = original_permutation_score_curves.__doc__
     permutation_p_from_accuracy.__name__ = original_permutation_p_from_accuracy.__name__
     permutation_p_from_accuracy.__doc__ = original_permutation_p_from_accuracy.__doc__
+    cross_validate_feature_decoding.__name__ = original_cross_validate_feature_decoding.__name__
+    cross_validate_feature_decoding.__doc__ = original_cross_validate_feature_decoding.__doc__
     as_class_score_matrix.__name__ = _ORIGINAL_AS_CLASS_SCORE_MATRIX.__name__
     as_class_score_matrix.__doc__ = _ORIGINAL_AS_CLASS_SCORE_MATRIX.__doc__
     class_score_matrix.__name__ = _ORIGINAL_CLASS_SCORE_MATRIX.__name__
     class_score_matrix.__doc__ = _ORIGINAL_CLASS_SCORE_MATRIX.__doc__
     windowed.predict_window_model = predict_window_model
+    windowed.score_windowed_decoding = score_windowed_decoding
     windowed.permutation_score_curves = permutation_score_curves
     windowed.permutation_p_from_accuracy = permutation_p_from_accuracy
+    transfer.predict_window_model = predict_window_model
+    transfer.score_windowed_decoding = score_windowed_decoding
+    transfer.cross_validate_feature_decoding = cross_validate_feature_decoding
     class_scores.as_class_score_matrix = as_class_score_matrix
     class_scores.class_score_matrix = class_score_matrix
     _INSTALLED = True
