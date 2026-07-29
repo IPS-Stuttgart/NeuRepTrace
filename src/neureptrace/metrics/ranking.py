@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence, Set
 from numbers import Integral
 
 import numpy as np
@@ -30,7 +30,7 @@ def rank_class_scores(
     if classes is not None and _has_incompatible_array_label_shape(y_true, classes):
         raise ValueError("y_true must be one-dimensional.")
     y_true = _label_vector(y_true, name="y_true")
-    if isinstance(top_k, (str, bytes, bytearray, memoryview)):
+    if isinstance(top_k, (str, bytes, bytearray, memoryview, Mapping, Set)):
         raise ValueError("top_k must be a sequence of integers.")
     try:
         top_k_values = tuple(top_k)
