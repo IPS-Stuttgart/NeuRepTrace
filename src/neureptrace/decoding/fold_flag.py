@@ -66,6 +66,8 @@ def absolute_value_features(features):
         raise ValueError("features must be a two-dimensional numeric matrix") from exc
     if matrix.ndim != 2:
         raise ValueError("features must be two-dimensional")
+    if matrix.shape[0] < 1 or matrix.shape[1] < 1:
+        raise ValueError("features must be a non-empty two-dimensional matrix")
     if not np.all(np.isfinite(matrix)):
         raise ValueError("features must be finite")
 
