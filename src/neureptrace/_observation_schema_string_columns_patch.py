@@ -1,10 +1,15 @@
-"""Patch observation-schema column arguments and temporal sequence keys.
+"""Patch observation-schema column arguments, row positions, and temporal sequence keys.
 
 The public observation validator accepts optional grouping and stream-column
 arguments. Because strings are sequences, passing a single column name such as
 ``group_columns="subject"`` used to be interpreted as the characters
 ``"s"``, ``"u"``, ... and reported as missing columns. Normalize these API
 arguments before the validator checks them.
+
+Validation diagnostics expose integer row numbers, but pandas indexes may use
+arbitrary labels. Reset an internal copy to a zero-based RangeIndex so invalid
+rows are reported by position instead of crashing while coercing string or
+other non-integer index labels.
 
 The temporal profile should also use the same provenance-aware sequence identity
 as the temporal model reader. Reused ``sequence_id``/``sample_index`` values in
@@ -131,7 +136,7 @@ def _reject_missing_temporal_identifiers(frame: Any) -> None:
 
 
 def install() -> None:
-    """Patch observation validation string handling and temporal keys."""
+    """Patch observation validation string handling, row positions, and temporal keys."""
 
     observation_schema = importlib.import_module("neureptrace.observation_schema")
 
@@ -144,11 +149,20 @@ def install() -> None:
                 kwargs["group_columns"] = _normalize_column_argument(kwargs["group_columns"])
             if "stream_columns" in kwargs:
                 kwargs["stream_columns"] = _normalize_column_argument(kwargs["stream_columns"])
-            report = original_validate(*args, **kwargs)
+
             frame = args[0] if args else kwargs.get("frame")
-            if frame is None:
+            validation_frame = None
+            if frame is not None:
+                validation_frame = frame.reset_index(drop=True)
+                if args:
+                    args = (validation_frame, *args[1:])
+                else:
+                    kwargs["frame"] = validation_frame
+
+            report = original_validate(*args, **kwargs)
+            if validation_frame is None:
                 return report
-            return _append_temporal_identifier_issues(report, frame, observation_schema)
+            return _append_temporal_identifier_issues(report, validation_frame, observation_schema)
 
         setattr(validate_probability_observations, _PATCH_MARKER, True)
         observation_schema.validate_probability_observations = validate_probability_observations
