@@ -261,6 +261,8 @@ def _object_vector(items: Sequence[object]) -> np.ndarray:
 def _validate_class_column_name(value: object) -> str:
     if not isinstance(value, str) or value == "":
         raise ValueError("class_column must be a non-empty string.")
+    if value == "score":
+        raise ValueError("class_column='score' conflicts with generated rank*_score columns.")
     return value
 
 
