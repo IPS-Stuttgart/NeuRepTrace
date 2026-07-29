@@ -107,7 +107,8 @@ def summarize_temporal_generalization_matrix(
     rows: list[dict[str, object]] = []
     for keys, group in grouped:
         key_values = keys if isinstance(keys, tuple) else (keys,)
-        values = pd.to_numeric(group[accuracy_column], errors="coerce").dropna().to_numpy(dtype=float)
+        numeric_accuracy = pd.to_numeric(group[accuracy_column], errors="coerce")
+        values = numeric_accuracy.dropna().to_numpy(dtype=float)
         mean_value = float(np.mean(values)) if len(values) else np.nan
         median_value = float(np.median(values)) if len(values) else np.nan
         std_value = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
@@ -131,11 +132,13 @@ def summarize_temporal_generalization_matrix(
             }
         )
         if chance_column is not None and chance_column in group.columns:
-            chance_values = pd.to_numeric(group[chance_column], errors="coerce").dropna()
-            chance = float(chance_values.iloc[0]) if not chance_values.empty else np.nan
+            numeric_chance = pd.to_numeric(group[chance_column], errors="coerce")
+            chance_values = numeric_chance.dropna().to_numpy(dtype=float)
+            chance = float(np.mean(chance_values)) if len(chance_values) else np.nan
+            paired = pd.DataFrame({"accuracy": numeric_accuracy, "chance": numeric_chance}).dropna()
             row["chance_accuracy"] = chance
             row["chance_percent"] = 100.0 * chance if np.isfinite(chance) else np.nan
-            row["above_chance_count"] = int((values > chance).sum()) if np.isfinite(chance) else 0
+            row["above_chance_count"] = int((paired["accuracy"] > paired["chance"]).sum())
         if "is_diagonal" in group.columns:
             diagonal_values = set(group["is_diagonal"].astype(bool))
             row["is_diagonal"] = bool(diagonal_values == {True})
