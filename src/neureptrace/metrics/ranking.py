@@ -30,7 +30,7 @@ def rank_class_scores(
     if classes is not None and _has_incompatible_array_label_shape(y_true, classes):
         raise ValueError("y_true must be one-dimensional.")
     y_true = _label_vector(y_true, name="y_true")
-    if isinstance(top_k, (str, bytes, bytearray)):
+    if isinstance(top_k, (str, bytes, bytearray, memoryview)):
         raise ValueError("top_k must be a sequence of integers.")
     top_k = tuple(_validate_integer(k, name="top_k", minimum=1) for k in top_k)
     row_top_k = _validate_integer(row_top_k, name="row_top_k", minimum=0)

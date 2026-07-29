@@ -5,7 +5,7 @@ import pytest
 from neureptrace.metrics import rank_class_scores
 
 
-@pytest.mark.parametrize("top_k", ["23", b"23", bytearray(b"23")])
+@pytest.mark.parametrize("top_k", ["23", b"23", bytearray(b"23"), memoryview(b"23")])
 def test_rank_class_scores_rejects_string_like_top_k_sequences(top_k: object) -> None:
     with pytest.raises(ValueError, match="top_k must be a sequence of integers"):
         rank_class_scores(
