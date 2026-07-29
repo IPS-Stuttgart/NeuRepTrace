@@ -9,6 +9,7 @@ import numpy as np
 
 _EPS_ERROR = "eps must be a positive finite value"
 _BOOLEAN_PROBABILITY_ERROR = "probabilities must contain numeric probability values, not boolean flags"
+_NON_NUMERIC_PROBABILITY_ERROR = "probabilities must contain numeric probability values"
 _COMPLEX_PROBABILITY_ERROR = "probabilities must contain real-valued probability values, not complex values"
 _COMPLEX_LABEL_ERROR = "labels must contain real integer class indices, not complex values"
 
@@ -130,6 +131,19 @@ def install() -> None:
         validate_ranking_integer._metric_ranking_complex_validation_patched = True  # type: ignore[attr-defined]
         ranking_metrics._validate_integer = validate_ranking_integer
 
+    if not getattr(weighted_metrics._validate_probability_inputs, "_metric_probability_type_error_patched", False):
+        original_weighted_validate_probability_inputs = weighted_metrics._validate_probability_inputs
+
+        @wraps(original_weighted_validate_probability_inputs)
+        def validate_weighted_probability_inputs(probabilities, labels):
+            try:
+                return original_weighted_validate_probability_inputs(probabilities, labels)
+            except (TypeError, OverflowError) as exc:
+                raise ValueError(_NON_NUMERIC_PROBABILITY_ERROR) from exc
+
+        validate_weighted_probability_inputs._metric_probability_type_error_patched = True  # type: ignore[attr-defined]
+        weighted_metrics._validate_probability_inputs = validate_weighted_probability_inputs
+
     if getattr(metrics.validate_probability_inputs, "_metric_scalar_array_validation_patched", False):
         return
 
@@ -160,13 +174,16 @@ def install() -> None:
             raise ValueError(_COMPLEX_PROBABILITY_ERROR)
         if materialized_labels is not None and _contains_complex(materialized_labels):
             raise ValueError(_COMPLEX_LABEL_ERROR)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            validated_probabilities, validated_labels = original_validate_probability_inputs(
-                materialized_probabilities,
-                materialized_labels,
-                require_normalized=require_normalized,
-                normalization_atol=validated_atol,
-            )
+        try:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                validated_probabilities, validated_labels = original_validate_probability_inputs(
+                    materialized_probabilities,
+                    materialized_labels,
+                    require_normalized=require_normalized,
+                    normalization_atol=validated_atol,
+                )
+        except (TypeError, OverflowError) as exc:
+            raise ValueError(_NON_NUMERIC_PROBABILITY_ERROR) from exc
         if require_normalized and not np.all(np.isfinite(validated_probabilities)):
             raise ValueError("probability rows must sum to one")
         return validated_probabilities, validated_labels
