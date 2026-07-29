@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from typing import Any, NoReturn
 
 import numpy as np
+import pandas as pd
 
 _PATCH_MARKER = "_neureptrace_metadata_column_validation_patch_installed"
 
@@ -87,6 +88,23 @@ def _validate_metadata_columns_config(config: Mapping[str, Any], *, error_type: 
         _coerce_metadata_column_optional(column.get("optional", False), error_type=error_type)
 
 
+def _pad_short_trialinfo(trialinfo: Any, *, n_trials: int) -> Any:
+    """Pad relaxed FieldTrip trial metadata to the epoch count with missing rows."""
+
+    values = np.asarray(trialinfo)
+    if values.ndim == 0:
+        values = values.reshape(1, 1)
+    elif values.ndim == 1:
+        values = values.reshape(1, -1) if n_trials == 1 else values.reshape(-1, 1)
+    if values.ndim != 2 or values.shape[0] >= n_trials:
+        return trialinfo
+
+    padded = np.empty((n_trials, values.shape[1]), dtype=object)
+    padded[:] = pd.NA
+    padded[: values.shape[0], :] = values
+    return padded
+
+
 def install() -> None:
     """Install stricter metadata column-index validation."""
 
@@ -97,6 +115,7 @@ def install() -> None:
         return
 
     original_validate_dataset_config = dataset_config.validate_dataset_config
+    original_trialinfo_to_frame = fieldtrip_mat._trialinfo_to_frame
 
     def validate_dataset_config(
         config: Mapping[str, Any],
@@ -121,8 +140,26 @@ def install() -> None:
             )
         return tuple(specs)
 
+    def _trialinfo_to_frame(
+        trialinfo: Any,
+        *,
+        n_trials: int,
+        columns: Any,
+        require_rows_equal_trials: bool,
+    ) -> Any:
+        if trialinfo is not None and not require_rows_equal_trials:
+            trialinfo = _pad_short_trialinfo(trialinfo, n_trials=n_trials)
+        return original_trialinfo_to_frame(
+            trialinfo,
+            n_trials=n_trials,
+            columns=columns,
+            require_rows_equal_trials=require_rows_equal_trials,
+        )
+
     validate_dataset_config.__doc__ = original_validate_dataset_config.__doc__
+    _trialinfo_to_frame.__doc__ = original_trialinfo_to_frame.__doc__
     dataset_config.validate_dataset_config = validate_dataset_config
     fieldtrip_mat._metadata_columns_from_config = _metadata_columns_from_config
+    fieldtrip_mat._trialinfo_to_frame = _trialinfo_to_frame
     setattr(dataset_config, _PATCH_MARKER, True)
     setattr(fieldtrip_mat, _PATCH_MARKER, True)
