@@ -70,8 +70,7 @@ def compute_temporal_generalization_matrix(
                     **base_metadata,
                     **_window_metadata("train", train_window),
                     **_window_metadata("test", test_window),
-                    "is_diagonal": _center_key(train_window.center, center_decimals)
-                    == _center_key(test_window.center, center_decimals),
+                    "is_diagonal": _center_key(train_window.center, center_decimals) == _center_key(test_window.center, center_decimals),
                     "accuracy": accuracy,
                     "percent": 100.0 * accuracy if np.isfinite(accuracy) else np.nan,
                     "chance_accuracy": chance,
