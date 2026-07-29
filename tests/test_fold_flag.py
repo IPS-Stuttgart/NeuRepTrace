@@ -59,6 +59,12 @@ def test_absolute_value_features_rejects_non_matrix() -> None:
         absolute_value_features([1.0, -2.0])
 
 
+@pytest.mark.parametrize("features", [np.empty((0, 2)), np.empty((2, 0))])
+def test_absolute_value_features_rejects_empty_matrix_dimensions(features: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        absolute_value_features(features)
+
+
 def test_absolute_value_features_rejects_float32_overflow() -> None:
     too_large = np.nextafter(float(np.finfo(np.float32).max), np.inf)
 
