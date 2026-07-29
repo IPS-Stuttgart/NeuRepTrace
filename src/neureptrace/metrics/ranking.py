@@ -32,7 +32,11 @@ def rank_class_scores(
     y_true = _label_vector(y_true, name="y_true")
     if isinstance(top_k, (str, bytes, bytearray, memoryview)):
         raise ValueError("top_k must be a sequence of integers.")
-    top_k = tuple(_validate_integer(k, name="top_k", minimum=1) for k in top_k)
+    try:
+        top_k_values = tuple(top_k)
+    except TypeError as exc:
+        raise ValueError("top_k must be a sequence of integers.") from exc
+    top_k = tuple(_validate_integer(k, name="top_k", minimum=1) for k in top_k_values)
     row_top_k = _validate_integer(row_top_k, name="row_top_k", minimum=0)
     class_column = _validate_class_column_name(class_column)
 
