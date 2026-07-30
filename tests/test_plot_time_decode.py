@@ -42,6 +42,23 @@ def test_plot_time_decode_results_accepts_selected_raw_metric_only(tmp_path: Pat
     assert list(summary.columns) == ["time", "accuracy_mean", "accuracy_sem"]
 
 
+def test_summary_from_csv_weights_subjects_equally_with_unequal_fold_counts(tmp_path: Path):
+    results_csv = tmp_path / "unequal_folds.csv"
+    pd.DataFrame(
+        {
+            "subject": ["s1", "s1", "s2"],
+            "fold": [0, 1, 0],
+            "time": [0.1, 0.1, 0.1],
+            "accuracy": [1.0, 1.0, 0.0],
+        }
+    ).to_csv(results_csv, index=False)
+
+    summary = _summary_from_csv(results_csv, metrics=("accuracy",))
+
+    assert summary["accuracy_mean"].tolist() == pytest.approx([0.5])
+    assert summary["accuracy_sem"].tolist() == pytest.approx([0.5])
+
+
 def test_plot_time_decode_results_accepts_selected_aggregated_metric_only(tmp_path: Path):
     results_csv = tmp_path / "accuracy_summary.csv"
     out_path = tmp_path / "accuracy_summary.png"

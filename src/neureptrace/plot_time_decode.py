@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from neureptrace.results import METRIC_COLUMNS, SUMMARY_GROUP_COLUMNS
+from neureptrace.results import METRIC_COLUMNS, SUMMARY_GROUP_COLUMNS, subject_time_metrics
 
 
 def _group_columns(frame: pd.DataFrame) -> list[str]:
@@ -70,6 +70,8 @@ def _summary_from_csv(
 
     group_columns = _group_columns(results)
     group_keys = [*group_columns, "time"]
+    if "subject" in results.columns:
+        results = subject_time_metrics(results, metric_columns=requested_metrics)
     grouped = results.groupby(group_keys, as_index=False, dropna=False)
     summary = grouped[list(requested_metrics)].mean()
     for metric in requested_metrics:
