@@ -51,6 +51,28 @@ def _validated_aggregation_mass(values: pd.Series, *, column: str) -> pd.Series:
     return mass
 
 
+def _validated_probability_values(
+    values: pd.Series,
+    aggregation_mass: pd.Series,
+    *,
+    column: str,
+) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce").astype(float)
+    provided = values.notna()
+    provided_values = numeric.loc[provided].to_numpy(dtype=float)
+    positive_mass_values = numeric.loc[aggregation_mass > 0.0].to_numpy(dtype=float)
+    if (
+        not np.isfinite(provided_values).all()
+        or bool(((provided_values < 0.0) | (provided_values > 1.0)).any())
+        or not np.isfinite(positive_mass_values).all()
+    ):
+        raise ValueError(
+            f"Reliability-bin {column} values must be finite probabilities in [0, 1] "
+            "whenever aggregation mass is positive."
+        )
+    return numeric
+
+
 def summarize_reliability_curve(
     reliability_bins: pd.DataFrame,
     *,
@@ -82,12 +104,14 @@ def summarize_reliability_curve(
         if mass_column == _SAMPLE_WEIGHT_COLUMN:
             aggregation_mass = aggregation_mass.fillna(sample_counts)
         aggregation_mass = _validated_aggregation_mass(aggregation_mass, column=mass_column)
+        accuracy_values = _validated_probability_values(group["accuracy"], aggregation_mass, column="accuracy")
+        confidence_values = _validated_probability_values(group["confidence"], aggregation_mass, column="confidence")
         max_mass = float(aggregation_mass.max())
         if max_mass > 0.0:
             scaled_mass = aggregation_mass / max_mass
             weights = scaled_mass / float(scaled_mass.sum())
-            accuracy = float((group["accuracy"].fillna(0.0) * weights).sum())
-            confidence = float((group["confidence"].fillna(0.0) * weights).sum())
+            accuracy = float((accuracy_values.fillna(0.0) * weights).sum())
+            confidence = float((confidence_values.fillna(0.0) * weights).sum())
         else:
             accuracy = float("nan")
             confidence = float("nan")
