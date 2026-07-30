@@ -46,6 +46,7 @@ def install() -> None:
     _onset_sensitivity_setting_id_patch.install()
     _onset_signed_probability_labels_patch.install()
     _onset_workflow_plot_optional_columns_patch.install()
+    importlib.import_module("neureptrace._semantic_stage_missing_group_patch").install()
     public = importlib.import_module("neureptrace._stimulus_detection_public")
     if getattr(public.main, _PATCH_MARKER, False):
         return
