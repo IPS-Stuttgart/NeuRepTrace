@@ -41,7 +41,7 @@ def _sample_weight_array(sample_weight: Iterable[float] | np.ndarray) -> np.ndar
     """Return sample weights as an object array without dropping one-pass iterables."""
 
     try:
-        if isinstance(sample_weight, np.ndarray) or isinstance(sample_weight, (str, bytes)):
+        if isinstance(sample_weight, np.ndarray) or isinstance(sample_weight, (str, bytes)) or hasattr(sample_weight, "__array__"):
             return np.asarray(sample_weight, dtype=object)
         return np.asarray(list(sample_weight), dtype=object)
     except TypeError:
@@ -96,7 +96,7 @@ def _labels_contain_boolean(labels: np.ndarray) -> bool:
 def _label_input_array(labels: object) -> np.ndarray:
     """Return labels as an object array without exhausting one-pass iterables."""
 
-    if isinstance(labels, np.ndarray) or isinstance(labels, (str, bytes)):
+    if isinstance(labels, np.ndarray) or isinstance(labels, (str, bytes)) or hasattr(labels, "__array__"):
         return np.asarray(labels, dtype=object)
     try:
         return np.asarray(list(labels), dtype=object)
@@ -115,6 +115,8 @@ def _materialize_nested_iterables(value: object) -> object:
         materialized = [_materialize_nested_iterables(item) for item in value.ravel(order="C")]
         return np.asarray(materialized, dtype=object).reshape(value.shape)
     if isinstance(value, (str, bytes)):
+        return value
+    if hasattr(value, "__array__"):
         return value
     if not isinstance(value, Iterable):
         return value
