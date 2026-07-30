@@ -4,6 +4,7 @@ from neureptrace.semantic_stages import (
     build_stage_report,
     detect_stable_stages,
     summarize_category_timecourse,
+    summarize_dominant_timecourse,
 )
 
 
@@ -62,7 +63,7 @@ def test_semantic_stage_pipeline_preserves_missing_optional_groups():
 def test_dominant_semantic_summary_preserves_missing_optional_groups():
     traces = _missing_group_trace().drop(columns="true_class")
 
-    summary, _ = summarize_category_timecourse(traces)
+    summary = summarize_dominant_timecourse(traces)
 
     assert len(summary) == 2
     assert summary["decoder"].isna().all()
