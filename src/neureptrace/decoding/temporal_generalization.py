@@ -10,6 +10,28 @@ import pandas as pd
 from neureptrace._object_label_utils import label_accuracy, values_equal
 
 
+_RESERVED_RESULT_COLUMNS = frozenset(
+    {
+        "train_window_center_s",
+        "train_window_start_s",
+        "train_window_stop_s",
+        "test_window_center_s",
+        "test_window_start_s",
+        "test_window_stop_s",
+        "is_diagonal",
+        "accuracy",
+        "percent",
+        "chance_accuracy",
+        "chance_percent",
+        "above_chance",
+        "n_train_trials",
+        "n_validation_trials",
+        "n_train_classes",
+        "n_validation_classes",
+    }
+)
+
+
 @dataclass(frozen=True)
 class TemporalFeatureWindow:
     """Feature matrix and labels for one train or test time window."""
@@ -49,12 +71,15 @@ def compute_temporal_generalization_matrix(
     if not test_windows:
         raise ValueError("Need at least one test window.")
 
-    base_metadata = dict(metadata or {})
+    base_metadata = _validated_metadata(metadata, role="metadata")
     rows: list[dict[str, object]] = []
     for train_window in sorted(train_windows, key=lambda window: _center_key(window.center, center_decimals)):
         train_labels = _validate_window_labels(train_window, role="train")
         model = fit_model(train_window)
-        fitted_metadata = dict(model_metadata(model) if model_metadata is not None else {})
+        fitted_metadata = _validated_metadata(
+            model_metadata(model) if model_metadata is not None else None,
+            role="model metadata",
+        )
         for test_window in sorted(test_windows, key=lambda window: _center_key(window.center, center_decimals)):
             labels = _validate_window_labels(test_window, role="test")
             predictions = _label_vector(predict_labels(model, test_window), role="predicted labels")
@@ -229,6 +254,15 @@ def _validate_chance_accuracy(value: float | None) -> float | None:
     return numeric
 
 
+def _validated_metadata(metadata: Mapping[str, object] | None, *, role: str) -> dict[str, object]:
+    result = dict(metadata or {})
+    collisions = sorted(_RESERVED_RESULT_COLUMNS.intersection(result))
+    if collisions:
+        names = ", ".join(collisions)
+        raise ValueError(f"{role} must not contain reserved result columns: {names}.")
+    return result
+
+
 def _center_key(center: float, decimals: int) -> float:
     return round(float(center), decimals)
 
@@ -241,10 +275,10 @@ def _chance_accuracy(chance_accuracy: float | None, labels: np.ndarray) -> float
 
 
 def _window_metadata(prefix: str, window: TemporalFeatureWindow) -> dict[str, object]:
-    metadata = dict(window.metadata or {})
+    metadata = _validated_metadata(window.metadata, role=f"{prefix} window metadata")
     return {
+        **metadata,
         f"{prefix}_window_center_s": float(window.center),
         f"{prefix}_window_start_s": float(window.start) if window.start is not None else np.nan,
         f"{prefix}_window_stop_s": float(window.stop) if window.stop is not None else np.nan,
-        **metadata,
     }
