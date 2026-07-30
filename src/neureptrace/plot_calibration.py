@@ -56,7 +56,9 @@ def summarize_reliability_curve(
     group_columns = ["decoder", "emission_mode", "bin", "bin_left", "bin_right"]
     for keys, group in bins.groupby(group_columns, sort=True):
         n_samples = int(group["n_samples"].sum())
-        aggregation_mass = group[mass_column].astype(float)
+        aggregation_mass = pd.to_numeric(group[mass_column], errors="raise").astype(float)
+        if mass_column == _SAMPLE_WEIGHT_COLUMN:
+            aggregation_mass = aggregation_mass.fillna(group["n_samples"].astype(float))
         max_mass = float(aggregation_mass.max())
         if max_mass > 0.0:
             scaled_mass = aggregation_mass / max_mass
