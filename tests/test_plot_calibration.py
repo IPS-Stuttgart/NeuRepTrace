@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -93,6 +94,45 @@ def test_summarize_reliability_curve_handles_large_sample_weights():
 
     assert curve.loc[0, "accuracy"] == pytest.approx(0.5)
     assert curve.loc[0, "confidence"] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("sample_weight", [[-1.0, 2.0], [np.inf, 2.0]])
+def test_summarize_reliability_curve_rejects_invalid_sample_weight(sample_weight):
+    bins = pd.DataFrame(
+        {
+            "decoder": ["logistic", "logistic"],
+            "time": [0.1, 0.2],
+            "bin": [1, 1],
+            "bin_left": [0.0, 0.0],
+            "bin_right": [0.5, 0.5],
+            "n_samples": [1, 1],
+            "sample_weight": sample_weight,
+            "accuracy": [1.0, 0.0],
+            "confidence": [0.9, 0.1],
+        }
+    )
+
+    with pytest.raises(ValueError, match="sample_weight values must be finite and non-negative"):
+        summarize_reliability_curve(bins)
+
+
+@pytest.mark.parametrize("n_samples", [[1, -1], [1.5, 2]])
+def test_summarize_reliability_curve_rejects_invalid_sample_counts(n_samples):
+    bins = pd.DataFrame(
+        {
+            "decoder": ["logistic", "logistic"],
+            "time": [0.1, 0.2],
+            "bin": [1, 1],
+            "bin_left": [0.0, 0.0],
+            "bin_right": [0.5, 0.5],
+            "n_samples": n_samples,
+            "accuracy": [1.0, 0.0],
+            "confidence": [0.9, 0.1],
+        }
+    )
+
+    with pytest.raises(ValueError, match="n_samples values must be finite non-negative integers"):
+        summarize_reliability_curve(bins)
 
 
 def test_summarize_reliability_curve_preserves_rows_with_missing_group_labels():
