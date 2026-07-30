@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -28,6 +29,26 @@ def _window(frame: pd.DataFrame, time_window: tuple[float, float] | None) -> pd.
     if window.empty:
         raise ValueError(f"No reliability-bin rows found in time window [{start}, {stop}].")
     return window
+
+
+def _validated_sample_counts(values: pd.Series) -> pd.Series:
+    counts = pd.to_numeric(values, errors="raise").astype(float)
+    numeric = counts.to_numpy(dtype=float)
+    if (
+        not np.isfinite(numeric).all()
+        or bool((numeric < 0.0).any())
+        or not np.equal(numeric, np.floor(numeric)).all()
+    ):
+        raise ValueError("Reliability-bin n_samples values must be finite non-negative integers.")
+    return counts
+
+
+def _validated_aggregation_mass(values: pd.Series, *, column: str) -> pd.Series:
+    mass = pd.to_numeric(values, errors="raise").astype(float)
+    numeric = mass.to_numpy(dtype=float)
+    if not np.isfinite(numeric).all() or bool((numeric < 0.0).any()):
+        raise ValueError(f"Reliability-bin {column} values must be finite and non-negative.")
+    return mass
 
 
 def summarize_reliability_curve(
@@ -55,10 +76,12 @@ def summarize_reliability_curve(
     rows = []
     group_columns = ["decoder", "emission_mode", "bin", "bin_left", "bin_right"]
     for keys, group in bins.groupby(group_columns, sort=True):
-        n_samples = int(group["n_samples"].sum())
+        sample_counts = _validated_sample_counts(group["n_samples"])
+        n_samples = int(sample_counts.sum())
         aggregation_mass = pd.to_numeric(group[mass_column], errors="raise").astype(float)
         if mass_column == _SAMPLE_WEIGHT_COLUMN:
-            aggregation_mass = aggregation_mass.fillna(group["n_samples"].astype(float))
+            aggregation_mass = aggregation_mass.fillna(sample_counts)
+        aggregation_mass = _validated_aggregation_mass(aggregation_mass, column=mass_column)
         max_mass = float(aggregation_mass.max())
         if max_mass > 0.0:
             scaled_mass = aggregation_mass / max_mass
