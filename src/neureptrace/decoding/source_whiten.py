@@ -84,8 +84,8 @@ def fit_source_whiten(
     test_out = apply_source_whiten(test, transform)
     metadata = _metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], feature_dim=source.shape[1], output_dim=train.shape[1])
     return SourceWhitenResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=_float32_if_safe(train),
+        test_features=_float32_if_safe(test_out),
         transform=transform,
         metadata=metadata,
     )
@@ -148,7 +148,7 @@ def fit_source_whiten_transform(
     return SourceWhitenTransform(
         mean=mean.astype(float, copy=False),
         components=components.astype(np.float32, copy=False),
-        whitening=whitening.astype(np.float32, copy=False),
+        whitening=_float32_if_safe(whitening),
         eigenvalues=values[: components.shape[0]].astype(float, copy=False),
         method=cfg.method,
         n_source_rows=int(source.shape[0]),
@@ -188,6 +188,19 @@ def _covariance(centered: np.ndarray) -> np.ndarray:
     if centered.shape[0] <= 1:
         return np.zeros((centered.shape[1], centered.shape[1]), dtype=float)
     return centered.T @ centered / float(centered.shape[0] - 1)
+
+
+def _float32_if_safe(values: np.ndarray) -> np.ndarray:
+    """Use float32 unless conversion overflows or erases nonzero values."""
+
+    array = np.asarray(values, dtype=float)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    lost_finite = np.isfinite(array) & ~np.isfinite(compact)
+    lost_nonzero = (array != 0.0) & (compact == 0.0)
+    if bool(np.any(lost_finite | lost_nonzero)):
+        return array
+    return compact
 
 
 def _normalize_n_components_request(value: int | str | None) -> int | str | None:
