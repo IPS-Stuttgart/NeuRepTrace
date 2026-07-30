@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -38,6 +39,36 @@ def _tiny_fallback_data():
     )
 
 
+def _composite_label_data():
+    features = np.array(
+        [
+            [-2.0, -1.0],
+            [-1.5, -0.8],
+            [-1.0, -1.2],
+            [-0.8, -0.7],
+            [0.8, 0.7],
+            [1.0, 1.2],
+            [1.5, 0.8],
+            [2.0, 1.0],
+        ],
+        dtype=float,
+    )
+    labels = np.asarray(
+        [
+            ["face", "left"],
+            ["face", "left"],
+            ["face", "left"],
+            ["face", "left"],
+            ["house", "right"],
+            ["house", "right"],
+            ["house", "right"],
+            ["house", "right"],
+        ],
+        dtype=object,
+    )
+    return features, labels
+
+
 def test_adaptive_calibration_routes_sample_weight_through_pipeline_fallback() -> None:
     features, labels, sample_weight = _tiny_fallback_data()
     estimator = make_pipeline(StandardScaler(), SampleWeightRequiredClassifier())
@@ -50,6 +81,38 @@ def test_adaptive_calibration_routes_sample_weight_through_pipeline_fallback() -
     final_estimator = model.model_.named_steps["sampleweightrequiredclassifier"]
     assert np.array_equal(final_estimator.sample_weight_, sample_weight)
     assert model.predict_proba(features[:2]).shape == (2, 2)
+
+
+def test_adaptive_calibration_preserves_composite_labels() -> None:
+    features, labels = _composite_label_data()
+    estimator = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000))
+    model = AdaptiveCalibratedClassifierCV(estimator=estimator, method="sigmoid", cv=2)
+
+    model.fit(features, labels)
+
+    assert model.used_uncalibrated_fallback_ is False
+    assert model.classes_.shape == (2,)
+    assert model.classes_.tolist() == [("face", "left"), ("house", "right")]
+    probabilities = model.predict_proba(features)
+    assert probabilities.shape == (features.shape[0], 2)
+    np.testing.assert_allclose(probabilities.sum(axis=1), 1.0)
+    predictions = model.predict(features)
+    assert predictions.shape == (features.shape[0],)
+    assert all(isinstance(label, tuple) for label in predictions.tolist())
+
+
+def test_adaptive_calibration_restores_composite_labels_after_fallback() -> None:
+    features, labels = _composite_label_data()
+    model = AdaptiveCalibratedClassifierCV(
+        estimator=make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000)),
+        method="sigmoid",
+        cv=3,
+    )
+
+    model.fit(features[[0, 1, 4]], labels[[0, 1, 4]])
+
+    assert model.used_uncalibrated_fallback_ is True
+    assert model.predict(features[[0, 4]]).tolist() == [("face", "left"), ("house", "right")]
 
 
 def test_adaptive_calibration_rejects_malformed_sample_weight() -> None:
