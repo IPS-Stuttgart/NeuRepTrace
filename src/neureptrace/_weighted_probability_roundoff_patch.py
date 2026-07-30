@@ -18,7 +18,7 @@ _COMPLEX_LABEL_ERROR = "labels must contain real integer class indices, not comp
 def _label_input_array(labels: Any) -> np.ndarray:
     """Return labels as an array without exhausting one-pass iterables implicitly."""
 
-    if isinstance(labels, np.ndarray) or isinstance(labels, (str, bytes)):
+    if isinstance(labels, np.ndarray) or isinstance(labels, (str, bytes)) or hasattr(labels, "__array__"):
         return np.asarray(labels)
     try:
         return np.asarray(list(labels))
