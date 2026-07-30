@@ -127,7 +127,7 @@ def summarize_sensitivity(summary: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("Sensitivity table must contain at least one grouping column.")
 
     rows = []
-    for keys, group in summary.groupby(group_columns, sort=True):
+    for keys, group in summary.groupby(group_columns, sort=True, dropna=False):
         key_values = keys if isinstance(keys, tuple) else (keys,)
         group_values = dict(zip(group_columns, key_values, strict=True))
         latencies = pd.to_numeric(group["post_detection_latency_median"], errors="coerce")
@@ -169,7 +169,7 @@ def plot_sensitivity_summary(summary: pd.DataFrame, out_path: Path) -> Path:
     group_columns = _present_group_columns(frame)
 
     fig, axes = plt.subplots(1, 2, figsize=(max(8.5, 0.65 * len(setting_ids)), 4.5))
-    for keys, group in frame.groupby(group_columns, sort=True):
+    for keys, group in frame.groupby(group_columns, sort=True, dropna=False):
         key_values = keys if isinstance(keys, tuple) else (keys,)
         label = " / ".join(map(str, key_values))
         group = group.sort_values("setting_index")
