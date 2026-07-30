@@ -51,6 +51,29 @@ def test_summarize_reliability_curve_prefers_sample_weight():
     assert curve.loc[0, "gap"] == pytest.approx(-0.08)
 
 
+def test_summarize_reliability_curve_falls_back_for_missing_sample_weight():
+    bins = pd.DataFrame(
+        {
+            "decoder": ["logistic", "logistic"],
+            "time": [0.1, 0.2],
+            "bin": [1, 1],
+            "bin_left": [0.0, 0.0],
+            "bin_right": [0.5, 0.5],
+            "n_samples": [2, 8],
+            "sample_weight": [pd.NA, 2.0],
+            "accuracy": [1.0, 0.0],
+            "confidence": [0.8, 0.2],
+        }
+    )
+
+    curve = summarize_reliability_curve(bins)
+
+    assert curve.loc[0, "n_samples"] == 10
+    assert curve.loc[0, "accuracy"] == pytest.approx(0.5)
+    assert curve.loc[0, "confidence"] == pytest.approx(0.5)
+    assert curve.loc[0, "gap"] == pytest.approx(0.0)
+
+
 def test_summarize_reliability_curve_handles_large_sample_weights():
     bins = pd.DataFrame(
         {
