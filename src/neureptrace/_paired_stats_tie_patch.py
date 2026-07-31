@@ -9,6 +9,8 @@ import re
 import numpy as np
 import pandas as pd
 
+from neureptrace._object_label_utils import values_equal
+
 
 _REQUIRED_COLUMNS = {"decoder_a_mean", "decoder_b_mean", "better_decoder_by_mean"}
 _COMPLEX_DIFFERENCES_ERROR = "differences must contain only real values."
@@ -38,6 +40,29 @@ def _validate_complete_pairing_identifiers(subject_metrics: pd.DataFrame) -> Non
             "Subject metrics must not contain missing decoder or subject identifiers. "
             f"Columns with missing values: {missing_columns}"
         )
+
+
+def _validate_identifier_string_collisions(subject_metrics: pd.DataFrame) -> None:
+    """Reject distinct identifiers that collapse to the same normalized string."""
+
+    for column in ("decoder", "subject"):
+        if column not in subject_metrics.columns:
+            continue
+        seen: dict[str, tuple[object, object]] = {}
+        for row_index, value in subject_metrics[column].items():
+            normalized = str(value)
+            previous = seen.get(normalized)
+            if previous is None:
+                seen[normalized] = (row_index, value)
+                continue
+            previous_index, previous_value = previous
+            if values_equal(previous_value, value):
+                continue
+            raise ValueError(
+                f"Subject metrics contain ambiguous {column} identifiers: "
+                f"{previous_value!r} at row {previous_index!r} and {value!r} at row {row_index!r} "
+                f"both normalize to {normalized!r}."
+            )
 
 
 def _is_boolean_scalar(value: object) -> bool:
@@ -205,6 +230,7 @@ def install() -> None:
         ) -> pd.DataFrame:
             metric_names = _validate_unique_metric_names(metrics)
             _validate_complete_pairing_identifiers(subject_metrics)
+            _validate_identifier_string_collisions(subject_metrics)
             selected_metrics = (
                 metric_names
                 if metric_names is not None
