@@ -152,6 +152,8 @@ class AdaptiveCalibratedClassifierCV(ClassifierMixin, BaseEstimator):
         composite_encoding = _encode_composite_labels(labels, expected_length=n_rows)
         if composite_encoding is None:
             labels_for_fit = np.asarray(labels)
+            if labels_for_fit.ndim == 2 and labels_for_fit.shape[1] == 1:
+                labels_for_fit = labels_for_fit.reshape(-1)
             public_classes = None
         else:
             labels_for_fit, public_classes = composite_encoding
