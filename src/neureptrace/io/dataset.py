@@ -135,7 +135,9 @@ class EpochDataset:
 
         reference = datasets[0]
         for dataset in datasets[1:]:
-            if not np.allclose(reference.times, dataset.times, rtol=0.0, atol=1e-9):
+            if reference.times.shape != dataset.times.shape or not np.allclose(
+                reference.times, dataset.times, rtol=0.0, atol=1e-9
+            ):
                 raise ValueError("Cannot concatenate datasets with different time axes.")
 
         aligned, channel_names, dropped_channels = cls._aligned_datasets(datasets, channel_policy)
