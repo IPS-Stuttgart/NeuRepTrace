@@ -240,7 +240,18 @@ def compare_prediction_frames(reference: pd.DataFrame, candidate: pd.DataFrame, 
         ref_true_name = f"{ref_true}_reference" if ref_true == cand_true else ref_true
         cand_true_name = f"{cand_true}_candidate" if ref_true == cand_true else cand_true
         matched = merged["_merge"] == "both"
-        mismatched = matched & (merged[ref_true_name].astype(str) != merged[cand_true_name].astype(str))
+        labels_equal = np.asarray(
+            [
+                _same_label_value(reference_label, candidate_label)
+                for reference_label, candidate_label in zip(
+                    merged[ref_true_name].tolist(),
+                    merged[cand_true_name].tolist(),
+                    strict=True,
+                )
+            ],
+            dtype=bool,
+        )
+        mismatched = matched & ~labels_equal
         diagnostics.extend([
             {"diagnostic": "matched_prediction_rows", "value": int(matched.sum())},
             {"diagnostic": "reference_only_rows", "value": int((merged["_merge"] == "left_only").sum())},
