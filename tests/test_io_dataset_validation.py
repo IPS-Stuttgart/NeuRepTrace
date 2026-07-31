@@ -55,3 +55,14 @@ def test_with_channels_rejects_duplicate_requested_channels():
 
     with pytest.raises(ValueError, match="Requested channel names.*unique"):
         dataset.with_channels(["MEG001", "MEG001"])
+
+
+def test_concatenate_rejects_time_axes_with_different_lengths_cleanly():
+    reference = _dataset()
+    shorter = _dataset(
+        data=np.ones((2, 2, 2), dtype=float),
+        times=np.array([0.0, 0.1], dtype=float),
+    )
+
+    with pytest.raises(ValueError, match="different time axes"):
+        EpochDataset.concatenate([reference, shorter])
