@@ -110,7 +110,19 @@ def _coerce_config(config: SignedPowerConfig | Mapping[str, Any]) -> SignedPower
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(_materialize_one_pass_iterable(values), dtype=float)
+    materialized = _materialize_one_pass_iterable(values)
+    try:
+        object_values = np.asarray(materialized, dtype=object)
+    except (TypeError, ValueError):
+        object_values = None
+    if object_values is not None and any(isinstance(value, (bool, np.bool_)) for value in object_values.flat):
+        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    if object_values is not None and any(isinstance(value, (complex, np.complexfloating)) for value in object_values.flat):
+        raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-empty two-dimensional numeric matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -125,8 +137,8 @@ def _materialize_one_pass_iterable(values: Any) -> Any:
         return values
     if hasattr(values, "__array__"):
         return values
-    if isinstance(values, Iterable) and not isinstance(values, Sequence):
-        return list(values)
+    if isinstance(values, Iterable):
+        return [_materialize_one_pass_iterable(value) for value in values]
     return values
 
 
