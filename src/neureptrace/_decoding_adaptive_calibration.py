@@ -29,6 +29,8 @@ def _normalize_sample_weight(sample_weight, *, n_rows: int) -> np.ndarray | None
         raise ValueError("sample_weight must contain one weight per label.")
     if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
         raise ValueError("sample_weight must contain finite non-negative numeric values.")
+    if float(np.sum(weights)) <= 0.0:
+        raise ValueError("sample_weight must have positive total weight.")
     return weights
 
 
