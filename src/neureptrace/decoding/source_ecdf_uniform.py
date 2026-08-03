@@ -191,6 +191,24 @@ def _materialize_one_pass_iterables(value: object) -> object:
     return [_materialize_one_pass_iterables(item) for item in value]
 
 
+def _contains_boolean(value: object) -> bool:
+    """Return whether a materialized feature input contains boolean values."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_boolean(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if not isinstance(value, Iterable):
+        return False
+    return any(_contains_boolean(item) for item in value)
+
+
 def _contains_complex(value: object) -> bool:
     """Return whether a materialized feature input contains complex values."""
 
@@ -211,6 +229,8 @@ def _contains_complex(value: object) -> bool:
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
     materialized = _materialize_one_pass_iterables(values)
+    if _contains_boolean(materialized):
+        raise ValueError(f"{name} must contain numeric, non-boolean features.")
     if _contains_complex(materialized):
         raise ValueError(f"{name} must contain only real-valued features.")
     matrix = np.asarray(materialized, dtype=float)
@@ -243,7 +263,17 @@ def _positive_int(value: int | str, *, name: str) -> int:
 
 
 def _open_unit_float(value: float | str, *, name: str) -> float:
-    parsed = float(value)
+    message = f"{name} must be in (0, 0.5)."
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(message)
+    if isinstance(value, np.ndarray):
+        if value.ndim != 0:
+            raise ValueError(message)
+        return _open_unit_float(value.item(), name=name)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
     if not np.isfinite(parsed) or parsed <= 0.0 or parsed >= 0.5:
-        raise ValueError(f"{name} must be in (0, 0.5).")
+        raise ValueError(message)
     return parsed
