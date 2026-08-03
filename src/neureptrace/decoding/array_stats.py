@@ -93,13 +93,13 @@ def _stable_column_mean_and_std(matrix: np.ndarray) -> tuple[np.ndarray, np.ndar
 
 
 def _positive_float(value: Any, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(f"{name} must be positive and finite.")
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
             raise ValueError(f"{name} must be positive and finite.")
         value = value.item()
-        if isinstance(value, (bool, np.bool_)):
+        if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
             raise ValueError(f"{name} must be positive and finite.")
     if isinstance(value, (list, tuple, dict, set)):
         raise ValueError(f"{name} must be positive and finite.")
