@@ -49,12 +49,25 @@ def _atomic_label_vector(labels: Sequence | np.ndarray, *, expected_length: int,
     if array.ndim == 0:
         vector = _object_vector([array.item()])
     elif array.ndim == 1:
-        vector = numeric.reshape(-1) if numeric is not None and numeric.ndim == 1 else array.reshape(-1)
-    elif 1 in array.shape:
-        vector = numeric.reshape(-1) if numeric is not None and 1 in numeric.shape else array.reshape(-1)
+        if array.shape[0] == expected_length:
+            vector = numeric.reshape(-1) if numeric is not None and numeric.ndim == 1 else array.reshape(-1)
+        elif expected_length == 1:
+            vector = _object_vector([tuple(array.tolist())])
+        else:
+            vector = numeric.reshape(-1) if numeric is not None and numeric.ndim == 1 else array.reshape(-1)
     else:
         rows = array.reshape(array.shape[0], -1)
-        vector = _object_vector(tuple(row.tolist()) for row in rows)
+        if rows.shape[0] == expected_length:
+            if rows.shape[1] == 1:
+                vector = numeric.reshape(-1) if numeric is not None else rows[:, 0]
+            else:
+                vector = _object_vector(tuple(row.tolist()) for row in rows)
+        elif array.size == expected_length and 1 in array.shape:
+            vector = numeric.reshape(-1) if numeric is not None else array.reshape(-1)
+        elif expected_length == 1:
+            vector = _object_vector([tuple(array.reshape(-1).tolist())])
+        else:
+            vector = _object_vector(tuple(row.tolist()) for row in rows)
     if len(vector) != expected_length:
         raise ValueError(f"{name} length must match feature rows: {len(vector)} != {expected_length}.")
     return vector
