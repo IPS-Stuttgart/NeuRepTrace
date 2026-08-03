@@ -1,4 +1,4 @@
-"""Normalize temporal grouping, boolean metadata, and continuous scan controls."""
+"""Normalize temporal grouping, boolean metadata, and continuous scan inputs."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ _CONTINUOUS_SEQUENCE_PATCH_MARKER = "_neureptrace_continuous_stream_sequence_ide
 _CONTINUOUS_SLICE_PATCH_MARKER = "_neureptrace_continuous_slice_selection_patch_installed"
 _CONTINUOUS_SCAN_STEP_PATCH_MARKER = "_neureptrace_continuous_scan_step_patch_installed"
 _CONTINUOUS_ANNOTATION_PATCH_MARKER = "_neureptrace_continuous_annotation_boundary_patch_installed"
+_CONTINUOUS_EVENT_TABLE_PATCH_MARKER = "_neureptrace_continuous_event_table_validation_patch_installed"
 _TRUE_BOOL_TEXT = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_TEXT = {"0", "false", "f", "no", "n", "off", ""}
 
@@ -237,8 +238,43 @@ def _scan_annotation_builder(original):
     return annotation_table
 
 
+def _validate_labeled_event_rows(frame: Any, *, onset_column: str, label_column: str) -> Any:
+    """Normalize event labels and reject non-finite event coordinates."""
+
+    if not isinstance(frame, pd.DataFrame):
+        return frame
+    validated = frame.copy()
+    onsets = pd.to_numeric(validated[onset_column], errors="coerce").to_numpy(dtype=float)
+    finite = np.isfinite(onsets)
+    if not bool(finite.all()):
+        rows = validated.index[~finite].tolist()[:5]
+        raise ValueError(f"Event onset values in {onset_column!r} must be finite; invalid row(s): {rows}.")
+
+    labels = validated[label_column].astype("string").str.strip()
+    blank = labels.isna() | labels.eq("")
+    if bool(blank.any()):
+        rows = validated.index[blank].tolist()[:5]
+        raise ValueError(f"Event labels in {label_column!r} must not be blank; invalid row(s): {rows}.")
+    validated[label_column] = labels.astype(str)
+    return validated
+
+
+def _scan_event_table_builder(original):
+    @wraps(original)
+    def label_event_table(*args, **kwargs):
+        labeled = original(*args, **kwargs)
+        return _validate_labeled_event_rows(
+            labeled,
+            onset_column=kwargs.get("onset_column", "onset"),
+            label_column=kwargs.get("label_column", "stimulus_class"),
+        )
+
+    setattr(label_event_table, _CONTINUOUS_EVENT_TABLE_PATCH_MARKER, True)
+    return label_event_table
+
+
 def _install_continuous_scan_patches() -> None:
-    """Keep scan windows grouped and validate continuous scan controls."""
+    """Keep scan windows grouped and validate continuous scan inputs."""
 
     module = importlib.import_module("neureptrace.continuous_stimulus_scan")
 
@@ -258,9 +294,13 @@ def _install_continuous_scan_patches() -> None:
     if not getattr(original_annotation_table, _CONTINUOUS_ANNOTATION_PATCH_MARKER, False):
         module._annotation_table = _scan_annotation_builder(original_annotation_table)
 
+    original_label_event_table = module.label_event_table
+    if not getattr(original_label_event_table, _CONTINUOUS_EVENT_TABLE_PATCH_MARKER, False):
+        module.label_event_table = _scan_event_table_builder(original_label_event_table)
+
 
 def install() -> None:
-    """Patch temporal grouping, scan identities, scan controls, and CSV booleans."""
+    """Patch temporal grouping, scan identities, scan inputs, and CSV booleans."""
 
     _install_continuous_scan_patches()
 
