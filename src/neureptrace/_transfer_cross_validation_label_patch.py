@@ -51,7 +51,7 @@ def _atomic_label_vector(labels: Sequence | np.ndarray, *, expected_length: int,
     elif array.ndim == 1:
         if array.shape[0] == expected_length:
             vector = numeric.reshape(-1) if numeric is not None and numeric.ndim == 1 else array.reshape(-1)
-        elif expected_length == 1:
+        elif expected_length == 1 and array.shape[0] > 0:
             vector = _object_vector([tuple(array.tolist())])
         else:
             vector = numeric.reshape(-1) if numeric is not None and numeric.ndim == 1 else array.reshape(-1)
