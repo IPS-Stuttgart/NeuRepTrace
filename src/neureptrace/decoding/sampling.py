@@ -26,7 +26,7 @@ def select_class_limited_indices(
     ----------
     labels:
         One-dimensional class labels, or any array-like object that can be flattened.
-        Tuple-valued and array-valued labels are treated as scalar composite class labels.
+        Tuple-, list-, and array-valued labels are treated as scalar composite class labels.
     max_per_class:
         Maximum number of rows to keep per class. ``None`` keeps every row.
     selection:
@@ -77,7 +77,7 @@ def select_class_limited_indices(
 
 
 def _label_vector(labels) -> np.ndarray:
-    """Return labels as a one-dimensional object vector without splitting tuples."""
+    """Return labels as a one-dimensional object vector without splitting composites."""
 
     if isinstance(labels, np.ndarray):
         original_dtype = labels.dtype
@@ -122,7 +122,7 @@ def _is_composite_label(label: object) -> bool:
         return False
     if isinstance(label, np.ndarray):
         return label.ndim != 0
-    return isinstance(label, tuple)
+    return isinstance(label, (tuple, list))
 
 
 def _ordered_unique_labels(labels) -> list[object]:
@@ -173,7 +173,7 @@ def _as_comparable_label(label: object) -> object:
         if label.ndim == 0:
             return _as_comparable_label(label.item())
         return tuple(_as_comparable_label(item) for item in label.tolist())
-    if isinstance(label, tuple):
+    if isinstance(label, (tuple, list)):
         return tuple(_as_comparable_label(item) for item in label)
     if isinstance(label, np.generic):
         return label.item()
