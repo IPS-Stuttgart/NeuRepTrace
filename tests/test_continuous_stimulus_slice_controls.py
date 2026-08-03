@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from neureptrace import continuous_stimulus_scan
@@ -79,3 +80,22 @@ def test_build_scan_segments_accepts_numpy_slice_starts(monkeypatch: pytest.Monk
     )
 
     assert [(segment.start, segment.stop) for segment in segments] == [(0.0, 1.0), (2.0, 3.0)]
+
+
+@pytest.mark.parametrize("scan_step", [0.0, -1.0, True, np.bool_(False), np.nan, np.inf, -np.inf])
+def test_run_continuous_stimulus_scan_rejects_invalid_scan_steps_before_file_access(
+    tmp_path: Path,
+    scan_step: object,
+) -> None:
+    out_dir = tmp_path / "scan_results"
+
+    with pytest.raises(ValueError, match="scan_step must be a positive finite number"):
+        continuous_stimulus_scan.run_continuous_stimulus_scan(
+            train_raw=Path("missing_train_raw.fif"),
+            train_events=pd.DataFrame(),
+            scan_raw=Path("missing_scan_raw.fif"),
+            out_dir=out_dir,
+            scan_step=scan_step,
+        )
+
+    assert not out_dir.exists()
