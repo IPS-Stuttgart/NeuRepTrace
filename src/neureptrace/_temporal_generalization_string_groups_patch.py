@@ -14,6 +14,7 @@ import pandas as pd
 _PATCH_MARKER = "_neureptrace_temporal_generalization_string_groups_patch_installed"
 _CONTINUOUS_SEQUENCE_PATCH_MARKER = "_neureptrace_continuous_stream_sequence_identity_patch_installed"
 _CONTINUOUS_SLICE_PATCH_MARKER = "_neureptrace_continuous_slice_selection_patch_installed"
+_CONTINUOUS_SCAN_STEP_PATCH_MARKER = "_neureptrace_continuous_scan_step_patch_installed"
 _CONTINUOUS_ANNOTATION_PATCH_MARKER = "_neureptrace_continuous_annotation_boundary_patch_installed"
 _TRUE_BOOL_TEXT = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_TEXT = {"0", "false", "f", "no", "n", "off", ""}
@@ -109,6 +110,19 @@ def _positive_slice_duration(value: object) -> float:
     return parsed
 
 
+def _positive_scan_step(value: object) -> float:
+    value = _scalar_value(value, name="scan_step")
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("scan_step must be a positive finite number.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("scan_step must be a positive finite number.") from exc
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError("scan_step must be a positive finite number.")
+    return parsed
+
+
 def _finite_slice_starts(values: object) -> tuple[float, ...]:
     if isinstance(values, (str, bytes)):
         raise ValueError("slice_starts must contain at least one finite numeric start.")
@@ -182,6 +196,17 @@ def _scan_segment_builder(original):
     return build_scan_segments
 
 
+def _scan_runner(original):
+    @wraps(original)
+    def run_continuous_stimulus_scan(*args, **kwargs):
+        if "scan_step" in kwargs:
+            kwargs["scan_step"] = _positive_scan_step(kwargs["scan_step"])
+        return original(*args, **kwargs)
+
+    setattr(run_continuous_stimulus_scan, _CONTINUOUS_SCAN_STEP_PATCH_MARKER, True)
+    return run_continuous_stimulus_scan
+
+
 def _same_boundary(left: float, right: float) -> bool:
     scale = max(1.0, abs(left), abs(right))
     return abs(left - right) <= 8.0 * np.finfo(float).eps * scale
@@ -213,7 +238,7 @@ def _scan_annotation_builder(original):
 
 
 def _install_continuous_scan_patches() -> None:
-    """Keep scan windows grouped and validate optional slice selection."""
+    """Keep scan windows grouped and validate continuous scan controls."""
 
     module = importlib.import_module("neureptrace.continuous_stimulus_scan")
 
@@ -225,13 +250,17 @@ def _install_continuous_scan_patches() -> None:
     if not getattr(original_builder, _CONTINUOUS_SLICE_PATCH_MARKER, False):
         module.build_scan_segments = _scan_segment_builder(original_builder)
 
+    original_runner = module.run_continuous_stimulus_scan
+    if not getattr(original_runner, _CONTINUOUS_SCAN_STEP_PATCH_MARKER, False):
+        module.run_continuous_stimulus_scan = _scan_runner(original_runner)
+
     original_annotation_table = module._annotation_table
     if not getattr(original_annotation_table, _CONTINUOUS_ANNOTATION_PATCH_MARKER, False):
         module._annotation_table = _scan_annotation_builder(original_annotation_table)
 
 
 def install() -> None:
-    """Patch temporal grouping, scan identities, slice controls, and CSV booleans."""
+    """Patch temporal grouping, scan identities, scan controls, and CSV booleans."""
 
     _install_continuous_scan_patches()
 
