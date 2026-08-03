@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from neureptrace.decoding.transfer import append_null_class_features
 
@@ -25,3 +26,8 @@ def test_append_null_class_features_keeps_scalar_label_row_vectors() -> None:
     )
 
     assert labels.tolist() == ["left", "right"]
+
+
+def test_append_null_class_features_rejects_missing_single_label() -> None:
+    with pytest.raises(ValueError, match="labels length must match feature rows: 0 != 1"):
+        append_null_class_features(np.asarray([[1.0]]), [])
