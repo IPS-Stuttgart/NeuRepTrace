@@ -25,7 +25,9 @@ _TRUE_BOOL_TEXT = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_BOOL_TEXT = {"0", "false", "f", "no", "n", "off", ""}
 _PATCH_MARKER = "_neureptrace_stimulus_boolean_summary_patch_installed"
 _STREAMING_LABEL_PATCH_MARKER = "_neureptrace_streaming_probability_label_patch_installed"
+_SCAN_SLICE_COUNT_PATCH_MARKER = "_neureptrace_continuous_slice_count_patch_installed"
 _BOOLEAN_SUMMARY_COLUMNS = ("is_true_positive", "is_duplicate_detection")
+_SLICE_COUNT_ERROR = "slice_count must be a positive non-boolean integer or None."
 
 
 def _is_missing(value: object) -> bool:
@@ -143,6 +145,41 @@ def _has_nonmissing_value(observation: Mapping[str, object], column: str) -> boo
         return True
 
 
+def _validated_slice_count(value: object) -> int | None:
+    """Normalize random slice counts without bool/zero/float leakage."""
+
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+        raise ValueError(_SLICE_COUNT_ERROR)
+    count = int(value)
+    if count <= 0:
+        raise ValueError(_SLICE_COUNT_ERROR)
+    return count
+
+
+def _install_continuous_slice_count_patch() -> None:
+    """Reject malformed random-slice counts before scan file access."""
+
+    import neureptrace.continuous_stimulus_scan as continuous_scan
+
+    if getattr(continuous_scan.build_scan_segments, _SCAN_SLICE_COUNT_PATCH_MARKER, False):
+        return
+
+    original_build_scan_segments = continuous_scan.build_scan_segments
+
+    @wraps(original_build_scan_segments)
+    def build_scan_segments(*args: Any, **kwargs: Any):
+        normalized_kwargs = dict(kwargs)
+        if "slice_count" in normalized_kwargs:
+            normalized_kwargs["slice_count"] = _validated_slice_count(normalized_kwargs["slice_count"])
+        return original_build_scan_segments(*args, **normalized_kwargs)
+
+    setattr(build_scan_segments, _SCAN_SLICE_COUNT_PATCH_MARKER, True)
+    build_scan_segments.__wrapped__ = original_build_scan_segments
+    continuous_scan.build_scan_segments = build_scan_segments
+
+
 def _install_streaming_probability_label_patch() -> None:
     """Preserve public labels when the online detector infers predictions."""
 
@@ -200,6 +237,7 @@ def install() -> None:
     if getattr(stimulus_public, _PATCH_MARKER, False):
         _install_group_completion_patch()
         _sync_public_module(stimulus_public)
+        _install_continuous_slice_count_patch()
         return
 
     original_matched_events = stimulus_public._matched_events
@@ -234,6 +272,7 @@ def install() -> None:
 
     _install_group_completion_patch()
     _sync_public_module(stimulus_public)
+    _install_continuous_slice_count_patch()
 
 
 __all__ = ["install"]
