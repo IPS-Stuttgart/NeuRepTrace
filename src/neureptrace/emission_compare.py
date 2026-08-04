@@ -44,13 +44,20 @@ def _contains_boolean_values(values: pd.Series) -> bool:
     return bool(values.map(lambda value: isinstance(value, (bool, np.bool_))).any())
 
 
+def _contains_complex_values(values: pd.Series) -> bool:
+    return bool(values.map(lambda value: isinstance(value, (complex, np.complexfloating))).any())
+
+
 def _coerce_finite_numeric_column(frame: pd.DataFrame, column: str) -> None:
     if _contains_boolean_values(frame[column]):
         raise ValueError(f"{column} values must be numeric, not boolean.")
     try:
-        frame[column] = pd.to_numeric(frame[column])
+        numeric = pd.to_numeric(frame[column])
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{column} values must be numeric.") from exc
+    if _contains_complex_values(numeric):
+        raise ValueError(f"{column} values must be real-valued.")
+    frame[column] = numeric
     if not np.isfinite(frame[column].to_numpy(dtype=float)).all():
         raise ValueError(f"{column} values must be finite.")
 
@@ -62,9 +69,12 @@ def _validate_optional_unit_interval_column(frame: pd.DataFrame, column: str) ->
     if _contains_boolean_values(frame.loc[present, column]):
         raise ValueError(f"{column} values must be numeric, not boolean.")
     try:
-        frame.loc[present, column] = pd.to_numeric(frame.loc[present, column])
+        numeric = pd.to_numeric(frame.loc[present, column])
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{column} values must be numeric.") from exc
+    if _contains_complex_values(numeric):
+        raise ValueError(f"{column} values must be real-valued.")
+    frame.loc[present, column] = numeric
     values = frame.loc[present, column].to_numpy(dtype=float)
     if not np.isfinite(values).all():
         raise ValueError(f"{column} values must be finite.")
