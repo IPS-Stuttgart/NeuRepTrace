@@ -1,4 +1,4 @@
-"""Match stimulus annotations independently and validate match tolerances."""
+"""Match stimulus annotations independently and validate matching inputs."""
 
 from __future__ import annotations
 
@@ -27,6 +27,30 @@ def _normalize_match_tolerance(value: object) -> float:
     return tolerance
 
 
+def _validate_onset_times(frame: pd.DataFrame, *, frame_name: str) -> None:
+    """Reject onset coordinates that cannot represent finite real times."""
+
+    if "onset_time" not in frame.columns:
+        return
+    invalid_indices: list[object] = []
+    for index, value in frame["onset_time"].items():
+        if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+            invalid_indices.append(index)
+            continue
+        try:
+            onset_time = float(value)
+        except (TypeError, ValueError, OverflowError):
+            invalid_indices.append(index)
+            continue
+        if not np.isfinite(onset_time):
+            invalid_indices.append(index)
+    if invalid_indices:
+        raise ValueError(
+            f"{frame_name} onset_time must contain only finite real numbers; "
+            f"invalid row indices: {invalid_indices}."
+        )
+
+
 def install() -> None:
     public_module = importlib.import_module(_PUBLIC_MODULE)
     if public_module.__dict__.get(_PATCH_MARKER, False):
@@ -44,6 +68,9 @@ def install() -> None:
         require_class_match: bool = True,
     ) -> pd.DataFrame:
         tolerance = _normalize_match_tolerance(match_tolerance)
+        _validate_onset_times(events, frame_name="events")
+        if not events.empty:
+            _validate_onset_times(annotations, frame_name="annotations")
         original_index = events.index.copy()
         matched = original_match(
             events.reset_index(drop=True),
