@@ -291,7 +291,9 @@ def _prior(values: Sequence[float] | np.ndarray | None, *, n_classes: int, defau
     else:
         materialized = _materialize_numeric_iterables(values)
         _validate_real_numeric_values(materialized, name=name)
-        vector = np.asarray(materialized, dtype=float).reshape(-1)
+        vector = np.asarray(materialized, dtype=float)
+        if vector.ndim != 1:
+            raise ValueError(f"{name} must be one-dimensional.")
     if vector.shape[0] != n_classes:
         raise ValueError(f"{name} must contain one value per class: {vector.shape[0]} != {n_classes}.")
     if not np.all(np.isfinite(vector)) or np.any(vector < 0.0):
