@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -151,6 +151,10 @@ def _label_vector(values: Sequence[Any] | np.ndarray, *, expected_length: int, n
 
 
 def _hashable_label(value: Any, *, name: str) -> Any:
+    if isinstance(value, tuple):
+        return tuple(_hashable_label(item, name=name) for item in value)
+    if isinstance(value, Iterator):
+        return _hashable_composite_label(value, name=name)
     try:
         hash(value)
     except TypeError:
