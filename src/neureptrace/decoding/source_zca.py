@@ -46,6 +46,13 @@ class SourceZCAReference:
     config: SourceZCAConfig
     n_fit_rows: int
 
+    def __post_init__(self) -> None:
+        """Reject complex fitted arrays before transforms can narrow them."""
+
+        for name in ("mean", "whitening", "coloring", "eigenvalues"):
+            if _contains_complex_value(getattr(self, name)):
+                raise ValueError(f"{name} must contain real-valued reference values, not complex values.")
+
 
 @dataclass(frozen=True, slots=True)
 class SourceZCAResult:
