@@ -29,16 +29,22 @@ def _validate_unique_metric_names(metrics: tuple[str, ...] | None) -> tuple[str,
 
 
 def _validate_complete_pairing_identifiers(subject_metrics: pd.DataFrame) -> None:
-    """Reject missing decoder or subject identifiers before string conversion."""
-    missing_columns = [
-        column
-        for column in ("decoder", "subject")
-        if column in subject_metrics.columns and bool(subject_metrics[column].isna().any())
-    ]
-    if missing_columns:
+    """Reject missing or blank decoder/subject identifiers before string conversion."""
+
+    invalid_rows: dict[str, list[object]] = {}
+    for column in ("decoder", "subject"):
+        if column not in subject_metrics.columns:
+            continue
+        values = subject_metrics[column]
+        invalid = values.isna() | values.map(
+            lambda value: isinstance(value, str) and value.strip() == ""
+        )
+        if bool(invalid.any()):
+            invalid_rows[column] = invalid[invalid].index.tolist()[:5]
+    if invalid_rows:
         raise ValueError(
-            "Subject metrics must not contain missing decoder or subject identifiers. "
-            f"Columns with missing values: {missing_columns}"
+            "Subject metrics must not contain missing decoder or subject identifiers; "
+            f"blank strings are also invalid. Rows: {invalid_rows}"
         )
 
 
