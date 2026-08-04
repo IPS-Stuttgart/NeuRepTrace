@@ -106,17 +106,19 @@ def accepted_probability_rows(probabilities: Sequence[Sequence[float]] | np.ndar
 
 
 def _selection_mask(values: Any) -> np.ndarray:
-    """Return a flattened Boolean selection mask without truthiness coercion."""
+    """Return a one-dimensional Boolean selection mask without truthiness coercion."""
 
     materialized = _materialize_nested_iterables(values)
     try:
         mask = np.asarray(materialized)
     except (TypeError, ValueError) as exc:
         raise ValueError("selection mask must contain only boolean values.") from exc
+    if mask.ndim != 1:
+        raise ValueError("selection mask must be one-dimensional.")
     if np.issubdtype(mask.dtype, np.bool_):
-        return mask.astype(bool, copy=False).reshape(-1)
-    if mask.dtype == object and all(isinstance(value, (bool, np.bool_)) for value in mask.reshape(-1)):
-        return mask.astype(bool, copy=False).reshape(-1)
+        return mask.astype(bool, copy=False)
+    if mask.dtype == object and all(isinstance(value, (bool, np.bool_)) for value in mask):
+        return mask.astype(bool, copy=False)
     raise ValueError("selection mask must contain only boolean values.")
 
 
