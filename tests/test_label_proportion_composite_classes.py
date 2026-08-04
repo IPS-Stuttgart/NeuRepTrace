@@ -52,3 +52,33 @@ def test_adjust_label_proportions_rejects_duplicate_classes_before_calibration()
             [1, 1],
             classes=["state", "state"],
         )
+
+
+def test_normalize_label_proportions_rejects_duplicate_generator_classes():
+    classes = [
+        (part for part in ("face", "early")),
+        (part for part in ("face", "early")),
+    ]
+
+    with pytest.raises(ValueError, match="classes must contain unique class labels"):
+        normalize_label_proportions([1, 1], classes=classes)
+
+
+def test_adjust_label_proportions_materializes_generator_classes():
+    classes = [
+        (part for part in ("face", "early")),
+        (part for part in ("scene", "late")),
+    ]
+
+    result = adjust_probabilities_to_label_proportions(
+        [[0.99, 0.01], [0.01, 0.99]],
+        [1, 1],
+        classes=classes,
+        tol=1e-12,
+    )
+
+    assert result.classes == (("face", "early"), ("scene", "late"))
+    assert list(predict_labels_from_label_proportions(result)) == [
+        ("face", "early"),
+        ("scene", "late"),
+    ]
