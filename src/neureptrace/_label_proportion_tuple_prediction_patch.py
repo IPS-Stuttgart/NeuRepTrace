@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
@@ -25,6 +26,8 @@ def _atomic_label(value: Any) -> Any:
     if isinstance(value, list):
         return tuple(_atomic_label(item) for item in value)
     if isinstance(value, tuple):
+        return tuple(_atomic_label(item) for item in value)
+    if isinstance(value, Iterator):
         return tuple(_atomic_label(item) for item in value)
     return value
 
