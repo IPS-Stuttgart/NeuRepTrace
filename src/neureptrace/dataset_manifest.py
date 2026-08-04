@@ -137,7 +137,7 @@ def _participants(value: Any) -> list[int]:
         exclude_cfg = []
     participants = _participant_values(participants_cfg, name="participants.include")
     excluded = set(_participant_values(exclude_cfg, name="participants.exclude"))
-    return [participant for participant in participants if participant not in excluded]
+    return list(dict.fromkeys(participant for participant in participants if participant not in excluded))
 
 
 def _participant_values(value: Any, *, name: str = "participants.include") -> list[int]:
