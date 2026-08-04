@@ -47,3 +47,12 @@ def test_object_array_iterator_cells_match_composite_selection() -> None:
 def test_iterator_composites_compare_and_hash_by_contents() -> None:
     assert values_equal(_parts("sub-01"), ("sub-01", "run-01"))
     assert hashable_domain_id(_parts("sub-01")) == ("sub-01", "run-01")
+
+
+def test_domain_mask_materializes_outer_selection_iterator_once() -> None:
+    domains = [("sub-01", "run-01"), ("sub-02", "run-01"), ("sub-01", "run-01")]
+    selected = (value for value in [("sub-01", "run-01")])
+
+    mask = domain_mask(domains, selected)
+
+    assert mask.tolist() == [True, False, True]
