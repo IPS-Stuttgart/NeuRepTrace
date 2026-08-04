@@ -28,17 +28,12 @@ class _ReptraceAliasLoader(importlib.abc.Loader):
     def create_module(self, spec):
         return None
 
-    def exec_module(self, module) -> None:
+    def exec_module(self, _module) -> None:
         target = importlib.import_module(self.target_name)
-        alias_spec = module.__spec__
-        alias_loader = module.__loader__
-        module.__dict__.update(target.__dict__)
-        module.__name__ = self.alias_name
-        module.__package__ = self.alias_name.rpartition(".")[0]
-        module.__loader__ = alias_loader
-        module.__spec__ = alias_spec
-        if hasattr(target, "__path__"):
-            module.__path__ = list(getattr(target, "__path__", ()))
+        # Import machinery returns the object stored under the requested name
+        # after ``exec_module``. Point the legacy name at the canonical module
+        # instead of copying its globals into a second, diverging module object.
+        sys.modules[self.alias_name] = target
 
 
 class _ReptraceAliasFinder(importlib.abc.MetaPathFinder):
