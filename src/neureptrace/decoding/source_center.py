@@ -24,6 +24,9 @@ class SourceCenterConfig:
 
     center: str = "mean"
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "center", normalize_center_mode(self.center))
+
 
 @dataclass(frozen=True, slots=True)
 class SourceCenterMap:
@@ -64,8 +67,8 @@ def fit_source_center_transform(
     train = apply_source_center_transform(source, center_map)
     test_out = apply_source_center_transform(test, center_map)
     return SourceCenterResult(
-        train_features=train.astype(np.float32, copy=False),
-        test_features=test_out.astype(np.float32, copy=False),
+        train_features=_compact_float32(train),
+        test_features=_compact_float32(test_out),
         center_map=center_map,
         metadata=_metadata(cfg, n_source_rows=source.shape[0], n_test_rows=test.shape[0], feature_dim=source.shape[1]),
     )
@@ -97,7 +100,7 @@ def fit_source_center_map(
     cfg = source_center_config() if config is None else _coerce_config(config)
     source = _feature_matrix(source_features, name="source_features")
     if cfg.center == "mean":
-        center = np.mean(source, axis=0)
+        center = _overflow_safe_feature_mean(source)
     elif cfg.center == "median":
         center = np.median(source, axis=0)
     elif cfg.center == "zero":
@@ -113,13 +116,53 @@ def apply_source_center_transform(features: Sequence[Sequence[float]] | np.ndarr
     matrix = _feature_matrix(features, name="features")
     if matrix.shape[1] != center_map.center.shape[0]:
         raise ValueError("features width must match center map width.")
-    return matrix - center_map.center[None, :]
+    with np.errstate(over="ignore", invalid="ignore"):
+        centered = matrix - center_map.center[None, :]
+    if not np.all(np.isfinite(centered)):
+        raise ValueError(
+            "Centered feature values exceed the finite floating-point range; "
+            "rescale source and held-out features before source centering."
+        )
+    return centered
+
+
+def _overflow_safe_feature_mean(source: np.ndarray) -> np.ndarray:
+    """Return a feature-wise mean without overflowing finite input sums."""
+
+    scales = np.max(np.abs(source), axis=0)
+    nonzero = scales > 0.0
+    center = np.zeros(source.shape[1], dtype=float)
+    if not np.any(nonzero):
+        return center
+    scaled_mean = np.mean(source[:, nonzero] / scales[nonzero], axis=0)
+    scaled_mean = np.clip(scaled_mean, -1.0, 1.0)
+    center[nonzero] = scales[nonzero] * scaled_mean
+    return center
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when conversion preserves finite, nonzero values."""
+
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        return values
+    if np.any((values != 0.0) & (compact == 0.0)):
+        return values
+    return compact
 
 
 def _coerce_config(config: SourceCenterConfig | Mapping[str, Any]) -> SourceCenterConfig:
     if isinstance(config, SourceCenterConfig):
-        return config
-    return source_center_config(**dict(config))
+        return SourceCenterConfig(center=config.center)
+    try:
+        options = dict(config)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Source center config must be a mapping or SourceCenterConfig.") from exc
+    unknown = sorted(str(key) for key in options if key != "center")
+    if unknown:
+        raise ValueError(f"Unknown source center config option(s): {', '.join(unknown)}.")
+    return source_center_config(**options)
 
 
 def _metadata(cfg: SourceCenterConfig, *, n_source_rows: int, n_test_rows: int, feature_dim: int) -> dict[str, Any]:
