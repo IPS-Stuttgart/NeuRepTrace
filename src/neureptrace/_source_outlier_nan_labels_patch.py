@@ -1,4 +1,4 @@
-"""Handle NaN/composite labels consistently in source-outlier weighting."""
+"""Handle NaN/composite labels and complex inputs in source-outlier weighting."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ import numpy as np
 from neureptrace._object_label_utils import label_counts, label_equal_mask, values_equal
 
 _PATCH_MARKER = "_neureptrace_source_outlier_nan_labels_patch_installed"
+_FEATURE_MATRIX_PATCH_MARKER = "_neureptrace_source_outlier_complex_features_patch_installed"
+_NORMALIZE_FLOAT_PATCH_MARKER = "_neureptrace_source_outlier_complex_controls_patch_installed"
 
 
 class _LabelThresholdMapping(Mapping[Any, float]):
@@ -48,10 +50,56 @@ def _label_equal_mask(labels: np.ndarray, label: Any) -> np.ndarray:
     return label_equal_mask(labels, label)
 
 
+def _contains_complex_feature_value(value: Any) -> bool:
+    """Return whether a materialized feature container contains complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return True
+        if value.dtype == object:
+            return any(_contains_complex_feature_value(item) for item in value.reshape(-1).tolist())
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Sequence):
+        return any(_contains_complex_feature_value(item) for item in value)
+    return False
+
+
 def install() -> None:
-    """Install NaN-aware source-label grouping for source-outlier weighting."""
+    """Install source-outlier input and source-label compatibility fixes."""
 
     import neureptrace.decoding.source_outlier as source_outlier
+
+    original_feature_matrix = source_outlier._feature_matrix
+    if not getattr(original_feature_matrix, _FEATURE_MATRIX_PATCH_MARKER, False):
+
+        @wraps(original_feature_matrix)
+        def _feature_matrix(values: Any, *, name: str) -> np.ndarray:
+            materialized_values = source_outlier._materialize_feature_values(values)
+            if _contains_complex_feature_value(materialized_values):
+                raise ValueError(f"{name} must contain real-valued features.")
+            return original_feature_matrix(materialized_values, name=name)
+
+        setattr(_feature_matrix, _FEATURE_MATRIX_PATCH_MARKER, True)
+        source_outlier._feature_matrix = _feature_matrix
+
+    original_normalize_float = source_outlier._normalize_float
+    if not getattr(original_normalize_float, _NORMALIZE_FLOAT_PATCH_MARKER, False):
+
+        @wraps(original_normalize_float)
+        def _normalize_float(value: Any, *, name: str) -> float:
+            scalar = value
+            if isinstance(scalar, np.ndarray) and scalar.ndim == 0:
+                scalar = scalar.item()
+            if isinstance(scalar, (complex, np.complexfloating)):
+                raise ValueError(f"{name} must be finite and real-valued.")
+            return original_normalize_float(value, name=name)
+
+        setattr(_normalize_float, _NORMALIZE_FLOAT_PATCH_MARKER, True)
+        source_outlier._normalize_float = _normalize_float
 
     original_compute = source_outlier.compute_source_outlier_weights
     if getattr(original_compute, _PATCH_MARKER, False):
