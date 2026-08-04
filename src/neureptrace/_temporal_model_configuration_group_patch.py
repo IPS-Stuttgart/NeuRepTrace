@@ -68,7 +68,8 @@ def install() -> None:
                 prob_columns=prob_columns,
             )
             for column, value in _group_values(group_columns, key).items():
-                states[column] = value
+                if column not in states.columns:
+                    states[column] = value
             state_frames.append(states)
         return pd.concat(state_frames, ignore_index=True) if state_frames else pd.DataFrame()
 
