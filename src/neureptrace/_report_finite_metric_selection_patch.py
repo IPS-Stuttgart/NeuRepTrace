@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from functools import wraps
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -12,6 +13,7 @@ _REPORT_PATCH_MARKER = "_report_finite_metric_selection_patched"
 _REPORT_AGGREGATE_PATCH_MARKER = "_report_aggregate_positional_selection_patched"
 _RESULTS_METRIC_SELECTION_PATCH_MARKER = "_results_unique_metric_selection_patched"
 _RESULTS_SUMMARY_SELECTION_PATCH_MARKER = "_results_summary_positional_selection_patched"
+_RESULTS_SUBJECT_READER_PATCH_MARKER = "_results_rejects_missing_subject_identifiers"
 _SEMANTIC_STAGE_PATCH_MARKER = "_semantic_stage_positional_selection_patched"
 
 
@@ -186,6 +188,39 @@ def _install_results_metric_selection_patch() -> None:
     results._selected_metric_columns = _selected_metric_columns
 
 
+def _install_results_subject_reader_patch() -> None:
+    import neureptrace.results as results
+
+    original_read_time_decode_results = results.read_time_decode_results
+    if getattr(original_read_time_decode_results, _RESULTS_SUBJECT_READER_PATCH_MARKER, False):
+        return
+
+    @wraps(original_read_time_decode_results)
+    def read_time_decode_results(
+        csv_paths: list[Path],
+        *,
+        subject_column: str | None = None,
+    ) -> pd.DataFrame:
+        selected_column = subject_column or "subject"
+        for csv_path in csv_paths:
+            subject_frame = pd.read_csv(csv_path, usecols=lambda column: column == selected_column)
+            if selected_column not in subject_frame.columns:
+                continue
+            subject_values = subject_frame[selected_column]
+            invalid = subject_values.isna() | subject_values.astype(str).str.strip().eq("")
+            if bool(invalid.any()):
+                rows = invalid[invalid].index.tolist()[:5]
+                raise ValueError(
+                    f"{csv_path} subject column '{selected_column}' must contain non-missing, "
+                    f"non-blank identifiers; bad row(s): {rows}."
+                )
+        return original_read_time_decode_results(csv_paths, subject_column=subject_column)
+
+    setattr(read_time_decode_results, _RESULTS_SUBJECT_READER_PATCH_MARKER, True)
+    read_time_decode_results.__wrapped__ = original_read_time_decode_results
+    results.read_time_decode_results = read_time_decode_results
+
+
 def install() -> None:
     """Install finite-value and positional-selection report guards."""
 
@@ -193,6 +228,7 @@ def install() -> None:
     _install_semantic_stage_patch()
     _install_results_summary_selection_patch()
     _install_results_metric_selection_patch()
+    _install_results_subject_reader_patch()
 
 
 __all__ = ["install"]
