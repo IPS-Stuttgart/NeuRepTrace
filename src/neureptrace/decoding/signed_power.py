@@ -7,11 +7,13 @@ is safe to compose with strict source-only decoders.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+
+from .signed_sqrt import _compact_float32, _feature_matrix, _positive_float
 
 SIGNED_POWER_PROTOCOL = "fixed_signed_power_transform"
 SIGNED_POWER_CATEGORY = "1_strict_source_only_compatible"
@@ -91,64 +93,7 @@ def signed_power_transform(features: Sequence[Sequence[float]] | np.ndarray, *, 
     return np.sign(matrix) * magnitude
 
 
-def _compact_float32(values: np.ndarray) -> np.ndarray:
-    """Use float32 only when conversion preserves finite, nonzero values."""
-
-    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-        compact = values.astype(np.float32, copy=False)
-    if not np.all(np.isfinite(compact)):
-        return values
-    if np.any((values != 0.0) & (compact == 0.0)):
-        return values
-    return compact
-
-
 def _coerce_config(config: SignedPowerConfig | Mapping[str, Any]) -> SignedPowerConfig:
     if isinstance(config, SignedPowerConfig):
         return signed_power_config(power=config.power)
     return signed_power_config(**dict(config))
-
-
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    materialized = _materialize_one_pass_iterable(values)
-    try:
-        object_values = np.asarray(materialized, dtype=object)
-    except (TypeError, ValueError):
-        object_values = None
-    if object_values is not None and any(isinstance(value, (bool, np.bool_)) for value in object_values.flat):
-        raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
-    if object_values is not None and any(isinstance(value, (complex, np.complexfloating)) for value in object_values.flat):
-        raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
-    try:
-        matrix = np.asarray(materialized, dtype=float)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a non-empty two-dimensional numeric matrix.") from exc
-    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
-        raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
-    if not np.all(np.isfinite(matrix)):
-        raise ValueError(f"{name} must contain only finite values.")
-    return matrix
-
-
-def _materialize_one_pass_iterable(values: Any) -> Any:
-    if isinstance(values, np.ndarray):
-        return values
-    if isinstance(values, (str, bytes, Mapping)):
-        return values
-    if hasattr(values, "__array__"):
-        return values
-    if isinstance(values, Iterable):
-        return [_materialize_one_pass_iterable(value) for value in values]
-    return values
-
-
-def _positive_float(value: float | str, *, name: str) -> float:
-    if isinstance(value, (bool, np.bool_)) or isinstance(value, np.ndarray):
-        raise ValueError(f"{name} must be positive and finite.")
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be positive and finite.") from exc
-    if not np.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be positive and finite.")
-    return parsed
