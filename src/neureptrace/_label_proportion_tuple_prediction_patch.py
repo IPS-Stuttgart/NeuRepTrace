@@ -61,11 +61,49 @@ def _object_label_vector(labels: Any) -> np.ndarray:
     return label_vector
 
 
+def _labels_equal(left: Any, right: Any) -> bool:
+    """Compare atomic labels without NumPy truth-value ambiguity."""
+
+    if left is right:
+        return True
+    if isinstance(left, float) and isinstance(right, float) and np.isnan(left) and np.isnan(right):
+        return True
+    if isinstance(left, tuple) or isinstance(right, tuple):
+        if not isinstance(left, tuple) or not isinstance(right, tuple) or len(left) != len(right):
+            return False
+        return all(_labels_equal(left_item, right_item) for left_item, right_item in zip(left, right, strict=True))
+    try:
+        result = left == right
+    except Exception:
+        return False
+    if isinstance(result, np.ndarray):
+        return bool(np.all(result))
+    try:
+        return bool(result)
+    except (TypeError, ValueError):
+        return False
+
+
+def _validate_unique_classes(classes: tuple[Any, ...]) -> None:
+    """Reject ambiguous duplicate scalar or composite class identities."""
+
+    seen: list[Any] = []
+    for class_label in classes:
+        if any(_labels_equal(class_label, existing) for existing in seen):
+            raise ValueError("classes must contain unique class labels.")
+        seen.append(class_label)
+
+
 def _normalize_label_proportions(target_proportions: Any, *, classes: Any = None) -> tuple[np.ndarray, tuple[Any, ...]]:
     """Normalize proportions after preserving composite class ids atomically."""
 
     class_order = None if classes is None else tuple(_object_label_vector(classes).tolist())
-    return _ORIGINAL_NORMALIZE_LABEL_PROPORTIONS(target_proportions, classes=class_order)
+    proportions, normalized_classes = _ORIGINAL_NORMALIZE_LABEL_PROPORTIONS(
+        target_proportions,
+        classes=class_order,
+    )
+    _validate_unique_classes(normalized_classes)
+    return proportions, normalized_classes
 
 
 def _predict_labels_from_label_proportions(result: _label_proportions.WeakLabelProportionCalibrationResult) -> np.ndarray:
