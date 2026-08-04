@@ -152,6 +152,7 @@ def _patch_hierarchical_three_class_logistic() -> None:
 
 def install() -> None:
     classifiers = importlib.import_module("neureptrace.decoding.classifiers")
+    mekt_patch = importlib.import_module("neureptrace._mekt_vector_validation_patch")
     _patch_calibration_split_label_equality()
     _patch_hierarchical_three_class_logistic()
     if getattr(classifiers, _PATCH_MARKER, False):
@@ -164,7 +165,6 @@ def install() -> None:
         return _unique_labels_and_inverse(label_vector)
 
     original_fit = classifiers.CorrelationPrototypeClassifier.fit
-    original_decision_function = classifiers.DecodedLabelClassifier.decision_function
 
     @wraps(original_fit)
     def fit(self, features: Sequence[Sequence[float]] | np.ndarray, labels: Sequence[Any] | np.ndarray, sample_weight: Sequence[float] | np.ndarray | None = None):
@@ -187,14 +187,50 @@ def install() -> None:
         self.normalized_prototypes_ = self._row_center_normalize(self.prototypes_)
         return self
 
-    @wraps(original_decision_function)
+    def _prediction_only_scores(model: Any, features: Any, *, n_classes: int, error_message: str) -> np.ndarray:
+        encoded = np.asarray(model.predict(features), dtype=int)
+        if encoded.ndim != 1:
+            raise ValueError("Encoded-label estimators must return a one-dimensional prediction vector.")
+        if np.any(encoded < 0) or np.any(encoded >= n_classes):
+            raise ValueError(error_message)
+        scores = np.zeros((encoded.shape[0], n_classes), dtype=float)
+        scores[np.arange(encoded.shape[0]), encoded] = 1.0
+        return scores
+
+    @wraps(classifiers.DecodedLabelClassifier.decision_function)
     def decision_function(self, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
         if hasattr(self.model, "decision_function"):
             scores = np.asarray(self.model.decision_function(features), dtype=float)
             if scores.ndim == 1 and self.classes_.shape[0] == 2:
                 return np.column_stack((-0.5 * scores, 0.5 * scores))
             return scores
-        return original_decision_function(self, features)
+        if hasattr(self.model, "predict_proba"):
+            return np.asarray(self.model.predict_proba(features), dtype=float)
+        if hasattr(self.model, "forward"):
+            return self._torch_logits(features)
+        return _prediction_only_scores(
+            self.model,
+            features,
+            n_classes=self.classes_.shape[0],
+            error_message="Classifier returned an encoded label outside the fitted class range.",
+        )
+
+    @wraps(mekt_patch._EncodedLabelEstimator.decision_function)
+    def mekt_decision_function(self, features: Any) -> np.ndarray:
+        estimator = self._require_fitted()
+        if hasattr(estimator, "decision_function"):
+            scores = np.asarray(estimator.decision_function(features), dtype=float)
+            if scores.ndim == 1 and self.classes_.shape[0] == 2:
+                return np.column_stack((-0.5 * scores, 0.5 * scores))
+            return scores
+        if hasattr(estimator, "predict_proba"):
+            return np.asarray(estimator.predict_proba(features), dtype=float)
+        return _prediction_only_scores(
+            estimator,
+            features,
+            n_classes=self.classes_.shape[0],
+            error_message="MEKT estimator returned an encoded label outside the fitted class range.",
+        )
 
     def positive_class_score(model: Any, features: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
         """Return a one-dimensional binary score for the positive class."""
@@ -212,4 +248,5 @@ def install() -> None:
     classifiers.CorrelationPrototypeClassifier.fit = fit
     classifiers.DecodedLabelClassifier.decision_function = decision_function
     classifiers.positive_class_score = positive_class_score
+    mekt_patch._EncodedLabelEstimator.decision_function = mekt_decision_function
     setattr(classifiers, _PATCH_MARKER, True)
