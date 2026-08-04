@@ -24,6 +24,8 @@ def column_stats(values: Sequence[Sequence[float]] | np.ndarray, *, scale_floor:
     """Return column-wise mean, standard deviation, minimum, and maximum."""
 
     floor = _positive_float(scale_floor, name="scale_floor")
+    if _contains_boolean(values):
+        raise ValueError("values must contain numeric entries, not boolean flags.")
     if _contains_complex(values):
         raise ValueError("values must contain real-valued entries.")
     matrix = np.asarray(values, dtype=float)
@@ -42,6 +44,29 @@ def column_stats(values: Sequence[Sequence[float]] | np.ndarray, *, scale_floor:
         maximum=maximum,
         metadata={"array_stats_rows": int(matrix.shape[0]), "array_stats_columns": int(matrix.shape[1])},
     )
+
+
+def _contains_boolean(value: object) -> bool:
+    """Return whether an array-like input contains boolean-valued entries."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_boolean(item) for item in value.ravel(order="C"))
+        return False
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_boolean(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if isinstance(value, Sequence):
+        return any(_contains_boolean(item) for item in value)
+    return False
 
 
 def _contains_complex(value: object) -> bool:
