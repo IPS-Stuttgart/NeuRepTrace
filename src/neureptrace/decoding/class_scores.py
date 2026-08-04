@@ -155,8 +155,9 @@ def _prediction_class_score_matrix(predictions: Sequence | np.ndarray, classes: 
     scores = np.zeros((n_samples, classes.size), dtype=float)
     for row_index, predicted in enumerate(predictions):
         matches = np.flatnonzero(_label_matches(classes, predicted))
-        if matches.size:
-            scores[row_index, matches[0]] = 1.0
+        if matches.size != 1:
+            return None
+        scores[row_index, matches[0]] = 1.0
     return scores
 
 
