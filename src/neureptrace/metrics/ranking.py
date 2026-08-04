@@ -197,13 +197,41 @@ def _scores_contain_complex(values: object) -> bool:
     return any(_scores_contain_complex(value) for value in values)
 
 
+def _materialize_nested_label(value: object) -> object:
+    """Materialize one-pass iterables inside a single label value."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = np.empty(value.shape, dtype=object)
+        for index in np.ndindex(value.shape):
+            materialized[index] = _materialize_nested_label(value[index])
+        return materialized
+    if isinstance(value, (str, bytes)):
+        return value
+    if isinstance(value, list):
+        return [_materialize_nested_label(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_materialize_nested_label(item) for item in value)
+    if isinstance(value, dict):
+        return {
+            _materialize_nested_label(key): _materialize_nested_label(item)
+            for key, item in value.items()
+        }
+    if not isinstance(value, Iterable):
+        return value
+    return tuple(_materialize_nested_label(item) for item in value)
+
+
 def _materialize_reusable_label_input(values: object) -> object:
     """Return label inputs that can be inspected more than once without data loss."""
 
-    if values is None or isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
+    if values is None or isinstance(values, (str, bytes)):
         return values
+    if isinstance(values, np.ndarray):
+        return _materialize_nested_label(values)
     try:
-        return list(values)
+        return [_materialize_nested_label(value) for value in values]
     except TypeError:
         return values
 
