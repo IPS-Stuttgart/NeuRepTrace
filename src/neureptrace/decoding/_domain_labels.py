@@ -81,6 +81,14 @@ def _freeze_domain_label(value: Any) -> Any:
         return tuple(sorted((_freeze_domain_label(item) for item in value), key=repr))
     if isinstance(value, (list, tuple)):
         return tuple(_freeze_domain_label(item) for item in value)
+    if not isinstance(value, (str, bytes, bytearray)):
+        try:
+            iterator = iter(value)
+        except TypeError:
+            pass
+        else:
+            if iterator is value:
+                return tuple(_freeze_domain_label(item) for item in iterator)
     try:
         hash(value)
     except TypeError:
