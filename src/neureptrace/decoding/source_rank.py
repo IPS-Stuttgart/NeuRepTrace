@@ -122,8 +122,13 @@ def _normalized_reference_fields(reference: SourceRankReference) -> tuple[np.nda
 
 
 def _matrix(values, *, name: str) -> np.ndarray:
+    materialized = _materialize_nested_iterables(values)
+    if _contains_complex_value(materialized):
+        raise ValueError(
+            f"{name} must contain real-valued numeric values, not complex values."
+        )
     try:
-        matrix = np.asarray(_materialize_nested_iterables(values), dtype=float)
+        matrix = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must contain finite numeric values.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
@@ -143,6 +148,24 @@ def _materialize_nested_iterables(value: Any) -> Any:
     if not isinstance(value, Iterable):
         return value
     return [_materialize_nested_iterables(item) for item in value]
+
+
+def _contains_complex_value(value: Any) -> bool:
+    """Return whether a materialized feature container has complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_value(item) for item in value.flat)
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if not isinstance(value, Iterable):
+        return False
+    return any(_contains_complex_value(item) for item in value)
 
 
 def _normalize_bool(value: Any, *, name: str) -> bool:
