@@ -8,7 +8,7 @@ features are not used for fitting.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -283,6 +283,8 @@ def _object_array(values: Sequence[Any]) -> np.ndarray:
 
 
 def _hashable_object_value(value: Any) -> Any:
+    if isinstance(value, Iterator):
+        return tuple(_hashable_object_value(item) for item in value)
     if isinstance(value, np.ndarray):
         array = np.asarray(value)
         if array.ndim == 0:
