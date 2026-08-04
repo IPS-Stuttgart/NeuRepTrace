@@ -20,7 +20,7 @@ class FeatureSummaryResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def summarize_features(features: Sequence[Sequence[float]] | np.ndarray, *, ddof: int | str = 1) -> FeatureSummaryResult:
+def summarize_features(features: Iterable[Iterable[float]] | np.ndarray, *, ddof: int | str = 1) -> FeatureSummaryResult:
     """Return simple column-wise summary statistics for a feature matrix."""
 
     matrix = _feature_matrix(features)
@@ -140,7 +140,7 @@ def _contains_complex(value: object) -> bool:
     return False
 
 
-def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
+def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray) -> np.ndarray:
     materialized = _materialize_nested_iterables(values)
     if _contains_boolean(materialized):
         raise ValueError("features must contain numeric values, not boolean flags.")
