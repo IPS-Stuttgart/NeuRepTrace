@@ -5,6 +5,7 @@ from __future__ import annotations
 from . import (
     _oscillatory_channel_indices_patch,
     _oscillatory_composite_labels_patch,
+    _oscillatory_log_power_eps_patch,
     _oscillatory_single_window_patch,
 )
 from . import oscillatory as _oscillatory
@@ -12,6 +13,7 @@ from . import oscillatory as _oscillatory
 _oscillatory_composite_labels_patch.install()
 _oscillatory_single_window_patch.install()
 _oscillatory_channel_indices_patch.install()
+_oscillatory_log_power_eps_patch.install()
 
 BandFeatureWindow = _oscillatory.BandFeatureWindow
 compute_alpha_features = _oscillatory.compute_alpha_features
