@@ -277,8 +277,65 @@ def _metadata(cfg: SourceSmoteConfig, *, n_source_rows: int, n_synthetic_rows: i
     }
 
 
+def _materialize_feature_values(value: Any) -> Any:
+    """Recursively materialize one-pass feature inputs before validation."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = np.empty(value.shape, dtype=object)
+        for index in np.ndindex(value.shape):
+            materialized[index] = _materialize_feature_values(value[index])
+        return materialized
+    if isinstance(value, (str, bytes, Mapping)):
+        return value
+    if isinstance(value, list):
+        return [_materialize_feature_values(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_materialize_feature_values(item) for item in value)
+    if isinstance(value, Iterable):
+        return [_materialize_feature_values(item) for item in value]
+    return value
+
+
+def _contains_boolean_feature_value(value: Any) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_boolean_feature_value(item) for item in value.flat)
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_contains_boolean_feature_value(item) for item in value)
+    return False
+
+
+def _contains_complex_feature_value(value: Any) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_feature_value(item) for item in value.flat)
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_contains_complex_feature_value(item) for item in value)
+    return False
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    matrix = np.asarray(values, dtype=float)
+    materialized = _materialize_feature_values(values)
+    if _contains_boolean_feature_value(materialized):
+        raise ValueError(f"{name} must contain real numeric values, not booleans.")
+    if _contains_complex_feature_value(materialized):
+        raise ValueError(f"{name} must contain real-valued features, not complex values.")
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a numeric feature matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
