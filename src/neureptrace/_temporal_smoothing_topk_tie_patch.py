@@ -7,7 +7,11 @@ from functools import wraps
 
 import numpy as np
 
-from . import _temporal_model_baseline_duplicate_patch, _temporal_model_class_metadata_patch
+from . import (
+    _temporal_model_baseline_duplicate_patch,
+    _temporal_model_class_metadata_patch,
+    _temporal_model_configuration_group_patch,
+)
 
 _PATCH_MARKER = "_neureptrace_temporal_smoothing_topk_tie_patch_installed"
 
@@ -88,6 +92,7 @@ def install() -> None:
 
     _temporal_model_baseline_duplicate_patch.install()
     _temporal_model_class_metadata_patch.install()
+    _temporal_model_configuration_group_patch.install()
 
     temporal_smoothing = importlib.import_module("neureptrace.temporal_smoothing")
     if getattr(temporal_smoothing, _PATCH_MARKER, False):
