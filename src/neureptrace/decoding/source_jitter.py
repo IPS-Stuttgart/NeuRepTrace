@@ -249,7 +249,23 @@ def _metadata(cfg: SourceFeatureJitterConfig, *, n_source_rows: int, n_synthetic
     }
 
 
+def _contains_complex_feature_value(value: Any) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.iscomplexobj(value):
+            return True
+        if value.dtype != object:
+            return False
+        return any(_contains_complex_feature_value(item) for item in value.flat)
+    if isinstance(value, (list, tuple)):
+        return any(_contains_complex_feature_value(item) for item in value)
+    return False
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    if _contains_complex_feature_value(values):
+        raise ValueError(f"{name} must contain only real values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
