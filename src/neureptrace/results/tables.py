@@ -206,9 +206,11 @@ def _finite_array(values: object) -> np.ndarray:
 
 def _finite_numeric_series(values: object, *, name: str) -> pd.Series:
     series = pd.Series(values)
-    if series.map(_is_boolean_scalar).any():
+    if series.map(_is_boolean_scalar).any() or series.map(_is_complex_scalar).any():
         raise ValueError(f"{name} must contain only finite numeric values.")
     parsed = pd.to_numeric(series, errors="coerce")
+    if np.iscomplexobj(parsed.to_numpy()):
+        raise ValueError(f"{name} must contain only finite numeric values.")
     numeric = parsed.to_numpy(dtype=float)
     if not np.all(np.isfinite(numeric)):
         raise ValueError(f"{name} must contain only finite numeric values.")
@@ -328,6 +330,10 @@ def _positive_float(value: object) -> float | None:
 
 def _is_boolean_scalar(value: object) -> bool:
     return isinstance(value, (bool, np.bool_))
+
+
+def _is_complex_scalar(value: object) -> bool:
+    return isinstance(value, (complex, np.complexfloating))
 
 
 def _nanmean(values: object) -> float:
