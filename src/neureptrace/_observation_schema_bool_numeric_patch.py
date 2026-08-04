@@ -7,6 +7,8 @@ check, malformed observation tables can silently turn ``True``/``False`` into
 
 from __future__ import annotations
 
+import importlib
+
 import numpy as np
 import pandas as pd
 
@@ -74,11 +76,12 @@ def _make_numeric_series_checked(observation_schema):
 
 
 def install() -> None:
-    """Install observation-schema numeric boolean rejection."""
+    """Install observation-schema numeric and provenance-hash guards."""
 
     from neureptrace import observation_schema
 
-    if getattr(observation_schema, _PATCH_MARKER, False):
-        return
-    observation_schema._numeric_series = _make_numeric_series_checked(observation_schema)
-    setattr(observation_schema, _PATCH_MARKER, True)
+    if not getattr(observation_schema, _PATCH_MARKER, False):
+        observation_schema._numeric_series = _make_numeric_series_checked(observation_schema)
+        setattr(observation_schema, _PATCH_MARKER, True)
+
+    importlib.import_module("neureptrace._stable_hash_iterator_patch").install()
