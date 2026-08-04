@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from neureptrace.decoding.label_proportions import (
     adjust_probabilities_to_label_proportions,
@@ -29,3 +30,25 @@ def test_adjust_probabilities_to_label_proportions_preserves_matrix_composite_cl
     assert result.classes == ((0, "left"), (1, "right"))
     assert np.allclose(result.probabilities.mean(axis=0), [0.5, 0.5], atol=1e-8)
     assert list(predict_labels_from_label_proportions(result)) == [(0, "left"), (1, "right")]
+
+
+@pytest.mark.parametrize(
+    "classes",
+    [
+        ["left", "left"],
+        [["face", "early"], ("face", "early")],
+        np.asarray([[0, "left"], [0, "left"]], dtype=object),
+    ],
+)
+def test_normalize_label_proportions_rejects_duplicate_class_identities(classes):
+    with pytest.raises(ValueError, match="classes must contain unique class labels"):
+        normalize_label_proportions([1, 1], classes=classes)
+
+
+def test_adjust_label_proportions_rejects_duplicate_classes_before_calibration():
+    with pytest.raises(ValueError, match="classes must contain unique class labels"):
+        adjust_probabilities_to_label_proportions(
+            [[0.8, 0.2], [0.3, 0.7]],
+            [1, 1],
+            classes=["state", "state"],
+        )
