@@ -137,6 +137,25 @@ def _compact_float_dtype(*arrays: np.ndarray) -> np.dtype:
     return np.dtype(np.float32)
 
 
+def _materialize_nested_iterables(value: object) -> object:
+    """Materialize one-pass containers before validation traverses them."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = np.empty(value.shape, dtype=object)
+        for index in np.ndindex(value.shape):
+            materialized[index] = _materialize_nested_iterables(value[index])
+        return materialized
+    if isinstance(value, (str, bytes, Mapping)):
+        return value
+    if hasattr(value, "__array__"):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_nested_iterables(item) for item in value]
+
+
 def _contains_complex(value: object) -> bool:
     """Return whether an input container contains complex values."""
 
@@ -160,9 +179,10 @@ def _contains_complex(value: object) -> bool:
 
 
 def _matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
-    if _contains_complex(values):
+    materialized = _materialize_nested_iterables(values)
+    if _contains_complex(materialized):
         raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
-    matrix = np.asarray(values, dtype=float)
+    matrix = np.asarray(materialized, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
@@ -173,10 +193,11 @@ def _matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.
 def _bound_vector(values: Sequence[float] | np.ndarray, *, name: str) -> np.ndarray:
     """Return one numeric clipping-bound vector without lossy coercion or NaNs."""
 
-    if _contains_complex(values):
+    materialized = _materialize_nested_iterables(values)
+    if _contains_complex(materialized):
         raise ValueError(f"{name} must contain real-valued bounds.")
     try:
-        vector = np.asarray(values, dtype=float).reshape(-1)
+        vector = np.asarray(materialized, dtype=float).reshape(-1)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a numeric vector.") from exc
     if np.any(np.isnan(vector)):
