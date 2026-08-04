@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence, Set
 
 import numpy as np
 import pandas as pd
@@ -20,7 +20,7 @@ def summarize_metric_table(
     chance_percent_column: str | None = None,
     chance_class_columns: Sequence[str] | str | None = None,
     permutation_p_column: str | None = None,
-    p_value_thresholds: Sequence[float] = (0.05, 0.01),
+    p_value_thresholds: Iterable[float] = (0.05, 0.01),
     zero_singleton_dispersion: bool = False,
 ) -> pd.DataFrame:
     """Summarize a figure-independent metric table across rows or participants.
@@ -37,6 +37,9 @@ def summarize_metric_table(
         required_columns.append(participant_column)
     if chance_column is not None:
         required_columns.append(chance_column)
+    if permutation_p_column is not None:
+        required_columns.append(permutation_p_column)
+        p_value_thresholds = _normalize_p_value_thresholds(p_value_thresholds)
     _require_columns(frame, required_columns)
 
     working = frame.copy()
@@ -99,7 +102,7 @@ def summarize_metric_table(
             finite_p_values = p_values[np.isfinite(p_values)]
             row["n_with_permutation"] = int(finite_p_values.size)
             for threshold in p_value_thresholds:
-                row[f"n_significant_p_{_threshold_suffix(threshold)}"] = int(np.sum(finite_p_values < float(threshold)))
+                row[f"n_significant_p_{_threshold_suffix(threshold)}"] = int(np.sum(finite_p_values < threshold))
         rows.append(row)
 
     return _sorted_frame(rows, group_columns)
@@ -142,6 +145,29 @@ def _normalize_columns(columns: Sequence[str] | str | None) -> list[str]:
     if isinstance(columns, str):
         return [columns]
     return list(dict.fromkeys(columns))
+
+
+def _normalize_p_value_thresholds(thresholds: Iterable[float]) -> tuple[float, ...]:
+    message = "p_value_thresholds must contain finite numeric values in the interval (0, 1]."
+    if isinstance(thresholds, (str, bytes, bytearray, memoryview, Mapping, Set)):
+        raise ValueError(message)
+    try:
+        values = tuple(thresholds)
+    except TypeError as exc:
+        raise ValueError(message) from exc
+
+    normalized: list[float] = []
+    for value in values:
+        if _is_boolean_scalar(value) or isinstance(value, (complex, np.complexfloating, np.ndarray)):
+            raise ValueError(message)
+        try:
+            threshold = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(message) from exc
+        if not np.isfinite(threshold) or threshold <= 0.0 or threshold > 1.0:
+            raise ValueError(message)
+        normalized.append(threshold)
+    return tuple(normalized)
 
 
 def _require_columns(frame: pd.DataFrame, columns: Sequence[str]) -> None:
