@@ -17,6 +17,7 @@ _TEMPORAL_STATE_PEAK_PATCH_MARKER = "_neureptrace_temporal_state_peak_selection_
 _SUBJECT_FALLBACK_PATCH_MARKER = "_neureptrace_semantic_stage_subject_fallback_patch_installed"
 _NUMERIC_COLUMN_PATCH_MARKER = "_neureptrace_semantic_stage_numeric_column_patch_installed"
 _MISSING_SEQUENCE_COMPONENT = object()
+_MISSING_SUBJECT_TOKENS = frozenset({"", "nan", "none", "nat"})
 
 
 def _output_paths(
@@ -77,7 +78,9 @@ def _state_trace_subject_fallbacks(
         if "subject" not in frame.columns:
             missing_subjects.extend([False] * len(frame))
         else:
-            missing_subjects.extend(frame["subject"].isna().tolist())
+            subject_tokens = frame["subject"].astype(str).str.strip().str.lower()
+            missing_subject = frame["subject"].isna() | subject_tokens.isin(_MISSING_SUBJECT_TOKENS)
+            missing_subjects.extend(missing_subject.tolist())
     return paths, np.asarray(missing_subjects, dtype=bool), fallback_subjects
 
 
