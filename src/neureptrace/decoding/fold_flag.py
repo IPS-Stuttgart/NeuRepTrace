@@ -52,6 +52,20 @@ def _contains_complex(value: object) -> bool:
     return any(_contains_complex(item) for item in value)
 
 
+def _float32_feature_matrix(values: np.ndarray) -> np.ndarray:
+    """Return float32 values without creating infinities or erasing nonzero data."""
+
+    if np.any(values > np.finfo(np.float32).max):
+        raise ValueError("features must be representable as finite float32 values")
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = values.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(compact)):
+        raise ValueError("features must be representable as finite float32 values")
+    if np.any((values != 0.0) & (compact == 0.0)):
+        raise ValueError("features must be representable as nonzero float32 values")
+    return compact
+
+
 def absolute_value_features(features):
     """Return absolute-valued feature rows."""
 
@@ -71,9 +85,7 @@ def absolute_value_features(features):
     if not np.all(np.isfinite(matrix)):
         raise ValueError("features must be finite")
 
-    absolute_matrix = np.abs(matrix)
-    if np.any(absolute_matrix > np.finfo(np.float32).max):
-        raise ValueError("features must be representable as finite float32 values")
+    transformed = _float32_feature_matrix(np.abs(matrix))
 
     metadata = {
         "abs_feature_protocol": ABS_FEATURE_PROTOCOL,
@@ -84,4 +96,4 @@ def absolute_value_features(features):
         "abs_feature_n_rows": int(matrix.shape[0]),
         "abs_feature_dim": int(matrix.shape[1]),
     }
-    return absolute_matrix.astype(np.float32, copy=False), metadata
+    return transformed, metadata

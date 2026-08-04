@@ -80,3 +80,24 @@ def test_absolute_value_features_accepts_float32_boundary() -> None:
 
     assert np.array_equal(transformed, np.asarray([[limit, limit]], dtype=np.float32))
     assert np.all(np.isfinite(transformed))
+
+
+def test_absolute_value_features_rejects_float32_underflow() -> None:
+    smallest_nonzero = float(np.nextafter(np.float32(0.0), np.float32(1.0)))
+    too_small = smallest_nonzero / 4.0
+    assert too_small > 0.0
+
+    with np.errstate(under="raise"):
+        with pytest.raises(ValueError, match="nonzero float32"):
+            absolute_value_features([[too_small, -too_small]])
+
+
+def test_absolute_value_features_accepts_smallest_nonzero_float32() -> None:
+    smallest_nonzero = np.nextafter(np.float32(0.0), np.float32(1.0))
+
+    transformed, _ = absolute_value_features([[smallest_nonzero, -smallest_nonzero]])
+
+    expected = np.asarray([[smallest_nonzero, smallest_nonzero]], dtype=np.float32)
+    assert transformed.dtype == np.float32
+    assert np.array_equal(transformed, expected)
+    assert np.all(transformed != 0.0)
