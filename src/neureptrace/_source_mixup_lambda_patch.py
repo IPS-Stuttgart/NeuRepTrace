@@ -39,7 +39,7 @@ def _contains_boolean(value: Any) -> bool:
 
 
 def install() -> None:
-    """Install guards for public Source MixUp lambda weights and disabled source-roll output."""
+    """Install Source MixUp and Source Feature Roll input guards."""
 
     source_mixup = importlib.import_module("neureptrace.decoding.source_mixup")
     original_mixup_rows = source_mixup.mixup_rows
@@ -59,6 +59,8 @@ def install() -> None:
     # compatibility patch, so the final public wrapper can be corrected here.
     source_roll_patch = importlib.import_module("neureptrace._source_roll_disabled_output_patch")
     source_roll_patch.install()
+    source_roll_numeric_patch = importlib.import_module("neureptrace._source_roll_numeric_input_patch")
+    source_roll_numeric_patch.install()
 
 
 __all__ = ["install"]
