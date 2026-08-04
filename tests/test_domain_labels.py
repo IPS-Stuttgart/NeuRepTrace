@@ -16,3 +16,24 @@ def test_as_domain_vector_keeps_flat_sequences_as_rows_without_expected_length()
     vector = _as_domain_vector(("first", "second"))
 
     assert vector.tolist() == ["first", "second"]
+
+
+def test_as_domain_vector_materializes_nested_one_pass_composite_labels() -> None:
+    rows = (
+        (part for part in ("subject-01", "run-01")),
+        (part for part in ("subject-01", "run-01")),
+        (part for part in ("subject-02", "run-01")),
+    )
+
+    vector = _as_domain_vector((row for row in rows), expected_length=3)
+
+    assert vector.tolist() == [
+        ("subject-01", "run-01"),
+        ("subject-01", "run-01"),
+        ("subject-02", "run-01"),
+    ]
+    assert _unique_domain_labels(vector) == (
+        ("subject-01", "run-01"),
+        ("subject-02", "run-01"),
+    )
+    assert _domain_mask(vector, ("subject-01", "run-01")).tolist() == [True, True, False]
