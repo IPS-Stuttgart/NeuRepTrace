@@ -321,12 +321,36 @@ def _install_source_smote_interpolation_patch() -> None:
     if not getattr(original_augment_source_with_smote, _SMOTE_OUTPUT_PATCH_MARKER, False):
 
         @wraps(original_augment_source_with_smote)
-        def augment_source_with_smote(*args: Any, **kwargs: Any) -> Any:
-            result = original_augment_source_with_smote(*args, **kwargs)
-            if result.metadata["source_smote"] or result.metadata["source_smote_preserve_original"]:
+        def augment_source_with_smote(
+            source_features: Any,
+            source_labels: Any,
+            *,
+            source_domains: Any = None,
+            config: Any = None,
+        ) -> Any:
+            materialized_features = _materialize_one_pass_iterable(source_features)
+            result = original_augment_source_with_smote(
+                materialized_features,
+                source_labels,
+                source_domains=source_domains,
+                config=config,
+            )
+            if result.metadata["source_smote"]:
                 return result
+
+            features = _compact_float32(module._feature_matrix(materialized_features, name="source_features"))
+            if result.metadata["source_smote_preserve_original"]:
+                return module.SourceSmoteResult(
+                    features=features,
+                    labels=result.labels,
+                    synthetic_mask=result.synthetic_mask,
+                    content_indices=result.content_indices,
+                    partner_indices=result.partner_indices,
+                    lambdas=result.lambdas,
+                    metadata=result.metadata,
+                )
             return module.SourceSmoteResult(
-                features=result.features[:0].copy(),
+                features=features[:0].copy(),
                 labels=result.labels[:0].copy(),
                 synthetic_mask=result.synthetic_mask[:0].copy(),
                 content_indices=result.content_indices,
