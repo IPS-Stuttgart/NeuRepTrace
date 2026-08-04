@@ -28,3 +28,13 @@ def test_accepted_probability_rows_preserve_tiny_positive_probability_mass() -> 
     assert accepted.dtype == np.float64
     assert accepted[0, 1] > 0.0
     np.testing.assert_array_equal(accepted, probabilities)
+
+
+def test_confidence_thresholds_use_full_precision_before_compaction() -> None:
+    probabilities = np.asarray([[0.50000001, 0.49999999]], dtype=float)
+
+    selection = select_confident_rows(probabilities, min_confidence=0.50000002)
+
+    assert selection.confidence.dtype == np.float32
+    np.testing.assert_array_equal(selection.confidence, [0.5])
+    assert selection.accepted_mask.tolist() == [False]
