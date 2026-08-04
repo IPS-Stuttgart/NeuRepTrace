@@ -30,9 +30,11 @@ def test_peak_metric_rows_sorts_csv_loaded_metric_values_numerically() -> None:
         ("accuracy", "bad"),
         ("accuracy", np.nan),
         ("accuracy", True),
+        ("accuracy", 0.9 + 0.1j),
         ("time", "bad"),
         ("time", np.inf),
         ("time", True),
+        ("time", np.complex128(0.1 + 0.2j)),
     ],
 )
 def test_peak_metric_rows_rejects_invalid_selection_values(column: str, value: object) -> None:
