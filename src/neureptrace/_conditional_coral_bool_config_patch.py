@@ -1,4 +1,4 @@
-"""Normalize conditional-CORAL config values from CLI/YAML-style inputs."""
+"""Normalize conditional-CORAL config and reject lossy complex inputs."""
 
 from __future__ import annotations
 
@@ -8,7 +8,9 @@ from typing import Any
 
 import numpy as np
 
-_PATCH_MARKER = "_neureptrace_conditional_coral_bool_config_patch_installed"
+_CONFIG_PATCH_MARKER = "_neureptrace_conditional_coral_bool_config_patch_installed"
+_FEATURE_PATCH_MARKER = "_neureptrace_conditional_coral_complex_feature_patch_installed"
+_PROBABILITY_PATCH_MARKER = "_neureptrace_conditional_coral_complex_probability_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
 _NONE_STRINGS = {"", "none", "null"}
@@ -76,36 +78,105 @@ def _normalize_optional_random_state(value: Any, *, name: str) -> int | None:
     return int(parsed)
 
 
+def _contains_complex_value(value: Any) -> bool:
+    """Return whether a declared numeric container contains complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, np.generic):
+        return _contains_complex_value(value.item())
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_complex_value(np.asarray(value))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, (str, bytes, bytearray, Mapping)):
+        return False
+    if isinstance(value, Sequence):
+        return any(_contains_complex_value(item) for item in value)
+    return False
+
+
 def install() -> None:
-    """Install strict normalization for conditional-CORAL config."""
+    """Install strict config and real-valued input validation for Conditional CORAL."""
 
     from neureptrace.decoding import conditional_coral
 
     original_config = conditional_coral.conditional_coral_config
-    if getattr(original_config, _PATCH_MARKER, False):
-        return
+    if not getattr(original_config, _CONFIG_PATCH_MARKER, False):
 
-    @wraps(original_config)
-    def conditional_coral_config(
-        *,
-        regularization: float | str = conditional_coral.DEFAULT_CONDITIONAL_CORAL_REGULARIZATION,
-        min_target_rows_per_class: int | str = conditional_coral.DEFAULT_CONDITIONAL_CORAL_MIN_TARGET_ROWS,
-        confidence_threshold: float | str = 0.0,
-        fallback: str = "global",
-        center: Any = True,
-        random_state: Any = 13,
-    ):
-        return original_config(
-            regularization=regularization,
-            min_target_rows_per_class=min_target_rows_per_class,
-            confidence_threshold=confidence_threshold,
-            fallback=fallback,
-            center=_normalize_bool(center, name="center"),
-            random_state=_normalize_optional_random_state(random_state, name="random_state"),
-        )
+        @wraps(original_config)
+        def conditional_coral_config(
+            *,
+            regularization: float | str = conditional_coral.DEFAULT_CONDITIONAL_CORAL_REGULARIZATION,
+            min_target_rows_per_class: int | str = conditional_coral.DEFAULT_CONDITIONAL_CORAL_MIN_TARGET_ROWS,
+            confidence_threshold: float | str = 0.0,
+            fallback: str = "global",
+            center: Any = True,
+            random_state: Any = 13,
+        ):
+            return original_config(
+                regularization=regularization,
+                min_target_rows_per_class=min_target_rows_per_class,
+                confidence_threshold=confidence_threshold,
+                fallback=fallback,
+                center=_normalize_bool(center, name="center"),
+                random_state=_normalize_optional_random_state(random_state, name="random_state"),
+            )
 
-    setattr(conditional_coral_config, _PATCH_MARKER, True)
-    conditional_coral.conditional_coral_config = conditional_coral_config
+        setattr(conditional_coral_config, _CONFIG_PATCH_MARKER, True)
+        conditional_coral.conditional_coral_config = conditional_coral_config
+
+    original_feature_matrix = conditional_coral._feature_matrix
+    if not getattr(original_feature_matrix, _FEATURE_PATCH_MARKER, False):
+
+        @wraps(original_feature_matrix)
+        def _feature_matrix(values: Any, *, name: str) -> np.ndarray:
+            if _contains_complex_value(values):
+                raise ValueError(
+                    f"{name} must contain real-valued feature values, not complex values."
+                )
+            return original_feature_matrix(values, name=name)
+
+        setattr(_feature_matrix, _FEATURE_PATCH_MARKER, True)
+        conditional_coral._feature_matrix = _feature_matrix
+
+    original_fit = conditional_coral.fit_pseudo_label_conditional_coral
+    if not getattr(original_fit, _PROBABILITY_PATCH_MARKER, False):
+
+        @wraps(original_fit)
+        def fit_pseudo_label_conditional_coral(
+            *,
+            source_features: Any,
+            source_labels: Any,
+            target_features: Any,
+            config: Any = None,
+            estimator: Any = None,
+            target_pseudo_labels: Any = None,
+            target_probabilities: Any = None,
+        ):
+            if target_probabilities is not None and _contains_complex_value(target_probabilities):
+                raise ValueError(
+                    "target_probabilities must contain real-valued probability values, not complex values."
+                )
+            return original_fit(
+                source_features=source_features,
+                source_labels=source_labels,
+                target_features=target_features,
+                config=config,
+                estimator=estimator,
+                target_pseudo_labels=target_pseudo_labels,
+                target_probabilities=target_probabilities,
+            )
+
+        setattr(fit_pseudo_label_conditional_coral, _PROBABILITY_PATCH_MARKER, True)
+        conditional_coral.fit_pseudo_label_conditional_coral = fit_pseudo_label_conditional_coral
 
 
 __all__ = ["install"]
