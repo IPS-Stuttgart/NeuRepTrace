@@ -14,6 +14,7 @@ _INTEGER_PRECISION_MARKER = "_source_scaling_integer_precision_patched"
 _BALANCING_CONFIG_MARKER = "_source_class_balancing_config_normalized"
 _THRESHOLD_OUTPUT_MARKER = "_source_threshold_output_precision_patched"
 _SOURCE_KNN_COMPLEX_MARKER = "_source_knn_complex_feature_validation_patched"
+_SOURCE_KNN_REFERENCE_COMPLEX_MARKER = "_source_knn_reference_complex_validation_patched"
 _SOURCE_KNN_ZERO_DISTANCE_MARKER = "_source_knn_zero_distance_weighting_patched"
 _SOURCE_ECDF_COMPLEX_EPSILON_MARKER = "_source_ecdf_complex_epsilon_validation_patched"
 _ALIAS_VALUES = {"all", "full"}
@@ -179,6 +180,28 @@ def _install_source_threshold_output_patch(source_threshold: Any) -> None:
     source_threshold.fit_source_threshold_transform = fit_source_threshold_transform
 
 
+def _install_source_knn_reference_complex_patch(source_knn: Any) -> None:
+    """Reject complex fitted arrays in directly constructed kNN references."""
+
+    current = source_knn.SourceKNNReference.__init__
+    if getattr(current, _SOURCE_KNN_REFERENCE_COMPLEX_MARKER, False):
+        return
+
+    @wraps(current)
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        current(self, *args, **kwargs)
+        for field_name in ("features", "mean", "scale"):
+            if _contains_complex_value(getattr(self, field_name)):
+                raise ValueError(
+                    f"SourceKNNReference.{field_name} must contain real-valued "
+                    "values, not complex values."
+                )
+
+    setattr(__init__, _SOURCE_KNN_REFERENCE_COMPLEX_MARKER, True)
+    __init__.__wrapped__ = current
+    source_knn.SourceKNNReference.__init__ = __init__
+
+
 def _install_source_knn_zero_distance_patch(source_knn: Any) -> None:
     """Make exact kNN matches exclude all nonzero-distance neighbors."""
 
@@ -288,6 +311,7 @@ def install() -> None:
         _feature_matrix.__wrapped__ = current_knn_feature_matrix
         source_knn._feature_matrix = _feature_matrix
 
+    _install_source_knn_reference_complex_patch(source_knn)
     _install_source_knn_zero_distance_patch(source_knn)
     _install_source_threshold_output_patch(source_threshold)
     _install_source_ecdf_complex_epsilon_patch(
