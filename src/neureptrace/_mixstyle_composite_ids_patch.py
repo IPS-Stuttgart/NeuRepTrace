@@ -73,6 +73,19 @@ def _unique_values(values: np.ndarray) -> tuple[Any, ...]:
     return tuple(unique)
 
 
+def _compact_feature_matrix(features: np.ndarray) -> np.ndarray:
+    """Use float32 only when it preserves every finite, nonzero feature value."""
+
+    matrix = np.asarray(features)
+    with np.errstate(over='ignore', under='ignore', invalid='ignore'):
+        compact = matrix.astype(np.float32, copy=False)
+    if np.any(np.isfinite(matrix) & ~np.isfinite(compact)):
+        return matrix
+    if np.any((matrix != 0.0) & (compact == 0.0)):
+        return matrix
+    return compact
+
+
 def _value_key(value: Any) -> Any:
     try:
         hash(value)
@@ -200,7 +213,7 @@ def install() -> None:
         if not feature_blocks:
             raise ValueError('No rows would be returned; enable include_original or request augmentations_per_row > 0.')
 
-        output_features = np.vstack(feature_blocks).astype(np.float32, copy=False)
+        output_features = _compact_feature_matrix(np.vstack(feature_blocks))
         output_labels = np.concatenate(label_blocks).astype(object, copy=False)
         output_domains = np.concatenate(domain_blocks).astype(object, copy=False)
         synthetic_mask = np.concatenate(mask_blocks)
