@@ -1,8 +1,9 @@
-"""Normalize Source Feature Jitter booleans and related source augmentation config."""
+"""Normalize Source Feature Jitter inputs and related source augmentation config."""
 
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterable
 from functools import wraps
 from typing import Any
 
@@ -193,6 +194,69 @@ def _normalize_masking_dataclass_config(source_masking: Any, config: Any) -> Any
     )
 
 
+def _materialize_features(value: Any) -> Any:
+    """Recursively materialize generator-backed feature rows exactly once."""
+
+    if isinstance(value, np.ndarray) or isinstance(value, (str, bytes)):
+        return value
+    if not isinstance(value, Iterable):
+        return value
+    return [_materialize_features(item) for item in value]
+
+
+def _compact_float32(values: np.ndarray) -> np.ndarray:
+    """Use float32 only when every finite nonzero feature survives narrowing."""
+
+    array = np.asarray(values)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        compact = array.astype(np.float32, copy=False)
+    if np.any(np.isfinite(array) & ~np.isfinite(compact)):
+        return array
+    if np.any((array != 0.0) & (compact == 0.0)):
+        return array
+    return compact
+
+
+def _disabled_jitter_result(
+    source_jitter: Any,
+    source_features: Any,
+    source_labels: Any,
+    source_domains: Any,
+    config: Any,
+) -> Any:
+    """Return the disabled no-op result without computing unused jitter scales."""
+
+    features = source_jitter._feature_matrix(source_features, name="source_features")
+    labels = source_jitter._label_vector(
+        source_labels,
+        expected_length=features.shape[0],
+        name="source_labels",
+    )
+    domains = source_jitter._domain_vector(
+        source_domains,
+        expected_length=features.shape[0],
+    )
+    classes, _ = source_jitter.label_counts(labels)
+    n_source_domains = int(source_jitter.label_counts(domains)[0].shape[0])
+    metadata = source_jitter._metadata(
+        config,
+        n_source_rows=features.shape[0],
+        n_synthetic_rows=0,
+        n_classes=classes.shape[0],
+        n_source_domains=n_source_domains,
+        feature_dim=features.shape[1],
+    )
+    metadata["source_feature_jitter_n_output_rows"] = int(features.shape[0])
+    return source_jitter.SourceFeatureJitterResult(
+        features=_compact_float32(features),
+        labels=labels.copy(),
+        synthetic_mask=np.zeros(features.shape[0], dtype=bool),
+        content_indices=np.empty(0, dtype=int),
+        noise=np.empty((0, features.shape[1]), dtype=np.float32),
+        metadata=metadata,
+    )
+
+
 def _singleton_axis_items(values: Any, *, expected_length: int) -> list[Any] | None:
     if expected_length == 1 or isinstance(values, (str, bytes)):
         return None
@@ -237,11 +301,34 @@ def _install_source_jitter_patch() -> None:
     if not getattr(original_augment, _AUGMENT_METADATA_PATCH_MARKER, False):
 
         @wraps(original_augment)
-        def augment_source_with_feature_jitter(*args: Any, **kwargs: Any):
-            if "config" in kwargs:
-                kwargs = dict(kwargs)
-                kwargs["config"] = _normalize_jitter_dataclass_config(source_jitter, kwargs["config"])
-            result = original_augment(*args, **kwargs)
+        def augment_source_with_feature_jitter(
+            source_features: Any,
+            source_labels: Any,
+            *,
+            source_domains: Any = None,
+            config: Any = None,
+        ):
+            normalized_config = _normalize_jitter_dataclass_config(source_jitter, config)
+            cfg = (
+                source_jitter.source_feature_jitter_config()
+                if normalized_config is None
+                else source_jitter._coerce_config(normalized_config)
+            )
+            materialized_features = _materialize_features(source_features)
+            if not cfg.enabled:
+                return _disabled_jitter_result(
+                    source_jitter,
+                    materialized_features,
+                    source_labels,
+                    source_domains,
+                    cfg,
+                )
+            result = original_augment(
+                materialized_features,
+                source_labels,
+                source_domains=source_domains,
+                config=cfg,
+            )
             output_rows = int(result.features.shape[0])
             metadata = result.metadata
             if metadata.get("source_feature_jitter_n_output_rows") == output_rows:
@@ -341,7 +428,7 @@ def _install_source_masking_patch() -> None:
 
 
 def install() -> None:
-    """Install numeric/scalar boolean normalization and source masking config validation."""
+    """Install Source Feature Jitter and source masking compatibility guards."""
 
     _install_source_jitter_patch()
     _install_source_jitter_singleton_axis_patch()
