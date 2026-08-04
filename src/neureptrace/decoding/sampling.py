@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from decimal import Decimal, InvalidOperation
 
 import numpy as np
@@ -85,6 +85,8 @@ def _label_vector(labels) -> np.ndarray:
         if array.ndim == 0:
             return array.reshape(1)
         if array.ndim == 1:
+            if np.issubdtype(original_dtype, np.object_):
+                return _object_label_vector([_as_comparable_label(item) for item in array.tolist()])
             return array
         if array.ndim == 2 and array.shape[1] == 1 and not np.issubdtype(original_dtype, np.object_):
             return array.reshape(-1)
@@ -94,9 +96,9 @@ def _label_vector(labels) -> np.ndarray:
         return np.asarray([labels], dtype=object)
 
     try:
-        items = list(labels)
+        items = [_as_comparable_label(item) for item in labels]
     except TypeError:
-        items = [labels]
+        items = [_as_comparable_label(labels)]
 
     if any(_is_composite_label(item) for item in items):
         return _object_label_vector(items)
@@ -108,7 +110,7 @@ def _row_tuple_label_vector(array: np.ndarray) -> np.ndarray:
 
     row_width = int(np.prod(array.shape[1:], dtype=int))
     flat_rows = array.reshape(array.shape[0], row_width)
-    return _object_label_vector([tuple(row) for row in flat_rows.tolist()])
+    return _object_label_vector([_as_comparable_label(tuple(row)) for row in flat_rows.tolist()])
 
 
 def _object_label_vector(items: list[object]) -> np.ndarray:
@@ -173,6 +175,8 @@ def _as_comparable_label(label: object) -> object:
         if label.ndim == 0:
             return _as_comparable_label(label.item())
         return tuple(_as_comparable_label(item) for item in label.tolist())
+    if isinstance(label, Iterator):
+        return tuple(_as_comparable_label(item) for item in label)
     if isinstance(label, (tuple, list)):
         return tuple(_as_comparable_label(item) for item in label)
     if isinstance(label, np.generic):
