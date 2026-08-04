@@ -340,14 +340,41 @@ def _pca_components_error_message() -> str:
     return "components_pca must be a positive integer count, a float in (0, 1) explained-variance ratio, or None/infinity to disable PCA."
 
 
+def _features_contain_boolean(values: object) -> bool:
+    """Return whether a materialized feature input contains boolean values."""
+
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return bool(values.size)
+        if values.dtype == object:
+            return any(_features_contain_boolean(value) for value in values.ravel(order="C"))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _features_contain_boolean(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if not isinstance(values, Iterable):
+        return False
+    return any(_features_contain_boolean(value) for value in values)
+
+
 def _feature_matrix(features: FeatureRows, *, name: str) -> np.ndarray:
     if isinstance(features, np.ndarray):
+        if _features_contain_boolean(features):
+            raise ValueError(f"{name} must contain numeric, non-boolean values.")
         matrix = np.asarray(features, dtype=float)
     else:
         try:
             rows = list(features)
         except TypeError as exc:
             raise ValueError(f"{name} must be a two-dimensional feature matrix.") from exc
+        if _features_contain_boolean(rows):
+            raise ValueError(f"{name} must contain numeric, non-boolean values.")
         try:
             matrix = np.asarray(rows, dtype=float)
         except (TypeError, ValueError) as exc:
