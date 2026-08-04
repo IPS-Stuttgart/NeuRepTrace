@@ -29,15 +29,15 @@ def _reject_boolean_values(values: object, message: str) -> None:
 
 
 def _temporal_config_scalar(value: object, message: str) -> object:
-    """Return a scalar config value while rejecting boolean and array-valued inputs."""
+    """Return a real scalar config value while rejecting malformed inputs."""
 
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(message)
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
             raise ValueError(message)
         value = value.item()
-        if isinstance(value, (bool, np.bool_)):
+        if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
             raise ValueError(message)
     elif isinstance(value, (list, tuple, dict, set)):
         raise ValueError(message)
