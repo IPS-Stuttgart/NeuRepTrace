@@ -83,12 +83,30 @@ def test_summarize_features_accepts_numpy_scalar_ddof() -> None:
     assert result.metadata["feature_summary_ddof"] == 0
 
 
+def test_summarize_features_accepts_nested_one_pass_iterables() -> None:
+    rows = (iter(row) for row in ([1.0, 2.0], [3.0, 4.0], [5.0, 8.0]))
+
+    result = summarize_features(rows)
+
+    np.testing.assert_allclose(result.mean, [3.0, 14.0 / 3.0])
+    np.testing.assert_allclose(result.minimum, [1.0, 2.0])
+    np.testing.assert_allclose(result.maximum, [5.0, 8.0])
+
+
+def test_summarize_features_rejects_boolean_values_in_one_pass_iterables() -> None:
+    rows = (iter(row) for row in ([1.0, 2.0], [3.0, True]))
+
+    with pytest.raises(ValueError, match="boolean flags"):
+        summarize_features(rows)
+
+
 @pytest.mark.parametrize(
     "features",
     [
         np.asarray([[1.0 + 2.0j, 3.0], [4.0, 5.0]], dtype=complex),
         np.asarray([[1.0 + 2.0j, 3.0], [4.0, 5.0]], dtype=object),
         [[np.complex128(1.0 + 2.0j), 3.0], [4.0, 5.0]],
+        (iter(row) for row in ([1.0 + 2.0j, 3.0], [4.0, 5.0])),
     ],
 )
 def test_summarize_features_rejects_complex_values(features) -> None:
