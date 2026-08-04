@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import numpy as np
@@ -16,10 +16,36 @@ def _object_vector(values: Sequence[Any]) -> np.ndarray:
     return vector
 
 
-def atomic_domain_vector(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+def _materialize_iterators(value: Any) -> Any:
+    """Recursively replace one-pass iterables with stable tuple values."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = np.empty(value.shape, dtype=object)
+        for index in np.ndindex(value.shape):
+            materialized[index] = _materialize_iterators(value[index])
+        return materialized
+    if isinstance(value, (str, bytes)):
+        return value
+    if isinstance(value, list):
+        return [_materialize_iterators(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_materialize_iterators(item) for item in value)
+    if isinstance(value, dict):
+        return {
+            _materialize_iterators(key): _materialize_iterators(item)
+            for key, item in value.items()
+        }
+    if not isinstance(value, Iterable):
+        return value
+    return tuple(_materialize_iterators(item) for item in value)
+
+
+def atomic_domain_vector(values: Iterable[Any] | np.ndarray) -> np.ndarray:
     """Return one object-valued domain id per row without flattening composite ids."""
 
-    array = np.asarray(values, dtype=object)
+    array = np.asarray(_materialize_iterators(values), dtype=object)
     if array.ndim == 0:
         return _object_vector([array.item()])
     if array.ndim == 1:
@@ -45,8 +71,8 @@ def _composite_items(value: object) -> list[object] | None:
         if value.ndim == 0:
             return None
         return value.reshape(-1).tolist()
-    if isinstance(value, (list, tuple)):
-        return list(value)
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+        return list(_materialize_iterators(value))
     return None
 
 
@@ -77,7 +103,7 @@ def values_equal(left: object, right: object) -> bool:
         return False
 
 
-def ordered_unique(values: Sequence[Any] | np.ndarray) -> tuple[object, ...]:
+def ordered_unique(values: Iterable[Any] | np.ndarray) -> tuple[object, ...]:
     """Return stable first-seen unique domain ids."""
 
     unique: list[object] = []
@@ -87,16 +113,18 @@ def ordered_unique(values: Sequence[Any] | np.ndarray) -> tuple[object, ...]:
     return tuple(unique)
 
 
-def domain_mask(values: Sequence[Any] | np.ndarray, selected: Sequence[object]) -> np.ndarray:
+def domain_mask(values: Iterable[Any] | np.ndarray, selected: Iterable[object]) -> np.ndarray:
     """Return a boolean mask for rows whose domain id is in ``selected``."""
 
     vector = atomic_domain_vector(values)
-    return np.asarray([any(values_equal(value, item) for item in selected) for value in vector], dtype=bool)
+    selected_vector = atomic_domain_vector(selected)
+    return np.asarray([any(values_equal(value, item) for item in selected_vector) for value in vector], dtype=bool)
 
 
 def hashable_domain_id(value: object) -> object:
     """Return a dictionary-safe representation for domain-risk summaries."""
 
+    value = _materialize_iterators(value)
     if isinstance(value, np.ndarray):
         value = value.tolist()
     if isinstance(value, list):
