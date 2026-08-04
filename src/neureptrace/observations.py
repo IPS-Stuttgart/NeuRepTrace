@@ -110,6 +110,54 @@ def _value_at(values: Sequence[object] | np.ndarray | pd.Series | None, index: i
     return value
 
 
+def _integer_input_array(values: object, *, name: str) -> np.ndarray:
+    """Materialize an integer-valued sample vector without numeric narrowing."""
+    message = f"{name} must have shape (n_samples,)."
+    if isinstance(values, np.ndarray) or hasattr(values, "__array__"):
+        array = np.asarray(values)
+    elif isinstance(values, (str, bytes)):
+        raise ValueError(message)
+    else:
+        try:
+            array = np.asarray(list(values))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(message) from exc
+    if array.ndim == 2 and array.shape[1] == 1:
+        array = array.reshape(-1)
+    if array.ndim != 1:
+        raise ValueError(message)
+    return array
+
+
+def _coerce_integer_vector(values: object, *, name: str) -> np.ndarray:
+    """Return a one-dimensional integer vector without truncating invalid values."""
+    array = _integer_input_array(values, name=name)
+    coerced: list[int] = []
+    integer_bounds = np.iinfo(np.int_)
+    for value in array.tolist():
+        if isinstance(value, np.generic):
+            value = value.item()
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError(f"{name} must contain integer values, not boolean flags.")
+        if isinstance(value, (complex, np.complexfloating)):
+            raise ValueError(f"{name} must contain real integer values, not complex values.")
+        try:
+            numeric = float(value)
+            integer = int(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must contain finite integer values.") from exc
+        if (
+            not np.isfinite(numeric)
+            or numeric % 1.0 != 0.0
+            or integer != numeric
+            or integer < integer_bounds.min
+            or integer > integer_bounds.max
+        ):
+            raise ValueError(f"{name} must contain finite integer values.")
+        coerced.append(integer)
+    return np.asarray(coerced, dtype=int)
+
+
 def _validate_class_indices(values: np.ndarray, *, n_classes: int, name: str) -> None:
     if values.size == 0:
         return
@@ -205,9 +253,9 @@ class ProbabilityObservationTable:
     ) -> "ProbabilityObservationTable":
         """Build canonical rows from held-out fold predictions."""
         probabilities = np.asarray(probabilities, dtype=float)
-        test_labels = np.asarray(test_labels, dtype=int)
-        predictions = np.asarray(predictions, dtype=int)
-        test_indices = np.asarray(test_indices, dtype=int)
+        test_labels = _coerce_integer_vector(test_labels, name="test_labels")
+        predictions = _coerce_integer_vector(predictions, name="predictions")
+        test_indices = _coerce_integer_vector(test_indices, name="test_indices")
         if probabilities.ndim != 2:
             raise ValueError("probabilities must have shape (n_samples, n_classes).")
         if probabilities.shape[0] != len(test_labels) or probabilities.shape[0] != len(predictions) or probabilities.shape[0] != len(test_indices):
