@@ -15,6 +15,10 @@ import pandas as pd
 _SAMPLE_WEIGHT_COLUMN = "sample_weight"
 
 
+def _contains_complex(values: pd.Series) -> bool:
+    return bool(values.map(lambda value: isinstance(value, (complex, np.complexfloating))).any())
+
+
 def _display_label(row: pd.Series | dict) -> str:
     decoder = str(row["decoder"])
     emission_mode = row.get("emission_mode")
@@ -32,6 +36,9 @@ def _window(frame: pd.DataFrame, time_window: tuple[float, float] | None) -> pd.
 
 
 def _validated_sample_counts(values: pd.Series) -> pd.Series:
+    message = "Reliability-bin n_samples values must be finite non-negative integers."
+    if _contains_complex(values):
+        raise ValueError(message)
     counts = pd.to_numeric(values, errors="raise").astype(float)
     numeric = counts.to_numpy(dtype=float)
     if (
@@ -39,15 +46,18 @@ def _validated_sample_counts(values: pd.Series) -> pd.Series:
         or bool((numeric < 0.0).any())
         or not np.equal(numeric, np.floor(numeric)).all()
     ):
-        raise ValueError("Reliability-bin n_samples values must be finite non-negative integers.")
+        raise ValueError(message)
     return counts
 
 
 def _validated_aggregation_mass(values: pd.Series, *, column: str) -> pd.Series:
+    message = f"Reliability-bin {column} values must be finite and non-negative."
+    if _contains_complex(values):
+        raise ValueError(message)
     mass = pd.to_numeric(values, errors="raise").astype(float)
     numeric = mass.to_numpy(dtype=float)
     if not np.isfinite(numeric).all() or bool((numeric < 0.0).any()):
-        raise ValueError(f"Reliability-bin {column} values must be finite and non-negative.")
+        raise ValueError(message)
     return mass
 
 
@@ -57,6 +67,12 @@ def _validated_probability_values(
     *,
     column: str,
 ) -> pd.Series:
+    message = (
+        f"Reliability-bin {column} values must be finite probabilities in [0, 1] "
+        "whenever aggregation mass is positive."
+    )
+    if _contains_complex(values):
+        raise ValueError(message)
     numeric = pd.to_numeric(values, errors="coerce").astype(float)
     provided = values.notna()
     provided_values = numeric.loc[provided].to_numpy(dtype=float)
@@ -66,10 +82,7 @@ def _validated_probability_values(
         or bool(((provided_values < 0.0) | (provided_values > 1.0)).any())
         or not np.isfinite(positive_mass_values).all()
     ):
-        raise ValueError(
-            f"Reliability-bin {column} values must be finite probabilities in [0, 1] "
-            "whenever aggregation mass is positive."
-        )
+        raise ValueError(message)
     return numeric
 
 
@@ -100,9 +113,9 @@ def summarize_reliability_curve(
     for keys, group in bins.groupby(group_columns, sort=True):
         sample_counts = _validated_sample_counts(group["n_samples"])
         n_samples = int(sample_counts.sum())
-        aggregation_mass = pd.to_numeric(group[mass_column], errors="raise").astype(float)
+        aggregation_mass = group[mass_column]
         if mass_column == _SAMPLE_WEIGHT_COLUMN:
-            aggregation_mass = aggregation_mass.fillna(sample_counts)
+            aggregation_mass = aggregation_mass.where(aggregation_mass.notna(), sample_counts)
         aggregation_mass = _validated_aggregation_mass(aggregation_mass, column=mass_column)
         accuracy_values = _validated_probability_values(group["accuracy"], aggregation_mass, column="accuracy")
         confidence_values = _validated_probability_values(group["confidence"], aggregation_mass, column="confidence")
