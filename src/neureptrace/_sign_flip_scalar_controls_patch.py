@@ -11,7 +11,9 @@ import numpy as np
 _PERMUTATION_COUNT_ERROR = "n_permutations must be a positive integer."
 _RANDOM_STATE_ERROR = "random_state must be a non-negative integer seed."
 _CLUSTER_ALPHA_ERROR = "cluster_alpha must be between 0 and 1."
+_REFERENCE_VALUE_ERROR = "chance must be a finite numeric scalar."
 _PATCH_MARKER = "_sign_flip_scalar_controls_patched"
+_REFERENCE_VALUE_PATCH_MARKER = "_sign_flip_reference_value_patched"
 _T_STATISTIC_PATCH_MARKER = "_sign_flip_zero_variance_t_patched"
 
 
@@ -132,6 +134,13 @@ def _validate_cluster_alpha(cluster_alpha: float) -> float:
     return float(numeric)
 
 
+def _validate_reference_value(reference_value: object) -> float:
+    numeric = _scalar_float(reference_value, _REFERENCE_VALUE_ERROR)
+    if not np.isfinite(numeric):
+        raise ValueError(_REFERENCE_VALUE_ERROR)
+    return float(numeric)
+
+
 def _t_statistics_from_mean_and_sem(means: np.ndarray, sem: np.ndarray) -> np.ndarray:
     """Return t statistics, including signed infinities for exact nonzero constants."""
 
@@ -210,12 +219,27 @@ def _patch_inference() -> None:
         _sign_flip_t_statistics._sign_flip_scalar_controls_patched = True  # type: ignore[attr-defined]
         inference._sign_flip_t_statistics = _sign_flip_t_statistics
 
+    if not getattr(inference.subject_time_effects, _REFERENCE_VALUE_PATCH_MARKER, False):
+        original_subject_time_effects = inference.subject_time_effects
+
+        @wraps(original_subject_time_effects)
+        def subject_time_effects(*args: object, **kwargs: object):
+            validated_kwargs = dict(kwargs)
+            if "chance" in validated_kwargs:
+                validated_kwargs["chance"] = _validate_reference_value(validated_kwargs["chance"])
+            return original_subject_time_effects(*args, **validated_kwargs)
+
+        subject_time_effects._sign_flip_reference_value_patched = True  # type: ignore[attr-defined]
+        inference.subject_time_effects = subject_time_effects
+
     if not getattr(inference.sign_flip_time_inference, _PATCH_MARKER, False):
         original_sign_flip_time_inference = inference.sign_flip_time_inference
 
         @wraps(original_sign_flip_time_inference)
         def sign_flip_time_inference(*args: object, **kwargs: object):
             validated_kwargs = dict(kwargs)
+            if "chance" in validated_kwargs:
+                validated_kwargs["chance"] = _validate_reference_value(validated_kwargs["chance"])
             if "n_permutations" in validated_kwargs:
                 validated_kwargs["n_permutations"] = _validate_positive_permutation_count(validated_kwargs["n_permutations"])
             if "random_state" in validated_kwargs:
