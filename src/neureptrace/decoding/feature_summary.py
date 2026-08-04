@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -80,6 +80,20 @@ def _rescale_finite(values: np.ndarray, scales: np.ndarray) -> np.ndarray:
     return output
 
 
+def _materialize_nested_iterables(value: object) -> object:
+    """Materialize one-pass feature containers before validation and conversion."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        return [_materialize_nested_iterables(item) for item in value.tolist()]
+    if hasattr(value, "__array__"):
+        return value
+    if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+        return value
+    return [_materialize_nested_iterables(item) for item in value]
+
+
 def _contains_boolean(value: object) -> bool:
     """Return whether a feature container contains Boolean-valued entries."""
 
@@ -127,11 +141,15 @@ def _contains_complex(value: object) -> bool:
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
-    if _contains_boolean(values):
+    materialized = _materialize_nested_iterables(values)
+    if _contains_boolean(materialized):
         raise ValueError("features must contain numeric values, not boolean flags.")
-    if _contains_complex(values):
+    if _contains_complex(materialized):
         raise ValueError("features must contain real-valued values.")
-    matrix = np.asarray(values, dtype=float)
+    try:
+        matrix = np.asarray(materialized, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("features must be a non-empty two-dimensional numeric matrix.") from exc
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError("features must be a non-empty two-dimensional matrix.")
     if not np.all(np.isfinite(matrix)):
