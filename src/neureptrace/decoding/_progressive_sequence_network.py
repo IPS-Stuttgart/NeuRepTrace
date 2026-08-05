@@ -5,11 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from neureptrace.decoding._progressive_sequence_core import (
-    _as_object_vector,
-    _bounded_float,
     _labels_equal,
     _nonnegative_int,
-    _positive_int,
     _stable_seed,
     _torch,
     _unique_in_order,
