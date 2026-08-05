@@ -1,0 +1,105 @@
+name: Recover prior Katja analysis code
+
+on:
+    workflow_dispatch:
+    pull_request:
+        branches: [main]
+        paths:
+            - .github/workflows/katja-recover-prior-analysis.yml
+            - workflow-triggers/katja_recover_prior.txt
+
+permissions:
+    contents: read
+
+jobs:
+    recover:
+        runs-on: [self-hosted, Linux]
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@v7
+            - name: Collect prior Katja implementation and compact outputs
+              shell: bash
+              env:
+                  PRIOR_ROOT: /home/florianpfaff/codex-runs/neureptrace-bush-alignment-20260610/NeuRepTrace
+              run: |
+                  set -euo pipefail
+                  out="${RUNNER_TEMP}/katja-prior"
+                  mkdir -p "$out/files"
+                  report="$out/inventory.txt"
+                  {
+                    echo "root=$PRIOR_ROOT"
+                    echo "date=$(date --iso-8601=seconds)"
+                    echo
+                    echo "== exact candidate files =="
+                    for path in \
+                      "$PRIOR_ROOT/src/neureptrace/katja_button_all_protocols.py" \
+                      "$PRIOR_ROOT/pyproject.toml"; do
+                      if [ -f "$path" ]; then
+                        stat --printf='%s\t%y\t%n\n' "$path"
+                        cp --parents "$path" "$out/files"
+                      else
+                        echo "missing\t$path"
+                      fi
+                    done
+                    echo
+                    echo "== matching compact files =="
+                  } > "$report"
+
+                  python - "$PRIOR_ROOT" "$out" <<'PY'
+                  from __future__ import annotations
+
+                  import os
+                  import pathlib
+                  import re
+                  import shutil
+                  import sys
+
+                  root = pathlib.Path(sys.argv[1])
+                  out = pathlib.Path(sys.argv[2])
+                  report = out / "inventory.txt"
+                  pattern = re.compile(
+                      r"katja|finger|class_repetition|seqid|all_protocol|calibrat|few_shot|source_select",
+                      re.IGNORECASE,
+                  )
+                  allowed = {
+                      ".py", ".toml", ".yaml", ".yml", ".json", ".csv", ".tsv", ".txt", ".md", ".npz", ".npy"
+                  }
+                  matches: list[tuple[int, pathlib.Path]] = []
+                  if root.is_dir():
+                      for current, dirs, files in os.walk(root):
+                          current_path = pathlib.Path(current)
+                          dirs[:] = [d for d in dirs if d not in {".git", ".venv", "venv", "node_modules", "__pycache__"}]
+                          for filename in files:
+                              path = current_path / filename
+                              if path.suffix.lower() not in allowed:
+                                  continue
+                              try:
+                                  size = path.stat().st_size
+                              except OSError:
+                                  continue
+                              if size > 25_000_000:
+                                  continue
+                              reason = bool(pattern.search(str(path.relative_to(root))))
+                              if not reason and path.suffix.lower() in {".py", ".yaml", ".yml", ".toml", ".json", ".md", ".txt"}:
+                                  try:
+                                      sample = path.read_text(encoding="utf-8", errors="replace")[:2_000_000]
+                                  except OSError:
+                                      sample = ""
+                                  reason = bool(pattern.search(sample))
+                              if reason:
+                                  matches.append((size, path))
+                  with report.open("a", encoding="utf-8") as handle:
+                      for size, path in sorted(matches, key=lambda item: str(item[1])):
+                          relative = path.relative_to(root)
+                          handle.write(f"{size}\t{relative}\n")
+                          destination = out / "files" / "prior-root" / relative
+                          destination.parent.mkdir(parents=True, exist_ok=True)
+                          shutil.copy2(path, destination)
+                  PY
+
+                  cat "$report"
+            - uses: actions/upload-artifact@v7
+              with:
+                  name: katja-prior-analysis
+                  path: ${{ runner.temp }}/katja-prior
+                  if-no-files-found: error
