@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
-
 import copy
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from neureptrace.decoding._progressive_sequence_core import (
@@ -27,6 +26,10 @@ from neureptrace.decoding._progressive_sequence_network import (
     _target_trial_validation_split,
 )
 from neureptrace.decoding._progressive_sequence_training import _ProgressiveSequenceTrainingMixin
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from typing import Any
 
 
 class TorchProgressiveSequenceClassifier(_ProgressiveSequenceTrainingMixin):
