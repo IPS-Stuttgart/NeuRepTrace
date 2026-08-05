@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from functools import wraps
+from numbers import Real
 from pathlib import Path
 
 import numpy as np
@@ -14,13 +15,75 @@ _REPORT_AGGREGATE_PATCH_MARKER = "_report_aggregate_positional_selection_patched
 _RESULTS_METRIC_SELECTION_PATCH_MARKER = "_results_unique_metric_selection_patched"
 _RESULTS_SUMMARY_SELECTION_PATCH_MARKER = "_results_summary_positional_selection_patched"
 _RESULTS_SUBJECT_READER_PATCH_MARKER = "_results_rejects_missing_subject_identifiers"
+_RESULTS_TUNED_FLAG_PATCH_MARKER = "_results_rejects_invalid_tuned_hyperparameter_flags"
 _SEMANTIC_STAGE_PATCH_MARKER = "_semantic_stage_positional_selection_patched"
+_TRUE_TUNED_FLAGS = {"1", "true", "yes", "y", "on"}
+_FALSE_TUNED_FLAGS = {"", "0", "false", "no", "n", "off"}
 
 
 def _finite_numeric_values(frame: pd.DataFrame, column: str) -> pd.Series:
     values = pd.to_numeric(frame[column], errors="coerce")
     finite = np.isfinite(values.to_numpy(dtype=float))
     return values.where(finite)
+
+
+def _is_missing_scalar(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(missing, (bool, np.bool_)) and bool(missing)
+
+
+def _coerce_tuned_hyperparameter_flag(value: object) -> bool:
+    """Return an explicit Boolean tuning flag without silently guessing."""
+
+    if _is_missing_scalar(value):
+        return False
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_TUNED_FLAGS:
+            return True
+        if normalized in _FALSE_TUNED_FLAGS:
+            return False
+        raise ValueError
+    if isinstance(value, Real):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError from exc
+        if np.isfinite(numeric) and numeric in {0.0, 1.0}:
+            return bool(int(numeric))
+    raise ValueError
+
+
+def _normalize_tuned_hyperparameter_flags(frame: pd.DataFrame) -> pd.DataFrame:
+    column = "tuned_hyperparameters"
+    if column not in frame.columns:
+        return frame
+
+    normalized: list[bool] = []
+    invalid_rows: list[object] = []
+    for row_index, value in frame[column].items():
+        try:
+            normalized.append(_coerce_tuned_hyperparameter_flag(value))
+        except ValueError:
+            invalid_rows.append(row_index)
+            normalized.append(False)
+
+    if invalid_rows:
+        raise ValueError(
+            "Results column 'tuned_hyperparameters' must contain booleans or explicit "
+            f"true/false (or 1/0) values; bad row(s): {invalid_rows[:5]}."
+        )
+
+    corrected = frame.copy()
+    corrected[column] = pd.Series(normalized, index=frame.index, dtype=bool)
+    return corrected
 
 
 def _window_mean(frame: pd.DataFrame, column: str, start: float, stop: float) -> float:
@@ -188,6 +251,22 @@ def _install_results_metric_selection_patch() -> None:
     results._selected_metric_columns = _selected_metric_columns
 
 
+def _install_results_tuned_flag_patch() -> None:
+    import neureptrace.results as results
+
+    original_normalize_group_defaults = results._normalize_group_defaults
+    if getattr(original_normalize_group_defaults, _RESULTS_TUNED_FLAG_PATCH_MARKER, False):
+        return
+
+    @wraps(original_normalize_group_defaults)
+    def _normalize_group_defaults(frame: pd.DataFrame) -> pd.DataFrame:
+        return original_normalize_group_defaults(_normalize_tuned_hyperparameter_flags(frame))
+
+    setattr(_normalize_group_defaults, _RESULTS_TUNED_FLAG_PATCH_MARKER, True)
+    _normalize_group_defaults.__wrapped__ = original_normalize_group_defaults
+    results._normalize_group_defaults = _normalize_group_defaults
+
+
 def _install_results_subject_reader_patch() -> None:
     import neureptrace.results as results
 
@@ -228,6 +307,7 @@ def install() -> None:
     _install_semantic_stage_patch()
     _install_results_summary_selection_patch()
     _install_results_metric_selection_patch()
+    _install_results_tuned_flag_patch()
     _install_results_subject_reader_patch()
 
 
