@@ -16,6 +16,10 @@ as the temporal model reader. Reused ``sequence_id``/``sample_index`` values in
 different source files, sessions, or runs must not be concatenated during schema
 validation. Missing or blank sequence identifiers are rejected because grouping
 them with ``dropna=False`` would otherwise create an artificial sequence.
+
+Onset class-metadata discovery must likewise ignore unrelated non-string pandas
+column labels. Integer and tuple metadata columns are valid, but they do not
+support string prefix operations and must not break inferred prediction labels.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from functools import wraps
 from typing import Any
 
 _PATCH_MARKER = "_neureptrace_observation_schema_string_columns_patch_installed"
+_ONSET_CLASS_LOOKUP_PATCH_MARKER = "_neureptrace_onset_string_columns_patch_installed"
 _MISSING_IDENTIFIER_TOKENS = frozenset({"", "<na>", "nan", "nat", "none", "null"})
 
 
@@ -55,6 +60,36 @@ def _normalize_column_argument(columns: Sequence[str] | str | None) -> list[str]
     if isinstance(columns, str):
         return [columns]
     return list(dict.fromkeys(columns))
+
+
+def _class_lookup_for_probability_columns(
+    frame: Any,
+    prob_columns: Sequence[str],
+    label_values: Sequence[int],
+) -> dict[int, str]:
+    """Map class labels while ignoring unrelated non-string column labels."""
+
+    lookup: dict[int, str] = {}
+    for label_value, prob_column in zip(label_values, prob_columns, strict=True):
+        suffix = str(prob_column).removeprefix("prob_class_")
+        class_column = f"class_{suffix}"
+        if class_column not in frame.columns:
+            continue
+        values = frame[class_column].dropna()
+        if not values.empty:
+            lookup[int(label_value)] = str(values.iloc[0])
+
+    for column in frame.columns:
+        if not isinstance(column, str) or not column.startswith("class_"):
+            continue
+        try:
+            class_label = int(column.removeprefix("class_"))
+        except ValueError:
+            continue
+        values = frame[column].dropna()
+        if not values.empty:
+            lookup.setdefault(class_label, str(values.iloc[0]))
+    return lookup
 
 
 def _temporal_sequence_key_columns(frame: Any) -> list[str]:
@@ -191,6 +226,12 @@ def install() -> None:
     if not getattr(original_sequence_key_columns, _PATCH_MARKER, False):
         setattr(_temporal_sequence_key_columns, _PATCH_MARKER, True)
         observation_schema._sequence_key_columns = _temporal_sequence_key_columns
+
+    event_detection_extensions = importlib.import_module("neureptrace._event_detection_extensions")
+    original_class_lookup = event_detection_extensions._class_lookup_for_probability_columns
+    if not getattr(original_class_lookup, _ONSET_CLASS_LOOKUP_PATCH_MARKER, False):
+        setattr(_class_lookup_for_probability_columns, _ONSET_CLASS_LOOKUP_PATCH_MARKER, True)
+        event_detection_extensions._class_lookup_for_probability_columns = _class_lookup_for_probability_columns
 
     temporal_model = importlib.import_module("neureptrace.temporal_model")
     original_reader = temporal_model.read_probability_observations
