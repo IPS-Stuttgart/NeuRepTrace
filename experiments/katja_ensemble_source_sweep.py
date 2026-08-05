@@ -41,71 +41,90 @@ from neureptrace.decoding.progressive_sequence_finetune import (
 DEVELOPMENT_TARGET = "s05"
 CALIBRATION_COUNTS = (15, 20)
 CURRENT_SELECTED_K20 = 0.5251572327044025
+BASELINE_REPRODUCTION_TOLERANCE = 0.01
 
 
 @dataclass(frozen=True, slots=True)
-class MemberSpec:
-    """One independently trained ensemble member."""
+class SourceSpaceSpec:
+    """Source-selection and fold-local preprocessing specification."""
 
     name: str
     n_source_participants: int
     source_selection_seed: int
-    model_seed: int
 
 
 @dataclass(slots=True)
-class PreparedMember:
-    """Fold-local feature space and fitted source model for one member."""
+class PreparedSourceSpace:
+    """Packed source and target tensors in one source-fitted feature space."""
 
-    spec: MemberSpec
+    spec: SourceSpaceSpec
     selected_sources: tuple[str, ...]
+    source_features: np.ndarray
+    source_labels: np.ndarray
+    source_subjects: np.ndarray
     target_features: np.ndarray
     target_labels: np.ndarray
     target_trial_ids: np.ndarray
     target_trial_strata: np.ndarray
-    source_model: TorchProgressiveSequenceClassifier
+
+
+@dataclass(frozen=True, slots=True)
+class MemberSpec:
+    """One model seed within a prepared source feature space."""
+
+    name: str
+    source_space: str
+    seed_variant: int
+
+
+def _source_space_specs() -> dict[str, SourceSpaceSpec]:
+    return {
+        "nine_s13": SourceSpaceSpec("nine_s13", 9, 13),
+        "nine_s29": SourceSpaceSpec("nine_s29", 9, 29),
+        "nine_s47": SourceSpaceSpec("nine_s47", 9, 47),
+        "all16": SourceSpaceSpec("all16", 16, 13),
+    }
 
 
 def _member_specs() -> dict[str, MemberSpec]:
-    result: dict[str, MemberSpec] = {}
-    for source_seed, model_seed in ((13, 13), (13, 29), (13, 47)):
-        name = f"nine_s{source_seed}_m{model_seed}"
-        result[name] = MemberSpec(name, 9, source_seed, model_seed)
-    for source_seed, model_seed in ((29, 29), (47, 47)):
-        name = f"nine_s{source_seed}_m{model_seed}"
-        result[name] = MemberSpec(name, 9, source_seed, model_seed)
-    for model_seed in (13, 29, 47):
-        name = f"all16_m{model_seed}"
-        result[name] = MemberSpec(name, 16, 13, model_seed)
-    return result
+    return {
+        "nine_s13_v0": MemberSpec("nine_s13_v0", "nine_s13", 0),
+        "nine_s13_v1": MemberSpec("nine_s13_v1", "nine_s13", 1),
+        "nine_s13_v2": MemberSpec("nine_s13_v2", "nine_s13", 2),
+        "nine_s29_v0": MemberSpec("nine_s29_v0", "nine_s29", 0),
+        "nine_s47_v0": MemberSpec("nine_s47_v0", "nine_s47", 0),
+        "all16_v0": MemberSpec("all16_v0", "all16", 0),
+        "all16_v1": MemberSpec("all16_v1", "all16", 1),
+        "all16_v2": MemberSpec("all16_v2", "all16", 2),
+    }
 
 
 def _configurations() -> dict[str, tuple[str, ...]]:
     return {
-        "nine_single_fixed": ("nine_s13_m13",),
-        "all16_single_fixed": ("all16_m13",),
+        "nine_single_protocol": ("nine_s13_v0",),
+        "all16_single_protocol": ("all16_v0",),
         "nine_model_ensemble3": (
-            "nine_s13_m13",
-            "nine_s13_m29",
-            "nine_s13_m47",
+            "nine_s13_v0",
+            "nine_s13_v1",
+            "nine_s13_v2",
         ),
         "nine_source_ensemble3": (
-            "nine_s13_m13",
-            "nine_s29_m29",
-            "nine_s47_m47",
+            "nine_s13_v0",
+            "nine_s29_v0",
+            "nine_s47_v0",
         ),
         "all16_model_ensemble3": (
-            "all16_m13",
-            "all16_m29",
-            "all16_m47",
+            "all16_v0",
+            "all16_v1",
+            "all16_v2",
         ),
         "hybrid_source_model_ensemble6": (
-            "nine_s13_m13",
-            "nine_s29_m29",
-            "nine_s47_m47",
-            "all16_m13",
-            "all16_m29",
-            "all16_m47",
+            "nine_s13_v0",
+            "nine_s29_v0",
+            "nine_s47_v0",
+            "all16_v0",
+            "all16_v1",
+            "all16_v2",
         ),
     }
 
@@ -134,6 +153,12 @@ def _prepare_rows(cache: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     }
 
 
+def _model_seed(calibration_seed: int, seed_variant: int) -> int:
+    """Keep variant zero identical to the established benchmark protocol."""
+
+    return int(calibration_seed) + 10_000 * int(seed_variant)
+
+
 def _model_kwargs(model_seed: int) -> dict[str, Any]:
     return {
         "hidden_units": 96,
@@ -159,10 +184,10 @@ def _model_kwargs(model_seed: int) -> dict[str, Any]:
     }
 
 
-def _prepare_member(
+def _prepare_source_space(
     rows: dict[str, np.ndarray],
-    spec: MemberSpec,
-) -> PreparedMember:
+    spec: SourceSpaceSpec,
+) -> PreparedSourceSpace:
     subjects = rows["subjects"].astype(str)
     target_mask = subjects == DEVELOPMENT_TARGET
     selected_sources = _stable_source_selection(
@@ -212,61 +237,67 @@ def _prepare_member(
         target_packed.row_indices,
         name="target sequence ID",
     )
-    model = TorchProgressiveSequenceClassifier(**_model_kwargs(spec.model_seed))
-    model.fit_source(
-        source_packed.features,
-        source_packed.labels,
-        source_subjects=source_trial_subjects,
-    )
-    return PreparedMember(
+    return PreparedSourceSpace(
         spec=spec,
         selected_sources=selected_sources,
+        source_features=source_packed.features,
+        source_labels=source_packed.labels,
+        source_subjects=source_trial_subjects,
         target_features=target_packed.features,
         target_labels=target_packed.labels,
         target_trial_ids=target_packed.trial_ids,
         target_trial_strata=target_trial_strata,
-        source_model=model,
     )
 
 
-def _validate_member_alignment(
-    members: dict[str, PreparedMember],
-) -> PreparedMember:
-    reference = next(iter(members.values()))
-    for member in members.values():
-        if not np.array_equal(member.target_trial_ids, reference.target_trial_ids):
-            raise RuntimeError("Ensemble members have different target trial ordering.")
-        if not np.array_equal(member.target_labels, reference.target_labels):
-            raise RuntimeError("Ensemble members have different target labels.")
+def _validate_source_space_alignment(
+    spaces: dict[str, PreparedSourceSpace],
+) -> PreparedSourceSpace:
+    reference = next(iter(spaces.values()))
+    for space in spaces.values():
+        if not np.array_equal(space.target_trial_ids, reference.target_trial_ids):
+            raise RuntimeError("Source spaces have different target trial ordering.")
+        if not np.array_equal(space.target_labels, reference.target_labels):
+            raise RuntimeError("Source spaces have different target labels.")
         if not np.array_equal(
-            member.target_trial_strata,
+            space.target_trial_strata,
             reference.target_trial_strata,
         ):
-            raise RuntimeError("Ensemble members have different target strata.")
+            raise RuntimeError("Source spaces have different target strata.")
     return reference
+
+
+def _fit_source_member(
+    space: PreparedSourceSpace,
+    *,
+    model_seed: int,
+) -> TorchProgressiveSequenceClassifier:
+    model = TorchProgressiveSequenceClassifier(**_model_kwargs(model_seed))
+    model.fit_source(
+        space.source_features,
+        space.source_labels,
+        source_subjects=space.source_subjects,
+    )
+    return model
 
 
 def run_sweep(
     cache: dict[str, np.ndarray],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     rows = _prepare_rows(cache)
-    specs = _member_specs()
+    space_specs = _source_space_specs()
+    spaces = {
+        name: _prepare_source_space(rows, spec)
+        for name, spec in space_specs.items()
+    }
+    reference = _validate_source_space_alignment(spaces)
+    member_specs = _member_specs()
     configurations = _configurations()
     needed_names = sorted({name for names in configurations.values() for name in names})
 
-    prepared: dict[str, PreparedMember] = {}
-    training_seconds: dict[str, float] = {}
-    for name in needed_names:
-        started = time.time()
-        prepared[name] = _prepare_member(rows, specs[name])
-        training_seconds[name] = time.time() - started
-        print(
-            f"Prepared {name} in {training_seconds[name]:.1f} s; "
-            f"sources={','.join(prepared[name].selected_sources)}"
-        )
-
-    reference = _validate_member_alignment(prepared)
     result_rows: list[dict[str, Any]] = []
+    training_seconds: dict[str, float] = {}
+    model_seeds: dict[str, int] = {}
 
     for calibration_seed in DEFAULT_CALIBRATION_SEEDS:
         splits = select_nested_trial_calibration_splits(
@@ -277,21 +308,39 @@ def run_sweep(
             seed=int(calibration_seed),
             context=("katja_finger", DEVELOPMENT_TARGET),
         )
+        fitted_members: dict[str, TorchProgressiveSequenceClassifier] = {}
+        for name in needed_names:
+            spec = member_specs[name]
+            model_seed = _model_seed(calibration_seed, spec.seed_variant)
+            started = time.time()
+            fitted_members[name] = _fit_source_member(
+                spaces[spec.source_space],
+                model_seed=model_seed,
+            )
+            key = f"seed{calibration_seed}:{name}"
+            training_seconds[key] = time.time() - started
+            model_seeds[key] = model_seed
+            print(
+                f"Prepared {key} in {training_seconds[key]:.1f} s; "
+                f"sources={','.join(spaces[spec.source_space].selected_sources)}"
+            )
+
         for calibration_count in CALIBRATION_COUNTS:
             split = splits[int(calibration_count)]
             member_probabilities: dict[str, np.ndarray] = {}
             for name in needed_names:
-                member = prepared[name]
-                model = copy.deepcopy(member.source_model)
+                spec = member_specs[name]
+                space = spaces[spec.source_space]
+                model = copy.deepcopy(fitted_members[name])
                 model.adapt_target(
-                    member.target_features[split.calibration_indices],
-                    member.target_labels[split.calibration_indices],
-                    target_strata=member.target_trial_strata[
+                    space.target_features[split.calibration_indices],
+                    space.target_labels[split.calibration_indices],
+                    target_strata=space.target_trial_strata[
                         split.calibration_indices
                     ],
                 )
                 member_probabilities[name] = model.predict_proba(
-                    member.target_features[split.evaluation_indices],
+                    space.target_features[split.evaluation_indices],
                     constrained=False,
                 )
                 del model
@@ -319,9 +368,7 @@ def run_sweep(
                         "k": int(calibration_count),
                         "ensemble_size": len(member_names),
                         "members": ",".join(member_names),
-                        "n_evaluation_trials": int(
-                            split.evaluation_indices.size
-                        ),
+                        "n_evaluation_trials": int(split.evaluation_indices.size),
                         "n_evaluation_events": int(evaluation_labels.size),
                         "independent_accuracy": float(
                             np.mean(independent == evaluation_labels)
@@ -331,6 +378,9 @@ def run_sweep(
                         ),
                     }
                 )
+
+        del fitted_members
+        torch.cuda.empty_cache()
 
     per_seed = pd.DataFrame(result_rows).sort_values(
         ["configuration", "k", "seed"]
@@ -364,33 +414,53 @@ def run_sweep(
         ascending=False,
     )
     selected = str(ranking.iloc[0]["configuration"])
-    selected_members = configurations[selected]
+    baseline_k20 = float(
+        ranking.loc[
+            ranking["configuration"] == "nine_single_protocol",
+            "independent_k20",
+        ].iloc[0]
+    )
+    baseline_error = baseline_k20 - CURRENT_SELECTED_K20
+    if abs(baseline_error) > BASELINE_REPRODUCTION_TOLERANCE:
+        raise RuntimeError(
+            "The single-member protocol baseline did not reproduce the prior "
+            f"s05 result: observed={baseline_k20:.6f}, "
+            f"expected={CURRENT_SELECTED_K20:.6f}."
+        )
     metadata = {
         "development_target": DEVELOPMENT_TARGET,
         "calibration_counts": list(CALIBRATION_COUNTS),
         "calibration_seeds": list(DEFAULT_CALIBRATION_SEEDS),
         "current_selected_independent_k20": CURRENT_SELECTED_K20,
+        "reproduced_baseline_independent_k20": baseline_k20,
+        "baseline_reproduction_error": baseline_error,
+        "baseline_reproduction_tolerance": BASELINE_REPRODUCTION_TOLERANCE,
         "selection_endpoint": (
             "five-seed mean independent k20 accuracy; independent k15 and "
             "permutation k20 as tie-breakers"
         ),
         "selected_configuration": selected,
-        "selected_members": list(selected_members),
-        "selected_independent_k20": float(
-            ranking.iloc[0]["independent_k20"]
-        ),
-        "improvement_over_current_selected_k20": float(
-            ranking.iloc[0]["independent_k20"] - CURRENT_SELECTED_K20
+        "selected_members": list(configurations[selected]),
+        "selected_independent_k20": float(ranking.iloc[0]["independent_k20"]),
+        "improvement_over_reproduced_baseline_k20": float(
+            ranking.iloc[0]["independent_k20"] - baseline_k20
         ),
         "member_training_seconds": training_seconds,
+        "member_model_seeds": model_seeds,
+        "source_spaces": {
+            name: {
+                "n_source_participants": spec.n_source_participants,
+                "source_selection_seed": spec.source_selection_seed,
+                "selected_sources": list(spaces[name].selected_sources),
+            }
+            for name, spec in space_specs.items()
+        },
         "members": {
             name: {
-                "n_source_participants": specs[name].n_source_participants,
-                "source_selection_seed": specs[name].source_selection_seed,
-                "model_seed": specs[name].model_seed,
-                "selected_sources": list(prepared[name].selected_sources),
+                "source_space": spec.source_space,
+                "seed_variant": spec.seed_variant,
             }
-            for name in needed_names
+            for name, spec in member_specs.items()
         },
         "configurations": {
             name: list(member_names)
