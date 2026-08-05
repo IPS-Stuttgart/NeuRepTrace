@@ -23,12 +23,13 @@ def _write_cache(path: Path, press_positions: np.ndarray) -> None:
 
 def test_katja_cache_preserves_integral_press_positions(tmp_path: Path) -> None:
     cache_path = tmp_path / "features.npz"
-    _write_cache(cache_path, np.asarray([1.0, 2.0, 3.0, 4.0]))
+    positions = np.asarray([np.iinfo(np.int64).min, -1, 4, np.iinfo(np.int64).max], dtype=np.int64)
+    _write_cache(cache_path, positions)
 
     cache = load_katja_feature_cache(cache_path)
 
     assert cache["press_positions"].dtype == np.int64
-    np.testing.assert_array_equal(cache["press_positions"], np.asarray([1, 2, 3, 4]))
+    np.testing.assert_array_equal(cache["press_positions"], positions)
 
 
 @pytest.mark.parametrize(
@@ -39,6 +40,7 @@ def test_katja_cache_preserves_integral_press_positions(tmp_path: Path) -> None:
         pytest.param(np.asarray([True, False, True, False]), id="boolean"),
         pytest.param(np.asarray([1.0, np.nan, 3.0, 4.0]), id="non-finite"),
         pytest.param(np.asarray([1, complex(2, 1), 3, 4], dtype=object), id="object-complex"),
+        pytest.param(np.asarray([1, 2, 3, 2**63], dtype=np.uint64), id="out-of-range"),
     ],
 )
 def test_katja_cache_rejects_non_integer_press_positions(
