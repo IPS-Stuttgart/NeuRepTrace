@@ -1,0 +1,335 @@
+name: Katja ensemble population follow-up
+
+permissions:
+    contents: read
+
+on: # yamllint disable-line rule:truthy
+    workflow_dispatch:
+    pull_request:
+        branches:
+            - main
+        paths:
+            - .github/workflows/katja-ensemble-population.yml
+            - experiments/katja-ensemble-population-config.json
+            - experiments/katja_ensemble_population.py
+            - experiments/katja_ensemble_source_sweep.py
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    population-follow-up:
+        name: Dual-GPU 16-target ensemble follow-up
+        runs-on: [self-hosted, Linux, X64, nvidia-smi]
+        timeout-minutes: 360
+        env:
+            KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
+            KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_ica_v4.npz
+            KATJA_PATCH_BASELINE: ca2ca39a1a3e5d7fd0b7cee4f697c9a9e1a47aa4
+            KATJA_POPULATION_CONFIG: experiments/katja-ensemble-population-config.json
+        steps:
+            - name: Check out experiment branch
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 1
+
+            - name: Validate locked follow-up scope
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  config="$KATJA_POPULATION_CONFIG"
+                  grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' "$config"
+                  grep -Eq '"development_target_excluded"[[:space:]]*:[[:space:]]*"s05"' "$config"
+                  grep -Eq '"primary_configuration"[[:space:]]*:[[:space:]]*"hybrid_source_model_ensemble6"' "$config"
+                  grep -Fq 'follow_up_validation_after_prior_16_target_single_model_result' "$config"
+                  cat "$config"
+
+            - name: Restore patch baseline and apply experiment patches
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  git fetch --no-tags --depth=1 origin "$KATJA_PATCH_BASELINE"
+                  for path in \
+                    src/neureptrace/katja_spm_feature_cache.py \
+                    src/neureptrace/decoding/_progressive_sequence_model.py \
+                    src/neureptrace/decoding/_progressive_sequence_training.py
+                  do
+                      git show "$KATJA_PATCH_BASELINE:$path" > "$path"
+                  done
+                  git apply --check experiments/katja-correct-order.patch
+                  git apply experiments/katja-correct-order.patch
+                  git apply --check experiments/katja-refit-full-data.patch
+                  git apply experiments/katja-refit-full-data.patch
+                  git diff --check
+
+            - name: Set up Python
+              uses: actions/setup-python@v7
+              with:
+                  python-version: "3.11"
+
+            - name: Install project and evaluation dependencies
+              run: |
+                  python -m pip install --disable-pip-version-check -e .
+                  python -m pip install --disable-pip-version-check \
+                    pytest numpy scipy pandas h5py
+
+            - name: Verify dual GPUs, scripts, and focused tests
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  nvidia-smi
+                  python -m py_compile \
+                    experiments/katja_ensemble_source_sweep.py \
+                    experiments/katja_ensemble_population.py
+                  python - <<'PY'
+                  from pathlib import Path
+
+                  import torch
+
+                  root = Path("/mnt/lexar4tb/datasets/Katja Button Press Data")
+                  report = {
+                      "dataset_exists": root.is_dir(),
+                      "dataset_root": str(root),
+                      "torch": torch.__version__,
+                      "cuda_available": torch.cuda.is_available(),
+                      "cuda_device_count": torch.cuda.device_count(),
+                      "cuda_devices": [
+                          torch.cuda.get_device_name(index)
+                          for index in range(torch.cuda.device_count())
+                      ],
+                  }
+                  print(report)
+                  if not root.is_dir():
+                      raise SystemExit(f"Katja dataset directory is missing: {root}")
+                  if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
+                      raise SystemExit("Two CUDA devices are required for this follow-up")
+                  PY
+                  python -m pytest -q \
+                    tests/test_progressive_sequence_finetune.py \
+                    tests/test_katja_finger_sequence_benchmark.py \
+                    | tee "${RUNNER_TEMP}/katja-ensemble-population-tests.txt"
+
+            - name: Validate or rebuild exact ICA response-locked cache
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  mkdir -p "$(dirname "$KATJA_CACHE")"
+                  cache_valid=0
+                  if [ -s "$KATJA_CACHE" ]; then
+                      if python - <<'PY'
+                  import json
+                  import os
+
+                  import numpy as np
+
+                  path = os.environ["KATJA_CACHE"]
+                  with np.load(path, allow_pickle=False) as archive:
+                      metadata = json.loads(str(archive["metadata_json"].item()))
+                      shape = list(archive["features"].shape)
+                  assert metadata["format"] == (
+                      "neureptrace_katja_button_press_event_features_exact_ica_v4"
+                  )
+                  assert metadata["correct_order_rule"] == (
+                      "finite variable timing and recorded press equals cueFinger"
+                  )
+                  print({"cache": path, "shape": shape, "format": metadata["format"]})
+                  PY
+                      then
+                          cache_valid=1
+                      fi
+                  fi
+                  if [ "$cache_valid" -ne 1 ]; then
+                      temporary="${KATJA_CACHE%.npz}.tmp.${GITHUB_RUN_ID}.npz"
+                      rm -f "$temporary"
+                      python -m neureptrace.katja_spm_feature_cache \
+                        --dataset-root "$KATJA_DATASET_ROOT" \
+                        --output "$temporary" \
+                        --button-lag-ms 30 \
+                        --force
+                      mv "$temporary" "$KATJA_CACHE"
+                  fi
+
+            - name: Run locked ensemble family on two GPUs
+              shell: bash
+              env:
+                  OMP_NUM_THREADS: "4"
+                  MKL_NUM_THREADS: "4"
+              run: |
+                  set -euo pipefail
+                  output="${RUNNER_TEMP}/katja-ensemble-population"
+                  mkdir -p "$output/part0" "$output/part1"
+
+                  CUDA_VISIBLE_DEVICES=0 python \
+                    experiments/katja_ensemble_population.py \
+                    --feature-cache "$KATJA_CACHE" \
+                    --targets "s06,s08,s09,s10,s11,s13,s14,s15" \
+                    --output-dir "$output/part0" \
+                    > "${RUNNER_TEMP}/katja-ensemble-population-gpu0.txt" 2>&1 &
+                  pid0=$!
+
+                  CUDA_VISIBLE_DEVICES=1 python \
+                    experiments/katja_ensemble_population.py \
+                    --feature-cache "$KATJA_CACHE" \
+                    --targets "s16,s17,s18,s20,s21,s24,s25,s28" \
+                    --output-dir "$output/part1" \
+                    > "${RUNNER_TEMP}/katja-ensemble-population-gpu1.txt" 2>&1 &
+                  pid1=$!
+
+                  status0=0
+                  status1=0
+                  wait "$pid0" || status0=$?
+                  wait "$pid1" || status1=$?
+                  cat "${RUNNER_TEMP}/katja-ensemble-population-gpu0.txt"
+                  cat "${RUNNER_TEMP}/katja-ensemble-population-gpu1.txt"
+                  if [ "$status0" -ne 0 ] || [ "$status1" -ne 0 ]; then
+                      echo "GPU process status: gpu0=$status0 gpu1=$status1" >&2
+                      exit 1
+                  fi
+
+            - name: Combine population results
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  python - <<'PY' | tee "${RUNNER_TEMP}/katja-ensemble-population-summary.txt"
+                  from __future__ import annotations
+
+                  import json
+                  import os
+                  import sys
+                  from pathlib import Path
+
+                  import pandas as pd
+
+                  experiments = Path("experiments").resolve()
+                  sys.path.insert(0, str(experiments))
+                  from katja_ensemble_population import (  # noqa: E402
+                      PRIMARY_CONFIGURATION,
+                      _summarize_population,
+                  )
+
+                  output = Path(os.environ["RUNNER_TEMP"]) / "katja-ensemble-population"
+                  parts = [output / "part0", output / "part1"]
+                  per_seed = pd.concat(
+                      [
+                          pd.read_csv(
+                              part / "katja_ensemble_population_per_seed.csv"
+                          )
+                          for part in parts
+                      ],
+                      ignore_index=True,
+                  ).sort_values(["configuration", "target", "k", "seed"])
+                  if per_seed["target"].nunique() != 16:
+                      raise RuntimeError("Expected exactly 16 follow-up targets")
+                  per_target, summary = _summarize_population(per_seed)
+                  per_seed.to_csv(
+                      output / "katja_ensemble_population_per_seed.csv",
+                      index=False,
+                  )
+                  per_target.to_csv(
+                      output / "katja_ensemble_population_per_target.csv",
+                      index=False,
+                  )
+                  summary.to_csv(
+                      output / "katja_ensemble_population_summary.csv",
+                      index=False,
+                  )
+                  part_metadata = [
+                      json.loads(
+                          (
+                              part / "katja_ensemble_population_metadata.json"
+                          ).read_text(encoding="utf-8")
+                      )
+                      for part in parts
+                  ]
+                  metadata = {
+                      "analysis_status": (
+                          "follow_up_validation_after_prior_16_target_single_model_result"
+                      ),
+                      "development_run_id": 31007742231,
+                      "development_artifact_id": 8931215635,
+                      "primary_configuration": PRIMARY_CONFIGURATION,
+                      "targets": sorted(per_seed["target"].unique().tolist()),
+                      "parts": part_metadata,
+                      "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  }
+                  (output / "katja_ensemble_population_metadata.json").write_text(
+                      json.dumps(metadata, indent=2, sort_keys=True),
+                      encoding="utf-8",
+                  )
+                  print(summary.to_string(index=False))
+                  PY
+
+            - name: Write follow-up result to workflow summary
+              if: always()
+              shell: bash
+              run: |
+                  if ! command -v python >/dev/null 2>&1; then
+                      exit 0
+                  fi
+                  python - <<'PY'
+                  import os
+                  from pathlib import Path
+
+                  import pandas as pd
+
+                  result = (
+                      Path(os.environ["RUNNER_TEMP"])
+                      / "katja-ensemble-population"
+                      / "katja_ensemble_population_summary.csv"
+                  )
+                  if not result.exists():
+                      raise SystemExit(0)
+                  frame = pd.read_csv(result)
+                  frame = frame[frame["k"] == 20].copy()
+                  percent_columns = [
+                      "independent_accuracy_mean",
+                      "independent_accuracy_sem",
+                      "permutation_accuracy_mean",
+                      "permutation_accuracy_sem",
+                      "julia_full_finetune_accuracy",
+                      "independent_delta_vs_julia",
+                      "permutation_delta_vs_julia",
+                  ]
+                  frame[percent_columns] *= 100.0
+                  columns = [
+                      "configuration",
+                      "category",
+                      "independent_accuracy_mean",
+                      "independent_accuracy_sem",
+                      "independent_delta_vs_julia",
+                      "permutation_accuracy_mean",
+                      "permutation_accuracy_sem",
+                      "permutation_delta_vs_julia",
+                  ]
+                  with Path(os.environ["GITHUB_STEP_SUMMARY"]).open(
+                      "a", encoding="utf-8"
+                  ) as stream:
+                      stream.write("## Katja ensemble population follow-up\n\n")
+                      stream.write(
+                          "This is a development-selected follow-up on the same "
+                          "16 participants previously used in PR #2109, not a new "
+                          "untouched confirmation. Values below are k20 percentages.\n\n"
+                      )
+                      stream.write("```text\n")
+                      stream.write(frame[columns].to_string(index=False))
+                      stream.write("\n```\n")
+                  PY
+
+            - name: Upload ensemble population follow-up
+              if: always()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: katja-ensemble-population-followup-exact-ica-v4
+                  path: |
+                      ${{ runner.temp }}/katja-ensemble-population-tests.txt
+                      ${{ runner.temp }}/katja-ensemble-population-gpu0.txt
+                      ${{ runner.temp }}/katja-ensemble-population-gpu1.txt
+                      ${{ runner.temp }}/katja-ensemble-population-summary.txt
+                      ${{ runner.temp }}/katja-ensemble-population/*.csv
+                      ${{ runner.temp }}/katja-ensemble-population/*.json
+                      ${{ runner.temp }}/katja-ensemble-population/part0/*.csv
+                      ${{ runner.temp }}/katja-ensemble-population/part0/*.json
+                      ${{ runner.temp }}/katja-ensemble-population/part1/*.csv
+                      ${{ runner.temp }}/katja-ensemble-population/part1/*.json
+                  if-no-files-found: warn
