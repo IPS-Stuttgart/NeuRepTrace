@@ -21,8 +21,6 @@ def _coerce_label_item(item):
         if array.ndim == 0:
             return _coerce_label_item(array.item())
         flat = array.reshape(-1)
-        if flat.size == 1:
-            return _coerce_label_item(flat[0])
         return tuple(_coerce_label_item(value) for value in flat.tolist())
     if isinstance(item, Iterator):
         return tuple(_coerce_label_item(value) for value in item)
