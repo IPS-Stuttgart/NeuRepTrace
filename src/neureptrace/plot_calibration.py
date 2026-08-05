@@ -19,6 +19,22 @@ def _contains_complex(values: pd.Series) -> bool:
     return bool(values.map(lambda value: isinstance(value, (complex, np.complexfloating))).any())
 
 
+def _is_boolean_like_numeric(value: object) -> bool:
+    if isinstance(value, (bool, np.bool_)):
+        return True
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        try:
+            scalar = value.item()
+        except ValueError:
+            return False
+        return isinstance(scalar, (bool, np.bool_))
+    return False
+
+
+def _contains_boolean(values: pd.Series) -> bool:
+    return bool(values.map(_is_boolean_like_numeric).any())
+
+
 def _display_label(row: pd.Series | dict) -> str:
     decoder = str(row["decoder"])
     emission_mode = row.get("emission_mode")
@@ -37,7 +53,7 @@ def _window(frame: pd.DataFrame, time_window: tuple[float, float] | None) -> pd.
 
 def _validated_sample_counts(values: pd.Series) -> pd.Series:
     message = "Reliability-bin n_samples values must be finite non-negative integers."
-    if _contains_complex(values):
+    if _contains_boolean(values) or _contains_complex(values):
         raise ValueError(message)
     counts = pd.to_numeric(values, errors="raise").astype(float)
     numeric = counts.to_numpy(dtype=float)
@@ -52,7 +68,7 @@ def _validated_sample_counts(values: pd.Series) -> pd.Series:
 
 def _validated_aggregation_mass(values: pd.Series, *, column: str) -> pd.Series:
     message = f"Reliability-bin {column} values must be finite and non-negative."
-    if _contains_complex(values):
+    if _contains_boolean(values) or _contains_complex(values):
         raise ValueError(message)
     mass = pd.to_numeric(values, errors="raise").astype(float)
     numeric = mass.to_numpy(dtype=float)
@@ -71,7 +87,7 @@ def _validated_probability_values(
         f"Reliability-bin {column} values must be finite probabilities in [0, 1] "
         "whenever aggregation mass is positive."
     )
-    if _contains_complex(values):
+    if _contains_boolean(values) or _contains_complex(values):
         raise ValueError(message)
     numeric = pd.to_numeric(values, errors="coerce").astype(float)
     provided = values.notna()
