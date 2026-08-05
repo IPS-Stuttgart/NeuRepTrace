@@ -16,7 +16,7 @@ on: # yamllint disable-line rule:truthy
             - experiments/katja_ensemble_source_sweep.py
 
 concurrency:
-    group: katja-ensemble-full-curve-v2-${{ github.ref }}
+    group: katja-ensemble-full-curve-v3-${{ github.ref }}
     cancel-in-progress: true
 
 env:
