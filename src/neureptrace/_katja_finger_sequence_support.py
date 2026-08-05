@@ -36,6 +36,7 @@ DEFAULT_PARTICIPANTS = (
 )
 DEFAULT_CALIBRATION_COUNTS = (1, 3, 5, 10, 15, 20)
 DEFAULT_CALIBRATION_SEEDS = (13, 29, 47, 71, 101)
+DEFAULT_SOURCE_SELECTION_SEED = 2026
 JULIA_FULL_FINETUNE_ACCURACY = {1: 0.274, 3: 0.404, 5: 0.466, 10: 0.534, 15: 0.572, 20: 0.594}
 
 
@@ -141,15 +142,63 @@ def _stable_source_selection(
     n_sources: int,
     seed: int,
 ) -> tuple[str, ...]:
-    candidates = np.asarray([participant for participant in participants if participant != target], dtype=object)
+    """Reproduce the source subset used by the original finger comparison."""
+
+    candidates = np.asarray(
+        sorted(participant for participant in participants if participant != target),
+        dtype=object,
+    )
     if candidates.shape[0] < n_sources:
         raise ValueError(f"Target {target!r} has only {candidates.shape[0]} candidate sources; requested {n_sources}.")
-    payload = f"{seed}|{target}|{'|'.join(participants)}".encode("utf-8")
-    import hashlib
+    target_number = int("".join(character for character in target if character.isdigit()) or 0)
+    rng = np.random.default_rng(int(seed) + target_number)
+    selected = rng.choice(candidates, size=int(n_sources), replace=False)
+    return tuple(sorted(str(value) for value in selected.tolist()))
 
-    stable_seed = int(hashlib.blake2b(payload, digest_size=8).hexdigest(), 16) % (2**32)
-    rng = np.random.default_rng(stable_seed)
-    return tuple(str(value) for value in rng.permutation(candidates)[:n_sources].tolist())
+
+def katja_nested_trial_calibration_indices(
+    strata: np.ndarray,
+    calibration_counts: tuple[int, ...],
+    *,
+    seed: int,
+) -> tuple[dict[int, np.ndarray], np.ndarray, np.ndarray]:
+    """Reproduce the original sequential-RNG nested Katja trial split.
+
+    The maximum calibration pool is drawn first inside each sorted sequence ID.
+    Lower-k pools are prefixes of that maximum pool, and the complement of the
+    maximum pool is the common evaluation set for every k.
+    """
+
+    values = np.asarray(strata).reshape(-1)
+    requested = tuple(sorted({int(count) for count in calibration_counts if int(count) > 0}))
+    if not requested:
+        raise ValueError("calibration_counts must contain at least one positive value.")
+    maximum = max(requested)
+    rng = np.random.default_rng(int(seed))
+    calibration: dict[int, list[int]] = {count: [] for count in requested}
+    evaluation: list[int] = []
+    reserved_all: list[int] = []
+    try:
+        ordered_strata = sorted(set(values.tolist()))
+    except TypeError:
+        ordered_strata = sorted(set(values.tolist()), key=str)
+    for stratum in ordered_strata:
+        candidates = np.flatnonzero(values == stratum).astype(int, copy=True)
+        if candidates.size <= maximum:
+            raise ValueError(
+                f"Stratum {stratum!r} has {candidates.size} trials; more than {maximum} are required."
+            )
+        rng.shuffle(candidates)
+        reserved = candidates[:maximum]
+        reserved_all.extend(int(index) for index in reserved)
+        evaluation.extend(int(index) for index in candidates[maximum:])
+        for count in requested:
+            calibration[count].extend(int(index) for index in reserved[:count])
+    return (
+        {count: np.asarray(sorted(indices), dtype=int) for count, indices in calibration.items()},
+        np.asarray(sorted(evaluation), dtype=int),
+        np.asarray(sorted(reserved_all), dtype=int),
+    )
 
 
 def _load_source_map(path: str | Path | None) -> dict[str, tuple[str, ...]]:
