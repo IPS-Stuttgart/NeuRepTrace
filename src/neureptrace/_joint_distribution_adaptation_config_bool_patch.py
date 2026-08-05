@@ -56,7 +56,7 @@ def install() -> None:
         setattr(joint_distribution_adaptation_config, _PATCH_MARKER, True)
         jda.joint_distribution_adaptation_config = joint_distribution_adaptation_config
 
-    original_resolve_classes = jda._resolve_classes
+    original_resolve_classes = getattr(jda, "_resolve_classes")
     if not getattr(original_resolve_classes, _CLASS_SET_PATCH_MARKER, False):
 
         @wraps(original_resolve_classes)
@@ -75,7 +75,7 @@ def install() -> None:
             return resolved
 
         setattr(_resolve_classes, _CLASS_SET_PATCH_MARKER, True)
-        jda._resolve_classes = _resolve_classes
+        setattr(jda, "_resolve_classes", _resolve_classes)
 
 
 def _normalize_bool(value: bool | int | float | str, *, name: str) -> bool:
