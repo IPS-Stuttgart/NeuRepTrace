@@ -73,7 +73,12 @@ def load_katja_feature_cache(path: str | Path) -> dict[str, np.ndarray]:
         raise FileNotFoundError(cache_path)
     with np.load(cache_path, allow_pickle=True) as cache:
         features, feature_name = _cache_field(cache, "features", "X")
-        feature_array = np.asarray(features, dtype=np.float32)
+        feature_values = np.asarray(features)
+        if np.iscomplexobj(feature_values) or (
+            feature_values.dtype == object and any(np.iscomplexobj(value) for value in feature_values.flat)
+        ):
+            raise ValueError(f"Cache field {feature_name!r} must contain real-valued features.")
+        feature_array = np.asarray(feature_values, dtype=np.float32)
         if feature_array.ndim < 2 or feature_array.shape[0] < 1:
             raise ValueError(f"Cache field {feature_name!r} must contain event rows and at least one feature dimension.")
         feature_array = feature_array.reshape(feature_array.shape[0], -1)
