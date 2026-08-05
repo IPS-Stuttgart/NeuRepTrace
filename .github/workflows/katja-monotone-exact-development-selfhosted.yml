@@ -1,0 +1,253 @@
+name: Katja monotone exact self-hosted development
+
+permissions:
+    contents: read
+
+on: # yamllint disable-line rule:truthy
+    workflow_dispatch:
+    pull_request:
+        branches:
+            - main
+        paths:
+            - .github/workflows/katja-monotone-exact-development-selfhosted.yml
+
+concurrency:
+    group: ${{ github.repository }}-katja-monotone-exact-development-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    development:
+        name: Five-seed s05 registered comparison
+        runs-on: [self-hosted, Linux, X64, nvidia-smi]
+        timeout-minutes: 240
+        env:
+            KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_ica_v4.npz
+            KATJA_CONFIG: experiments/katja-monotone-exact-config.json
+        steps:
+            - name: Check out experiment branch
+              uses: actions/checkout@v7
+
+            - name: Set up Python
+              uses: actions/setup-python@v7
+              with:
+                  python-version: "3.11"
+
+            - name: Install project and test dependencies
+              run: |
+                  python -m pip install --disable-pip-version-check -e .
+                  python -m pip install --disable-pip-version-check pytest numpy scipy pandas h5py
+
+            - name: Validate registered configuration, CUDA, and cache
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  test -s "$KATJA_CACHE"
+                  nvidia-smi
+                  python - <<'PY'
+                  import json
+                  import os
+                  from pathlib import Path
+
+                  import numpy as np
+                  import torch
+
+                  config = json.loads(
+                      Path(os.environ["KATJA_CONFIG"]).read_text(encoding="utf-8")
+                  )
+                  required = {
+                      "enabled",
+                      "development_target",
+                      "calibration_counts",
+                      "calibration_seeds",
+                      "reference_independent_k20",
+                      "minimum_promotion_gain",
+                      "configurations",
+                  }
+                  missing = sorted(required.difference(config))
+                  if missing:
+                      raise SystemExit(f"Missing configuration fields: {missing}")
+                  if not config["enabled"]:
+                      raise SystemExit("Registered experiment is disabled")
+                  expected_configurations = {
+                      "monotone_sinkhorn",
+                      "monotone_exact",
+                  }
+                  if set(config["configurations"]) != expected_configurations:
+                      raise SystemExit("Unexpected registered configurations")
+                  if not torch.cuda.is_available():
+                      raise SystemExit("CUDA is required")
+                  with np.load(os.environ["KATJA_CACHE"], allow_pickle=False) as archive:
+                      metadata = json.loads(str(archive["metadata_json"].item()))
+                      shape = list(archive["features"].shape)
+                  expected_format = (
+                      "neureptrace_katja_button_press_event_features_exact_ica_v4"
+                  )
+                  if metadata.get("format") != expected_format:
+                      raise SystemExit(
+                          f"Unexpected cache format: {metadata.get('format')!r}"
+                      )
+                  print(json.dumps(config, indent=2, sort_keys=True))
+                  print(
+                      {
+                          "torch": torch.__version__,
+                          "cuda_device": torch.cuda.get_device_name(0),
+                          "cache_shape": shape,
+                          "cache_format": metadata["format"],
+                      }
+                  )
+                  PY
+
+            - name: Run focused tests
+              run: |
+                  python -m pytest -q \
+                    tests/test_monotone_exact_sequence.py \
+                    tests/test_progressive_sequence_finetune.py \
+                    tests/test_katja_finger_sequence_benchmark.py \
+                    | tee "${RUNNER_TEMP}/katja-monotone-exact-tests.txt"
+
+            - name: Run registered five-seed development comparison
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  output="${RUNNER_TEMP}/katja-monotone-exact-development"
+                  mkdir -p "$output"
+                  python - <<'PY' | tee "${RUNNER_TEMP}/katja-monotone-exact-development.txt"
+                  from __future__ import annotations
+
+                  import json
+                  import os
+                  import time
+                  from pathlib import Path
+
+                  import pandas as pd
+
+                  import neureptrace.katja_finger_sequence_benchmark as benchmark
+                  from neureptrace._katja_finger_sequence_support import (
+                      DEFAULT_PARTICIPANTS,
+                      load_katja_feature_cache,
+                  )
+                  from neureptrace.decoding.monotone_exact_sequence import (
+                      TorchMonotoneExactSequenceClassifier,
+                  )
+
+                  config = json.loads(
+                      Path(os.environ["KATJA_CONFIG"]).read_text(encoding="utf-8")
+                  )
+                  output = (
+                      Path(os.environ["RUNNER_TEMP"])
+                      / "katja-monotone-exact-development"
+                  )
+                  cache = load_katja_feature_cache(os.environ["KATJA_CACHE"])
+                  benchmark.TorchProgressiveSequenceClassifier = (
+                      TorchMonotoneExactSequenceClassifier
+                  )
+                  base_kwargs = {
+                      "hidden_units": 96,
+                      "num_layers": 2,
+                      "num_heads": 4,
+                      "adapter_rank": 8,
+                      "source_max_epochs": 120,
+                      "meta_epochs": 2,
+                      "meta_support_trials": 4,
+                      "meta_query_trials": 4,
+                      "meta_inner_steps": 5,
+                      "adapter_steps": 80,
+                      "last_block_steps": 60,
+                      "full_finetune_steps": 60,
+                      "batch_size": 64,
+                      "device": "cuda",
+                      "refit_source_on_all": True,
+                      "refit_target_on_all": True,
+                  }
+                  seed_frames = []
+                  target_frames = []
+                  summary_frames = []
+                  run_metadata = {}
+                  for name, objective in config["configurations"].items():
+                      started = time.time()
+                      model_kwargs = {**base_kwargs, **objective}
+                      per_seed, per_target, summary, metadata = (
+                          benchmark.run_katja_finger_sequence_benchmark(
+                              cache,
+                              participants=DEFAULT_PARTICIPANTS,
+                              target_participants=(config["development_target"],),
+                              calibration_counts=tuple(config["calibration_counts"]),
+                              calibration_seeds=tuple(config["calibration_seeds"]),
+                              n_source_participants=9,
+                              source_selection_seed=13,
+                              pca_components=64,
+                              model_kwargs=model_kwargs,
+                          )
+                      )
+                      elapsed = time.time() - started
+                      for frame in (per_seed, per_target, summary):
+                          frame.insert(0, "configuration", name)
+                          frame.insert(1, "elapsed_seconds", elapsed)
+                      seed_frames.append(per_seed)
+                      target_frames.append(per_target)
+                      summary_frames.append(summary)
+                      run_metadata[name] = {
+                          "elapsed_seconds": elapsed,
+                          "model_kwargs": model_kwargs,
+                          "benchmark_metadata": metadata,
+                      }
+                      print(f"\n=== {name} ({elapsed:.1f} s) ===")
+                      print(summary.to_string(index=False))
+
+                  all_seed = pd.concat(seed_frames, ignore_index=True)
+                  all_target = pd.concat(target_frames, ignore_index=True)
+                  all_summary = pd.concat(summary_frames, ignore_index=True)
+                  ranking = all_summary[all_summary["k"] == 20].sort_values(
+                      ["independent_accuracy_mean", "permutation_accuracy_mean"],
+                      ascending=False,
+                  )
+                  winner = str(ranking.iloc[0]["configuration"])
+                  winner_accuracy = float(
+                      ranking.iloc[0]["independent_accuracy_mean"]
+                  )
+                  promotion_threshold = float(
+                      config["reference_independent_k20"]
+                  ) + float(config["minimum_promotion_gain"])
+                  selection = {
+                      "winner": winner,
+                      "winner_accuracy": winner_accuracy,
+                      "reference_accuracy": float(
+                          config["reference_independent_k20"]
+                      ),
+                      "promotion_threshold": promotion_threshold,
+                      "promote": bool(winner_accuracy > promotion_threshold),
+                  }
+                  all_seed.to_csv(output / "per_seed.csv", index=False)
+                  all_target.to_csv(output / "per_target.csv", index=False)
+                  all_summary.to_csv(output / "summary.csv", index=False)
+                  (output / "metadata.json").write_text(
+                      json.dumps(
+                          {
+                              "registered_config": config,
+                              "runs": run_metadata,
+                          },
+                          indent=2,
+                          sort_keys=True,
+                      ),
+                      encoding="utf-8",
+                  )
+                  (output / "selection.json").write_text(
+                      json.dumps(selection, indent=2, sort_keys=True),
+                      encoding="utf-8",
+                  )
+                  print("\n=== registered selection ===")
+                  print(json.dumps(selection, indent=2, sort_keys=True))
+                  print(ranking.to_string(index=False))
+                  PY
+
+            - name: Upload registered development comparison
+              if: always()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: katja-monotone-exact-development-selfhosted
+                  path: |
+                      ${{ runner.temp }}/katja-monotone-exact-tests.txt
+                      ${{ runner.temp }}/katja-monotone-exact-development.txt
+                      ${{ runner.temp }}/katja-monotone-exact-development/*.csv
+                      ${{ runner.temp }}/katja-monotone-exact-development/*.json
+                  if-no-files-found: warn
