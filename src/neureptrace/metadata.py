@@ -109,6 +109,11 @@ def prepare_binary_metadata(
     case_sensitive: bool = False,
 ) -> pd.DataFrame:
     """Load metadata, add a binary label, and write the result as CSV."""
+    events_csv = Path(events_csv)
+    out_path = Path(out_path)
+    if events_csv.resolve(strict=False) == out_path.resolve(strict=False):
+        raise ValueError("out_path must not overwrite events_csv.")
+
     metadata = pd.read_csv(events_csv)
     labeled = add_binary_label(
         metadata,
