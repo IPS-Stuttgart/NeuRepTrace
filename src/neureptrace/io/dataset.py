@@ -84,7 +84,7 @@ class EpochDataset:
             raise ValueError(f"Cannot select missing channels: {missing}.")
         indices = [index_by_name[channel_name] for channel_name in channel_names]
         provenance = dict(self.provenance)
-        provenance["selected_channels"] = channel_names
+        provenance["selected_channels"] = list(channel_names)
         return type(self)(
             data=self.data[:, indices, :],
             times=self.times.copy(),
