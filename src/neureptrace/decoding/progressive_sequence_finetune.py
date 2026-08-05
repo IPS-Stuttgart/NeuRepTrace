@@ -7,8 +7,7 @@ and permutation-constrained decoding.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -28,6 +27,10 @@ from neureptrace.decoding._progressive_sequence_core import (
     sinkhorn_trial_probabilities,
 )
 from neureptrace.decoding._progressive_sequence_model import TorchProgressiveSequenceClassifier
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from typing import Any
 
 __all__ = (
     "PROGRESSIVE_SEQUENCE_CATEGORY",
