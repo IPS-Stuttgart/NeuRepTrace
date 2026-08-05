@@ -95,6 +95,7 @@ def run_katja_finger_sequence_benchmark(
     press_positions = press_positions[included]
     sequence_ids = sequence_ids[included]
     labels = labels[included]
+    available_participants = set(subjects.tolist())
     source_map = {} if source_map is None else source_map
     model_config = {} if model_kwargs is None else dict(model_kwargs)
     rows: list[dict[str, Any]] = []
@@ -118,8 +119,14 @@ def run_katja_finger_sequence_benchmark(
                 n_sources=n_source_participants,
                 seed=source_selection_seed,
             )
+        selected_sources = tuple(str(source) for source in selected_sources)
         if target in selected_sources or len(set(selected_sources)) != len(selected_sources):
             raise ValueError(f"Invalid source participant set for target {target!r}: {selected_sources!r}.")
+        missing_sources = tuple(source for source in selected_sources if source not in available_participants)
+        if missing_sources:
+            raise ValueError(
+                f"Selected source participants for target {target!r} lack included rows: {missing_sources!r}."
+            )
         source_selection_registry[target] = selected_sources
         source_mask = np.isin(subjects, np.asarray(selected_sources))
         if not np.any(source_mask):
