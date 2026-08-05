@@ -62,6 +62,15 @@ def _normalize_column_argument(columns: Sequence[str] | str | None) -> list[str]
     return list(dict.fromkeys(columns))
 
 
+def _string_labeled_frame(frame: Any) -> Any:
+    """Return a column view containing only labels used by the string schema."""
+
+    string_positions = [index for index, column in enumerate(frame.columns) if isinstance(column, str)]
+    if len(string_positions) == len(frame.columns):
+        return frame
+    return frame.iloc[:, string_positions]
+
+
 def _temporal_sequence_key_columns(frame: Any) -> list[str]:
     if "sequence_id" in frame.columns:
         return [column for column in _SEQUENCE_ID_KEY_CANDIDATES if column in frame.columns]
@@ -150,10 +159,7 @@ def install() -> None:
 
         @wraps(original_probability_columns)
         def probability_columns(frame: Any) -> list[str]:
-            string_positions = [index for index, column in enumerate(frame.columns) if isinstance(column, str)]
-            if len(string_positions) == len(frame.columns):
-                return original_probability_columns(frame)
-            return original_probability_columns(frame.iloc[:, string_positions])
+            return original_probability_columns(_string_labeled_frame(frame))
 
         setattr(probability_columns, _PATCH_MARKER, True)
         observation_schema.probability_columns = probability_columns
@@ -184,6 +190,16 @@ def install() -> None:
 
         setattr(validate_probability_observations, _PATCH_MARKER, True)
         observation_schema.validate_probability_observations = validate_probability_observations
+
+    original_class_validator = observation_schema._validate_class_columns
+    if not getattr(original_class_validator, _PATCH_MARKER, False):
+
+        @wraps(original_class_validator)
+        def _validate_class_columns(frame: Any, prob_columns: Sequence[str], issues: list[Any]) -> None:
+            return original_class_validator(_string_labeled_frame(frame), prob_columns, issues)
+
+        setattr(_validate_class_columns, _PATCH_MARKER, True)
+        observation_schema._validate_class_columns = _validate_class_columns
 
     original_group_validator = observation_schema._validate_group_columns
     if not getattr(original_group_validator, _PATCH_MARKER, False):
