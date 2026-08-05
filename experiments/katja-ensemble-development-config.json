@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "purpose": "development-only source and model probability ensemble sweep",
+  "target": "s05",
+  "feature_cache": "katja_finger_events_exact_ica_v4.npz",
+  "selection_endpoint": "five-seed mean independent k20 accuracy"
+}
