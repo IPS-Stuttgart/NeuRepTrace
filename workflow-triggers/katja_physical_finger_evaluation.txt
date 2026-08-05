@@ -1,3 +1,0 @@
-Frozen physical-finger outer-fold evaluation trigger.
-Protocol: global five-class physical head, target fixed-finger masking, k20, five seeds, all 17 outer pseudo-targets.
-Primary comparison: uniform local+physical six-model blend versus frozen same-nine-source local three-model ensemble.
