@@ -1,11 +1,12 @@
 # Progressive sequence-level target fine-tuning
 
 `neureptrace.decoding.progressive_sequence_finetune` provides a Protocol-3
-neural decoder for repeated-event trials such as multi-press motor sequences. It
-addresses two limitations of independent event classifiers:
+neural decoder for repeated-event trials such as multi-press motor sequences.
+It addresses two limitations of independent event classifiers:
 
 1. the model can use the other presses in the same complete trial as context;
-2. when the design contains one occurrence of every class per trial, prediction can enforce that one-to-one assignment without using evaluation labels.
+2. when the design contains one occurrence of every class per trial, prediction
+   can enforce that one-to-one assignment without using evaluation labels.
 
 The decoder trains a source backbone with held-out-source-subject validation,
 then adapts to the labeled target calibration trials in three stages:
@@ -15,10 +16,10 @@ then adapts to the labeled target calibration trials in three stages:
 - full-backbone fine-tuning with L2-SP regularization and optional source replay.
 
 Small calibration sets automatically stay in the more strongly regularized
-stages. The sequence backbone is a residual event encoder followed by Transformer
-encoder layers. A differentiable Sinkhorn term encourages a doubly stochastic
-event-by-class assignment, and inference uses a Hungarian maximum-a-posteriori
-assignment.
+stages. The sequence backbone is a residual event encoder followed by
+Transformer encoder layers. A differentiable Sinkhorn term encourages a doubly
+stochastic event-by-class assignment, and inference uses a Hungarian
+maximum-a-posteriori assignment.
 
 ## Leakage-safe nested calibration
 
@@ -68,22 +69,28 @@ result = fit_progressive_sequence_target_calibrated_decoder(
 # result.predictions: one-to-one Hungarian trial assignments
 ```
 
-`target_labels` outside `result.calibration_indices` are not used during model fitting. Score only `result.evaluation_indices`.
+`target_labels` outside `result.calibration_indices` are not used during model
+fitting. Score only `result.evaluation_indices`.
 
 ## Katja Button Press MEG recommendation
 
 For the reconstructed four-variable-finger target:
 
-- pack presses 2–5 from each correct-order trial into one `trials x 4 x features` tensor;
+- pack presses 2–5 from each correct-order trial into one
+  `trials x 4 x features` tensor;
 - preserve the source-fitted scaler/PCA protocol for the first comparison;
-- then compare against raw source-standardized four-window channel means, avoiding PCA if GPU memory permits;
-- provide sequence ID only as a calibration-split stratum, never as an input feature;
-- report independent event accuracy and permutation-constrained accuracy separately;
-- average deterministic model seeds within target before the population mean/SEM, matching the existing analysis.
+- then compare against raw source-standardized four-window channel means,
+  avoiding PCA if GPU memory permits;
+- provide sequence ID only as a calibration-split stratum, never as an input
+  feature;
+- report independent event accuracy and permutation-constrained accuracy
+  separately;
+- average deterministic model seeds within target before the population
+  mean/SEM, matching the existing analysis.
 
-The permutation constraint is valid only after auditing that every included trial
-contains each participant-local variable finger exactly once. Do not apply it if
-repetitions or omissions are present.
+The permutation constraint is valid only after auditing that every included
+trial contains each participant-local variable finger exactly once. Do not
+apply it if repetitions or omissions are present.
 
 ## End-to-end Katja feature-cache runner
 
@@ -97,13 +104,15 @@ python -m neureptrace.katja_finger_sequence_benchmark \
 
 The NPZ cache must contain one row per press event:
 
-- `features`: `events x features`, or `events x ...` (all trailing dimensions are flattened);
+- `features`: `events x features`, or `events x ...`; all trailing dimensions
+  are flattened;
 - `subjects`;
 - `trial_ids` (unique within participant);
 - `press_positions`;
 - `sequence_ids` or `seqID`;
 - either participant-local `labels` or physical `finger_codes`;
-- optional `correct_order` boolean rows. If absent, all rows are assumed already filtered.
+- optional `correct_order` boolean rows. If absent, all rows are assumed
+  already filtered.
 
 When only physical codes are supplied, the runner sorts each participant's four
 included variable codes and maps them to classes 0–3. It keeps presses 2–5 by
