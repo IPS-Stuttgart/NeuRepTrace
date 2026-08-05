@@ -6,6 +6,8 @@ from collections.abc import Iterable, Mapping
 from functools import wraps
 from typing import Any
 
+from . import _openneuro_word_event_validation_patch
+
 _BOOLEAN_RUN_TEXT = {"false", "no", "off", "on", "true", "yes"}
 _PATCH_MARKER = "_neureptrace_openneuro_parse_runs_validation_patch_installed"
 
@@ -69,7 +71,9 @@ def _validate_supported_runs(spec: Any, parsed: tuple[str | None, ...]) -> None:
 
 
 def install() -> None:
-    """Reject empty, boolean-like, and unsupported OpenNeuro run selectors."""
+    """Reject invalid OpenNeuro run selectors and ambiguous word events."""
+
+    _openneuro_word_event_validation_patch.install()
 
     import neureptrace.openneuro_meg as openneuro_meg
 
