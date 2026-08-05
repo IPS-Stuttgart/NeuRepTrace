@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 import numpy as np
@@ -22,10 +22,38 @@ def _object_value_vector(values: Sequence[Any]) -> np.ndarray:
     return vector
 
 
-def _atomic_vector(values: Sequence[Any] | np.ndarray, *, name: str, reject_matrix: bool = False) -> np.ndarray:
+def _materialize_iterators(value: Any) -> Any:
+    """Recursively replace one-pass iterators with stable tuple values."""
+
+    if isinstance(value, np.ndarray):
+        if value.dtype != object:
+            return value
+        materialized = np.empty(value.shape, dtype=object)
+        for index in np.ndindex(value.shape):
+            materialized[index] = _materialize_iterators(value[index])
+        return materialized
+    if isinstance(value, Iterator):
+        return tuple(_materialize_iterators(item) for item in value)
+    if isinstance(value, list):
+        return [_materialize_iterators(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_materialize_iterators(item) for item in value)
+    if isinstance(value, dict):
+        return {
+            _materialize_iterators(key): _materialize_iterators(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, set):
+        return {_materialize_iterators(item) for item in value}
+    if isinstance(value, frozenset):
+        return frozenset(_materialize_iterators(item) for item in value)
+    return value
+
+
+def _atomic_vector(values: Iterable[Any] | np.ndarray, *, name: str, reject_matrix: bool = False) -> np.ndarray:
     """Normalize row labels while keeping tuple/list IDs as one value per row."""
 
-    array = np.asarray(values, dtype=object)
+    array = np.asarray(_materialize_iterators(values), dtype=object)
     if array.ndim == 0:
         return _object_value_vector([array.item()])
     if array.ndim == 1:
@@ -66,14 +94,14 @@ def _is_missing_domain_value(value: Any) -> bool:
         return False
 
 
-def _is_missing_domain_array(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+def _is_missing_domain_array(values: Iterable[Any] | np.ndarray) -> np.ndarray:
     """Return one missing-domain flag per scalar or composite source-domain row."""
 
     vector = _atomic_vector(values, name="source_domains")
     return np.asarray([_is_missing_domain_value(value) for value in vector], dtype=bool)
 
 
-def _ordered_unique(values: Sequence[Any] | np.ndarray) -> np.ndarray:
+def _ordered_unique(values: Iterable[Any] | np.ndarray) -> np.ndarray:
     unique: list[object] = []
     for value in _atomic_vector(values, name="values"):
         if not any(_values_equal(existing, value) for existing in unique):
@@ -81,7 +109,12 @@ def _ordered_unique(values: Sequence[Any] | np.ndarray) -> np.ndarray:
     return _object_value_vector(unique)
 
 
-def _encode_atomic(values: Sequence[Any] | np.ndarray, *, name: str, reject_matrix: bool = False) -> tuple[np.ndarray, np.ndarray]:
+def _encode_atomic(
+    values: Iterable[Any] | np.ndarray,
+    *,
+    name: str,
+    reject_matrix: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
     vector = _atomic_vector(values, name=name, reject_matrix=reject_matrix)
     unique = _ordered_unique(vector)
     encoded = np.zeros(vector.shape[0], dtype=np.int64)
