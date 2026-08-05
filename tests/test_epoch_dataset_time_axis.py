@@ -20,6 +20,13 @@ def test_epoch_dataset_infers_sampling_frequency_from_uniform_time_axis() -> Non
     assert _epoch_dataset([0.0, 0.1, 0.2]).infer_sampling_frequency() == pytest.approx(10.0)
 
 
+def test_epoch_dataset_rejects_single_sample_time_axis_for_sampling_frequency() -> None:
+    dataset = _epoch_dataset([0.0])
+
+    with pytest.raises(ValueError, match="at least two time samples"):
+        dataset.infer_sampling_frequency()
+
+
 def test_epoch_dataset_rejects_irregular_time_axis_for_sampling_frequency() -> None:
     dataset = _epoch_dataset([0.0, 0.1, 0.25])
 
