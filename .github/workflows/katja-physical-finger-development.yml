@@ -1,0 +1,271 @@
+name: Katja physical-finger transfer development
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/katja-physical-finger-development.yml"
+      - "src/neureptrace/decoding/physical_finger_sequence_finetune.py"
+      - "src/neureptrace/katja_physical_finger_sequence_benchmark.py"
+      - "tests/test_physical_finger_sequence_finetune.py"
+      - "tests/test_katja_physical_finger_sequence_benchmark.py"
+      - "experiments/katja-refit-full-data.patch"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: katja-physical-finger-development-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+  KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_ica_v4.npz
+
+jobs:
+  develop-on-s05:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, nvidia-smi]
+    timeout-minutes: 180
+    steps:
+      - name: Check out NeuRepTrace
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          clean: true
+
+      - name: Apply deterministic refit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check experiments/katja-refit-full-data.patch
+          git apply experiments/katja-refit-full-data.patch
+          git diff --check
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install -e .
+          python -m pip install pytest
+
+      - name: Verify CUDA and focused tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          nvidia-smi -L
+          python - <<'PY'
+          import torch
+          print({
+              "torch": torch.__version__,
+              "cuda_available": torch.cuda.is_available(),
+              "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+          })
+          if not torch.cuda.is_available():
+              raise SystemExit("CUDA is required for the Katja development sweep")
+          PY
+          python -m pytest -q \
+            tests/test_progressive_sequence_finetune.py \
+            tests/test_katja_finger_sequence_benchmark.py \
+            tests/test_physical_finger_sequence_finetune.py \
+            tests/test_katja_physical_finger_sequence_benchmark.py \
+            | tee "${RUNNER_TEMP}/katja-physical-tests.txt"
+
+      - name: Audit physical class semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$KATJA_CACHE"
+          python - <<'PY' | tee "${RUNNER_TEMP}/katja-physical-audit.txt"
+          from __future__ import annotations
+
+          import json
+          import os
+          from collections import Counter
+
+          import numpy as np
+
+          from neureptrace._katja_finger_sequence_support import load_katja_feature_cache
+          from neureptrace.katja_physical_finger_sequence_benchmark import _participant_variable_codes
+
+          cache = load_katja_feature_cache(os.environ["KATJA_CACHE"])
+          subjects = cache["subjects"].astype(str)
+          positions = cache["press_positions"].astype(int)
+          included = cache["correct_order"].astype(bool) & np.isin(positions, [2, 3, 4, 5])
+          codes = _participant_variable_codes(subjects[included], cache["finger_codes"][included])
+          universe = tuple(sorted(set(cache["finger_codes"][included].tolist())))
+          omitted = {
+              subject: tuple(value for value in universe if value not in values)
+              for subject, values in codes.items()
+          }
+          groups = Counter(values for values in codes.values())
+          report = {
+              "cache": os.environ["KATJA_CACHE"],
+              "feature_shape": list(cache["features"].shape),
+              "physical_universe": list(universe),
+              "variable_codes_by_subject": {subject: list(values) for subject, values in sorted(codes.items())},
+              "omitted_fixed_code_by_subject": {subject: list(values) for subject, values in sorted(omitted.items())},
+              "variable_set_group_sizes": {str(values): count for values, count in sorted(groups.items(), key=lambda item: str(item[0]))},
+          }
+          print(json.dumps(report, indent=2, sort_keys=True))
+          if len(universe) != 5:
+              raise RuntimeError(f"Expected five physical fingers, got {universe!r}")
+          if any(len(values) != 4 for values in codes.values()):
+              raise RuntimeError("Every participant must have four variable physical fingers")
+          PY
+
+      - name: Run s05 physical-transfer sweep
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="${RUNNER_TEMP}/katja-physical-development"
+          mkdir -p "$output"
+          python - <<'PY' | tee "${RUNNER_TEMP}/katja-physical-development.txt"
+          from __future__ import annotations
+
+          import json
+          import os
+          import time
+          from pathlib import Path
+
+          import pandas as pd
+
+          from neureptrace._katja_finger_sequence_support import DEFAULT_PARTICIPANTS, load_katja_feature_cache
+          from neureptrace.katja_physical_finger_sequence_benchmark import run_katja_physical_finger_sequence_benchmark
+
+          cache = load_katja_feature_cache(os.environ["KATJA_CACHE"])
+          output = Path(os.environ["RUNNER_TEMP"]) / "katja-physical-development"
+          common = {
+              "hidden_units": 96,
+              "num_layers": 2,
+              "num_heads": 4,
+              "adapter_rank": 8,
+              "source_max_epochs": 120,
+              "meta_epochs": 2,
+              "meta_support_trials": 4,
+              "meta_query_trials": 4,
+              "meta_inner_steps": 5,
+              "adapter_steps": 80,
+              "last_block_steps": 60,
+              "full_finetune_steps": 60,
+              "sinkhorn_loss_weight": 0.5,
+              "assignment_loss_weight": 0.1,
+              "sinkhorn_temperature": 0.5,
+              "batch_size": 64,
+              "device": "cuda",
+              "refit_source_on_all": True,
+              "refit_target_on_all": True,
+          }
+          configurations = [
+              ("physical_9", "deterministic", 1),
+              ("physical_all16", "all", 1),
+              ("physical_same_set", "same_variable_set", 1),
+              ("physical_9_ensemble3", "deterministic", 3),
+              ("physical_all16_ensemble3", "all", 3),
+          ]
+          seed_frames = []
+          target_frames = []
+          summary_frames = []
+          metadata = {}
+          failures = {}
+          for name, source_mode, repeats in configurations:
+              started = time.time()
+              try:
+                  per_seed, per_target, summary, run_metadata = run_katja_physical_finger_sequence_benchmark(
+                      cache,
+                      participants=DEFAULT_PARTICIPANTS,
+                      target_participants=("s05",),
+                      calibration_counts=(15, 20),
+                      calibration_seeds=(13, 29, 47, 71, 101),
+                      source_selection_mode=source_mode,
+                      n_source_participants=9,
+                      source_selection_seed=13,
+                      pca_components=64,
+                      model_repeats=repeats,
+                      model_kwargs=common,
+                  )
+              except Exception as exc:
+                  failures[name] = f"{type(exc).__name__}: {exc}"
+                  print(f"\n=== {name} failed ===\n{failures[name]}")
+                  continue
+              elapsed = time.time() - started
+              for frame in (per_seed, per_target, summary):
+                  frame.insert(0, "configuration", name)
+                  frame.insert(1, "elapsed_seconds", elapsed)
+              seed_frames.append(per_seed)
+              target_frames.append(per_target)
+              summary_frames.append(summary)
+              metadata[name] = {
+                  "elapsed_seconds": elapsed,
+                  "source_selection_mode": source_mode,
+                  "model_repeats": repeats,
+                  "run_metadata": run_metadata,
+              }
+              print(f"\n=== {name} ({elapsed:.1f} s) ===")
+              print(summary.to_string(index=False))
+
+          if not summary_frames:
+              raise RuntimeError(f"All physical-transfer configurations failed: {failures}")
+          all_seed = pd.concat(seed_frames, ignore_index=True)
+          all_target = pd.concat(target_frames, ignore_index=True)
+          all_summary = pd.concat(summary_frames, ignore_index=True)
+          ranking = (
+              all_summary[all_summary["k"] == 20]
+              .sort_values(
+                  ["independent_accuracy_mean", "soft_assignment_accuracy_mean", "permutation_accuracy_mean"],
+                  ascending=False,
+              )
+              .reset_index(drop=True)
+          )
+          all_seed.to_csv(output / "katja_physical_development_per_seed.csv", index=False)
+          all_target.to_csv(output / "katja_physical_development_per_target.csv", index=False)
+          all_summary.to_csv(output / "katja_physical_development_summary.csv", index=False)
+          ranking.to_csv(output / "katja_physical_development_ranking.csv", index=False)
+          (output / "katja_physical_development_metadata.json").write_text(
+              json.dumps(
+                  {
+                      "development_target": "s05",
+                      "prior_selected_local_independent_k20": 0.5251572327044025,
+                      "prior_selected_population_independent_k20": 0.573603,
+                      "configurations": metadata,
+                      "failures": failures,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              ),
+              encoding="utf-8",
+          )
+          print("\n=== k20 ranking ===")
+          print(
+              ranking[
+                  [
+                      "configuration",
+                      "independent_accuracy_mean",
+                      "soft_assignment_accuracy_mean",
+                      "permutation_accuracy_mean",
+                      "independent_delta_vs_julia",
+                  ]
+              ].to_string(index=False)
+          )
+          PY
+
+      - name: Upload development results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: katja-physical-finger-development-s05
+          path: |
+            ${{ runner.temp }}/katja-physical-tests.txt
+            ${{ runner.temp }}/katja-physical-audit.txt
+            ${{ runner.temp }}/katja-physical-development.txt
+            ${{ runner.temp }}/katja-physical-development/*.csv
+            ${{ runner.temp }}/katja-physical-development/*.json
+          if-no-files-found: warn
