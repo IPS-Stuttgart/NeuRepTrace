@@ -319,6 +319,8 @@ def _feature_matrix(values: Iterable[Iterable[float]] | np.ndarray, *, name: str
     materialized = _materialize_nested_iterables(values)
     if _feature_values_contain_boolean(materialized):
         raise ValueError(f"{name} must contain numeric feature values, not boolean flags.")
+    if _feature_values_contain_complex(materialized):
+        raise ValueError(f"{name} must contain real-valued numeric features, not complex values.")
     try:
         matrix = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -343,9 +345,37 @@ def _feature_values_contain_boolean(values: object) -> bool:
         return False
     if isinstance(values, Mapping):
         return False
+    if hasattr(values, "__array__"):
+        try:
+            return _feature_values_contain_boolean(np.asarray(values))
+        except (TypeError, ValueError):
+            return False
     if not isinstance(values, Iterable):
         return False
     return any(_feature_values_contain_boolean(value) for value in values)
+
+
+def _feature_values_contain_complex(values: object) -> bool:
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return True
+        if values.dtype == object:
+            return any(_feature_values_contain_complex(value) for value in values.ravel(order="C"))
+        return False
+    if isinstance(values, (str, bytes)):
+        return False
+    if isinstance(values, Mapping):
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _feature_values_contain_complex(np.asarray(values))
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(values, Iterable):
+        return False
+    return any(_feature_values_contain_complex(value) for value in values)
 
 
 def _vector(values: Iterable[Any] | np.ndarray, *, name: str, expected_length: int | None = None) -> np.ndarray:
