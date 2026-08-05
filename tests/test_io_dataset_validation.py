@@ -55,3 +55,14 @@ def test_with_channels_rejects_duplicate_requested_channels():
 
     with pytest.raises(ValueError, match="Requested channel names.*unique"):
         dataset.with_channels(["MEG001", "MEG001"])
+
+
+def test_with_channels_snapshots_selected_channel_provenance():
+    dataset = _dataset()
+    requested_channels = ["MEG002", "MEG001"]
+
+    selected = dataset.with_channels(requested_channels)
+    requested_channels[:] = ["MEG001"]
+
+    assert selected.channel_names == ["MEG002", "MEG001"]
+    assert selected.provenance["selected_channels"] == ["MEG002", "MEG001"]
