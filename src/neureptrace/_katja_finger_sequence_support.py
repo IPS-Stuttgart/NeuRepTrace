@@ -56,6 +56,27 @@ def _as_1d(values: np.ndarray, *, name: str, n_rows: int) -> np.ndarray:
     return array
 
 
+def _as_boolean_1d(values: np.ndarray, *, name: str, n_rows: int) -> np.ndarray:
+    """Validate a cache Boolean vector without applying truthiness coercion."""
+
+    array = _as_1d(values, name=name, n_rows=n_rows)
+    result = np.empty(n_rows, dtype=bool)
+    for index, value in enumerate(array.tolist()):
+        if isinstance(value, (bool, np.bool_)):
+            result[index] = bool(value)
+            continue
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            numeric = float(value)
+            if np.isfinite(numeric) and numeric in (0.0, 1.0):
+                result[index] = bool(int(numeric))
+                continue
+        raise ValueError(
+            f"Cache field {name!r} must contain only boolean or numeric 0/1 values; "
+            f"row {index} contains {value!r}."
+        )
+    return result
+
+
 def _cache_field(cache: Any, *names: str, required: bool = True):
     for name in names:
         if name in cache:
@@ -104,7 +125,7 @@ def load_katja_feature_cache(path: str | Path) -> dict[str, np.ndarray]:
         result["correct_order"] = (
             np.ones(n_rows, dtype=bool)
             if correct_order is None
-            else _as_1d(correct_order, name="correct_order", n_rows=n_rows).astype(bool)
+            else _as_boolean_1d(correct_order, name="correct_order", n_rows=n_rows)
         )
     return result
 
