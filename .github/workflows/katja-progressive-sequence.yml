@@ -35,7 +35,7 @@ jobs:
         timeout-minutes: 180
         env:
             KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
-            KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_v2.npz
+            KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_ica_v4.npz
             KATJA_PATCH_BASELINE: ca2ca39a1a3e5d7fd0b7cee4f697c9a9e1a47aa4
         steps:
             - name: Check out experiment branch
@@ -103,7 +103,7 @@ jobs:
                     tests/test_katja_finger_sequence_benchmark.py \
                     | tee "${RUNNER_TEMP}/katja-structured-development-tests.txt"
 
-            - name: Validate or rebuild corrected response-locked cache
+            - name: Validate or rebuild exact ICA response-locked cache
               shell: bash
               run: |
                   set -euo pipefail
@@ -120,8 +120,8 @@ jobs:
                   with np.load(path, allow_pickle=False) as archive:
                       metadata = json.loads(str(archive["metadata_json"].item()))
                       shape = list(archive["features"].shape)
-                  assert metadata["format"] == "neureptrace_katja_button_press_event_features_v2"
-                  assert metadata["correct_order_rule"] == "npress==5 and recorded press equals cueFinger"
+                  assert metadata["format"] == "neureptrace_katja_button_press_event_features_exact_ica_v4"
+                  assert metadata["correct_order_rule"] == "finite variable timing and recorded press equals cueFinger"
                   print({"cache": path, "shape": shape, "format": metadata["format"]})
                   PY
                       then
@@ -263,6 +263,8 @@ jobs:
                   target_frames = []
                   summary_frames = []
                   run_metadata = {
+                      "feature_cache": os.environ["KATJA_CACHE"],
+                      "feature_format": "neureptrace_katja_button_press_event_features_exact_ica_v4",
                       "development_target": "s05",
                       "selection_endpoint": (
                           "mean five-seed independent k20 accuracy; "
@@ -414,8 +416,9 @@ jobs:
                   ) as stream:
                       stream.write("## Katja structured-loss development sweep\n\n")
                       stream.write(
-                          "Five seeds on development subject s05 only. "
-                          "The 16-subject confirmatory cohort was not used for selection.\n\n"
+                          "Five seeds on development subject s05 only, using the "
+                          "exact-order ICA-corrected feature cache. The 16-subject "
+                          "confirmatory cohort was not used for selection.\n\n"
                       )
                       stream.write("```text\n")
                       stream.write(ranking.to_string(index=False))
@@ -426,7 +429,7 @@ jobs:
               if: always()
               uses: actions/upload-artifact@v7
               with:
-                  name: katja-structured-development-s05
+                  name: katja-structured-development-s05-exact-ica-v4
                   path: |
                       ${{ runner.temp }}/katja-structured-development-tests.txt
                       ${{ runner.temp }}/katja-structured-development.txt
