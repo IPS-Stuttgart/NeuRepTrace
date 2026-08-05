@@ -1,0 +1,157 @@
+name: Katja high-resolution global-finger s05 fallback
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/katja-global-physical-finger
+    paths:
+      - .github/workflows/katja-highres-global-s05-fallback.yml
+
+permissions:
+  contents: read
+
+jobs:
+  highres-global-s05-fallback:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 150
+    env:
+      KATJA_HIGHRES_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_16x25ms_v1.npz
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply experiment patches
+        run: |
+          git apply --check experiments/katja-correct-order.patch
+          git apply experiments/katja-correct-order.patch
+          git apply --check experiments/katja-refit-full-data.patch
+          git apply experiments/katja-refit-full-data.patch
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -e .
+          python -m pip install --disable-pip-version-check numpy scipy h5py
+
+      - name: Verify CUDA
+        run: |
+          nvidia-smi
+          python - <<'PY'
+          import torch
+
+          print(torch.__version__, torch.cuda.is_available())
+          if not torch.cuda.is_available():
+              raise SystemExit("CUDA is required")
+          PY
+
+      - name: Build 16-bin feature cache when absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$KATJA_HIGHRES_CACHE")"
+          if [ ! -s "$KATJA_HIGHRES_CACHE" ]; then
+            temporary="${KATJA_HIGHRES_CACHE%.npz}.tmp.${GITHUB_RUN_ID}.npz"
+            python - "$temporary" <<'PY'
+          from __future__ import annotations
+
+          import sys
+
+          from neureptrace.katja_spm_feature_cache import (
+              build_katja_spm_feature_cache,
+          )
+
+          response_start = -0.2
+          response_stop = 0.2
+          temporal_bins = 16
+          width = (response_stop - response_start) / temporal_bins
+          centers = tuple(
+              response_start + (index + 0.5) * width
+              for index in range(temporal_bins)
+          )
+          build_katja_spm_feature_cache(
+              "/mnt/lexar4tb/datasets/Katja Button Press Data",
+              sys.argv[1],
+              window_centers_seconds=centers,
+              window_width_seconds=width,
+              button_lag_seconds=0.03,
+          )
+          PY
+            mv "$temporary" "$KATJA_HIGHRES_CACHE"
+          fi
+
+      - name: Run high-resolution global k20 screen
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="${RUNNER_TEMP}/katja-highres-global-s05-fallback"
+          mkdir -p "$output"
+          python - <<'PY' | tee "${RUNNER_TEMP}/katja-highres-global-s05-fallback.txt"
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          from neureptrace._katja_finger_sequence_support import (
+              DEFAULT_PARTICIPANTS,
+              load_katja_feature_cache,
+          )
+          from neureptrace.katja_global_physical_benchmark import (
+              run_katja_global_physical_benchmark,
+          )
+
+          output = Path(os.environ["RUNNER_TEMP"]) / "katja-highres-global-s05-fallback"
+          cache = load_katja_feature_cache(os.environ["KATJA_HIGHRES_CACHE"])
+          model_kwargs = {
+              "hidden_units": 128,
+              "num_layers": 2,
+              "num_heads": 4,
+              "adapter_rank": 16,
+              "source_max_epochs": 120,
+              "meta_epochs": 2,
+              "meta_support_trials": 4,
+              "meta_query_trials": 4,
+              "meta_inner_steps": 5,
+              "adapter_steps": 100,
+              "last_block_steps": 80,
+              "full_finetune_steps": 80,
+              "batch_size": 64,
+              "device": "cuda",
+              "refit_source_on_all": True,
+              "refit_target_on_all": True,
+          }
+          per_seed, per_target, summary, metadata = (
+              run_katja_global_physical_benchmark(
+                  cache,
+                  participants=DEFAULT_PARTICIPANTS,
+                  target_participants=("s05",),
+                  calibration_counts=(20,),
+                  calibration_seeds=(13,),
+                  n_source_participants=9,
+                  source_selection_seed=13,
+                  pca_components=512,
+                  model_kwargs=model_kwargs,
+              )
+          )
+          per_seed.to_csv(output / "per_seed.csv", index=False)
+          per_target.to_csv(output / "per_target.csv", index=False)
+          summary.to_csv(output / "summary.csv", index=False)
+          (output / "metadata.json").write_text(
+              json.dumps(metadata, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print(summary.to_string(index=False))
+          PY
+
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: katja-highres-global-s05-fallback
+          path: |
+            ${{ runner.temp }}/katja-highres-global-s05-fallback.txt
+            ${{ runner.temp }}/katja-highres-global-s05-fallback/*.csv
+            ${{ runner.temp }}/katja-highres-global-s05-fallback/*.json
+          if-no-files-found: warn
