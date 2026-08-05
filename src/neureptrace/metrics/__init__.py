@@ -47,13 +47,13 @@ __all__ = [
 
 def _coerce_numeric_scalar(value: object, name: str, expectation: str) -> float:
     message = f"{name} must be {expectation}"
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
         raise ValueError(message)
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
             raise ValueError(message)
         value = value.item()
-        if isinstance(value, (bool, np.bool_)):
+        if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
             raise ValueError(message)
     try:
         return float(value)
@@ -97,6 +97,14 @@ def _labels_contain_boolean(labels: np.ndarray) -> bool:
     return False
 
 
+def _labels_contain_complex(labels: np.ndarray) -> bool:
+    if np.issubdtype(labels.dtype, np.complexfloating):
+        return bool(labels.size)
+    if labels.dtype == object:
+        return any(isinstance(value, (complex, np.complexfloating)) for value in labels.ravel())
+    return False
+
+
 def _probabilities_contain_boolean(probabilities: object) -> bool:
     if isinstance(probabilities, (bool, np.bool_)):
         return True
@@ -113,6 +121,24 @@ def _probabilities_contain_boolean(probabilities: object) -> bool:
     except TypeError:
         return False
     return any(_probabilities_contain_boolean(value) for value in iterator)
+
+
+def _probabilities_contain_complex(probabilities: object) -> bool:
+    if isinstance(probabilities, (complex, np.complexfloating)):
+        return True
+    if isinstance(probabilities, np.ndarray):
+        if np.issubdtype(probabilities.dtype, np.complexfloating):
+            return bool(probabilities.size)
+        if probabilities.dtype != object:
+            return False
+        return any(_probabilities_contain_complex(value) for value in probabilities.ravel())
+    if isinstance(probabilities, (str, bytes)):
+        return False
+    try:
+        iterator = iter(probabilities)
+    except TypeError:
+        return False
+    return any(_probabilities_contain_complex(value) for value in iterator)
 
 
 def _materialize_one_pass_iterables(value: object) -> object:
@@ -135,6 +161,8 @@ def _materialize_one_pass_iterables(value: object) -> object:
 def _coerce_label_indices(labels: np.ndarray) -> np.ndarray:
     if _labels_contain_boolean(labels):
         raise ValueError("labels must contain integer class indices")
+    if _labels_contain_complex(labels):
+        raise ValueError("labels must contain real integer class indices, not complex values")
     if np.issubdtype(labels.dtype, np.integer):
         return labels.astype(int, copy=False)
 
@@ -161,6 +189,8 @@ def validate_probability_inputs(
     probabilities = _materialize_one_pass_iterables(probabilities)
     if _probabilities_contain_boolean(probabilities):
         raise ValueError("probabilities must contain numeric probability values, not boolean flags")
+    if _probabilities_contain_complex(probabilities):
+        raise ValueError("probabilities must contain real-valued probability values, not complex values")
     probabilities = np.asarray(probabilities, dtype=float)
     if probabilities.ndim != 2:
         raise ValueError("probabilities must have shape (n_samples, n_classes)")
