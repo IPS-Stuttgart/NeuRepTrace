@@ -1,7 +1,15 @@
 {
-  "enabled": true,
-  "purpose": "development-only source and model probability ensemble sweep",
-  "target": "s05",
+  "artifact_digest": "sha256:95d1d07a211b3e0401fa8602da4f9cf5672fdd9c7bf0e86f549fe5c42c51e24d",
+  "artifact_id": 8931215635,
+  "baseline_independent_k20": 0.5251572327044025,
+  "baseline_reproduction_error": 0.0,
+  "development_run_id": 31007742231,
+  "enabled": false,
   "feature_cache": "katja_finger_events_exact_ica_v4.npz",
-  "selection_endpoint": "five-seed mean independent k20 accuracy"
+  "purpose": "archived development-only source and model probability ensemble sweep",
+  "selected_configuration": "hybrid_source_model_ensemble6",
+  "selected_independent_k20": 0.6591194968553459,
+  "selected_permutation_k20": 0.7264150943396226,
+  "selection_endpoint": "five-seed mean independent k20 accuracy",
+  "target": "s05"
 }
