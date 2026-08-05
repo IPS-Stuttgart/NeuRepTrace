@@ -244,7 +244,7 @@ def _finite_numeric_series(values: object, *, name: str) -> pd.Series:
 
 
 def _finite_numeric_scalar(value: object, *, name: str) -> float:
-    if _is_boolean_scalar(value):
+    if _is_boolean_scalar(value) or _is_complex_scalar(value):
         raise ValueError(f"{name} must be a finite numeric value.")
     try:
         parsed = float(value)
