@@ -37,6 +37,9 @@ def test_state_trace_reader_preserves_missing_optional_group_identifiers(
     assert not traces["emission_mode"].eq("nan").any()
 
     summary = summarize_dominant_timecourse(traces)
+    assert len(summary) == 4
+    assert int(summary["decoder"].isna().sum()) == 2
+    assert int(summary["emission_mode"].isna().sum()) == 2
     assert summary.loc[summary["decoder"].isna(), "emission_mode"].eq(
         "calibrated"
     ).all()
