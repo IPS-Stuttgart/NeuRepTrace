@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Iterator
 from functools import wraps
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -69,13 +70,23 @@ def _validate_numeric_features(value: Any, *, name: str) -> Any:
     return materialized
 
 
+def _installed_here(function: Any, marker: str) -> bool:
+    """Distinguish this guard from outer wrappers that copied its marker."""
+
+    attributes = getattr(function, "__dict__", {})
+    code = getattr(function, "__code__", None)
+    if not attributes.get(marker, False) or code is None:
+        return False
+    return Path(code.co_filename).resolve() == Path(__file__).resolve()
+
+
 def install() -> None:
     """Install Source Feature Roll feature-input guards."""
 
     source_roll = importlib.import_module("neureptrace.decoding.source_roll")
 
     original_feature_matrix = source_roll._feature_matrix
-    if not getattr(original_feature_matrix, _MATRIX_MARKER, False):
+    if not _installed_here(original_feature_matrix, _MATRIX_MARKER):
 
         @wraps(original_feature_matrix)
         def feature_matrix(values: Any, *, name: str) -> np.ndarray:
@@ -89,7 +100,7 @@ def install() -> None:
         source_roll._feature_matrix = feature_matrix
 
     original_roll_feature_row = source_roll.roll_feature_row
-    if not getattr(original_roll_feature_row, _ROW_MARKER, False):
+    if not _installed_here(original_roll_feature_row, _ROW_MARKER):
 
         @wraps(original_roll_feature_row)
         def roll_feature_row(
