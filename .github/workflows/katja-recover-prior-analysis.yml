@@ -17,6 +17,9 @@ jobs:
         timeout-minutes: 15
         steps:
             - uses: actions/checkout@v7
+            - uses: actions/setup-python@v7
+              with:
+                  python-version: "3.11"
             - name: Collect prior Katja implementation and compact outputs
               shell: bash
               env:
@@ -98,8 +101,9 @@ jobs:
                   PY
 
                   cat "$report"
-            - uses: actions/upload-artifact@v7
+            - if: always()
+              uses: actions/upload-artifact@v7
               with:
                   name: katja-prior-analysis
                   path: ${{ runner.temp }}/katja-prior
-                  if-no-files-found: error
+                  if-no-files-found: warn
