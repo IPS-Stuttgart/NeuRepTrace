@@ -66,10 +66,13 @@ def _reject_complex_feature_values(values: object, *, name: str) -> None:
     """Reject complex features before NumPy can discard their imaginary part."""
 
     try:
-        array = np.asarray(values, dtype=object)
+        array = np.asarray(values)
     except (TypeError, ValueError):
         return
-    if any(_contains_complex_feature_value(value) for value in array.ravel(order="C")):
+    if np.issubdtype(array.dtype, np.complexfloating) or (
+        array.dtype == object
+        and any(_contains_complex_feature_value(value) for value in array.ravel(order="C"))
+    ):
         raise ValueError(f"{name} must contain real-valued features, not complex values.")
 
 
