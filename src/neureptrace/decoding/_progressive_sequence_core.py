@@ -16,14 +16,16 @@ The implementation never needs target evaluation labels during fitting.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Iterable, Sequence
-from dataclasses import dataclass, field
-from typing import Any
-
 import hashlib
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+
+if TYPE_CHECKING:
+    from collections.abc import Hashable, Iterable, Sequence
+    from typing import Any
 
 PROGRESSIVE_SEQUENCE_PROTOCOL = "progressive_sequence_target_fine_tuning"
 PROGRESSIVE_SEQUENCE_CATEGORY = "3_supervised_calibrated_target_alignment"
