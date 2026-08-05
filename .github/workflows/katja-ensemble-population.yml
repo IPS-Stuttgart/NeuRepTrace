@@ -20,9 +20,9 @@ concurrency:
 
 jobs:
     population-follow-up:
-        name: Dual-GPU 16-target ensemble follow-up
+        name: Eight-worker dual-GPU k20 ensemble follow-up
         runs-on: [self-hosted, Linux, X64, nvidia-smi]
-        timeout-minutes: 360
+        timeout-minutes: 180
         env:
             KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
             KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_ica_v4.npz
@@ -150,40 +150,50 @@ jobs:
                       mv "$temporary" "$KATJA_CACHE"
                   fi
 
-            - name: Run locked ensemble family on two GPUs
+            - name: Run locked k20 ensemble family with eight workers
               shell: bash
               env:
-                  OMP_NUM_THREADS: "4"
-                  MKL_NUM_THREADS: "4"
+                  OMP_NUM_THREADS: "2"
+                  MKL_NUM_THREADS: "2"
               run: |
                   set -euo pipefail
                   output="${RUNNER_TEMP}/katja-ensemble-population"
-                  mkdir -p "$output/part0" "$output/part1"
+                  mkdir -p "$output/parts"
+                  targets=(
+                      s06 s08 s09 s10 s11 s13 s14 s15
+                      s16 s17 s18 s20 s21 s24 s25 s28
+                  )
+                  pids=()
+                  logs=()
+                  for index in "${!targets[@]}"; do
+                      target="${targets[$index]}"
+                      gpu=$((index % 2))
+                      part="$output/parts/$target"
+                      log="${RUNNER_TEMP}/katja-ensemble-population-${target}.txt"
+                      mkdir -p "$part"
+                      CUDA_VISIBLE_DEVICES="$gpu" python -u \
+                        experiments/katja_ensemble_population.py \
+                        --feature-cache "$KATJA_CACHE" \
+                        --targets "$target" \
+                        --calibration-counts "20" \
+                        --calibration-seeds "13,29,47,71,101" \
+                        --output-dir "$part" \
+                        > "$log" 2>&1 &
+                      pids+=("$!")
+                      logs+=("$log")
+                  done
 
-                  CUDA_VISIBLE_DEVICES=0 python \
-                    experiments/katja_ensemble_population.py \
-                    --feature-cache "$KATJA_CACHE" \
-                    --targets "s06,s08,s09,s10,s11,s13,s14,s15" \
-                    --output-dir "$output/part0" \
-                    > "${RUNNER_TEMP}/katja-ensemble-population-gpu0.txt" 2>&1 &
-                  pid0=$!
-
-                  CUDA_VISIBLE_DEVICES=1 python \
-                    experiments/katja_ensemble_population.py \
-                    --feature-cache "$KATJA_CACHE" \
-                    --targets "s16,s17,s18,s20,s21,s24,s25,s28" \
-                    --output-dir "$output/part1" \
-                    > "${RUNNER_TEMP}/katja-ensemble-population-gpu1.txt" 2>&1 &
-                  pid1=$!
-
-                  status0=0
-                  status1=0
-                  wait "$pid0" || status0=$?
-                  wait "$pid1" || status1=$?
-                  cat "${RUNNER_TEMP}/katja-ensemble-population-gpu0.txt"
-                  cat "${RUNNER_TEMP}/katja-ensemble-population-gpu1.txt"
-                  if [ "$status0" -ne 0 ] || [ "$status1" -ne 0 ]; then
-                      echo "GPU process status: gpu0=$status0 gpu1=$status1" >&2
+                  failure=0
+                  for index in "${!pids[@]}"; do
+                      status=0
+                      wait "${pids[$index]}" || status=$?
+                      cat "${logs[$index]}"
+                      if [ "$status" -ne 0 ]; then
+                          echo "Worker ${targets[$index]} failed with $status" >&2
+                          failure=1
+                      fi
+                  done
+                  if [ "$failure" -ne 0 ]; then
                       exit 1
                   fi
 
@@ -209,7 +219,11 @@ jobs:
                   )
 
                   output = Path(os.environ["RUNNER_TEMP"]) / "katja-ensemble-population"
-                  parts = [output / "part0", output / "part1"]
+                  targets = [
+                      "s06", "s08", "s09", "s10", "s11", "s13", "s14", "s15",
+                      "s16", "s17", "s18", "s20", "s21", "s24", "s25", "s28",
+                  ]
+                  parts = [output / "parts" / target for target in targets]
                   per_seed = pd.concat(
                       [
                           pd.read_csv(
@@ -323,13 +337,10 @@ jobs:
                   name: katja-ensemble-population-followup-exact-ica-v4
                   path: |
                       ${{ runner.temp }}/katja-ensemble-population-tests.txt
-                      ${{ runner.temp }}/katja-ensemble-population-gpu0.txt
-                      ${{ runner.temp }}/katja-ensemble-population-gpu1.txt
+                      ${{ runner.temp }}/katja-ensemble-population-s*.txt
                       ${{ runner.temp }}/katja-ensemble-population-summary.txt
                       ${{ runner.temp }}/katja-ensemble-population/*.csv
                       ${{ runner.temp }}/katja-ensemble-population/*.json
-                      ${{ runner.temp }}/katja-ensemble-population/part0/*.csv
-                      ${{ runner.temp }}/katja-ensemble-population/part0/*.json
-                      ${{ runner.temp }}/katja-ensemble-population/part1/*.csv
-                      ${{ runner.temp }}/katja-ensemble-population/part1/*.json
+                      ${{ runner.temp }}/katja-ensemble-population/parts/*/*.csv
+                      ${{ runner.temp }}/katja-ensemble-population/parts/*/*.json
                   if-no-files-found: warn
