@@ -108,6 +108,8 @@ def _labels_contain_complex(labels: np.ndarray) -> bool:
 def _probabilities_contain_boolean(probabilities: object) -> bool:
     if isinstance(probabilities, (bool, np.bool_)):
         return True
+    if isinstance(probabilities, np.generic):
+        return False
     if isinstance(probabilities, np.ndarray):
         if np.issubdtype(probabilities.dtype, np.bool_):
             return True
@@ -116,6 +118,12 @@ def _probabilities_contain_boolean(probabilities: object) -> bool:
         return any(_probabilities_contain_boolean(value) for value in probabilities.ravel())
     if isinstance(probabilities, (str, bytes)):
         return False
+    if hasattr(probabilities, "__array__"):
+        try:
+            array = np.asarray(probabilities, dtype=object)
+        except (TypeError, ValueError):
+            return False
+        return _probabilities_contain_boolean(array)
     try:
         iterator = iter(probabilities)
     except TypeError:
@@ -126,6 +134,8 @@ def _probabilities_contain_boolean(probabilities: object) -> bool:
 def _probabilities_contain_complex(probabilities: object) -> bool:
     if isinstance(probabilities, (complex, np.complexfloating)):
         return True
+    if isinstance(probabilities, np.generic):
+        return False
     if isinstance(probabilities, np.ndarray):
         if np.issubdtype(probabilities.dtype, np.complexfloating):
             return bool(probabilities.size)
@@ -134,6 +144,12 @@ def _probabilities_contain_complex(probabilities: object) -> bool:
         return any(_probabilities_contain_complex(value) for value in probabilities.ravel())
     if isinstance(probabilities, (str, bytes)):
         return False
+    if hasattr(probabilities, "__array__"):
+        try:
+            array = np.asarray(probabilities, dtype=object)
+        except (TypeError, ValueError):
+            return False
+        return _probabilities_contain_complex(array)
     try:
         iterator = iter(probabilities)
     except TypeError:
