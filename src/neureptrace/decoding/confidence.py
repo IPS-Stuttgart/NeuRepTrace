@@ -34,12 +34,10 @@ def _compact_float32(values: np.ndarray) -> np.ndarray:
     return compact
 
 
-def confidence_scores(probabilities: Sequence[Sequence[float]] | np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return confidence, top-two margin, entropy, and predicted index.
-
-    Rows are normalized internally, so callers may pass non-negative scores whose
-    rows have positive mass.
-    """
+def _confidence_components(
+    probabilities: Sequence[Sequence[float]] | np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return full-precision confidence components for threshold decisions."""
 
     matrix = _probability_matrix(probabilities)
     # Use a stable descending order so exact probability ties follow NumPy's
@@ -51,11 +49,22 @@ def confidence_scores(probabilities: Sequence[Sequence[float]] | np.ndarray) -> 
     confidence = matrix[rows, top]
     margin = confidence - matrix[rows, second]
     entropy = -np.sum(matrix * np.log(np.maximum(matrix, 1e-12)), axis=1) / np.log(matrix.shape[1])
+    return confidence, margin, entropy, top.astype(int, copy=False)
+
+
+def confidence_scores(probabilities: Sequence[Sequence[float]] | np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return confidence, top-two margin, entropy, and predicted index.
+
+    Rows are normalized internally, so callers may pass non-negative scores whose
+    rows have positive mass.
+    """
+
+    confidence, margin, entropy, predicted = _confidence_components(probabilities)
     return (
         _compact_float32(confidence),
         _compact_float32(margin),
         _compact_float32(entropy),
-        top.astype(int, copy=False),
+        predicted,
     )
 
 
@@ -71,7 +80,7 @@ def select_confident_rows(
     conf_thr = _unit_interval(min_confidence, name="min_confidence")
     margin_thr = _unit_interval(min_margin, name="min_margin")
     entropy_thr = _unit_interval(max_entropy, name="max_entropy")
-    confidence, margin, entropy, predicted = confidence_scores(probabilities)
+    confidence, margin, entropy, predicted = _confidence_components(probabilities)
     accepted = (confidence >= conf_thr) & (margin >= margin_thr) & (entropy <= entropy_thr)
     metadata = {
         "confidence_selection": True,
