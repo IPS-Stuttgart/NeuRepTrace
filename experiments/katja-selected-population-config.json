@@ -1,8 +1,8 @@
 {
-  "assignment_loss_weight": 0.0,
-  "configuration": "pending_s05_exact_ica_selection",
-  "enabled": false,
-  "selection_scope": "five calibration seeds on development target s05 using exact-order ICA-corrected features",
-  "sinkhorn_loss_weight": 0.0,
-  "sinkhorn_temperature": 1.0
+  "assignment_loss_weight": 0.1,
+  "configuration": "joint_050_010_temp050",
+  "enabled": true,
+  "selection_scope": "selected by five-seed mean independent k20 accuracy on development target s05 using exact-order ICA-corrected features; independent k15 and constrained k20 were tie-breakers",
+  "sinkhorn_loss_weight": 0.5,
+  "sinkhorn_temperature": 0.5
 }
