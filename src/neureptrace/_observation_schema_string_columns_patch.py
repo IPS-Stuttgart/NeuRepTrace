@@ -1,10 +1,15 @@
-"""Patch observation-schema column arguments, row positions, and temporal sequence keys.
+"""Patch observation-schema column arguments, labels, row positions, and temporal keys.
 
 The public observation validator accepts optional grouping and stream-column
 arguments. Because strings are sequences, passing a single column name such as
 ``group_columns="subject"`` used to be interpreted as the characters
 ``"s"``, ``"u"``, ... and reported as missing columns. Normalize these API
 arguments before the validator checks them.
+
+Probability-column discovery must also tolerate ordinary pandas DataFrames with
+mixed column-label types. Non-string metadata labels are unrelated to the
+``prob_class_*`` schema and should be ignored instead of causing an incidental
+``AttributeError`` when ``startswith`` is evaluated.
 
 Validation diagnostics expose integer row numbers, but pandas indexes may use
 arbitrary labels. Reset an internal copy to a zero-based RangeIndex so invalid
@@ -136,9 +141,22 @@ def _reject_missing_temporal_identifiers(frame: Any) -> None:
 
 
 def install() -> None:
-    """Patch observation validation string handling, row positions, and temporal keys."""
+    """Patch observation validation column handling, row positions, and temporal keys."""
 
     observation_schema = importlib.import_module("neureptrace.observation_schema")
+
+    original_probability_columns = observation_schema.probability_columns
+    if not getattr(original_probability_columns, _PATCH_MARKER, False):
+
+        @wraps(original_probability_columns)
+        def probability_columns(frame: Any) -> list[str]:
+            string_positions = [index for index, column in enumerate(frame.columns) if isinstance(column, str)]
+            if len(string_positions) == len(frame.columns):
+                return original_probability_columns(frame)
+            return original_probability_columns(frame.iloc[:, string_positions])
+
+        setattr(probability_columns, _PATCH_MARKER, True)
+        observation_schema.probability_columns = probability_columns
 
     original_validate = observation_schema.validate_probability_observations
     if not getattr(original_validate, _PATCH_MARKER, False):
