@@ -1,5 +1,7 @@
 {
-  "analysis_status": "frozen_structural_outer_pseudo_target_evaluation",
+  "analysis_status": "completed_frozen_structural_outer_pseudo_target_evaluation",
+  "artifact_digest": "sha256:7a48c1fa7bedc741c7f3690f10a60286861fabc582933196a3b3d8205a9f5599",
+  "artifact_id": 8937965215,
   "calibration_count": 20,
   "calibration_seeds": [13, 29, 47, 71, 101],
   "candidate_methods": [
@@ -7,7 +9,7 @@
     "physical_ensemble3_masked",
     "local_physical_blend6"
   ],
-  "enabled": true,
+  "enabled": false,
   "global_physical_head": {
     "classes": 5,
     "inference_mask": "remove target fixed physical code and renormalize",
@@ -15,6 +17,40 @@
   },
   "primary_candidate": "local_physical_blend6",
   "reference_method": "local_ensemble3",
+  "result": {
+    "local_ensemble3": {
+      "independent_accuracy_mean": 0.617276,
+      "independent_accuracy_sem": 0.016939,
+      "permutation_accuracy_mean": 0.663548,
+      "permutation_accuracy_sem": 0.019892
+    },
+    "local_physical_blend6": {
+      "independent_accuracy_mean": 0.620223,
+      "independent_accuracy_sem": 0.015731,
+      "mean_paired_independent_delta": 0.002947,
+      "paired_ci95": [-0.002454, 0.008349],
+      "paired_losses": 6,
+      "paired_p_value_two_sided": 0.264393,
+      "paired_ties": 2,
+      "paired_wins": 9,
+      "permutation_accuracy_mean": 0.664631,
+      "permutation_accuracy_sem": 0.018723,
+      "predeclared_positive_mean_rule_met": true
+    },
+    "physical_ensemble3_masked": {
+      "independent_accuracy_mean": 0.610502,
+      "independent_accuracy_sem": 0.014761,
+      "mean_paired_independent_delta": -0.006774,
+      "paired_ci95": [-0.015193, 0.001646],
+      "paired_losses": 14,
+      "paired_p_value_two_sided": 0.107422,
+      "paired_ties": 0,
+      "paired_wins": 3,
+      "permutation_accuracy_mean": 0.653278,
+      "permutation_accuracy_sem": 0.018294
+    }
+  },
+  "result_interpretation": "The frozen equal blend met the preregistered positive-mean rule by +0.295 percentage points, but its 95% paired target interval includes zero and the two-sided p-value is 0.264. The standalone physical head was worse on average and lost on 14 of 17 targets. This is not convincing evidence for replacing the local-label ensemble.",
   "source_participants_per_target": 9,
   "source_selection_seed": 13,
   "success_rule": "mean paired independent k20 accuracy of local_physical_blend6 exceeds local_ensemble3 across all outer targets",
@@ -36,5 +72,6 @@
     "s24",
     "s25",
     "s28"
-  ]
+  ],
+  "workflow_run_id": 31021832048
 }
