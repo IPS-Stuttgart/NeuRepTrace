@@ -23,13 +23,39 @@ def domain_risk_summary(losses, domains):
         raise ValueError("at least two source domains are required")
     per_domain = {}
     for level in levels:
-        per_domain[level] = float(np.mean(loss_values[_domain_mask(domain_values, level)]))
+        per_domain[level] = _stable_mean(loss_values[_domain_mask(domain_values, level)])
     values = np.asarray(tuple(per_domain.values()), dtype=float)
     return {
         "domain_risks": per_domain,
-        "mean_risk": float(np.mean(values)),
-        "risk_variance": float(np.var(values)),
+        "mean_risk": _stable_mean(values),
+        "risk_variance": _stable_variance(values),
         "protocol": DOMAIN_INVARIANCE_PROTOCOL,
         "uses_target_features": False,
         "uses_target_labels": False,
     }
+
+
+def _stable_mean(values: np.ndarray) -> float:
+    """Return the arithmetic mean without overflowing finite same-sign inputs."""
+    scale = float(np.max(np.abs(values)))
+    if scale == 0.0:
+        return 0.0
+    normalized = values / scale
+    normalized_mean = float(np.mean(normalized))
+    lower = float(np.min(normalized))
+    upper = float(np.max(normalized))
+    return float(np.clip(normalized_mean, lower, upper) * scale)
+
+
+def _stable_variance(values: np.ndarray) -> float:
+    """Return the population variance when it is representable in ``float64``."""
+    scale = float(np.max(np.abs(values)))
+    if scale == 0.0:
+        return 0.0
+    normalized_variance = float(np.var(values / scale))
+    if normalized_variance == 0.0:
+        return 0.0
+    standard_deviation = float(np.sqrt(normalized_variance) * scale)
+    if standard_deviation > np.sqrt(np.finfo(float).max):
+        return float("inf")
+    return float(standard_deviation * standard_deviation)
