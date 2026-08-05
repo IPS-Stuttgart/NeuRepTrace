@@ -18,15 +18,17 @@ from neureptrace.decoding._progressive_sequence_core import (
     PackedTrialEvents,
     PermutationDecodingResult,
     ProgressiveSequenceCalibrationResult,
-    _as_feature_tensor,
+    _as_feature_tensor as _core_as_feature_tensor,
     _as_label_matrix,
     _as_object_vector,
-    pack_complete_trial_events,
+    pack_complete_trial_events as _core_pack_complete_trial_events,
     permutation_constrained_decode,
     select_nested_trial_calibration_splits,
     sinkhorn_trial_probabilities,
 )
-from neureptrace.decoding._progressive_sequence_model import TorchProgressiveSequenceClassifier
+from neureptrace.decoding._progressive_sequence_model import (
+    TorchProgressiveSequenceClassifier as _TorchProgressiveSequenceClassifier,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -46,6 +48,90 @@ __all__ = (
     "select_nested_trial_calibration_splits",
     "sinkhorn_trial_probabilities",
 )
+
+
+def _contains_complex_feature_value(value: object) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if not isinstance(value, np.ndarray):
+        return False
+    if np.issubdtype(value.dtype, np.complexfloating):
+        return bool(value.size)
+    if value.dtype == object:
+        return any(_contains_complex_feature_value(item) for item in value.ravel(order="C"))
+    return False
+
+
+def _reject_complex_feature_values(values: object, *, name: str) -> None:
+    """Reject complex features before NumPy can discard their imaginary part."""
+
+    try:
+        array = np.asarray(values, dtype=object)
+    except (TypeError, ValueError):
+        return
+    if any(_contains_complex_feature_value(value) for value in array.ravel(order="C")):
+        raise ValueError(f"{name} must contain real-valued features, not complex values.")
+
+
+def _as_feature_tensor(values: Sequence | np.ndarray, *, name: str) -> np.ndarray:
+    _reject_complex_feature_values(values, name=name)
+    return _core_as_feature_tensor(values, name=name)
+
+
+def pack_complete_trial_events(
+    features: Sequence[Sequence[float]] | np.ndarray,
+    trial_ids: Sequence[Any] | np.ndarray,
+    press_positions: Sequence[Any] | np.ndarray,
+    *,
+    labels: Sequence[Any] | np.ndarray | None = None,
+    expected_events: int = 4,
+    require_unique_positions: bool = True,
+    require_permutation_labels: bool = False,
+) -> PackedTrialEvents:
+    """Pack complete event rows after validating their numeric domain."""
+
+    _reject_complex_feature_values(features, name="features")
+    return _core_pack_complete_trial_events(
+        features,
+        trial_ids,
+        press_positions,
+        labels=labels,
+        expected_events=expected_events,
+        require_unique_positions=require_unique_positions,
+        require_permutation_labels=require_permutation_labels,
+    )
+
+
+class TorchProgressiveSequenceClassifier(_TorchProgressiveSequenceClassifier):
+    """Progressive sequence classifier with lossless feature validation."""
+
+    def fit_source(
+        self,
+        source_features: Sequence | np.ndarray,
+        source_labels: Sequence | np.ndarray,
+        *,
+        source_subjects: Sequence[Any] | np.ndarray | None = None,
+    ) -> TorchProgressiveSequenceClassifier:
+        _reject_complex_feature_values(source_features, name="source_features")
+        return super().fit_source(source_features, source_labels, source_subjects=source_subjects)
+
+    def adapt_target(
+        self,
+        target_calibration_features: Sequence | np.ndarray,
+        target_calibration_labels: Sequence | np.ndarray,
+        *,
+        target_strata: Sequence[Any] | np.ndarray | None = None,
+    ) -> TorchProgressiveSequenceClassifier:
+        _reject_complex_feature_values(target_calibration_features, name="target_calibration_features")
+        return super().adapt_target(
+            target_calibration_features,
+            target_calibration_labels,
+            target_strata=target_strata,
+        )
+
+    def predict_proba(self, features: Sequence | np.ndarray, *, constrained: bool = False) -> np.ndarray:
+        _reject_complex_feature_values(features, name="features")
+        return super().predict_proba(features, constrained=constrained)
 
 
 def fit_progressive_sequence_target_calibrated_decoder(
