@@ -55,6 +55,7 @@ def run_katja_finger_sequence_benchmark(
     cache: dict[str, np.ndarray],
     *,
     participants: tuple[str, ...] = DEFAULT_PARTICIPANTS,
+    target_participants: tuple[str, ...] | None = None,
     calibration_counts: tuple[int, ...] = DEFAULT_CALIBRATION_COUNTS,
     calibration_seeds: tuple[int, ...] = DEFAULT_CALIBRATION_SEEDS,
     event_positions: tuple[int, ...] = (2, 3, 4, 5),
@@ -95,8 +96,14 @@ def run_katja_finger_sequence_benchmark(
     model_config = {} if model_kwargs is None else dict(model_kwargs)
     rows: list[dict[str, Any]] = []
     source_selection_registry: dict[str, tuple[str, ...]] = {}
+    targets = participants if target_participants is None else target_participants
+    if not targets or len(set(targets)) != len(targets):
+        raise ValueError("target_participants must contain unique identifiers.")
+    unknown_targets = [target for target in targets if target not in participants]
+    if unknown_targets:
+        raise ValueError(f"Target participants are absent from the participant pool: {unknown_targets!r}.")
 
-    for target in participants:
+    for target in targets:
         target_mask = subjects == target
         if not np.any(target_mask):
             raise ValueError(f"Target participant {target!r} has no included rows.")
@@ -223,6 +230,7 @@ def run_katja_finger_sequence_benchmark(
     summary = pd.DataFrame(summary_rows).sort_values("k").reset_index(drop=True)
     metadata = {
         "participants": list(participants),
+        "target_participants": list(targets),
         "calibration_counts": [int(value) for value in calibration_counts],
         "calibration_seeds": [int(value) for value in calibration_seeds],
         "event_positions": [int(value) for value in event_positions],
@@ -244,6 +252,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--feature-cache", required=True, help="NPZ event-row feature cache.")
     parser.add_argument("--output-dir", required=True, help="Directory for CSV and JSON outputs.")
     parser.add_argument("--participants", default=",".join(DEFAULT_PARTICIPANTS))
+    parser.add_argument("--targets", help="Optional comma-separated target subset; sources still use --participants.")
     parser.add_argument("--calibration-counts", default=",".join(str(value) for value in DEFAULT_CALIBRATION_COUNTS))
     parser.add_argument("--calibration-seeds", default=",".join(str(value) for value in DEFAULT_CALIBRATION_SEEDS))
     parser.add_argument("--event-positions", default="2,3,4,5")
@@ -275,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     per_seed, per_target, summary, metadata = run_katja_finger_sequence_benchmark(
         cache,
         participants=_parse_csv_values(args.participants),
+        target_participants=None if args.targets is None else _parse_csv_values(args.targets),
         calibration_counts=_parse_csv_values(args.calibration_counts, cast=int),
         calibration_seeds=_parse_csv_values(args.calibration_seeds, cast=int),
         event_positions=_parse_csv_values(args.event_positions, cast=int),
