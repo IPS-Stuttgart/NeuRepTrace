@@ -1,0 +1,116 @@
+name: Katja button-press data discovery
+
+on:
+    workflow_dispatch:
+    pull_request:
+        branches:
+            - main
+        paths:
+            - .github/workflows/katja-button-press-discovery.yml
+            - workflow-triggers/katja_button_press.txt
+
+permissions:
+    contents: read
+
+jobs:
+    discover-katja-data:
+        runs-on: [self-hosted, Linux]
+        timeout-minutes: 30
+        steps:
+            - name: Discover candidate datasets and prior feature artifacts
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  report="${RUNNER_TEMP}/katja-discovery.txt"
+                  {
+                    echo "runner=${RUNNER_NAME:-unknown}"
+                    echo "workspace=${GITHUB_WORKSPACE:-unknown}"
+                    echo "date=$(date --iso-8601=seconds)"
+                    echo
+                    echo "== mounts =="
+                    df -h || true
+                    echo
+                    echo "== candidate files =="
+                    for root in /home/github-runner/.cache/datasets /home/github-runner/_work /mnt /data /srv /opt; do
+                      [ -d "$root" ] || continue
+                      echo "-- $root"
+                      find "$root" -maxdepth 9 -type f \
+                        \( -iname '*katja*' \
+                           -o -iname '*button*press*' \
+                           -o -iname '*finger*' \
+                           -o -iname 's05*.mat' \
+                           -o -iname 's05*.fif' \
+                           -o -iname 's05*.npz' \
+                           -o -iname 's05*.npy' \) \
+                        -printf '%s\t%p\n' 2>/dev/null | sort -n | tail -n 500 || true
+                    done
+                    echo
+                    echo "== candidate directories =="
+                    for root in /home/github-runner/.cache/datasets /home/github-runner/_work /mnt /data /srv /opt; do
+                      [ -d "$root" ] || continue
+                      find "$root" -maxdepth 8 -type d \
+                        \( -iname '*katja*' -o -iname '*button*press*' -o -iname '*finger*' \) \
+                        -print 2>/dev/null | head -n 300 || true
+                    done
+                  } | tee "$report"
+
+                  python - "$report" <<'PY'
+                  from __future__ import annotations
+
+                  import pathlib
+                  import re
+                  import sys
+
+                  report = pathlib.Path(sys.argv[1])
+                  text = report.read_text(encoding="utf-8", errors="replace")
+                  candidates: list[pathlib.Path] = []
+                  for line in text.splitlines():
+                      match = re.match(r"^\d+\t(/.*)$", line)
+                      if match:
+                          candidates.append(pathlib.Path(match.group(1)))
+
+                  with report.open("a", encoding="utf-8") as handle:
+                      handle.write("\n== lightweight candidate inspection ==\n")
+                      for path in candidates[:200]:
+                          try:
+                              suffix = path.suffix.lower()
+                              handle.write(f"\n-- {path}\n")
+                              if suffix in {".csv", ".tsv", ".txt"} and path.stat().st_size < 50_000_000:
+                                  with path.open("r", encoding="utf-8", errors="replace") as source:
+                                      for _ in range(3):
+                                          line = source.readline()
+                                          if not line:
+                                              break
+                                          handle.write(line[:2000])
+                              elif suffix == ".npz":
+                                  import numpy as np
+
+                                  with np.load(path, allow_pickle=False) as archive:
+                                      handle.write(f"npz_keys={archive.files}\n")
+                                      for key in archive.files[:30]:
+                                          array = archive[key]
+                                          handle.write(f"  {key}: shape={array.shape}, dtype={array.dtype}\n")
+                              elif suffix == ".npy":
+                                  import numpy as np
+
+                                  array = np.load(path, mmap_mode="r", allow_pickle=False)
+                                  handle.write(f"npy_shape={array.shape}, dtype={array.dtype}\n")
+                              elif suffix == ".mat":
+                                  try:
+                                      from scipy.io import whosmat
+
+                                      handle.write(f"mat_variables={whosmat(path)}\n")
+                                  except Exception as exc:
+                                      handle.write(f"mat_inspection_error={type(exc).__name__}: {exc}\n")
+                          except Exception as exc:
+                              handle.write(f"inspection_error={type(exc).__name__}: {exc}\n")
+                  PY
+
+                  cat "$report"
+
+            - name: Upload discovery report
+              uses: actions/upload-artifact@v7
+              with:
+                  name: katja-button-press-discovery
+                  path: ${{ runner.temp }}/katja-discovery.txt
+                  if-no-files-found: error
