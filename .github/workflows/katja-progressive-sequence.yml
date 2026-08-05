@@ -26,7 +26,7 @@ on: # yamllint disable-line rule:truthy
 
 concurrency:
     group: ${{ github.repository }}-katja-structured-development-${{ github.event.pull_request.number || github.ref }}
-    cancel-in-progress: true
+    cancel-in-progress: false
 
 jobs:
     structured-loss-sweep:
