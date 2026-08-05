@@ -1,4 +1,4 @@
-"""Preserve composite source labels in adversarial torch decoders."""
+"""Preserve adversarial labels and reject lossy complex feature inputs."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _atomic_label_vector(values: Sequence[Any] | np.ndarray, *, expected_length:
     """Return one object-valued label per source row.
 
     NumPy converts rectangular inputs such as ``[(class_id, repetition), ...]``
-    into a two-dimensional object array.  DANN/CDAN labels are row-level metadata,
+    into a two-dimensional object array. DANN/CDAN labels are row-level metadata,
     so each rectangular row must remain one atomic class value before integer
     encoding for torch.
     """
@@ -79,13 +79,34 @@ def _encode_atomic_labels(values: Sequence[Any] | np.ndarray, *, expected_length
     return _object_value_vector(classes), encoded
 
 
+def _contains_complex_values(values: Any) -> bool:
+    """Return whether a feature container contains complex scalar values."""
+
+    array = np.asarray(values)
+    if np.iscomplexobj(array):
+        return True
+    if array.dtype != object:
+        return False
+    return any(isinstance(value, (complex, np.complexfloating)) for value in array.reshape(-1).tolist())
+
+
+def _reject_complex_features(values: Any, *, name: str) -> None:
+    """Reject features that NumPy would narrow by discarding imaginary parts."""
+
+    if _contains_complex_values(values):
+        raise ValueError(f"{name} must contain real-valued features.")
+
+
 def _install_fit_wrapper(class_object: type, *, label_name: str) -> None:
     original_fit = class_object.fit
     if getattr(original_fit, _PATCH_MARKER, False):
         return
+    estimator_name = label_name.partition(" ")[0]
 
     @wraps(original_fit)
     def fit(self, source_features, source_labels, *, target_features):
+        _reject_complex_features(source_features, name=f"{estimator_name} source_features")
+        _reject_complex_features(target_features, name=f"{estimator_name} target_features")
         source = np.asarray(source_features)
         expected_length = int(source.shape[0]) if source.ndim >= 1 else 0
         classes, encoded_labels = _encode_atomic_labels(
@@ -102,7 +123,7 @@ def _install_fit_wrapper(class_object: type, *, label_name: str) -> None:
 
 
 def install() -> None:
-    """Install composite-label wrappers for DANN and CDAN classifiers."""
+    """Install label preservation and feature-domain guards for DANN and CDAN."""
 
     dann = importlib.import_module("neureptrace.decoding.dann")
     _install_fit_wrapper(dann.TorchDANNClassifier, label_name="DANN source_labels")
