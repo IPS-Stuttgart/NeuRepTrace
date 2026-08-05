@@ -33,102 +33,207 @@ jobs:
               run: |
                   set -euo pipefail
                   report="${RUNNER_TEMP}/katja-discovery.txt"
-                  roots=(
-                    "/mnt/lexar4tb/datasets/Katja Button Press Data"
-                    "/mnt/lexar4tb/Katja_Button_Press_Data"
-                  )
+                  dataset_root="/mnt/lexar4tb/datasets/Katja Button Press Data"
+                  export KATJA_DATASET_ROOT="$dataset_root"
+
                   {
                     echo "runner=${RUNNER_NAME:-unknown}"
                     echo "workspace=${GITHUB_WORKSPACE:-unknown}"
                     echo "date=$(date --iso-8601=seconds)"
+                    echo "dataset_root=$dataset_root"
                     echo
-                    echo "== exact dataset trees =="
-                    for root in "${roots[@]}"; do
-                      echo "-- $root"
-                      if [ -d "$root" ]; then
-                        find "$root" -maxdepth 7 -printf '%y\t%s\t%p\n' 2>/dev/null | sort -k3 | head -n 5000
-                      else
-                        echo "missing"
-                      fi
-                    done
+                    echo "== top-level dataset entries =="
+                    find "$dataset_root" -mindepth 1 -maxdepth 2 -printf '%y\t%s\t%p\n' 2>/dev/null | sort -k3 || true
                     echo
-                    echo "== prior Katja/finger/seqID artifacts =="
-                    for root in /home/github-runner/actions-runner/_work /home/github-runner/.cache /mnt/lexar4tb; do
-                      [ -d "$root" ] || continue
-                      find "$root" -maxdepth 10 -type f \
-                        \( -iname '*katja*' -o -iname '*finger*' -o -iname '*seqid*' -o -iname '*button*press*' \) \
-                        -printf '%s\t%p\n' 2>/dev/null | sort -n | tail -n 1500 || true
+                    echo "== README =="
+                    sed -n '1,240p' "$dataset_root/README.txt" || true
+                    echo
+                    echo "== supplied MATLAB preprocessing scripts =="
+                    for script in "$dataset_root"/*.m; do
+                      [ -f "$script" ] || continue
+                      echo "-- $script"
+                      sed -n '1,280p' "$script" || true
                     done
-                  } | tee "$report"
+                  } > "$report"
 
-                  python - "$report" "${roots[@]}" <<'PY'
+                  python - "$report" <<'PY'
                   from __future__ import annotations
 
+                  import json
+                  import os
                   import pathlib
+                  import re
                   import sys
+                  from typing import Any
 
                   import h5py
                   import numpy as np
-                  from scipy.io import whosmat
+                  from scipy.io import loadmat, whosmat
 
                   report = pathlib.Path(sys.argv[1])
-                  roots = [pathlib.Path(value) for value in sys.argv[2:]]
-                  candidates: list[pathlib.Path] = []
-                  for root in roots:
-                      if root.is_dir():
-                          candidates.extend(path for path in root.rglob("*") if path.is_file())
-                  text = report.read_text(encoding="utf-8", errors="replace")
-                  for line in text.splitlines():
-                      fields = line.split("\t")
-                      if len(fields) >= 2 and fields[-1].startswith("/"):
-                          path = pathlib.Path(fields[-1])
-                          if path.is_file() and path not in candidates:
-                              candidates.append(path)
+                  root = pathlib.Path(os.environ["KATJA_DATASET_ROOT"])
+                  subject = "s05"
+                  subject_dir = root / subject
+                  beh_dir = root / "beh_data" / subject
+
+                  def summarize(value: Any, *, depth: int = 0) -> Any:
+                      if depth >= 4:
+                          return f"<{type(value).__name__}>"
+                      if isinstance(value, np.ndarray):
+                          summary: dict[str, Any] = {
+                              "type": "ndarray",
+                              "shape": list(value.shape),
+                              "dtype": str(value.dtype),
+                          }
+                          if value.dtype.names:
+                              summary["fields"] = list(value.dtype.names)
+                          if value.size <= 80 and value.dtype.kind in "biufUS":
+                              summary["values"] = value.tolist()
+                          elif value.dtype == object and value.size <= 20:
+                              summary["items"] = [summarize(item, depth=depth + 1) for item in value.flat]
+                          return summary
+                      if hasattr(value, "_fieldnames"):
+                          return {
+                              "type": type(value).__name__,
+                              "fields": {
+                                  field: summarize(getattr(value, field), depth=depth + 1)
+                                  for field in value._fieldnames
+                              },
+                          }
+                      if isinstance(value, dict):
+                          return {
+                              str(key): summarize(item, depth=depth + 1)
+                              for key, item in value.items()
+                              if not str(key).startswith("__")
+                          }
+                      if isinstance(value, (str, int, float, bool)) or value is None:
+                          return value
+                      return repr(value)[:500]
+
+                  selected: list[pathlib.Path] = [
+                      beh_dir / "behDataMEG.mat",
+                      beh_dir / "targetMEG.mat",
+                      beh_dir / "fractal2sequence_mapping.mat",
+                      beh_dir / "exp_BN00.mat",
+                      beh_dir / "exp_BN15.mat",
+                  ]
+                  selected.extend(sorted(subject_dir.glob("fc*.mat"))[:1])
+                  selected.extend(sorted(subject_dir.glob("Bfc*.mat"))[:1])
 
                   with report.open("a", encoding="utf-8") as handle:
-                      handle.write("\n== lightweight file schemas ==\n")
-                      for path in candidates[:2000]:
-                          suffix = path.suffix.lower()
-                          if suffix not in {".mat", ".csv", ".tsv", ".txt", ".json", ".npz", ".npy"}:
+                      handle.write("\n== selected MATLAB schemas ==\n")
+                      for path in selected:
+                          handle.write(f"\n-- {path} ({path.stat().st_size if path.exists() else 'missing'} bytes)\n")
+                          if not path.exists():
                               continue
                           try:
-                              handle.write(f"\n-- {path} ({path.stat().st_size} bytes)\n")
-                              if suffix in {".csv", ".tsv", ".txt", ".json"} and path.stat().st_size < 50_000_000:
-                                  with path.open("r", encoding="utf-8", errors="replace") as source:
-                                      for _ in range(5):
-                                          line = source.readline()
-                                          if not line:
-                                              break
-                                          handle.write(line[:4000])
-                              elif suffix == ".npz":
-                                  with np.load(path, allow_pickle=False) as archive:
-                                      handle.write(f"npz_keys={archive.files}\n")
-                                      for key in archive.files[:50]:
-                                          array = archive[key]
-                                          handle.write(f"  {key}: shape={array.shape}, dtype={array.dtype}\n")
-                              elif suffix == ".npy":
-                                  array = np.load(path, mmap_mode="r", allow_pickle=False)
-                                  handle.write(f"npy_shape={array.shape}, dtype={array.dtype}\n")
-                              elif suffix == ".mat":
-                                  try:
-                                      handle.write(f"mat_variables={whosmat(path)}\n")
-                                  except Exception as scipy_error:
-                                      try:
-                                          with h5py.File(path, "r") as archive:
-                                              handle.write(f"hdf5_keys={list(archive.keys())}\n")
-                                              for key in list(archive.keys())[:50]:
-                                                  item = archive[key]
-                                                  handle.write(
-                                                      f"  {key}: type={type(item).__name__}, "
-                                                      f"shape={getattr(item, 'shape', None)}, dtype={getattr(item, 'dtype', None)}\n"
-                                                  )
-                                      except Exception as hdf5_error:
-                                          handle.write(
-                                              f"mat_inspection_error={type(scipy_error).__name__}: {scipy_error}; "
-                                              f"hdf5_error={type(hdf5_error).__name__}: {hdf5_error}\n"
-                                          )
+                              handle.write(f"whosmat={whosmat(path)}\n")
                           except Exception as exc:
-                              handle.write(f"inspection_error={type(exc).__name__}: {exc}\n")
+                              handle.write(f"whosmat_error={type(exc).__name__}: {exc}\n")
+                          try:
+                              loaded = loadmat(path, squeeze_me=True, struct_as_record=False)
+                              handle.write(json.dumps(summarize(loaded), indent=2, default=str)[:120_000])
+                              handle.write("\n")
+                          except Exception as scipy_error:
+                              handle.write(f"loadmat_error={type(scipy_error).__name__}: {scipy_error}\n")
+                              try:
+                                  with h5py.File(path, "r") as archive:
+                                      handle.write(f"hdf5_keys={list(archive.keys())}\n")
+                                      for key in list(archive.keys())[:100]:
+                                          item = archive[key]
+                                          handle.write(
+                                              f"  {key}: type={type(item).__name__}, "
+                                              f"shape={getattr(item, 'shape', None)}, "
+                                              f"dtype={getattr(item, 'dtype', None)}\n"
+                                          )
+                              except Exception as hdf5_error:
+                                  handle.write(f"hdf5_error={type(hdf5_error).__name__}: {hdf5_error}\n")
+
+                      handle.write("\n== prior Katja analysis files ==\n")
+                      search_roots = [
+                          pathlib.Path("/home/github-runner/actions-runner/_work"),
+                          pathlib.Path("/home/github-runner/.cache"),
+                          pathlib.Path("/mnt/lexar4tb"),
+                      ]
+                      name_pattern = re.compile(
+                          r"katja|finger[_ -]?accuracy|seqid|button[_ -]?press|few[_ -]?shot",
+                          re.IGNORECASE,
+                      )
+                      content_pattern = re.compile(
+                          rb"class_repetition|42[.]76|59[.]4|fixed.loss.share|Katja Button Press",
+                          re.IGNORECASE,
+                      )
+                      matches: list[tuple[int, str, str]] = []
+                      allowed_suffixes = {
+                          ".py", ".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".tsv", ".npz", ".npy", ".pkl"
+                      }
+                      skipped_prefixes = (
+                          str(root / "beh_data"),
+                          str(root / "s05"),
+                          str(root / "s06"),
+                          str(root / "s08"),
+                          str(root / "s09"),
+                          str(root / "s10"),
+                          str(root / "s11"),
+                          str(root / "s13"),
+                          str(root / "s14"),
+                          str(root / "s15"),
+                          str(root / "s16"),
+                          str(root / "s17"),
+                          str(root / "s18"),
+                          str(root / "s20"),
+                          str(root / "s21"),
+                          str(root / "s24"),
+                          str(root / "s25"),
+                          str(root / "s28"),
+                      )
+                      for search_root in search_roots:
+                          if not search_root.is_dir():
+                              continue
+                          for current, dirs, files in os.walk(search_root):
+                              current_path = pathlib.Path(current)
+                              current_str = str(current_path)
+                              dirs[:] = [
+                                  directory
+                                  for directory in dirs
+                                  if directory not in {".git", "node_modules", ".venv", "venv", "__pycache__"}
+                                  and not str(current_path / directory).startswith(skipped_prefixes)
+                              ]
+                              if current_str.startswith(skipped_prefixes):
+                                  dirs[:] = []
+                                  continue
+                              for filename in files:
+                                  path = current_path / filename
+                                  suffix = path.suffix.lower()
+                                  if suffix not in allowed_suffixes:
+                                      continue
+                                  try:
+                                      size = path.stat().st_size
+                                  except OSError:
+                                      continue
+                                  if size > 100_000_000:
+                                      continue
+                                  reason = "name" if name_pattern.search(path.name) else ""
+                                  if not reason and suffix in {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".tsv"}:
+                                      try:
+                                          with path.open("rb") as source:
+                                              sample = source.read(2_000_000)
+                                          if content_pattern.search(sample):
+                                              reason = "content"
+                                      except OSError:
+                                          pass
+                                  if reason:
+                                      matches.append((size, str(path), reason))
+                      for size, path_text, reason in sorted(set(matches), key=lambda item: (item[1], item[0]))[-1000:]:
+                          handle.write(f"{size}\t{reason}\t{path_text}\n")
+
+                      handle.write("\n== Python environment probes ==\n")
+                      for package in ("mne", "torch", "sklearn", "pyriemann"):
+                          try:
+                              module = __import__(package)
+                              handle.write(f"{package}={getattr(module, '__version__', 'installed')}\n")
+                          except Exception as exc:
+                              handle.write(f"{package}=missing ({type(exc).__name__}: {exc})\n")
                   PY
 
                   cat "$report"
