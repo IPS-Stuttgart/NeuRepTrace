@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
     population-evaluation:
+        if: github.event_name == 'workflow_dispatch'
         name: Exact-ICA confirmatory 16-target baseline
         runs-on: [self-hosted, Linux, X64, nvidia-smi]
         timeout-minutes: 240
