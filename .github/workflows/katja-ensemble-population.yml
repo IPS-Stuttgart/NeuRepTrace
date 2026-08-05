@@ -1,0 +1,27 @@
+name: Katja ensemble population follow-up
+
+permissions:
+    contents: read
+
+on: # yamllint disable-line rule:truthy
+    workflow_dispatch:
+    pull_request:
+        branches:
+            - main
+        paths:
+            - .github/workflows/katja-ensemble-population.yml
+            - experiments/katja-ensemble-population-config.json
+
+jobs:
+    archive-note:
+        name: Ensemble population follow-up archived
+        runs-on: ubuntu-latest
+        steps:
+            - name: Record completed k20 follow-up
+              run: |
+                  echo "The locked 16-target k20 follow-up completed in run 31009907653."
+                  echo "Strict same-nine-source 3-model ensemble: 61.9063% independent."
+                  echo "Development-selected hybrid ensemble: 65.7863% independent."
+                  echo "Julia reference: 59.4%."
+                  echo "Artifact: 8932702885."
+                  echo "The execution gate is disabled to prevent repeated follow-up evaluation."

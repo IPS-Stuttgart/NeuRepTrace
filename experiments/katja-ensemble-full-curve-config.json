@@ -1,0 +1,39 @@
+{
+  "analysis_status": "full_curve_follow_up_after_k20_ensemble_result",
+  "calibration_counts": [1, 3, 5, 10, 15, 20],
+  "calibration_seeds": [13, 29, 47, 71, 101],
+  "development_artifact_id": 8931215635,
+  "development_run_id": 31007742231,
+  "development_target_excluded": "s05",
+  "enabled": true,
+  "feature_cache": "katja_finger_events_exact_ica_v4.npz",
+  "k20_population_artifact_id": 8932702885,
+  "k20_population_run_id": 31009907653,
+  "primary_configuration": "hybrid_source_model_ensemble6",
+  "reported_configurations": [
+    "nine_single_protocol",
+    "nine_model_ensemble3",
+    "nine_source_ensemble3",
+    "all16_single_protocol",
+    "all16_model_ensemble3",
+    "hybrid_source_model_ensemble6"
+  ],
+  "targets": [
+    "s06",
+    "s08",
+    "s09",
+    "s10",
+    "s11",
+    "s13",
+    "s14",
+    "s15",
+    "s16",
+    "s17",
+    "s18",
+    "s20",
+    "s21",
+    "s24",
+    "s25",
+    "s28"
+  ]
+}

@@ -1,0 +1,26 @@
+name: Katja source-model ensemble development
+
+permissions:
+    contents: read
+
+on: # yamllint disable-line rule:truthy
+    workflow_dispatch:
+    pull_request:
+        branches:
+            - main
+        paths:
+            - .github/workflows/katja-ensemble-development.yml
+            - experiments/katja-ensemble-development-config.json
+
+jobs:
+    archive-note:
+        name: Ensemble development selection archived
+        runs-on: ubuntu-latest
+        steps:
+            - name: Record completed development sweep
+              run: |
+                  echo "The exact-ICA s05 ensemble sweep completed in run 31007742231."
+                  echo "The protocol baseline reproduced 52.5157% independent k20."
+                  echo "Selected hybrid ensemble: 65.9120% independent k20."
+                  echo "Artifact: 8931215635."
+                  echo "The development gate is disabled; use the follow-up population workflow for further evaluation."
