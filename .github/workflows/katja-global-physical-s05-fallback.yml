@@ -1,4 +1,4 @@
-name: Katja exact global physical-finger s05 screen
+name: Katja exact ICA global physical-finger s05 screen
 
 on:
   workflow_dispatch:
@@ -20,11 +20,11 @@ jobs:
     timeout-minutes: 120
     env:
       KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
-      KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_v3.npz
+      KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_ica_v4.npz
     steps:
       - uses: actions/checkout@v7
 
-      - name: Apply exact correct-order protocol
+      - name: Apply exact ICA and correct-order protocol
         run: |
           git apply --recount --check experiments/katja-correct-order.patch
           git apply --recount experiments/katja-correct-order.patch
@@ -49,7 +49,7 @@ jobs:
               raise SystemExit("CUDA is required")
           PY
 
-      - name: Build exact feature cache when absent
+      - name: Build exact ICA feature cache when absent
         shell: bash
         run: |
           set -euo pipefail
@@ -153,6 +153,7 @@ jobs:
           )
           metadata["comparison_source_seed"] = 2026
           metadata["comparison_split_implementation"] = "recovered_sequential_rng"
+          metadata["spm_input_selection"] = "Bfc*ICA_corrected.mat"
           per_seed.to_csv(output / "per_seed.csv", index=False)
           per_target.to_csv(output / "per_target.csv", index=False)
           summary.to_csv(output / "summary.csv", index=False)
