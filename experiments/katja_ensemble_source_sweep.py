@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import torch
 
 from neureptrace._katja_finger_sequence_support import (
     DEFAULT_CALIBRATION_SEEDS,
@@ -199,8 +200,8 @@ def _prepare_member(
         expected_events=4,
         require_permutation_labels=True,
     )
-    if target_packed.labels is None:
-        raise RuntimeError("Target labels are required for development scoring.")
+    if source_packed.labels is None or target_packed.labels is None:
+        raise RuntimeError("Source and target labels are required for development scoring.")
     source_trial_subjects = _constant_trial_values(
         subjects[source_mask],
         source_packed.row_indices,
@@ -267,8 +268,6 @@ def run_sweep(
     reference = _validate_member_alignment(prepared)
     result_rows: list[dict[str, Any]] = []
 
-    import torch
-
     for calibration_seed in DEFAULT_CALIBRATION_SEEDS:
         splits = select_nested_trial_calibration_splits(
             reference.target_trial_strata,
@@ -276,7 +275,7 @@ def run_sweep(
             max_per_stratum=max(CALIBRATION_COUNTS),
             min_evaluation_per_stratum=1,
             seed=int(calibration_seed),
-            context=("katja_ensemble_development", DEVELOPMENT_TARGET),
+            context=("katja_finger", DEVELOPMENT_TARGET),
         )
         for calibration_count in CALIBRATION_COUNTS:
             split = splits[int(calibration_count)]
