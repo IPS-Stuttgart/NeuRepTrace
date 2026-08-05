@@ -21,7 +21,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
  
  DEFAULT_WINDOW_CENTERS_SECONDS = (-0.15, -0.05, 0.05, 0.15)
  DEFAULT_WINDOW_WIDTH_SECONDS = 0.10
-@@ -103,11 +107,9 @@ def _find_spm_header(subject_directory: Path) -> Path:
+@@ -108,9 +112,7 @@ def _find_spm_header(subject_directory: Path) -> Path:
 -    candidates = sorted(
 -        path for path in subject_directory.glob("fc*.mat") if not path.name.startswith("Bfc")
 -    )
@@ -33,7 +33,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
              f"found {len(candidates)}."
          )
      return candidates[0]
-@@ -435,7 +439,5 @@ def extract_subject_feature_rows(
+@@ -449,7 +451,5 @@ def extract_subject_feature_rows(
      cue_finger = np.asarray(behavior["cue_finger"])
      timing_ms = np.asarray(behavior["timing_ms"], dtype=float)
      cue_duration_ms = np.asarray(behavior["cue_duration_ms"], dtype=float)
@@ -41,7 +41,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
 -    npress = np.asarray(behavior["npress"], dtype=float)
      sequence = np.asarray(behavior["sequence_ids"])
  
-@@ -446,9 +448,4 @@ def extract_subject_feature_rows(
+@@ -459,10 +459,5 @@ def extract_subject_feature_rows(
          recorded = press[trial_index, :5]
          instructed = cue_finger[trial_index, :5]
 -        correct_order = bool(
@@ -54,7 +54,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
 +        valid_timing = bool(np.all(np.isfinite(timing_ms[trial_index, 1:5])))
 +        correct_order = bool(valid_timing and np.array_equal(recorded, instructed))
          if not correct_order:
-@@ -633,7 +630,7 @@ def build_katja_spm_feature_cache(
+@@ -632,6 +627,6 @@ def build_katja_spm_feature_cache(
              f"Subject feature widths differ unexpectedly: {sorted(feature_widths)}."
          )
      metadata = {
@@ -62,7 +62,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
 +        "format": "neureptrace_katja_button_press_event_features_exact_ica_v4",
          "participants": list(participant_tuple),
          "selected_channel_policy": (
-@@ -653,7 +650,5 @@ def build_katja_spm_feature_cache(
+@@ -648,7 +643,5 @@ def build_katja_spm_feature_cache(
          "button_lag_seconds": float(button_lag_seconds),
          "event_positions": [2, 3, 4, 5],
 -        "correct_order_rule": (
