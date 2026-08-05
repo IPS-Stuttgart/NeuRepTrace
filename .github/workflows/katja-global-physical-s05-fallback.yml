@@ -17,14 +17,14 @@ jobs:
     timeout-minutes: 120
     env:
       KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
-      KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_v2.npz
+      KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_v3.npz
     steps:
       - uses: actions/checkout@v7
 
       - name: Apply exact correct-order protocol
         run: |
-          git apply --check experiments/katja-correct-order.patch
-          git apply experiments/katja-correct-order.patch
+          git apply --recount --check experiments/katja-correct-order.patch
+          git apply --recount experiments/katja-correct-order.patch
 
       - uses: actions/setup-python@v7
         with:
@@ -61,7 +61,7 @@ jobs:
             mv "$temporary" "$KATJA_CACHE"
           fi
 
-      - name: Run global physical-finger k20 screen
+      - name: Run exact global physical-finger k20 screen
         shell: bash
         run: |
           set -euo pipefail
@@ -74,14 +74,49 @@ jobs:
           import os
           from pathlib import Path
 
+          import neureptrace.katja_global_physical_benchmark as benchmark
           from neureptrace._katja_finger_sequence_support import (
               DEFAULT_PARTICIPANTS,
+              katja_nested_trial_calibration_indices,
               load_katja_feature_cache,
           )
-          from neureptrace.katja_global_physical_benchmark import (
-              run_katja_global_physical_benchmark,
+          from neureptrace.decoding.progressive_sequence_finetune import (
+              NestedTrialCalibrationSplit,
           )
 
+          def exact_splits(
+              strata,
+              calibration_counts=(1, 3, 5, 10, 15, 20),
+              *,
+              max_per_stratum=None,
+              min_evaluation_per_stratum=1,
+              seed=13,
+              context=(),
+          ):
+              del context
+              counts = tuple(int(value) for value in calibration_counts)
+              if max_per_stratum is not None and int(max_per_stratum) != max(counts):
+                  raise ValueError("Exact Katja split requires max_per_stratum=max(calibration_counts).")
+              if int(min_evaluation_per_stratum) != 1:
+                  raise ValueError("Exact Katja split uses one or more evaluation trials per sequence.")
+              calibration, evaluation, pool = katja_nested_trial_calibration_indices(
+                  strata,
+                  counts,
+                  seed=int(seed),
+              )
+              return {
+                  count: NestedTrialCalibrationSplit(
+                      calibration_indices=indices,
+                      evaluation_indices=evaluation.copy(),
+                      calibration_pool_indices=pool.copy(),
+                      per_stratum=int(count),
+                      max_per_stratum=max(counts),
+                      seed=int(seed),
+                  )
+                  for count, indices in calibration.items()
+              }
+
+          benchmark.select_nested_trial_calibration_splits = exact_splits
           output = Path(os.environ["RUNNER_TEMP"]) / "katja-global-physical-s05-fallback"
           cache = load_katja_feature_cache(os.environ["KATJA_CACHE"])
           model_kwargs = {
@@ -101,18 +136,20 @@ jobs:
               "device": "cuda",
           }
           per_seed, per_target, summary, metadata = (
-              run_katja_global_physical_benchmark(
+              benchmark.run_katja_global_physical_benchmark(
                   cache,
                   participants=DEFAULT_PARTICIPANTS,
                   target_participants=("s05",),
                   calibration_counts=(20,),
                   calibration_seeds=(13,),
                   n_source_participants=9,
-                  source_selection_seed=13,
+                  source_selection_seed=2026,
                   pca_components=256,
                   model_kwargs=model_kwargs,
               )
           )
+          metadata["comparison_source_seed"] = 2026
+          metadata["comparison_split_implementation"] = "recovered_sequential_rng"
           per_seed.to_csv(output / "per_seed.csv", index=False)
           per_target.to_csv(output / "per_target.csv", index=False)
           summary.to_csv(output / "summary.csv", index=False)
