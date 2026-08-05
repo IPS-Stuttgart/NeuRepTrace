@@ -1,0 +1,411 @@
+diff -ruN a/src/neureptrace/decoding/_progressive_sequence_model.py b/src/neureptrace/decoding/_progressive_sequence_model.py
+--- a/src/neureptrace/decoding/_progressive_sequence_model.py	2026-08-05 09:24:59.630124890 +0000
++++ b/src/neureptrace/decoding/_progressive_sequence_model.py	2026-08-05 09:24:59.780385713 +0000
+@@ -66,6 +66,8 @@
+         meta_step_size: float = 0.15,
+         l2sp_weight: float = 1e-4,
+         source_replay_weight: float = 0.1,
++        refit_source_on_all: bool = True,
++        refit_target_on_all: bool = True,
+         validation_fraction: float = 0.2,
+         patience: int = 12,
+         min_trials_for_last_block: int = 8,
+@@ -105,6 +107,8 @@
+         self.meta_step_size = meta_step_size
+         self.l2sp_weight = l2sp_weight
+         self.source_replay_weight = source_replay_weight
++        self.refit_source_on_all = refit_source_on_all
++        self.refit_target_on_all = refit_target_on_all
+         self.validation_fraction = validation_fraction
+         self.patience = patience
+         self.min_trials_for_last_block = min_trials_for_last_block
+@@ -205,6 +209,7 @@
+             raise ValueError("target_strata must contain one value per target calibration trial.")
+ 
+         self.model_.load_state_dict(self.source_state_)
++        self._reset_torch_rng("target_adaptation", x.shape[0])
+         train_idx, validation_idx, validation_mode = _target_trial_validation_split(
+             x.shape[0],
+             strata=strata,
+@@ -306,5 +311,8 @@
+             "progressive_sequence_adaptation_history": copy.deepcopy(getattr(self, "adaptation_stage_history_", [])),
+             "progressive_sequence_source_replay_weight": float(self.source_replay_weight),
+             "progressive_sequence_l2sp_weight": float(self.l2sp_weight),
++            "progressive_sequence_refit_source_on_all": bool(self.refit_source_on_all),
++            "progressive_sequence_refit_target_on_all": bool(self.refit_target_on_all),
++            "progressive_sequence_source_refit_epochs": int(getattr(self, "source_refit_epochs_", 0)),
+             "progressive_sequence_device": str(getattr(self, "device_", self.device)),
+         }
+diff -ruN a/src/neureptrace/decoding/_progressive_sequence_training.py b/src/neureptrace/decoding/_progressive_sequence_training.py
+--- a/src/neureptrace/decoding/_progressive_sequence_training.py	2026-08-05 09:24:59.191492380 +0000
++++ b/src/neureptrace/decoding/_progressive_sequence_training.py	2026-08-05 09:24:59.779554931 +0000
+@@ -48,6 +48,16 @@
+         if not np.all(np.sort(encoded_labels, axis=1) == expected[None, :]):
+             raise ValueError(f"Every {name} trial must contain one occurrence of every class.")
+ 
++    def _reset_torch_rng(self, *parts) -> int:
++        """Reset CPU/CUDA RNGs so adaptations do not depend on evaluation order."""
++
++        torch = _torch()
++        seed = _stable_seed(_nonnegative_int(self.random_state or 0, "random_state"), (), *parts)
++        torch.manual_seed(seed)
++        if torch.cuda.is_available():
++            torch.cuda.manual_seed_all(seed)
++        return int(seed)
++
+     def _set_source_trainable(self) -> None:
+         for name, parameter in self.model_.named_parameters():
+             parameter.requires_grad_(not name.startswith("adapter_"))
+@@ -55,6 +65,31 @@
+     def _set_adaptation_stage_trainable(self, stage: str) -> tuple[str, ...]:
+         return _set_model_stage_trainable(self.model_, stage)
+ 
++    def _source_epoch_updates(
++        self,
++        *,
++        x_tensor,
++        y_tensor,
++        domain_tensor,
++        indices: np.ndarray,
++        optimizer,
++        rng: np.random.Generator,
++        batch_size: int,
++    ) -> None:
++        self.model_.train()
++        for batch_idx in _epoch_batches(indices, batch_size=batch_size, rng=rng):
++            optimizer.zero_grad(set_to_none=True)
++            batch_x = self._augment(x_tensor[batch_idx])
++            logits = self.model_(batch_x, use_adapter=False)
++            loss = self._classification_loss(
++                logits,
++                y_tensor[batch_idx],
++                domains=domain_tensor[batch_idx],
++                include_vrex=True,
++            )
++            loss.backward()
++            optimizer.step()
++
+     def _train_source(
+         self,
+         x: np.ndarray,
+@@ -65,43 +100,97 @@
+         validation_idx: np.ndarray,
+     ) -> None:
+         torch = _torch()
++        initial_state = {
++            name: value.detach().cpu().clone()
++            for name, value in self.model_.state_dict().items()
++        }
++        trainable_parameters = [
++            parameter for parameter in self.model_.parameters() if parameter.requires_grad
++        ]
+         optimizer = torch.optim.AdamW(
+-            [parameter for parameter in self.model_.parameters() if parameter.requires_grad],
++            trainable_parameters,
+             lr=_positive_float(self.source_learning_rate, "source_learning_rate"),
+             weight_decay=_nonnegative_float(self.weight_decay, "weight_decay"),
+         )
+         x_tensor = torch.as_tensor(x, dtype=torch.float32, device=self.device_)
+         y_tensor = torch.as_tensor(y, dtype=torch.long, device=self.device_)
+         domain_tensor = torch.as_tensor(domains, dtype=torch.long, device=self.device_)
+-        rng = np.random.default_rng(self.random_state)
++        self._reset_torch_rng("source_selection")
++        rng = np.random.default_rng(
++            _stable_seed(_nonnegative_int(self.random_state or 0, "random_state"), (), "source_selection")
++        )
+         batch_size = _positive_int(self.batch_size, "batch_size")
+         max_epochs = _positive_int(self.source_max_epochs, "source_max_epochs")
+         patience_limit = _positive_int(self.patience, "patience")
+         best_loss = np.inf
+         best_state = None
++        best_epoch = 0
+         patience_left = patience_limit
+         self.source_epochs_run_ = 0
+         for epoch in range(max_epochs):
+             self.source_epochs_run_ = epoch + 1
+-            self.model_.train()
+-            for batch_idx in _epoch_batches(train_idx, batch_size=batch_size, rng=rng):
+-                optimizer.zero_grad(set_to_none=True)
+-                batch_x = self._augment(x_tensor[batch_idx])
+-                logits = self.model_(batch_x, use_adapter=False)
+-                loss = self._classification_loss(logits, y_tensor[batch_idx], domains=domain_tensor[batch_idx], include_vrex=True)
+-                loss.backward()
+-                optimizer.step()
+-            validation_loss = self._validation_loss(x_tensor[validation_idx], y_tensor[validation_idx], use_adapter=False)
++            self._source_epoch_updates(
++                x_tensor=x_tensor,
++                y_tensor=y_tensor,
++                domain_tensor=domain_tensor,
++                indices=train_idx,
++                optimizer=optimizer,
++                rng=rng,
++                batch_size=batch_size,
++            )
++            validation_loss = self._validation_loss(
++                x_tensor[validation_idx], y_tensor[validation_idx], use_adapter=False
++            )
+             if validation_loss + 1e-6 < best_loss:
+                 best_loss = validation_loss
+-                best_state = {name: value.detach().cpu().clone() for name, value in self.model_.state_dict().items()}
++                best_epoch = epoch + 1
++                best_state = {
++                    name: value.detach().cpu().clone()
++                    for name, value in self.model_.state_dict().items()
++                }
+                 patience_left = patience_limit
+             else:
+                 patience_left -= 1
+                 if patience_left <= 0:
+                     break
+-        if best_state is not None:
+-            self.model_.load_state_dict(best_state)
++
++        refit = bool(self.refit_source_on_all) and not np.array_equal(
++            np.sort(train_idx), np.sort(np.arange(x.shape[0], dtype=int))
++        )
++        if refit and best_epoch > 0:
++            self.model_.load_state_dict(initial_state)
++            self._set_source_trainable()
++            optimizer = torch.optim.AdamW(
++                [parameter for parameter in self.model_.parameters() if parameter.requires_grad],
++                lr=_positive_float(self.source_learning_rate, "source_learning_rate"),
++                weight_decay=_nonnegative_float(self.weight_decay, "weight_decay"),
++            )
++            self._reset_torch_rng("source_refit", best_epoch)
++            rng = np.random.default_rng(
++                _stable_seed(
++                    _nonnegative_int(self.random_state or 0, "random_state"),
++                    (),
++                    "source_refit",
++                    best_epoch,
++                )
++            )
++            all_indices = np.arange(x.shape[0], dtype=int)
++            for _epoch in range(best_epoch):
++                self._source_epoch_updates(
++                    x_tensor=x_tensor,
++                    y_tensor=y_tensor,
++                    domain_tensor=domain_tensor,
++                    indices=all_indices,
++                    optimizer=optimizer,
++                    rng=rng,
++                    batch_size=batch_size,
++                )
++            self.source_refit_epochs_ = int(best_epoch)
++        else:
++            if best_state is not None:
++                self.model_.load_state_dict(best_state)
++            self.source_refit_epochs_ = 0
++        self.best_source_epoch_ = int(best_epoch)
+         self.best_source_validation_loss_ = float(best_loss)
+ 
+     def _meta_initialize_target_adapter(self, x: np.ndarray, y: np.ndarray, domains: np.ndarray) -> tuple[int, int]:
+@@ -169,6 +258,51 @@
+         self.model_.eval()
+         return int(episodes_run), int(episodes_accepted)
+ 
++    def _adaptation_update(
++        self,
++        *,
++        x_tensor,
++        y_tensor,
++        target_indices: np.ndarray,
++        source_x_tensor,
++        source_y_tensor,
++        optimizer,
++        trainable_parameters,
++        rng: np.random.Generator,
++        batch_size: int,
++        replay_weight: float,
++        l2sp_weight: float,
++    ) -> None:
++        self.model_.train()
++        target_size = min(batch_size, target_indices.size)
++        target_batch = rng.choice(target_indices, size=target_size, replace=False)
++        optimizer.zero_grad(set_to_none=True)
++        target_logits = self.model_(self._augment(x_tensor[target_batch]), use_adapter=True)
++        loss = self._classification_loss(
++            target_logits, y_tensor[target_batch], domains=None, include_vrex=False
++        )
++        if replay_weight > 0.0:
++            replay_size = min(batch_size, self.source_features_.shape[0])
++            source_batch = rng.choice(
++                self.source_features_.shape[0], size=replay_size, replace=False
++            )
++            source_logits = self.model_(
++                self._augment(source_x_tensor[source_batch]), use_adapter=False
++            )
++            replay_loss = self._classification_loss(
++                source_logits,
++                source_y_tensor[source_batch],
++                domains=None,
++                include_vrex=False,
++            )
++            loss = loss + replay_weight * replay_loss
++        if l2sp_weight > 0.0:
++            loss = loss + l2sp_weight * self._l2sp_penalty()
++        loss.backward()
++        torch = _torch()
++        torch.nn.utils.clip_grad_norm_(trainable_parameters, max_norm=5.0)
++        optimizer.step()
++
+     def _adapt_stage(
+         self,
+         x: np.ndarray,
+@@ -181,8 +315,14 @@
+         learning_rate: float,
+     ) -> None:
+         torch = _torch()
++        stage_start_state = {
++            name: value.detach().cpu().clone()
++            for name, value in self.model_.state_dict().items()
++        }
+         trainable_names = self._set_adaptation_stage_trainable(stage)
+-        trainable_parameters = [parameter for parameter in self.model_.parameters() if parameter.requires_grad]
++        trainable_parameters = [
++            parameter for parameter in self.model_.parameters() if parameter.requires_grad
++        ]
+         if not trainable_parameters:
+             return
+         optimizer = torch.optim.AdamW(
+@@ -192,51 +332,116 @@
+         )
+         x_tensor = torch.as_tensor(x, dtype=torch.float32, device=self.device_)
+         y_tensor = torch.as_tensor(y, dtype=torch.long, device=self.device_)
+-        source_x_tensor = torch.as_tensor(self.source_features_, dtype=torch.float32, device=self.device_)
+-        source_y_tensor = torch.as_tensor(self.source_encoded_labels_, dtype=torch.long, device=self.device_)
+-        rng = np.random.default_rng(_stable_seed(_nonnegative_int(self.random_state or 0, "random_state"), (), "stage", stage))
++        source_x_tensor = torch.as_tensor(
++            self.source_features_, dtype=torch.float32, device=self.device_
++        )
++        source_y_tensor = torch.as_tensor(
++            self.source_encoded_labels_, dtype=torch.long, device=self.device_
++        )
++        self._reset_torch_rng("stage_selection", stage, x.shape[0])
++        rng = np.random.default_rng(
++            _stable_seed(
++                _nonnegative_int(self.random_state or 0, "random_state"),
++                (),
++                "stage_selection",
++                stage,
++                x.shape[0],
++            )
++        )
+         batch_size = _positive_int(self.batch_size, "batch_size")
+-        replay_weight = _nonnegative_float(self.source_replay_weight, "source_replay_weight")
++        replay_weight = _nonnegative_float(
++            self.source_replay_weight, "source_replay_weight"
++        )
+         l2sp_weight = _nonnegative_float(self.l2sp_weight, "l2sp_weight")
+         patience_limit = _positive_int(self.patience, "patience")
+         patience_left = patience_limit
+         best_loss = np.inf
+         best_state = None
++        best_step = 0
+         steps_run = 0
+         for step in range(steps):
+             steps_run = step + 1
+-            self.model_.train()
+-            target_batch = rng.choice(train_idx, size=min(batch_size, train_idx.size), replace=train_idx.size < batch_size)
+-            optimizer.zero_grad(set_to_none=True)
+-            target_logits = self.model_(self._augment(x_tensor[target_batch]), use_adapter=True)
+-            loss = self._classification_loss(target_logits, y_tensor[target_batch], domains=None, include_vrex=False)
+-            if replay_weight > 0.0:
+-                replay_size = min(batch_size, self.source_features_.shape[0])
+-                source_batch = rng.choice(self.source_features_.shape[0], size=replay_size, replace=self.source_features_.shape[0] < replay_size)
+-                source_logits = self.model_(self._augment(source_x_tensor[source_batch]), use_adapter=False)
+-                replay_loss = self._classification_loss(source_logits, source_y_tensor[source_batch], domains=None, include_vrex=False)
+-                loss = loss + replay_weight * replay_loss
+-            if l2sp_weight > 0.0:
+-                loss = loss + l2sp_weight * self._l2sp_penalty()
+-            loss.backward()
+-            torch.nn.utils.clip_grad_norm_(trainable_parameters, max_norm=5.0)
+-            optimizer.step()
+-
+-            validation_loss = self._validation_loss(x_tensor[validation_idx], y_tensor[validation_idx], use_adapter=True)
++            self._adaptation_update(
++                x_tensor=x_tensor,
++                y_tensor=y_tensor,
++                target_indices=train_idx,
++                source_x_tensor=source_x_tensor,
++                source_y_tensor=source_y_tensor,
++                optimizer=optimizer,
++                trainable_parameters=trainable_parameters,
++                rng=rng,
++                batch_size=batch_size,
++                replay_weight=replay_weight,
++                l2sp_weight=l2sp_weight,
++            )
++            validation_loss = self._validation_loss(
++                x_tensor[validation_idx], y_tensor[validation_idx], use_adapter=True
++            )
+             if validation_loss + 1e-6 < best_loss:
+                 best_loss = validation_loss
+-                best_state = {name: value.detach().cpu().clone() for name, value in self.model_.state_dict().items()}
++                best_step = step + 1
++                best_state = {
++                    name: value.detach().cpu().clone()
++                    for name, value in self.model_.state_dict().items()
++                }
+                 patience_left = patience_limit
+             else:
+                 patience_left -= 1
+                 if patience_left <= 0:
+                     break
+-        if best_state is not None:
++
++        full_indices = np.arange(x.shape[0], dtype=int)
++        refit = (
++            bool(self.refit_target_on_all)
++            and best_step > 0
++            and not np.array_equal(np.sort(train_idx), full_indices)
++        )
++        if refit:
++            self.model_.load_state_dict(stage_start_state)
++            trainable_names = self._set_adaptation_stage_trainable(stage)
++            trainable_parameters = [
++                parameter for parameter in self.model_.parameters() if parameter.requires_grad
++            ]
++            optimizer = torch.optim.AdamW(
++                trainable_parameters,
++                lr=learning_rate,
++                weight_decay=_nonnegative_float(self.weight_decay, "weight_decay"),
++            )
++            self._reset_torch_rng("stage_refit", stage, x.shape[0], best_step)
++            rng = np.random.default_rng(
++                _stable_seed(
++                    _nonnegative_int(self.random_state or 0, "random_state"),
++                    (),
++                    "stage_refit",
++                    stage,
++                    x.shape[0],
++                    best_step,
++                )
++            )
++            for _step in range(best_step):
++                self._adaptation_update(
++                    x_tensor=x_tensor,
++                    y_tensor=y_tensor,
++                    target_indices=full_indices,
++                    source_x_tensor=source_x_tensor,
++                    source_y_tensor=source_y_tensor,
++                    optimizer=optimizer,
++                    trainable_parameters=trainable_parameters,
++                    rng=rng,
++                    batch_size=batch_size,
++                    replay_weight=replay_weight,
++                    l2sp_weight=l2sp_weight,
++                )
++        elif best_state is not None:
+             self.model_.load_state_dict(best_state)
++
+         self.adaptation_stage_history_.append(
+             {
+                 "stage": stage,
+                 "steps_run": int(steps_run),
++                "best_step": int(best_step),
++                "refit_steps": int(best_step if refit else 0),
++                "refit_on_all_calibration": bool(refit),
+                 "best_validation_loss": float(best_loss),
+                 "trainable_parameter_names": trainable_names,
+             }
