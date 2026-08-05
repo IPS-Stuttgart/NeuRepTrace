@@ -1,0 +1,166 @@
+name: Katja exact ICA participant-local full k20
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - agent/katja-global-physical-finger
+    paths:
+      - .github/workflows/katja-participant-local-k20.yml
+
+permissions:
+  contents: read
+
+jobs:
+  participant-local-k20:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 420
+    env:
+      KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_ica_v4.npz
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -e .
+          python -m pip install --disable-pip-version-check numpy scipy h5py
+
+      - name: Verify CUDA and exact cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$KATJA_CACHE"
+          nvidia-smi
+          python - <<'PY'
+          import torch
+
+          if not torch.cuda.is_available():
+              raise SystemExit("CUDA is required")
+          print(torch.__version__, torch.cuda.get_device_name(0))
+          PY
+
+      - name: Run all 17 participant-local targets at k20 seed 13
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="${RUNNER_TEMP}/katja-participant-local-k20"
+          mkdir -p "$output"
+          python - <<'PY' | tee "${RUNNER_TEMP}/katja-participant-local-k20.txt"
+          from __future__ import annotations
+
+          import json
+          import os
+          import time
+          from pathlib import Path
+
+          import neureptrace.katja_finger_sequence_benchmark as benchmark
+          from neureptrace._katja_finger_sequence_support import (
+              DEFAULT_PARTICIPANTS,
+              katja_nested_trial_calibration_indices,
+              load_katja_feature_cache,
+          )
+          from neureptrace.decoding.progressive_sequence_finetune import (
+              NestedTrialCalibrationSplit,
+          )
+
+          def exact_splits(
+              strata,
+              calibration_counts=(20,),
+              *,
+              max_per_stratum=None,
+              min_evaluation_per_stratum=1,
+              seed=13,
+              context=(),
+          ):
+              del context
+              counts = tuple(int(value) for value in calibration_counts)
+              calibration, evaluation, pool = katja_nested_trial_calibration_indices(
+                  strata,
+                  counts,
+                  seed=int(seed),
+              )
+              return {
+                  count: NestedTrialCalibrationSplit(
+                      calibration_indices=indices,
+                      evaluation_indices=evaluation.copy(),
+                      calibration_pool_indices=pool.copy(),
+                      per_stratum=int(count),
+                      max_per_stratum=max(counts),
+                      seed=int(seed),
+                  )
+                  for count, indices in calibration.items()
+              }
+
+          benchmark.select_nested_trial_calibration_splits = exact_splits
+          output = Path(os.environ["RUNNER_TEMP"]) / "katja-participant-local-k20"
+          cache = load_katja_feature_cache(os.environ["KATJA_CACHE"])
+          model_kwargs = {
+              "hidden_units": 96,
+              "num_layers": 2,
+              "num_heads": 4,
+              "adapter_rank": 8,
+              "source_max_epochs": 120,
+              "meta_epochs": 2,
+              "meta_support_trials": 4,
+              "meta_query_trials": 4,
+              "meta_inner_steps": 5,
+              "adapter_steps": 80,
+              "last_block_steps": 60,
+              "full_finetune_steps": 60,
+              "batch_size": 64,
+              "device": "cuda",
+              "enforce_permutation_labels": True,
+          }
+          started = time.time()
+          per_seed, per_target, summary, metadata = (
+              benchmark.run_katja_finger_sequence_benchmark(
+                  cache,
+                  participants=DEFAULT_PARTICIPANTS,
+                  calibration_counts=(20,),
+                  calibration_seeds=(13,),
+                  n_source_participants=9,
+                  source_selection_seed=2026,
+                  pca_components=256,
+                  model_kwargs=model_kwargs,
+              )
+          )
+          metadata.update(
+              {
+                  "comparison_source_seed": 2026,
+                  "comparison_split_implementation": "recovered_sequential_rng",
+                  "spm_input_selection": "Bfc*ICA_corrected.mat",
+                  "elapsed_seconds": time.time() - started,
+                  "training_label_space": "participant_local_sorted_variable_finger",
+                  "screening_policy": "paired_against_global_physical_seed13_k20",
+              }
+          )
+          per_seed.to_csv(output / "per_seed.csv", index=False)
+          per_target.to_csv(output / "per_target.csv", index=False)
+          summary.to_csv(output / "summary.csv", index=False)
+          (output / "metadata.json").write_text(
+              json.dumps(metadata, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print("\n=== population summary ===")
+          print(summary.to_string(index=False))
+          print("\n=== per-target ranking ===")
+          print(
+              per_target.sort_values("independent_accuracy", ascending=False).to_string(
+                  index=False
+              )
+          )
+          PY
+
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: katja-participant-local-k20
+          path: |
+            ${{ runner.temp }}/katja-participant-local-k20.txt
+            ${{ runner.temp }}/katja-participant-local-k20/*.csv
+            ${{ runner.temp }}/katja-participant-local-k20/*.json
+          if-no-files-found: warn
