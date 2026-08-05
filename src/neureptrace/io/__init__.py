@@ -8,11 +8,13 @@ files or thin project repositories that call these adapters.
 from __future__ import annotations
 
 from neureptrace.io import (
+    _epoch_dataset_single_sample_sfreq_patch,
     _fieldtrip_config_participant,
     _fieldtrip_finite_time_axis_patch,
     _synthetic_fieldtrip_output_collision_patch,
 )
 
+_epoch_dataset_single_sample_sfreq_patch.install()
 _fieldtrip_config_participant.install()
 _fieldtrip_finite_time_axis_patch.install()
 _synthetic_fieldtrip_output_collision_patch.install()
