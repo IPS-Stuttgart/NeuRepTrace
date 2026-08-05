@@ -1,0 +1,327 @@
+name: Katja global physical-finger s05 benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - codex/katja-progressive-sequence-20260805
+    paths:
+      - .github/workflows/katja-global-physical-s05.yml
+      - src/neureptrace/katja_global_physical_benchmark.py
+      - tests/test_katja_global_physical_benchmark.py
+
+permissions:
+  contents: read
+
+jobs:
+  global-physical-s05:
+    runs-on: [self-hosted, Linux, X64, nvidia-smi]
+    timeout-minutes: 150
+    env:
+      KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
+      KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_v2.npz
+    steps:
+      - name: Check out experiment branch
+        uses: actions/checkout@v7
+
+      - name: Apply current protocol and refit experiments
+        run: |
+          git apply --check experiments/katja-correct-order.patch
+          git apply experiments/katja-correct-order.patch
+          git apply --check experiments/katja-refit-full-data.patch
+          git apply experiments/katja-refit-full-data.patch
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install project and experiment dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -e .
+          python -m pip install --disable-pip-version-check pytest numpy scipy h5py
+
+      - name: Verify CUDA and focused tests
+        run: |
+          nvidia-smi
+          python - <<'PY'
+          import torch
+
+          print(
+              {
+                  "torch": torch.__version__,
+                  "cuda_available": torch.cuda.is_available(),
+                  "cuda_device": (
+                      torch.cuda.get_device_name(0)
+                      if torch.cuda.is_available()
+                      else None
+                  ),
+              }
+          )
+          if not torch.cuda.is_available():
+              raise SystemExit("CUDA is required for the Katja neural sweep")
+          PY
+          python -m pytest -q \
+            tests/test_progressive_sequence_finetune.py \
+            tests/test_katja_finger_sequence_benchmark.py \
+            tests/test_katja_global_physical_benchmark.py \
+            | tee "${RUNNER_TEMP}/katja-global-physical-tests.txt"
+
+      - name: Build exact response-locked cache when absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$KATJA_CACHE")"
+          if [ ! -s "$KATJA_CACHE" ]; then
+            temporary="${KATJA_CACHE%.npz}.tmp.${GITHUB_RUN_ID}.npz"
+            rm -f "$temporary"
+            python -m neureptrace.katja_spm_feature_cache \
+              --dataset-root "$KATJA_DATASET_ROOT" \
+              --output "$temporary" \
+              --button-lag-ms 30 \
+              --force
+            mv "$temporary" "$KATJA_CACHE"
+          fi
+
+      - name: Run calibration-masked global physical-finger sweep on s05
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="${RUNNER_TEMP}/katja-global-physical-s05"
+          mkdir -p "$output"
+          python - <<'PY' | tee "${RUNNER_TEMP}/katja-global-physical-s05.txt"
+          from __future__ import annotations
+
+          import json
+          import os
+          import time
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          from sklearn.linear_model import LogisticRegression
+
+          from neureptrace._katja_finger_sequence_support import (
+              DEFAULT_PARTICIPANTS,
+              _constant_trial_values,
+              _fit_source_preprocessor,
+              _stable_source_selection,
+              _transform_features,
+              load_katja_feature_cache,
+          )
+          from neureptrace.decoding.progressive_sequence_finetune import (
+              pack_complete_trial_events,
+              select_nested_trial_calibration_splits,
+          )
+          from neureptrace.katja_global_physical_benchmark import (
+              restrict_probabilities_to_calibration_classes,
+              run_katja_global_physical_benchmark,
+          )
+
+          output = Path(os.environ["RUNNER_TEMP"]) / "katja-global-physical-s05"
+          cache = load_katja_feature_cache(os.environ["KATJA_CACHE"])
+
+          subjects = cache["subjects"].astype(str)
+          trial_ids = cache["trial_ids"]
+          positions = cache["press_positions"].astype(int)
+          sequence_ids = cache["sequence_ids"]
+          physical = cache["finger_codes"]
+          included = cache["correct_order"].astype(bool) & np.isin(
+              positions, [2, 3, 4, 5]
+          )
+          features = cache["features"][included]
+          subjects = subjects[included]
+          trial_ids = trial_ids[included]
+          positions = positions[included]
+          sequence_ids = sequence_ids[included]
+          physical = physical[included]
+          target = "s05"
+          sources = _stable_source_selection(
+              DEFAULT_PARTICIPANTS,
+              target=target,
+              n_sources=9,
+              seed=13,
+          )
+          source_mask = np.isin(subjects, np.asarray(sources))
+          target_mask = subjects == target
+          scaler, pca, source_x = _fit_source_preprocessor(
+              features[source_mask], pca_components=64
+          )
+          target_x = _transform_features(
+              features[target_mask], scaler=scaler, pca=pca
+          )
+          target_packed = pack_complete_trial_events(
+              target_x,
+              trial_ids[target_mask],
+              positions[target_mask],
+              labels=physical[target_mask],
+              expected_events=4,
+              require_permutation_labels=False,
+          )
+          target_strata = _constant_trial_values(
+              sequence_ids[target_mask],
+              target_packed.row_indices,
+              name="target sequence ID",
+          )
+          split = select_nested_trial_calibration_splits(
+              target_strata,
+              calibration_counts=(20,),
+              max_per_stratum=20,
+              seed=13,
+              context=("katja_global_physical", target),
+          )[20]
+          calibration_rows = target_packed.row_indices[
+              split.calibration_indices
+          ].reshape(-1)
+          evaluation_rows = target_packed.row_indices[
+              split.evaluation_indices
+          ].reshape(-1)
+          source_y = physical[source_mask]
+          target_y = physical[target_mask]
+          linear = LogisticRegression(
+              C=1.0,
+              max_iter=4000,
+              solver="lbfgs",
+              random_state=13,
+          ).fit(source_x, source_y)
+          global_probabilities = linear.predict_proba(
+              target_x[evaluation_rows]
+          ).reshape(split.evaluation_indices.size, 4, -1)
+          allowed, restricted = restrict_probabilities_to_calibration_classes(
+              global_probabilities,
+              linear.classes_,
+              target_y[calibration_rows],
+          )
+          linear_predictions = allowed[np.argmax(restricted, axis=2)].reshape(-1)
+          linear_report = {
+              "target": target,
+              "sources": list(sources),
+              "n_source_classes": int(linear.classes_.shape[0]),
+              "allowed_target_classes": allowed.tolist(),
+              "n_evaluation_events": int(evaluation_rows.shape[0]),
+              "masked_source_only_accuracy": float(
+                  np.mean(linear_predictions == target_y[evaluation_rows])
+              ),
+          }
+          print("=== global physical linear control ===")
+          print(json.dumps(linear_report, indent=2, sort_keys=True))
+          (output / "linear_control.json").write_text(
+              json.dumps(linear_report, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+
+          base = {
+              "hidden_units": 96,
+              "num_layers": 2,
+              "num_heads": 4,
+              "adapter_rank": 8,
+              "source_max_epochs": 120,
+              "meta_epochs": 2,
+              "meta_support_trials": 4,
+              "meta_query_trials": 4,
+              "meta_inner_steps": 5,
+              "adapter_steps": 80,
+              "last_block_steps": 60,
+              "full_finetune_steps": 60,
+              "batch_size": 64,
+              "device": "cuda",
+              "refit_source_on_all": True,
+              "refit_target_on_all": True,
+          }
+          configurations = [
+              ("global_pca64_refit", 64, {}),
+              ("global_pca256_refit", 256, {}),
+              (
+                  "global_raw_refit_strong",
+                  None,
+                  {
+                      "source_replay_weight": 0.25,
+                      "l2sp_weight": 1e-3,
+                      "adaptation_learning_rate": 1e-3,
+                      "full_finetune_learning_rate": 5e-5,
+                      "dropout": 0.20,
+                      "feature_dropout": 0.10,
+                  },
+              ),
+          ]
+          seed_frames = []
+          target_frames = []
+          summary_frames = []
+          metadata = {}
+          for name, pca_components, overrides in configurations:
+              started = time.time()
+              kwargs = {**base, **overrides}
+              per_seed, per_target, summary, run_metadata = (
+                  run_katja_global_physical_benchmark(
+                      cache,
+                      participants=DEFAULT_PARTICIPANTS,
+                      target_participants=("s05",),
+                      calibration_counts=(10, 15, 20),
+                      calibration_seeds=(13,),
+                      n_source_participants=9,
+                      source_selection_seed=13,
+                      pca_components=pca_components,
+                      model_kwargs=kwargs,
+                  )
+              )
+              elapsed = time.time() - started
+              for frame in (per_seed, per_target, summary):
+                  frame.insert(0, "configuration", name)
+                  frame.insert(
+                      1,
+                      "pca_components",
+                      "none" if pca_components is None else pca_components,
+                  )
+                  frame.insert(2, "elapsed_seconds", elapsed)
+              seed_frames.append(per_seed)
+              target_frames.append(per_target)
+              summary_frames.append(summary)
+              metadata[name] = {
+                  "pca_components": pca_components,
+                  "model_kwargs": kwargs,
+                  "elapsed_seconds": elapsed,
+                  "benchmark_metadata": run_metadata,
+              }
+              print("\n===", name, f"({elapsed:.1f} s) ===")
+              print(summary.to_string(index=False))
+
+          all_seed = pd.concat(seed_frames, ignore_index=True)
+          all_target = pd.concat(target_frames, ignore_index=True)
+          all_summary = pd.concat(summary_frames, ignore_index=True)
+          all_seed.to_csv(output / "per_seed.csv", index=False)
+          all_target.to_csv(output / "per_target.csv", index=False)
+          all_summary.to_csv(output / "summary.csv", index=False)
+          (output / "metadata.json").write_text(
+              json.dumps(metadata, indent=2, sort_keys=True),
+              encoding="utf-8",
+          )
+          print("\n=== k20 ranking by masked independent accuracy ===")
+          ranking = all_summary[all_summary["k"] == 20].sort_values(
+              ["independent_accuracy_mean", "permutation_accuracy_mean"],
+              ascending=False,
+          )
+          print(
+              ranking[
+                  [
+                      "configuration",
+                      "independent_accuracy_mean",
+                      "global_unmasked_accuracy_mean",
+                      "permutation_accuracy_mean",
+                      "independent_delta_vs_julia",
+                      "permutation_delta_vs_julia",
+                  ]
+              ].to_string(index=False)
+          )
+          PY
+
+      - name: Upload global physical-finger results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: katja-global-physical-s05
+          path: |
+            ${{ runner.temp }}/katja-global-physical-tests.txt
+            ${{ runner.temp }}/katja-global-physical-s05.txt
+            ${{ runner.temp }}/katja-global-physical-s05/*.csv
+            ${{ runner.temp }}/katja-global-physical-s05/*.json
+          if-no-files-found: warn
