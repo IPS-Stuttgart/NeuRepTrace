@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from decimal import Decimal, InvalidOperation
 
 import numpy as np
@@ -13,34 +14,47 @@ _INTEGER_PATCH_MARKER = "_neureptrace_sampling_integer_array_patch_installed"
 
 
 def _coerce_label_item(item):
-    """Keep NumPy array-valued labels atomic when labels are supplied as a sequence."""
+    """Return a stable atomic representation for composite class labels."""
 
-    if not isinstance(item, np.ndarray):
-        return item
-    array = item.astype(object, copy=False)
-    if array.ndim == 0:
-        return array.item()
-    flat = array.reshape(-1)
-    if flat.size == 1:
-        return flat[0]
-    return tuple(flat.tolist())
+    if isinstance(item, np.ndarray):
+        array = item.astype(object, copy=False)
+        if array.ndim == 0:
+            return _coerce_label_item(array.item())
+        flat = array.reshape(-1)
+        if flat.size == 1:
+            return _coerce_label_item(flat[0])
+        return tuple(_coerce_label_item(value) for value in flat.tolist())
+    if isinstance(item, Iterator):
+        return tuple(_coerce_label_item(value) for value in item)
+    if isinstance(item, (tuple, list)):
+        return tuple(_coerce_label_item(value) for value in item)
+    if isinstance(item, np.generic):
+        return item.item()
+    return item
+
+
+def _object_label_vector(items: list[object]) -> np.ndarray:
+    vector = np.empty(len(items), dtype=object)
+    vector[:] = items
+    return vector
 
 
 def _array_label_vector(array: np.ndarray) -> np.ndarray:
     """Return one class-label object per row of an array-like label container."""
 
+    original_dtype = array.dtype
     array = array.astype(object, copy=False)
     if array.ndim == 0:
         return array.reshape(1)
     if array.ndim == 1:
+        if np.issubdtype(original_dtype, np.object_):
+            return _object_label_vector([_coerce_label_item(item) for item in array.tolist()])
         return array
     row_width = int(np.prod(array.shape[1:], dtype=int))
     rows = array.reshape(array.shape[0], row_width)
-    if rows.shape[1] == 1:
+    if rows.shape[1] == 1 and not np.issubdtype(original_dtype, np.object_):
         return rows[:, 0].astype(object, copy=False)
-    vector = np.empty(rows.shape[0], dtype=object)
-    vector[:] = [tuple(row.tolist()) for row in rows]
-    return vector
+    return _object_label_vector([_coerce_label_item(tuple(row.tolist())) for row in rows])
 
 
 def _label_vector(labels) -> np.ndarray:
@@ -53,15 +67,12 @@ def _label_vector(labels) -> np.ndarray:
         return np.asarray([labels], dtype=object)
 
     try:
-        items = list(labels)
+        items = [_coerce_label_item(item) for item in labels]
     except TypeError:
-        items = [labels]
+        items = [_coerce_label_item(labels)]
 
-    items = [_coerce_label_item(item) for item in items]
     if any(isinstance(item, tuple) for item in items):
-        vector = np.empty(len(items), dtype=object)
-        vector[:] = items
-        return vector
+        return _object_label_vector(items)
 
     array = np.asarray(items, dtype=object)
     if array.ndim >= 2 and array.shape[0] == len(items):
