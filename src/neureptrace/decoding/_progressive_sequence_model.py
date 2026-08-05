@@ -15,14 +15,10 @@ from neureptrace.decoding._progressive_sequence_core import (
     _as_label_matrix,
     _as_object_vector,
     _bounded_float,
-    _labels_equal,
-    _nonnegative_float,
     _nonnegative_int,
     _positive_float,
     _positive_int,
-    _stable_seed,
     _torch,
-    _unique_in_order,
     permutation_constrained_decode,
 )
 from neureptrace.decoding._progressive_sequence_network import (
