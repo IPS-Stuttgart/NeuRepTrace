@@ -1,21 +1,66 @@
 {
-  "analysis_status": "follow_up_validation_after_prior_16_target_single_model_result",
+  "analysis_status": "completed_follow_up_validation_after_prior_16_target_single_model_result",
+  "artifact_digest": "sha256:d24b9129e42a0d24d9d770fd30b527fa244bf54becf1aa63721dd0a5e84eaa53",
+  "artifact_id": 8932702885,
   "calibration_counts": [20],
   "calibration_seeds": [13, 29, 47, 71, 101],
   "development_artifact_id": 8931215635,
   "development_run_id": 31007742231,
   "development_target_excluded": "s05",
-  "enabled": true,
+  "enabled": false,
   "feature_cache": "katja_finger_events_exact_ica_v4.npz",
+  "follow_up_run_id": 31009907653,
   "primary_configuration": "hybrid_source_model_ensemble6",
-  "reported_configurations": [
-    "nine_single_protocol",
-    "nine_model_ensemble3",
-    "nine_source_ensemble3",
-    "all16_single_protocol",
-    "all16_model_ensemble3",
-    "hybrid_source_model_ensemble6"
-  ],
+  "results_k20": {
+    "all16_model_ensemble3": {
+      "independent_mean": 0.6483731268050024,
+      "independent_sem": 0.015746448658251578,
+      "independent_delta_vs_julia": 0.05437312680500239,
+      "permutation_mean": 0.6999562726035544,
+      "permutation_sem": 0.020702612415775267
+    },
+    "all16_single_protocol": {
+      "independent_mean": 0.6152305157901758,
+      "independent_sem": 0.016144499833468922,
+      "independent_delta_vs_julia": 0.021230515790175875,
+      "permutation_mean": 0.6735562105396565,
+      "permutation_sem": 0.021695766791742115
+    },
+    "hybrid_source_model_ensemble6": {
+      "independent_mean": 0.6578626813834083,
+      "independent_sem": 0.016281034577692886,
+      "independent_delta_vs_julia": 0.06386268138340834,
+      "paired_gain_over_single_mean": 0.08419544003598,
+      "paired_gain_over_single_sem": 0.007812797166960759,
+      "targets_improved_over_single": 16,
+      "permutation_mean": 0.7101239849669327,
+      "permutation_sem": 0.0207490359811957
+    },
+    "nine_model_ensemble3": {
+      "independent_mean": 0.6190630111719881,
+      "independent_sem": 0.017932296122446935,
+      "independent_delta_vs_julia": 0.02506301117198817,
+      "paired_gain_over_single_mean": 0.045395769824559835,
+      "paired_gain_over_single_sem": 0.005736462207531634,
+      "targets_improved_over_single": 16,
+      "permutation_mean": 0.6650822810756041,
+      "permutation_sem": 0.021113445709406563
+    },
+    "nine_single_protocol": {
+      "independent_mean": 0.5736672413474283,
+      "independent_sem": 0.015461229185555661,
+      "independent_delta_vs_julia": -0.02033275865257167,
+      "permutation_mean": 0.6215530401899537,
+      "permutation_sem": 0.019066729889802358
+    },
+    "nine_source_ensemble3": {
+      "independent_mean": 0.6368192357015678,
+      "independent_sem": 0.016948304921380677,
+      "independent_delta_vs_julia": 0.04281923570156787,
+      "permutation_mean": 0.6856981316885395,
+      "permutation_sem": 0.020337437020150163
+    }
+  },
   "targets": [
     "s06",
     "s08",
