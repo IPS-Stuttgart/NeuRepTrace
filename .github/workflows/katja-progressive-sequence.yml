@@ -1,0 +1,174 @@
+name: Katja progressive sequence benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/katja-progressive-sequence.yml
+      - src/neureptrace/decoding/_progressive_sequence_core.py
+      - src/neureptrace/decoding/_progressive_sequence_model.py
+      - src/neureptrace/decoding/_progressive_sequence_network.py
+      - src/neureptrace/decoding/_progressive_sequence_training.py
+      - src/neureptrace/decoding/progressive_sequence_finetune.py
+      - src/neureptrace/katja_finger_sequence_benchmark.py
+      - tests/test_progressive_sequence_finetune.py
+      - tests/test_katja_finger_sequence_benchmark.py
+      - workflow-triggers/katja_progressive_sequence.txt
+
+permissions:
+  contents: read
+
+jobs:
+  probe-and-test:
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 45
+    env:
+      KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
+    steps:
+      - name: Check out experiment branch
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install project and inspection dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -e .
+          python -m pip install --disable-pip-version-check pytest numpy scipy h5py
+
+      - name: Run focused progressive-sequence tests
+        continue-on-error: true
+        run: |
+          python -m pytest -q \
+            tests/test_progressive_sequence_finetune.py \
+            tests/test_katja_finger_sequence_benchmark.py \
+            | tee "${RUNNER_TEMP}/katja-progressive-tests.txt"
+
+      - name: Probe Katja SPM and MATLAB layouts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee "${RUNNER_TEMP}/katja-layout-probe.txt"
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          import h5py
+          import numpy as np
+          from scipy.io import loadmat
+
+          root = Path(os.environ["KATJA_DATASET_ROOT"])
+          subject = "s05"
+          header = next((root / subject).glob("fc*.mat"))
+          data_path = header.with_suffix(".dat")
+          beh_path = root / "beh_data" / subject / "behDataMEG.mat"
+          target_path = root / "beh_data" / subject / "targetMEG.mat"
+
+          print(f"root={root}")
+          print(f"header={header}")
+          print(f"data={data_path} bytes={data_path.stat().st_size}")
+
+          D = loadmat(header, squeeze_me=True, struct_as_record=False)["D"]
+          print("D fields:", list(D._fieldnames))
+          for field in ("type", "Nsamples", "Fsample", "timeOnset", "fname", "path", "condlist"):
+              print(f"D.{field}=", getattr(D, field, None))
+
+          data = D.data
+          dims = tuple(int(value) for value in np.asarray(data.dim).reshape(-1))
+          print("D.data:", {name: getattr(data, name, None) for name in data._fieldnames})
+          print("dims=", dims, "expected_float32_bytes=", int(np.prod(dims)) * 4)
+
+          def describe_struct(value):
+              if hasattr(value, "_fieldnames"):
+                  result = {}
+                  for name in value._fieldnames:
+                      item = getattr(value, name)
+                      if isinstance(item, np.ndarray):
+                          result[name] = {"shape": list(item.shape), "dtype": str(item.dtype)}
+                      elif isinstance(item, np.generic):
+                          result[name] = item.item()
+                      else:
+                          result[name] = str(item)[:300]
+                  return result
+              return repr(value)
+
+          channels = np.atleast_1d(D.channels).reshape(-1)
+          print("n_channels=", len(channels))
+          for index in list(range(min(8, len(channels)))) + [i for i, channel in enumerate(channels) if "UPPT" in str(getattr(channel, "label", ""))][:8]:
+              print(f"channel[{index}]=", json.dumps(describe_struct(channels[index]), default=str))
+          types = [str(getattr(channel, "type", "")) for channel in channels]
+          labels = [str(getattr(channel, "label", "")) for channel in channels]
+          bad = [bool(np.asarray(getattr(channel, "bad", False)).reshape(-1)[0]) if np.asarray(getattr(channel, "bad", False)).size else False for channel in channels]
+          from collections import Counter
+          print("channel_type_counts=", Counter(types))
+          print("bad_channel_count=", sum(bad))
+          print("first_meggrad_indices=", [i for i, value in enumerate(types) if value == "MEGGRAD"][:20])
+          print("trigger_indices=", [(i, label, types[i]) for i, label in enumerate(labels) if "UPPT" in label or "TRIG" in label.upper()])
+
+          trials = np.atleast_1d(D.trials).reshape(-1)
+          print("n_trials=", len(trials))
+          for index in range(min(3, len(trials))):
+              print(f"trial[{index}]=", json.dumps(describe_struct(trials[index]), default=str))
+
+          dtype_code = int(np.asarray(data.dtype).reshape(-1)[0])
+          dtype = {16: np.dtype("<f4"), 64: np.dtype("<f8")}.get(dtype_code)
+          if dtype is None:
+              raise RuntimeError(f"Unsupported SPM dtype code {dtype_code}")
+          mm = np.memmap(data_path, dtype=dtype, mode="r", shape=dims, order="F")
+          for channel_index in [0] + [i for i, label in enumerate(labels) if "UPPT" in label][:1]:
+              sample = np.asarray(mm[channel_index, :2000, 0], dtype=float)
+              print(
+                  f"memmap channel={channel_index} label={labels[channel_index]} "
+                  f"min={np.nanmin(sample):.9g} max={np.nanmax(sample):.9g} "
+                  f"mean={np.nanmean(sample):.9g} std={np.nanstd(sample):.9g}"
+              )
+
+          def probe_hdf5(path: Path, root_name: str) -> None:
+              print(f"\nHDF5 {path}")
+              with h5py.File(path, "r") as archive:
+                  group = archive[root_name]
+                  print("group keys=", sorted(group.keys()))
+                  for name in sorted(group.keys()):
+                      item = group[name]
+                      print(
+                          f"  {name}: type={type(item).__name__} "
+                          f"shape={getattr(item, 'shape', None)} dtype={getattr(item, 'dtype', None)}"
+                      )
+                      if isinstance(item, h5py.Dataset):
+                          flat = np.asarray(item).reshape(-1, order="F")
+                          if flat.size and flat.dtype.kind != "O":
+                              print("    first=", flat[:12].tolist())
+                          elif flat.size and h5py.check_dtype(ref=item.dtype) is not None:
+                              values = []
+                              for ref in flat[:4]:
+                                  if ref:
+                                      target = archive[ref]
+                                      values.append({"name": target.name, "shape": target.shape, "dtype": str(target.dtype)})
+                              print("    refs=", values)
+
+          probe_hdf5(beh_path, "A")
+          probe_hdf5(target_path, "T")
+          PY
+
+      - name: Package checked-out branch for local iteration
+        if: always()
+        shell: bash
+        run: |
+          tar --exclude=.git -czf "${RUNNER_TEMP}/neureptrace-katja-branch.tgz" .
+
+      - name: Upload probe, tests, and branch snapshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: katja-progressive-sequence-probe
+          path: |
+            ${{ runner.temp }}/katja-layout-probe.txt
+            ${{ runner.temp }}/katja-progressive-tests.txt
+            ${{ runner.temp }}/neureptrace-katja-branch.tgz
+          if-no-files-found: warn
