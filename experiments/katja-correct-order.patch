@@ -21,43 +21,41 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
  
  DEFAULT_WINDOW_CENTERS_SECONDS = (-0.15, -0.05, 0.05, 0.15)
  DEFAULT_WINDOW_WIDTH_SECONDS = 0.10
-@@ -435,7 +439,6 @@ def extract_subject_feature_rows(
+@@ -435,7 +439,5 @@ def extract_subject_feature_rows(
      cue_finger = np.asarray(behavior["cue_finger"])
      timing_ms = np.asarray(behavior["timing_ms"], dtype=float)
      cue_duration_ms = np.asarray(behavior["cue_duration_ms"], dtype=float)
 -    points = np.asarray(behavior["points"], dtype=float)
-     npress = np.asarray(behavior["npress"], dtype=float)
+-    npress = np.asarray(behavior["npress"], dtype=float)
      sequence = np.asarray(behavior["sequence_ids"])
  
-@@ -446,10 +449,11 @@ def extract_subject_feature_rows(
+@@ -446,9 +448,4 @@ def extract_subject_feature_rows(
          recorded = press[trial_index, :5]
          instructed = cue_finger[trial_index, :5]
-         correct_order = bool(
+-        correct_order = bool(
 -            points[trial_index] >= 1
 -            and npress[trial_index] >= 5
-+            npress[trial_index] == 5
-             and np.all(np.isfinite(np.asarray(recorded, dtype=float)))
-+            and np.all(np.isfinite(np.asarray(instructed, dtype=float)))
-             and np.all(np.isfinite(timing_ms[trial_index, :5]))
-+            and np.isfinite(cue_duration_ms[trial_index])
-             and np.array_equal(recorded, instructed)
-         )
+-            and np.all(np.isfinite(np.asarray(recorded, dtype=float)))
+-            and np.all(np.isfinite(timing_ms[trial_index, :5]))
+-            and np.array_equal(recorded, instructed)
+-        )
++        valid_timing = bool(np.all(np.isfinite(timing_ms[trial_index, 1:5])))
++        correct_order = bool(valid_timing and np.array_equal(recorded, instructed))
          if not correct_order:
-@@ -633,7 +637,7 @@ def build_katja_spm_feature_cache(
+@@ -633,7 +630,7 @@ def build_katja_spm_feature_cache(
              f"Subject feature widths differ unexpectedly: {sorted(feature_widths)}."
          )
      metadata = {
 -        "format": "neureptrace_katja_button_press_event_features_v1",
-+        "format": "neureptrace_katja_button_press_event_features_v2",
++        "format": "neureptrace_katja_button_press_event_features_exact_v3",
          "participants": list(participant_tuple),
          "selected_channel_policy": (
-             "intersection_of_good_MEGGRAD_across_participants"
-@@ -653,7 +657,5 @@ def build_katja_spm_feature_cache(
+@@ -653,7 +650,5 @@ def build_katja_spm_feature_cache(
          "button_lag_seconds": float(button_lag_seconds),
          "event_positions": [2, 3, 4, 5],
 -        "correct_order_rule": (
 -            "points>=1, npress>=5, and recorded press equals cueFinger"
 -        ),
-+        "correct_order_rule": "npress==5 and recorded press equals cueFinger",
++        "correct_order_rule": "finite variable timing and recorded press equals cueFinger",
          "subject_summary": subject_summary,
      }
