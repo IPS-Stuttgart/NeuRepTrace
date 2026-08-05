@@ -1,0 +1,73 @@
+diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_spm_feature_cache.py
+--- a/src/neureptrace/katja_spm_feature_cache.py
++++ b/src/neureptrace/katja_spm_feature_cache.py
+@@ -10,14 +10,18 @@ from __future__ import annotations
+ import argparse
+ import json
+ from dataclasses import dataclass
+ from pathlib import Path
+-from typing import Any, Iterable, Sequence
++from typing import TYPE_CHECKING
+ 
+ import h5py
+ import numpy as np
+ from scipy.io import loadmat
+ 
+ from neureptrace._katja_finger_sequence_support import DEFAULT_PARTICIPANTS
++
++if TYPE_CHECKING:
++    from collections.abc import Iterable, Sequence
++    from typing import Any
+ 
+ DEFAULT_WINDOW_CENTERS_SECONDS = (-0.15, -0.05, 0.05, 0.15)
+ DEFAULT_WINDOW_WIDTH_SECONDS = 0.10
+@@ -108,9 +112,7 @@ def _find_spm_header(subject_directory: Path) -> Path:
+-    candidates = sorted(
+-        path for path in subject_directory.glob("fc*.mat") if not path.name.startswith("Bfc")
+-    )
++    candidates = sorted(subject_directory.glob("Bfc*ICA_corrected.mat"))
+     if len(candidates) != 1:
+         raise FileNotFoundError(
+-            f"Expected exactly one sensor-level fc*.mat file in {subject_directory}; "
++            f"Expected exactly one ICA-corrected Bfc*ICA_corrected.mat file in {subject_directory}; "
+             f"found {len(candidates)}."
+         )
+     return candidates[0]
+@@ -449,7 +451,5 @@ def extract_subject_feature_rows(
+     cue_finger = np.asarray(behavior["cue_finger"])
+     timing_ms = np.asarray(behavior["timing_ms"], dtype=float)
+     cue_duration_ms = np.asarray(behavior["cue_duration_ms"], dtype=float)
+-    points = np.asarray(behavior["points"], dtype=float)
+-    npress = np.asarray(behavior["npress"], dtype=float)
+     sequence = np.asarray(behavior["sequence_ids"])
+ 
+@@ -459,10 +459,5 @@ def extract_subject_feature_rows(
+         recorded = press[trial_index, :5]
+         instructed = cue_finger[trial_index, :5]
+-        correct_order = bool(
+-            points[trial_index] >= 1
+-            and npress[trial_index] >= 5
+-            and np.all(np.isfinite(np.asarray(recorded, dtype=float)))
+-            and np.all(np.isfinite(timing_ms[trial_index, :5]))
+-            and np.array_equal(recorded, instructed)
+-        )
++        valid_timing = bool(np.all(np.isfinite(timing_ms[trial_index, 1:5])))
++        correct_order = bool(valid_timing and np.array_equal(recorded, instructed))
+         if not correct_order:
+@@ -632,6 +627,6 @@ def build_katja_spm_feature_cache(
+             f"Subject feature widths differ unexpectedly: {sorted(feature_widths)}."
+         )
+     metadata = {
+-        "format": "neureptrace_katja_button_press_event_features_v1",
++        "format": "neureptrace_katja_button_press_event_features_exact_ica_v4",
+         "participants": list(participant_tuple),
+         "selected_channel_policy": (
+@@ -648,7 +643,5 @@ def build_katja_spm_feature_cache(
+         "button_lag_seconds": float(button_lag_seconds),
+         "event_positions": [2, 3, 4, 5],
+-        "correct_order_rule": (
+-            "points>=1, npress>=5, and recorded press equals cueFinger"
+-        ),
++        "correct_order_rule": "finite variable timing and recorded press equals cueFinger",
+         "subject_summary": subject_summary,
+     }

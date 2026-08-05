@@ -1,0 +1,54 @@
+name: Katja experiment patch smoke
+
+permissions:
+    contents: read
+
+on: # yamllint disable-line rule:truthy
+    workflow_dispatch:
+    pull_request:
+        branches:
+            - main
+        paths:
+            - .github/workflows/katja-experiment-patch-smoke.yml
+            - experiments/katja-correct-order.patch
+            - experiments/katja-refit-full-data.patch
+            - src/neureptrace/katja_spm_feature_cache.py
+            - src/neureptrace/decoding/_progressive_sequence_model.py
+            - src/neureptrace/decoding/_progressive_sequence_training.py
+
+jobs:
+    patch-smoke:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        env:
+            KATJA_PATCH_BASELINE: ca2ca39a1a3e5d7fd0b7cee4f697c9a9e1a47aa4
+        steps:
+            - name: Check out experiment branch
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 1
+
+            - name: Restore patch baseline and apply patches
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  git fetch --no-tags --depth=1 origin "$KATJA_PATCH_BASELINE"
+                  for path in \
+                    src/neureptrace/katja_spm_feature_cache.py \
+                    src/neureptrace/decoding/_progressive_sequence_model.py \
+                    src/neureptrace/decoding/_progressive_sequence_training.py
+                  do
+                      git show "$KATJA_PATCH_BASELINE:$path" > "$path"
+                  done
+                  git apply --check experiments/katja-correct-order.patch
+                  git apply experiments/katja-correct-order.patch
+                  git apply --check experiments/katja-refit-full-data.patch
+                  git apply experiments/katja-refit-full-data.patch
+                  git diff --check
+
+            - name: Compile patched modules
+              run: |
+                  python -m py_compile \
+                    src/neureptrace/katja_spm_feature_cache.py \
+                    src/neureptrace/decoding/_progressive_sequence_model.py \
+                    src/neureptrace/decoding/_progressive_sequence_training.py

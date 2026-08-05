@@ -1,0 +1,28 @@
+name: Katja structured-loss development sweep
+
+permissions:
+    contents: read
+
+on: # yamllint disable-line rule:truthy
+    workflow_dispatch:
+    pull_request:
+        branches:
+            - main
+        paths:
+            - .github/workflows/katja-progressive-sequence.yml
+
+concurrency:
+    group: ${{ github.repository }}-katja-structured-development-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    archive-note:
+        name: Development selection archived
+        runs-on: ubuntu-latest
+        steps:
+            - name: Record completed development sweep
+              run: |
+                  echo "The exact-ICA five-seed s05 development sweep completed in run 30998306259."
+                  echo "Selected configuration: joint_050_010_temp050."
+                  echo "The locked 16-target confirmation completed in run 30999224620."
+                  echo "Use the workflow history and uploaded artifacts for the full sweep outputs."
