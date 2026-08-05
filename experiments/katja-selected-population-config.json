@@ -1,0 +1,8 @@
+{
+  "assignment_loss_weight": 0.0,
+  "configuration": "pending_s05_exact_ica_selection",
+  "enabled": false,
+  "selection_scope": "five calibration seeds on development target s05 using exact-order ICA-corrected features",
+  "sinkhorn_loss_weight": 0.0,
+  "sinkhorn_temperature": 1.0
+}
