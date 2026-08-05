@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from neureptrace.decoding import _progressive_sequence_probability_patch as _progressive_sequence_probability_patch  # noqa: F401
 from neureptrace.decoding._progressive_sequence_core import (
     PROGRESSIVE_SEQUENCE_CATEGORY,
     PROGRESSIVE_SEQUENCE_PROTOCOL,
