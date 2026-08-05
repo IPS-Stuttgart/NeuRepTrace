@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - .github/workflows/katja-progressive-sequence.yml
+      - experiments/katja-refit-full-data.patch
       - src/neureptrace/katja_spm_feature_cache.py
       - src/neureptrace/katja_finger_sequence_benchmark.py
       - src/neureptrace/_katja_finger_sequence_support.py
@@ -23,7 +24,7 @@ permissions:
   contents: read
 
 jobs:
-  build-and-pilot:
+  refit-feature-sweep:
     runs-on: [self-hosted, Linux, X64, nvidia-smi]
     timeout-minutes: 180
     env:
@@ -32,6 +33,11 @@ jobs:
     steps:
       - name: Check out experiment branch
         uses: actions/checkout@v7
+
+      - name: Apply refit-on-all experiment patch
+        run: |
+          git apply --check experiments/katja-refit-full-data.patch
+          git apply experiments/katja-refit-full-data.patch
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -48,20 +54,21 @@ jobs:
           nvidia-smi
           python - <<'PY'
           import torch
-          print({
+          report = {
               "torch": torch.__version__,
               "cuda_available": torch.cuda.is_available(),
               "cuda_device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
-          })
+          }
+          print(report)
           if not torch.cuda.is_available():
-              raise SystemExit("CUDA is required for the Katja neural pilot")
+              raise SystemExit("CUDA is required for the Katja neural sweep")
           PY
           python -m pytest -q \
             tests/test_progressive_sequence_finetune.py \
             tests/test_katja_finger_sequence_benchmark.py \
             | tee "${RUNNER_TEMP}/katja-progressive-tests.txt"
 
-      - name: Build response-locked feature cache atomically
+      - name: Build response-locked feature cache when absent
         shell: bash
         run: |
           set -euo pipefail
@@ -73,112 +80,291 @@ jobs:
               --dataset-root "$KATJA_DATASET_ROOT" \
               --output "$temporary" \
               --button-lag-ms 30 \
-              --force \
-              | tee "${RUNNER_TEMP}/katja-feature-build.txt"
+              --force
             mv "$temporary" "$KATJA_CACHE"
-          else
-            echo "Reusing $KATJA_CACHE" | tee "${RUNNER_TEMP}/katja-feature-build.txt"
           fi
 
-      - name: Audit feature cache
+      - name: Audit cache and reproduce linear s05 controls
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY' | tee "${RUNNER_TEMP}/katja-cache-audit.txt"
+          python - <<'PY' | tee "${RUNNER_TEMP}/katja-linear-sanity.txt"
           from __future__ import annotations
 
           import json
           import os
-          from collections import Counter, defaultdict
 
           import numpy as np
+          from sklearn.linear_model import LogisticRegression
 
-          path = os.environ["KATJA_CACHE"]
-          with np.load(path, allow_pickle=False) as cache:
-              features = cache["features"]
-              subjects = cache["subjects"].astype(str)
-              trials = cache["trial_ids"]
-              positions = cache["press_positions"].astype(int)
-              sequences = cache["sequence_ids"].astype(int)
-              fingers = cache["finger_codes"].astype(int)
-              metadata = json.loads(str(cache["metadata_json"].item()))
+          from neureptrace._katja_finger_sequence_support import (
+              DEFAULT_PARTICIPANTS,
+              _composite_trial_ids,
+              _constant_trial_values,
+              _fit_source_preprocessor,
+              _stable_source_selection,
+              _transform_features,
+              derive_participant_local_finger_labels,
+              load_katja_feature_cache,
+          )
+          from neureptrace.decoding.progressive_sequence_finetune import (
+              pack_complete_trial_events,
+              select_nested_trial_calibration_splits,
+          )
 
-          grouped: dict[tuple[str, int], list[tuple[int, int, int]]] = defaultdict(list)
-          for subject, trial, position, sequence, finger in zip(
-              subjects.tolist(),
-              trials.tolist(),
-              positions.tolist(),
-              sequences.tolist(),
-              fingers.tolist(),
-              strict=True,
-          ):
-              grouped[(subject, int(trial))].append((position, sequence, finger))
-          malformed = []
-          for key, values in grouped.items():
-              if sorted(position for position, _, _ in values) != [2, 3, 4, 5]:
-                  malformed.append((key, "positions", values))
-              if len({finger for _, _, finger in values}) != 4:
-                  malformed.append((key, "fingers", values))
-              if len({sequence for _, sequence, _ in values}) != 1:
-                  malformed.append((key, "sequence", values))
-          if malformed:
-              raise RuntimeError(f"Malformed complete trials: {malformed[:5]}")
-          if features.ndim != 2 or not np.all(np.isfinite(features)):
-              raise RuntimeError("Feature matrix must be finite and two-dimensional")
-          if float(np.std(features)) <= 0.0:
-              raise RuntimeError("Feature matrix is constant")
+          cache = load_katja_feature_cache(os.environ["KATJA_CACHE"])
+          subjects = cache["subjects"].astype(str)
+          trial_ids = cache["trial_ids"]
+          positions = cache["press_positions"].astype(int)
+          sequence_ids = cache["sequence_ids"]
+          included = cache["correct_order"].astype(bool) & np.isin(positions, [2, 3, 4, 5])
+          labels = derive_participant_local_finger_labels(
+              subjects,
+              cache["finger_codes"],
+              included_mask=included,
+              expected_classes=4,
+          )
+          features = cache["features"][included]
+          subjects = subjects[included]
+          trial_ids = trial_ids[included]
+          positions = positions[included]
+          sequence_ids = sequence_ids[included]
+          labels = labels[included]
 
-          sequence_counts = Counter((subject, int(sequence)) for subject, sequence in zip(subjects[::4], sequences[::4], strict=True))
+          target = "s05"
+          sources = _stable_source_selection(
+              DEFAULT_PARTICIPANTS,
+              target=target,
+              n_sources=9,
+              seed=13,
+          )
+          source_mask = np.isin(subjects, np.asarray(sources))
+          target_mask = subjects == target
+          scaler, pca, source_x = _fit_source_preprocessor(
+              features[source_mask], pca_components=64
+          )
+          target_x = _transform_features(
+              features[target_mask], scaler=scaler, pca=pca
+          )
+          target_packed = pack_complete_trial_events(
+              target_x,
+              trial_ids[target_mask],
+              positions[target_mask],
+              labels=labels[target_mask],
+              expected_events=4,
+              require_permutation_labels=True,
+          )
+          target_strata = _constant_trial_values(
+              sequence_ids[target_mask],
+              target_packed.row_indices,
+              name="target sequence ID",
+          )
+          split = select_nested_trial_calibration_splits(
+              target_strata,
+              calibration_counts=(20,),
+              max_per_stratum=20,
+              seed=13,
+              context=("katja_finger", target),
+          )[20]
+          calibration_rows = target_packed.row_indices[split.calibration_indices].reshape(-1)
+          evaluation_rows = target_packed.row_indices[split.evaluation_indices].reshape(-1)
+          source_y = labels[source_mask].astype(int)
+          target_y = labels[target_mask].astype(int)
+
+          def model():
+              return LogisticRegression(
+                  C=1.0,
+                  max_iter=4000,
+                  solver="lbfgs",
+                  random_state=13,
+              )
+
+          source_only = model().fit(source_x, source_y)
+          target_only = model().fit(target_x[calibration_rows], target_y[calibration_rows])
+          pooled_x = np.concatenate([source_x, target_x[calibration_rows]], axis=0)
+          pooled_y = np.concatenate([source_y, target_y[calibration_rows]], axis=0)
+          pooled_weight = np.concatenate(
+              [
+                  np.full(source_y.shape[0], 0.5 / source_y.shape[0]),
+                  np.full(calibration_rows.shape[0], 0.5 / calibration_rows.shape[0]),
+              ]
+          )
+          weighted = model().fit(pooled_x, pooled_y, sample_weight=pooled_weight)
           report = {
-              "path": path,
-              "features_shape": list(features.shape),
-              "feature_mean": float(np.mean(features)),
-              "feature_std": float(np.std(features)),
-              "n_subjects": len(set(subjects.tolist())),
-              "n_trials": len(grouped),
-              "selected_channel_count": metadata["selected_channel_count"],
-              "trials_per_subject_sequence": {
-                  f"{subject}:{sequence}": count
-                  for (subject, sequence), count in sorted(sequence_counts.items())
-              },
+              "cache_shape": list(cache["features"].shape),
+              "target": target,
+              "sources": list(sources),
+              "n_calibration_trials": int(split.calibration_indices.size),
+              "n_evaluation_trials": int(split.evaluation_indices.size),
+              "source_only_accuracy": float(
+                  source_only.score(target_x[evaluation_rows], target_y[evaluation_rows])
+              ),
+              "target_only_accuracy": float(
+                  target_only.score(target_x[evaluation_rows], target_y[evaluation_rows])
+              ),
+              "fixed_loss_share_accuracy": float(
+                  weighted.score(target_x[evaluation_rows], target_y[evaluation_rows])
+              ),
           }
           print(json.dumps(report, indent=2, sort_keys=True))
-          if report["n_subjects"] != 17:
-              raise RuntimeError(f"Expected 17 participants, got {report['n_subjects']}")
-          if min(sequence_counts.values()) < 21:
-              raise RuntimeError("Every participant/sequence needs k20 plus evaluation trials")
           PY
 
-      - name: Run s05 progressive-sequence pilot
+      - name: Sweep refit, feature width, and objective variants on s05
         shell: bash
         run: |
           set -euo pipefail
-          output="${RUNNER_TEMP}/katja-pilot-s05"
-          python -m neureptrace.katja_finger_sequence_benchmark \
-            --feature-cache "$KATJA_CACHE" \
-            --output-dir "$output" \
-            --targets s05 \
-            --calibration-counts 1,3,5,10,15,20 \
-            --calibration-seeds 13 \
-            --source-max-epochs 120 \
-            --meta-epochs 2 \
-            --adapter-steps 80 \
-            --last-block-steps 60 \
-            --full-finetune-steps 60 \
-            --batch-size 64 \
-            --device cuda \
-            | tee "${RUNNER_TEMP}/katja-pilot-s05.txt"
+          output="${RUNNER_TEMP}/katja-refit-sweep-s05"
+          mkdir -p "$output"
+          python - <<'PY' | tee "${RUNNER_TEMP}/katja-refit-sweep-s05.txt"
+          from __future__ import annotations
 
-      - name: Upload audit and pilot results
+          import json
+          import os
+          import time
+          from pathlib import Path
+
+          import pandas as pd
+
+          from neureptrace._katja_finger_sequence_support import (
+              DEFAULT_PARTICIPANTS,
+              load_katja_feature_cache,
+          )
+          from neureptrace.katja_finger_sequence_benchmark import (
+              run_katja_finger_sequence_benchmark,
+          )
+
+          output = Path(os.environ["RUNNER_TEMP"]) / "katja-refit-sweep-s05"
+          cache = load_katja_feature_cache(os.environ["KATJA_CACHE"])
+          base = {
+              "hidden_units": 96,
+              "num_layers": 2,
+              "num_heads": 4,
+              "adapter_rank": 8,
+              "source_max_epochs": 120,
+              "meta_epochs": 2,
+              "meta_support_trials": 4,
+              "meta_query_trials": 4,
+              "meta_inner_steps": 5,
+              "adapter_steps": 80,
+              "last_block_steps": 60,
+              "full_finetune_steps": 60,
+              "batch_size": 64,
+              "device": "cuda",
+              "refit_source_on_all": True,
+              "refit_target_on_all": True,
+          }
+          configurations = [
+              ("pca64_refit_default", 64, {}),
+              (
+                  "pca64_refit_independent_loss",
+                  64,
+                  {"sinkhorn_loss_weight": 0.0, "assignment_loss_weight": 0.0},
+              ),
+              (
+                  "pca256_refit_independent_loss",
+                  256,
+                  {"sinkhorn_loss_weight": 0.0, "assignment_loss_weight": 0.0},
+              ),
+              (
+                  "raw1092_refit_independent_loss",
+                  None,
+                  {"sinkhorn_loss_weight": 0.0, "assignment_loss_weight": 0.0},
+              ),
+              (
+                  "pca64_refit_no_full",
+                  64,
+                  {
+                      "sinkhorn_loss_weight": 0.0,
+                      "assignment_loss_weight": 0.0,
+                      "full_finetune_steps": 0,
+                  },
+              ),
+              (
+                  "raw1092_refit_strong",
+                  None,
+                  {
+                      "sinkhorn_loss_weight": 0.0,
+                      "assignment_loss_weight": 0.0,
+                      "source_replay_weight": 0.25,
+                      "l2sp_weight": 1e-3,
+                      "adaptation_learning_rate": 1e-3,
+                      "full_finetune_learning_rate": 5e-5,
+                      "dropout": 0.20,
+                      "feature_dropout": 0.10,
+                  },
+              ),
+          ]
+          seed_frames = []
+          target_frames = []
+          summary_frames = []
+          run_metadata = {}
+          for name, pca_components, overrides in configurations:
+              started = time.time()
+              kwargs = {**base, **overrides}
+              per_seed, per_target, summary, metadata = run_katja_finger_sequence_benchmark(
+                  cache,
+                  participants=DEFAULT_PARTICIPANTS,
+                  target_participants=("s05",),
+                  calibration_counts=(10, 15, 20),
+                  calibration_seeds=(13,),
+                  n_source_participants=9,
+                  source_selection_seed=13,
+                  pca_components=pca_components,
+                  model_kwargs=kwargs,
+              )
+              elapsed = time.time() - started
+              for frame in (per_seed, per_target, summary):
+                  frame.insert(0, "configuration", name)
+                  frame.insert(1, "pca_components", "none" if pca_components is None else pca_components)
+                  frame.insert(2, "elapsed_seconds", elapsed)
+              seed_frames.append(per_seed)
+              target_frames.append(per_target)
+              summary_frames.append(summary)
+              run_metadata[name] = {
+                  "pca_components": pca_components,
+                  "model_kwargs": kwargs,
+                  "elapsed_seconds": elapsed,
+                  "benchmark_metadata": metadata,
+              }
+              print("\n===", name, f"({elapsed:.1f} s) ===")
+              print(summary.to_string(index=False))
+
+          all_seed = pd.concat(seed_frames, ignore_index=True)
+          all_target = pd.concat(target_frames, ignore_index=True)
+          all_summary = pd.concat(summary_frames, ignore_index=True)
+          all_seed.to_csv(output / "katja_refit_sweep_per_seed.csv", index=False)
+          all_target.to_csv(output / "katja_refit_sweep_per_target.csv", index=False)
+          all_summary.to_csv(output / "katja_refit_sweep_summary.csv", index=False)
+          (output / "katja_refit_sweep_metadata.json").write_text(
+              json.dumps(run_metadata, indent=2, sort_keys=True), encoding="utf-8"
+          )
+          print("\n=== k20 ranking by independent accuracy ===")
+          ranking = all_summary[all_summary["k"] == 20].sort_values(
+              ["independent_accuracy_mean", "permutation_accuracy_mean"],
+              ascending=False,
+          )
+          print(
+              ranking[
+                  [
+                      "configuration",
+                      "independent_accuracy_mean",
+                      "permutation_accuracy_mean",
+                      "independent_delta_vs_julia",
+                      "permutation_delta_vs_julia",
+                  ]
+              ].to_string(index=False)
+          )
+          PY
+
+      - name: Upload sweep results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: katja-progressive-sequence-pilot-s05
+          name: katja-refit-feature-sweep-s05
           path: |
             ${{ runner.temp }}/katja-progressive-tests.txt
-            ${{ runner.temp }}/katja-feature-build.txt
-            ${{ runner.temp }}/katja-cache-audit.txt
-            ${{ runner.temp }}/katja-pilot-s05.txt
-            ${{ runner.temp }}/katja-pilot-s05/*.csv
-            ${{ runner.temp }}/katja-pilot-s05/*.json
+            ${{ runner.temp }}/katja-linear-sanity.txt
+            ${{ runner.temp }}/katja-refit-sweep-s05.txt
+            ${{ runner.temp }}/katja-refit-sweep-s05/*.csv
+            ${{ runner.temp }}/katja-refit-sweep-s05/*.json
           if-no-files-found: warn
