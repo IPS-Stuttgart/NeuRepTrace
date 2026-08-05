@@ -174,8 +174,12 @@ def _linear_vrex_feature_matrix(values: Any, *, name: str) -> np.ndarray:
 
 
 def _validate_finite_source_features(source_features: Any) -> None:
-    """Reject NaN/Inf VREx fit features before torch training starts."""
+    """Reject malformed VREx fit features before torch training starts."""
 
+    if _contains_complex_feature(source_features):
+        raise ValueError(
+            "vrex source_features must contain real-valued feature values, not complex values."
+        )
     try:
         matrix = np.asarray(source_features, dtype=np.float32)
     except (TypeError, ValueError) as exc:
