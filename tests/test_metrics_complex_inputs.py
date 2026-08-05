@@ -95,7 +95,7 @@ def _labels() -> np.ndarray:
                 _labels(),
                 eps=np.complex64(1e-6 + 1e-3j),
             ),
-            "eps must be a finite probability floor",
+            "eps must be a positive finite value",
         ),
     ],
 )
