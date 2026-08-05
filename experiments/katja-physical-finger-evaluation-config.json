@@ -1,0 +1,40 @@
+{
+  "analysis_status": "frozen_structural_outer_pseudo_target_evaluation",
+  "calibration_count": 20,
+  "calibration_seeds": [13, 29, 47, 71, 101],
+  "candidate_methods": [
+    "local_ensemble3",
+    "physical_ensemble3_masked",
+    "local_physical_blend6"
+  ],
+  "enabled": true,
+  "global_physical_head": {
+    "classes": 5,
+    "inference_mask": "remove target fixed physical code and renormalize",
+    "permutation_training_loss": false
+  },
+  "primary_candidate": "local_physical_blend6",
+  "reference_method": "local_ensemble3",
+  "source_participants_per_target": 9,
+  "source_selection_seed": 13,
+  "success_rule": "mean paired independent k20 accuracy of local_physical_blend6 exceeds local_ensemble3 across all outer targets",
+  "targets": [
+    "s05",
+    "s06",
+    "s08",
+    "s09",
+    "s10",
+    "s11",
+    "s13",
+    "s14",
+    "s15",
+    "s16",
+    "s17",
+    "s18",
+    "s20",
+    "s21",
+    "s24",
+    "s25",
+    "s28"
+  ]
+}
