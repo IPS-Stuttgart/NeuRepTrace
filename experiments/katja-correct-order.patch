@@ -59,7 +59,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
          )
      metadata = {
 -        "format": "neureptrace_katja_button_press_event_features_v1",
-+        "format": "neureptrace_katja_button_press_event_features_exact_ica_v4",
++        "format": "neureptrace_katja_button_press_event_features_exact_ica_v4_recovered",
          "participants": list(participant_tuple),
          "selected_channel_policy": (
 @@ -653,7 +650,5 @@ def build_katja_spm_feature_cache(
