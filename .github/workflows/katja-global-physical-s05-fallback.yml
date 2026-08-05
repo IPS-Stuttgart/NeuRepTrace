@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
     branches:
-      - codex/katja-progressive-sequence-20260805
+      - main
     paths:
       - .github/workflows/katja-global-physical-s05-fallback.yml
       - experiments/katja-correct-order.patch
