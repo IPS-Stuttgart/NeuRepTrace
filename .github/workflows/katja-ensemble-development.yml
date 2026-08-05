@@ -18,43 +18,8 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    gate:
-        name: Read ensemble development gate
-        runs-on: ubuntu-latest
-        outputs:
-            enabled: ${{ steps.config.outputs.enabled }}
-        steps:
-            - name: Check out experiment branch
-              uses: actions/checkout@v7
-
-            - name: Validate development gate
-              id: config
-              shell: bash
-              run: |
-                  python - <<'PY'
-                  import json
-                  import os
-                  from pathlib import Path
-
-                  config = json.loads(
-                      Path(
-                          "experiments/katja-ensemble-development-config.json"
-                      ).read_text(encoding="utf-8")
-                  )
-                  if config.get("target") != "s05":
-                      raise SystemExit("The ensemble sweep must remain s05-only")
-                  enabled = bool(config.get("enabled", False))
-                  with Path(os.environ["GITHUB_OUTPUT"]).open(
-                      "a", encoding="utf-8"
-                  ) as stream:
-                      stream.write(f"enabled={str(enabled).lower()}\n")
-                  print(json.dumps(config, indent=2, sort_keys=True))
-                  PY
-
     development:
         name: Source and model ensemble sweep on s05
-        needs: gate
-        if: needs.gate.outputs.enabled == 'true'
         runs-on: [self-hosted, Linux, X64, nvidia-smi]
         timeout-minutes: 180
         env:
@@ -66,6 +31,25 @@ jobs:
               uses: actions/checkout@v7
               with:
                   fetch-depth: 1
+
+            - name: Validate development scope
+              shell: bash
+              run: |
+                  python - <<'PY'
+                  import json
+                  from pathlib import Path
+
+                  config = json.loads(
+                      Path(
+                          "experiments/katja-ensemble-development-config.json"
+                      ).read_text(encoding="utf-8")
+                  )
+                  if not config.get("enabled", False):
+                      raise SystemExit("The ensemble development gate is disabled")
+                  if config.get("target") != "s05":
+                      raise SystemExit("The ensemble sweep must remain s05-only")
+                  print(json.dumps(config, indent=2, sort_keys=True))
+                  PY
 
             - name: Restore patch baseline and apply experiment patches
               shell: bash
