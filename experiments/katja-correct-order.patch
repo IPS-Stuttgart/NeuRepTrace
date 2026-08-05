@@ -1,5 +1,4 @@
 diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_spm_feature_cache.py
-index 0d912e8..0000000 100644
 --- a/src/neureptrace/katja_spm_feature_cache.py
 +++ b/src/neureptrace/katja_spm_feature_cache.py
 @@ -10,12 +10,17 @@ from __future__ import annotations
@@ -44,14 +43,15 @@ index 0d912e8..0000000 100644
              and np.array_equal(recorded, instructed)
          )
          if not correct_order:
-@@ -635,7 +642,7 @@ def build_katja_spm_feature_cache(
-         ),
-         "subject_summary": subject_summary,
-     }
--    metadata = {
+@@ -633,7 +640,7 @@ def build_katja_spm_feature_cache(
+             f"Subject feature widths differ unexpectedly: {sorted(feature_widths)}."
+         )
+     metadata = {
 -        "format": "neureptrace_katja_button_press_event_features_v1",
-+    metadata = {
 +        "format": "neureptrace_katja_button_press_event_features_v2",
+         "participants": list(participant_tuple),
+         "selected_channel_policy": (
+             "intersection_of_good_MEGGRAD_across_participants"
 @@ -653,9 +660,7 @@ def build_katja_spm_feature_cache(
          "button_lag_seconds": float(button_lag_seconds),
          "event_positions": [2, 3, 4, 5],
