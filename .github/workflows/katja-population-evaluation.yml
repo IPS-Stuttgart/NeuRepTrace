@@ -30,12 +30,12 @@ concurrency:
 
 jobs:
     population-evaluation:
-        name: Confirmatory 16-target neural benchmark
+        name: Exact-ICA confirmatory 16-target baseline
         runs-on: [self-hosted, Linux, X64, nvidia-smi]
         timeout-minutes: 240
         env:
             KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
-            KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_v2.npz
+            KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_ica_v4.npz
             KATJA_PATCH_BASELINE: ca2ca39a1a3e5d7fd0b7cee4f697c9a9e1a47aa4
         steps:
             - name: Check out experiment branch
@@ -108,7 +108,7 @@ jobs:
                     tests/test_katja_finger_sequence_benchmark.py \
                     | tee "${RUNNER_TEMP}/katja-population-tests.txt"
 
-            - name: Validate or rebuild corrected response-locked cache
+            - name: Validate or rebuild exact ICA response-locked cache
               shell: bash
               run: |
                   set -euo pipefail
@@ -122,11 +122,12 @@ jobs:
                   import numpy as np
 
                   path = os.environ["KATJA_CACHE"]
-                  with np.load(path, allow_pickle=False) as cache:
-                      metadata = json.loads(str(cache["metadata_json"].item()))
-                  assert metadata["format"] == "neureptrace_katja_button_press_event_features_v2"
-                  assert metadata["correct_order_rule"] == "npress==5 and recorded press equals cueFinger"
-                  print({"cache": path, "shape": list(cache["features"].shape), "metadata": metadata["format"]})
+                  with np.load(path, allow_pickle=False) as archive:
+                      metadata = json.loads(str(archive["metadata_json"].item()))
+                      shape = list(archive["features"].shape)
+                  assert metadata["format"] == "neureptrace_katja_button_press_event_features_exact_ica_v4"
+                  assert metadata["correct_order_rule"] == "finite variable timing and recorded press equals cueFinger"
+                  print({"cache": path, "shape": shape, "format": metadata["format"]})
                   PY
                       then
                           cache_valid=1
@@ -143,7 +144,7 @@ jobs:
                       mv "$temporary" "$KATJA_CACHE"
                   fi
 
-            - name: Run confirmatory target-by-seed-by-k evaluation
+            - name: Run exact-ICA independent-loss population baseline
               shell: bash
               run: |
                   set -euo pipefail
@@ -194,6 +195,7 @@ jobs:
                       "refit_target_on_all": True,
                       "sinkhorn_loss_weight": 0.0,
                       "assignment_loss_weight": 0.0,
+                      "sinkhorn_temperature": 1.0,
                   }
                   started = time.time()
                   per_seed, per_target, summary, metadata = (
@@ -215,12 +217,13 @@ jobs:
                           "elapsed_seconds": elapsed,
                           "development_target": development_target,
                           "confirmatory_targets": list(confirmatory_targets),
-                          "configuration": "pca64_independent_loss",
+                          "configuration": "pca64_independent_loss_exact_ica_v4",
                           "configuration_selection": (
-                              "Selected on the prior one-seed s05 development sweep; "
-                              "s05 is excluded from this confirmatory summary."
+                              "Untuned exact-ICA independent-loss baseline; "
+                              "structured-loss selection is performed separately on s05."
                           ),
                           "feature_cache": os.environ["KATJA_CACHE"],
+                          "feature_format": "neureptrace_katja_button_press_event_features_exact_ica_v4",
                           "patch_baseline": os.environ["KATJA_PATCH_BASELINE"],
                       }
                   )
@@ -268,7 +271,7 @@ jobs:
                   frame[percent_columns] *= 100.0
                   summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
                   with summary_path.open("a", encoding="utf-8") as stream:
-                      stream.write("## Katja confirmatory population evaluation\n\n")
+                      stream.write("## Katja exact-ICA population baseline\n\n")
                       stream.write(
                           "PCA64 independent-loss configuration; five seeds; "
                           "16 targets excluding development target s05.\n\n```text\n"
@@ -277,11 +280,11 @@ jobs:
                       stream.write("\n```\n")
                   PY
 
-            - name: Upload population evaluation results
+            - name: Upload exact-ICA population baseline
               if: always()
               uses: actions/upload-artifact@v7
               with:
-                  name: katja-population-evaluation
+                  name: katja-population-evaluation-exact-ica-v4
                   path: |
                       ${{ runner.temp }}/katja-population-tests.txt
                       ${{ runner.temp }}/katja-population-evaluation.txt
