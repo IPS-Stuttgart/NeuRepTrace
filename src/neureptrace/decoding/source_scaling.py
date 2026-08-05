@@ -279,8 +279,33 @@ def _metadata(cfg: SourceFeatureScalingConfig, n_source_rows: int, n_synthetic_r
     }
 
 
+def _contains_complex_value(value: object) -> bool:
+    """Return whether a feature container includes complex-valued observations."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return bool(value.size)
+        if value.dtype == object:
+            return any(_contains_complex_value(item) for item in value.ravel(order="C"))
+        return False
+    if isinstance(value, (str, bytes)):
+        return False
+    if hasattr(value, "__array__"):
+        try:
+            return _contains_complex_value(np.asarray(value, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(value, Sequence):
+        return any(_contains_complex_value(item) for item in value)
+    return False
+
+
 # jscpd:ignore-start
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    if _contains_complex_value(values):
+        raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
     matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[1] < 1:
         raise ValueError(f"{name} must be a non-empty two-dimensional matrix.")
