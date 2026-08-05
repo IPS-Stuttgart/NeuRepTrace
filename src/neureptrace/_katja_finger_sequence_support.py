@@ -60,36 +60,59 @@ def _integer_cache_field(values: np.ndarray, *, name: str, n_rows: int) -> np.nd
     """Return a one-dimensional integer cache field without lossy coercion."""
 
     array = _as_1d(values, name=name, n_rows=n_rows)
+    error = f"Cache field {name!r} must contain finite integer values."
+    int64_info = np.iinfo(np.int64)
+
     if np.issubdtype(array.dtype, np.bool_) or np.issubdtype(array.dtype, np.complexfloating):
-        raise ValueError(f"Cache field {name!r} must contain finite integer values.")
-    if array.dtype == object:
-        invalid_domain = np.fromiter(
-            (
-                isinstance(value, (bool, np.bool_, complex, np.complexfloating))
-                for value in array
-            ),
-            dtype=bool,
-            count=array.size,
+        raise ValueError(error)
+    if np.issubdtype(array.dtype, np.signedinteger):
+        return array.astype(np.int64, copy=False)
+    if np.issubdtype(array.dtype, np.unsignedinteger):
+        valid = array <= int64_info.max
+    elif np.issubdtype(array.dtype, np.floating):
+        numeric = array.astype(np.float64, copy=False)
+        valid = (
+            np.isfinite(numeric)
+            & (numeric == np.rint(numeric))
+            & (numeric >= int64_info.min)
+            & (numeric < 2**63)
         )
-        if bool(invalid_domain.any()):
-            rows = np.flatnonzero(invalid_domain).tolist()[:5]
+    else:
+        parsed = np.empty(array.size, dtype=np.int64)
+        invalid_rows: list[int] = []
+        for row, value in enumerate(array.tolist()):
+            if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+                invalid_rows.append(row)
+                continue
+            text = str(value).strip()
+            try:
+                integer = int(text, 10)
+            except (TypeError, ValueError):
+                try:
+                    numeric = float(text)
+                except (TypeError, ValueError, OverflowError):
+                    invalid_rows.append(row)
+                    continue
+                if not np.isfinite(numeric) or numeric != np.rint(numeric):
+                    invalid_rows.append(row)
+                    continue
+                integer = int(numeric)
+            if integer < int64_info.min or integer > int64_info.max:
+                invalid_rows.append(row)
+                continue
+            parsed[row] = integer
+        if invalid_rows:
             raise ValueError(
-                f"Cache field {name!r} must contain finite integer values; invalid value(s) at row(s) {rows}."
+                f"Cache field {name!r} must contain finite integer values; invalid value(s) at row(s) {invalid_rows[:5]}."
             )
-    try:
-        numeric = array.astype(np.float64)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"Cache field {name!r} must contain finite integer values.") from exc
-    finite = np.isfinite(numeric)
-    integral = finite & (numeric == np.rint(numeric))
-    in_range = (numeric >= float(-(2**63))) & (numeric < float(2**63))
-    valid = integral & in_range
+        return parsed
+
     if not bool(valid.all()):
         rows = np.flatnonzero(~valid).tolist()[:5]
         raise ValueError(
             f"Cache field {name!r} must contain finite integer values; invalid value(s) at row(s) {rows}."
         )
-    return numeric.astype(np.int64)
+    return array.astype(np.int64)
 
 
 def _cache_field(cache: Any, *names: str, required: bool = True):
