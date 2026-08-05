@@ -62,6 +62,8 @@ def _parse_csv(value: str) -> tuple[str, ...]:
     result = tuple(item.strip() for item in str(value).split(",") if item.strip())
     if not result:
         raise ValueError("Comma-separated participant list must not be empty.")
+    if len(set(result)) != len(result):
+        raise ValueError("Comma-separated participant list must contain unique values.")
     return result
 
 
@@ -69,6 +71,8 @@ def _parse_int_csv(value: str) -> tuple[int, ...]:
     result = tuple(int(item.strip()) for item in str(value).split(",") if item.strip())
     if not result or any(item <= 0 for item in result):
         raise ValueError("Comma-separated integer list must contain positive values.")
+    if len(set(result)) != len(result):
+        raise ValueError("Comma-separated integer list must contain unique values.")
     return result
 
 
@@ -175,6 +179,19 @@ def _fit_source_model(
 def _summarize_population(
     per_seed: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    fold_columns = ["configuration", "target", "k", "seed"]
+    duplicate_folds = per_seed.duplicated(fold_columns, keep=False)
+    if duplicate_folds.any():
+        preview = (
+            per_seed.loc[duplicate_folds, fold_columns]
+            .head(3)
+            .to_dict(orient="records")
+        )
+        raise ValueError(
+            "per_seed contains duplicate configuration/target/k/seed rows: "
+            f"{preview!r}."
+        )
+
     per_target = (
         per_seed.groupby(["configuration", "target", "k"], as_index=False)
         .agg(
@@ -232,6 +249,18 @@ def run_targets(
     calibration_counts: tuple[int, ...] = DEFAULT_CALIBRATION_COUNTS,
     calibration_seeds: tuple[int, ...] = DEFAULT_CALIBRATION_SEEDS,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    if not targets:
+        raise ValueError("targets must not be empty.")
+    if len(set(targets)) != len(targets):
+        raise ValueError("targets must be unique.")
+    if not calibration_counts:
+        raise ValueError("calibration_counts must not be empty.")
+    if len(set(calibration_counts)) != len(calibration_counts):
+        raise ValueError("calibration_counts must be unique.")
+    if not calibration_seeds:
+        raise ValueError("calibration_seeds must not be empty.")
+    if len(set(calibration_seeds)) != len(calibration_seeds):
+        raise ValueError("calibration_seeds must be unique.")
     if DEVELOPMENT_TARGET in targets:
         raise ValueError("The development target s05 must be excluded.")
     unknown = [target for target in targets if target not in DEFAULT_PARTICIPANTS]
