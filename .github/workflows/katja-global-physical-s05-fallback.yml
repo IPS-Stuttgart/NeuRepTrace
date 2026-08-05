@@ -21,12 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Apply experiment patches
+      - name: Apply exact correct-order protocol
         run: |
           git apply --check experiments/katja-correct-order.patch
           git apply experiments/katja-correct-order.patch
-          git apply --check experiments/katja-refit-full-data.patch
-          git apply experiments/katja-refit-full-data.patch
 
       - uses: actions/setup-python@v7
         with:
@@ -101,8 +99,6 @@ jobs:
               "full_finetune_steps": 60,
               "batch_size": 64,
               "device": "cuda",
-              "refit_source_on_all": True,
-              "refit_target_on_all": True,
           }
           per_seed, per_target, summary, metadata = (
               run_katja_global_physical_benchmark(
