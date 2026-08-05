@@ -1,0 +1,226 @@
+name: Katja ensemble population full curve v3
+
+permissions:
+    contents: read
+
+on: # yamllint disable-line rule:truthy
+    workflow_dispatch:
+    pull_request:
+        branches:
+            - main
+        paths:
+            - .github/workflows/katja-ensemble-full-curve-v3.yml
+            - experiments/katja-ensemble-full-curve-config.json
+            - experiments/katja_ensemble_full_curve.py
+            - experiments/katja_ensemble_population.py
+            - experiments/katja_ensemble_source_sweep.py
+
+concurrency:
+    group: katja-ensemble-full-curve-v2-${{ github.ref }}
+    cancel-in-progress: true
+
+env:
+    KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_exact_ica_v4.npz
+    KATJA_PATCH_BASELINE: ca2ca39a1a3e5d7fd0b7cee4f697c9a9e1a47aa4
+    KATJA_FULL_CURVE_CONFIG: experiments/katja-ensemble-full-curve-config.json
+    OMP_NUM_THREADS: "2"
+    MKL_NUM_THREADS: "2"
+
+jobs:
+    evaluate:
+        name: Sixteen-worker dual-GPU six-k follow-up
+        if: >-
+            github.event_name == 'workflow_dispatch' ||
+            github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: [self-hosted, Linux, X64, nvidia-smi]
+        timeout-minutes: 180
+        steps:
+            - name: Check out experiment branch
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 1
+
+            - name: Set up Python
+              uses: actions/setup-python@v7
+              with:
+                  python-version: "3.11"
+
+            - name: Validate scope and restore locked experiment implementation
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  python - <<'PY'
+                  import json
+                  import os
+
+                  with open(os.environ["KATJA_FULL_CURVE_CONFIG"], encoding="utf-8") as stream:
+                      config = json.load(stream)
+                  assert config["enabled"] is True
+                  assert config["analysis_status"] == (
+                      "full_curve_follow_up_after_k20_ensemble_result"
+                  )
+                  assert config["development_target_excluded"] == "s05"
+                  assert config["primary_configuration"] == (
+                      "hybrid_source_model_ensemble6"
+                  )
+                  assert config["calibration_counts"] == [1, 3, 5, 10, 15, 20]
+                  assert config["calibration_seeds"] == [13, 29, 47, 71, 101]
+                  assert len(config["targets"]) == 16
+                  assert "s05" not in config["targets"]
+                  assert len(config["reported_configurations"]) == 6
+                  print(json.dumps(config, indent=2, sort_keys=True))
+                  PY
+                  git fetch --no-tags --depth=1 origin "$KATJA_PATCH_BASELINE"
+                  for path in \
+                    src/neureptrace/katja_spm_feature_cache.py \
+                    src/neureptrace/decoding/_progressive_sequence_model.py \
+                    src/neureptrace/decoding/_progressive_sequence_training.py
+                  do
+                      git show "$KATJA_PATCH_BASELINE:$path" > "$path"
+                  done
+                  git apply --check experiments/katja-correct-order.patch
+                  git apply experiments/katja-correct-order.patch
+                  git apply --check experiments/katja-refit-full-data.patch
+                  git apply experiments/katja-refit-full-data.patch
+                  git diff --check
+
+            - name: Install and validate execution environment
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  python -m pip install --disable-pip-version-check -e .
+                  python -m pip install --disable-pip-version-check \
+                    pytest numpy scipy pandas h5py
+                  nvidia-smi
+                  python -m py_compile \
+                    experiments/katja_ensemble_source_sweep.py \
+                    experiments/katja_ensemble_population.py \
+                    experiments/katja_ensemble_full_curve.py
+                  python - <<'PY'
+                  import json
+                  import os
+
+                  import numpy as np
+                  import torch
+
+                  if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
+                      raise SystemExit("Two CUDA devices are required")
+                  path = os.environ["KATJA_CACHE"]
+                  with np.load(path, allow_pickle=False) as archive:
+                      metadata = json.loads(str(archive["metadata_json"].item()))
+                      shape = list(archive["features"].shape)
+                  assert metadata["format"] == (
+                      "neureptrace_katja_button_press_event_features_exact_ica_v4"
+                  )
+                  assert metadata["correct_order_rule"] == (
+                      "finite variable timing and recorded press equals cueFinger"
+                  )
+                  assert shape == [15792, 1092]
+                  print(
+                      {
+                          "torch": torch.__version__,
+                          "cuda_devices": [
+                              torch.cuda.get_device_name(index)
+                              for index in range(torch.cuda.device_count())
+                          ],
+                          "cache": path,
+                          "shape": shape,
+                      }
+                  )
+                  PY
+                  python -m pytest -q \
+                    tests/test_progressive_sequence_finetune.py \
+                    tests/test_katja_finger_sequence_benchmark.py \
+                    | tee "${RUNNER_TEMP}/katja-ensemble-full-curve-tests.txt"
+
+            - name: Run one process per follow-up target
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  output="${RUNNER_TEMP}/katja-ensemble-full-curve"
+                  python -u experiments/katja_ensemble_full_curve.py \
+                    --feature-cache "$KATJA_CACHE" \
+                    --output-dir "$output" \
+                    --targets "s06,s08,s09,s10,s11,s13,s14,s15,s16,s17,s18,s20,s21,s24,s25,s28" \
+                    --calibration-counts "1,3,5,10,15,20" \
+                    --calibration-seeds "13,29,47,71,101" \
+                    --workers 16 \
+                    --gpu-count 2 \
+                    --reference-k20 0.657863 \
+                    --reference-tolerance 0.00005 \
+                    | tee "${RUNNER_TEMP}/katja-ensemble-full-curve-summary.txt"
+
+            - name: Write full curve to workflow summary
+              if: always()
+              shell: bash
+              run: |
+                  if ! command -v python >/dev/null 2>&1; then
+                      exit 0
+                  fi
+                  python - <<'PY'
+                  import os
+                  from pathlib import Path
+
+                  import pandas as pd
+
+                  output = Path(os.environ["RUNNER_TEMP"]) / "katja-ensemble-full-curve"
+                  curve_path = output / "katja_ensemble_primary_curve.csv"
+                  paired_path = output / "katja_ensemble_primary_vs_control.csv"
+                  if not curve_path.exists():
+                      raise SystemExit(0)
+                  curve = pd.read_csv(curve_path)
+                  paired = pd.read_csv(paired_path)
+                  percent_columns = [
+                      "independent_accuracy_mean",
+                      "independent_accuracy_sem",
+                      "permutation_accuracy_mean",
+                      "permutation_accuracy_sem",
+                      "julia_full_finetune_accuracy",
+                      "independent_delta_vs_julia",
+                      "permutation_delta_vs_julia",
+                  ]
+                  curve[percent_columns] *= 100.0
+                  paired["mean_primary_minus_control"] *= 100.0
+                  with Path(os.environ["GITHUB_STEP_SUMMARY"]).open(
+                      "a", encoding="utf-8"
+                  ) as stream:
+                      stream.write("## Katja hybrid ensemble full calibration curve\n\n")
+                      stream.write(
+                          "This is a full-curve follow-up on the same 16 participants used "
+                          "for the locked k20 evaluation, not a new untouched cohort.\n\n"
+                      )
+                      stream.write("```text\n")
+                      stream.write(
+                          curve[
+                              [
+                                  "k",
+                                  "independent_accuracy_mean",
+                                  "independent_accuracy_sem",
+                                  "julia_full_finetune_accuracy",
+                                  "independent_delta_vs_julia",
+                                  "permutation_accuracy_mean",
+                                  "permutation_accuracy_sem",
+                              ]
+                          ].to_string(index=False)
+                      )
+                      stream.write("\n```\n\n")
+                      stream.write("### Primary versus exact single-model control\n\n")
+                      stream.write("```text\n")
+                      stream.write(paired.to_string(index=False))
+                      stream.write("\n```\n")
+                  PY
+
+            - name: Upload ensemble full-curve follow-up
+              if: always()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: katja-ensemble-population-full-curve-exact-ica-v4
+                  path: |
+                      ${{ runner.temp }}/katja-ensemble-full-curve-tests.txt
+                      ${{ runner.temp }}/katja-ensemble-full-curve-summary.txt
+                      ${{ runner.temp }}/katja-ensemble-full-curve/*.csv
+                      ${{ runner.temp }}/katja-ensemble-full-curve/*.json
+                      ${{ runner.temp }}/katja-ensemble-full-curve/logs/*.txt
+                      ${{ runner.temp }}/katja-ensemble-full-curve/parts/*/*.csv
+                      ${{ runner.temp }}/katja-ensemble-full-curve/parts/*/*.json
+                  if-no-files-found: warn
