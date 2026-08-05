@@ -21,6 +21,18 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
  
  DEFAULT_WINDOW_CENTERS_SECONDS = (-0.15, -0.05, 0.05, 0.15)
  DEFAULT_WINDOW_WIDTH_SECONDS = 0.10
+@@ -103,11 +107,9 @@ def _find_spm_header(subject_directory: Path) -> Path:
+-    candidates = sorted(
+-        path for path in subject_directory.glob("fc*.mat") if not path.name.startswith("Bfc")
+-    )
++    candidates = sorted(subject_directory.glob("Bfc*ICA_corrected.mat"))
+     if len(candidates) != 1:
+         raise FileNotFoundError(
+-            f"Expected exactly one sensor-level fc*.mat file in {subject_directory}; "
++            f"Expected exactly one ICA-corrected Bfc*ICA_corrected.mat file in {subject_directory}; "
+             f"found {len(candidates)}."
+         )
+     return candidates[0]
 @@ -435,7 +439,5 @@ def extract_subject_feature_rows(
      cue_finger = np.asarray(behavior["cue_finger"])
      timing_ms = np.asarray(behavior["timing_ms"], dtype=float)
@@ -47,7 +59,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
          )
      metadata = {
 -        "format": "neureptrace_katja_button_press_event_features_v1",
-+        "format": "neureptrace_katja_button_press_event_features_exact_v3",
++        "format": "neureptrace_katja_button_press_event_features_exact_ica_v4",
          "participants": list(participant_tuple),
          "selected_channel_policy": (
 @@ -653,7 +650,5 @@ def build_katja_spm_feature_cache(
