@@ -152,7 +152,11 @@ def _duplicate_probability_labels(labels: Sequence[int]) -> list[int]:
 
 def _probability_columns(frame: pd.DataFrame) -> list[str]:
     columns = sorted(
-        (column for column in frame.columns if column.startswith("prob_class_")),
+        (
+            column
+            for column in frame.columns
+            if isinstance(column, str) and column.startswith("prob_class_")
+        ),
         key=_probability_sort_key,
     )
     if not columns:
