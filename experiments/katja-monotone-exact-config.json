@@ -1,0 +1,26 @@
+{
+  "enabled": true,
+  "development_target": "s05",
+  "calibration_counts": [15, 20],
+  "calibration_seeds": [13, 29, 47, 71, 101],
+  "reference_independent_k20": 0.5252,
+  "minimum_promotion_gain": 0.002,
+  "selection_metric": "five-seed mean independent k20 accuracy on development target s05; independent k15 and constrained k20 are tie-breakers",
+  "confirmation_policy": "run the winning development configuration on the 16 targets excluding s05 only when it exceeds the registered reference by the minimum promotion gain",
+  "configurations": {
+    "monotone_sinkhorn": {
+      "sinkhorn_loss_weight": 0.5,
+      "assignment_loss_weight": 0.1,
+      "sinkhorn_temperature": 0.5,
+      "exact_permutation_loss_weight": 0.0,
+      "exact_permutation_temperature": 0.5
+    },
+    "monotone_exact": {
+      "sinkhorn_loss_weight": 0.0,
+      "assignment_loss_weight": 0.1,
+      "sinkhorn_temperature": 0.5,
+      "exact_permutation_loss_weight": 0.5,
+      "exact_permutation_temperature": 0.5
+    }
+  }
+}
