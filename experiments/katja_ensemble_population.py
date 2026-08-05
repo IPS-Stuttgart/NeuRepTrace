@@ -65,6 +65,13 @@ def _parse_csv(value: str) -> tuple[str, ...]:
     return result
 
 
+def _parse_int_csv(value: str) -> tuple[int, ...]:
+    result = tuple(int(item.strip()) for item in str(value).split(",") if item.strip())
+    if not result or any(item <= 0 for item in result):
+        raise ValueError("Comma-separated integer list must contain positive values.")
+    return result
+
+
 def _prepare_target_source_space(
     rows: dict[str, np.ndarray],
     *,
@@ -222,6 +229,8 @@ def run_targets(
     cache: dict[str, np.ndarray],
     *,
     targets: tuple[str, ...],
+    calibration_counts: tuple[int, ...] = DEFAULT_CALIBRATION_COUNTS,
+    calibration_seeds: tuple[int, ...] = DEFAULT_CALIBRATION_SEEDS,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     if DEVELOPMENT_TARGET in targets:
         raise ValueError("The development target s05 must be excluded.")
@@ -261,11 +270,11 @@ def run_targets(
             "n_target_trials": int(reference["target_features"].shape[0]),
         }
 
-        for calibration_seed in DEFAULT_CALIBRATION_SEEDS:
+        for calibration_seed in calibration_seeds:
             splits = select_nested_trial_calibration_splits(
                 reference["target_strata"],
-                calibration_counts=DEFAULT_CALIBRATION_COUNTS,
-                max_per_stratum=max(DEFAULT_CALIBRATION_COUNTS),
+                calibration_counts=calibration_counts,
+                max_per_stratum=max(calibration_counts),
                 min_evaluation_per_stratum=1,
                 seed=int(calibration_seed),
                 context=("katja_finger", target),
@@ -281,7 +290,7 @@ def run_targets(
                     model_seed=model_seed,
                 )
 
-            for calibration_count in DEFAULT_CALIBRATION_COUNTS:
+            for calibration_count in calibration_counts:
                 split = splits[int(calibration_count)]
                 probabilities_by_member: dict[str, np.ndarray] = {}
                 for member_name in needed_members:
@@ -360,8 +369,8 @@ def run_targets(
         ),
         "development_target_excluded": DEVELOPMENT_TARGET,
         "targets": list(targets),
-        "calibration_counts": list(DEFAULT_CALIBRATION_COUNTS),
-        "calibration_seeds": list(DEFAULT_CALIBRATION_SEEDS),
+        "calibration_counts": list(calibration_counts),
+        "calibration_seeds": list(calibration_seeds),
         "primary_configuration": PRIMARY_CONFIGURATION,
         "configuration_categories": CONFIGURATION_CATEGORIES,
         "target_metadata": target_metadata,
@@ -382,6 +391,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--feature-cache", required=True)
     parser.add_argument("--targets", required=True)
+    parser.add_argument(
+        "--calibration-counts",
+        default=",".join(str(value) for value in DEFAULT_CALIBRATION_COUNTS),
+    )
+    parser.add_argument(
+        "--calibration-seeds",
+        default=",".join(str(value) for value in DEFAULT_CALIBRATION_SEEDS),
+    )
     parser.add_argument("--output-dir", required=True)
     return parser
 
@@ -389,6 +406,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     targets = _parse_csv(args.targets)
+    calibration_counts = _parse_int_csv(args.calibration_counts)
+    calibration_seeds = _parse_int_csv(args.calibration_seeds)
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     cache = load_katja_feature_cache(args.feature_cache)
@@ -396,6 +415,8 @@ def main(argv: list[str] | None = None) -> int:
     per_seed, per_target, summary, metadata = run_targets(
         cache,
         targets=targets,
+        calibration_counts=calibration_counts,
+        calibration_seeds=calibration_seeds,
     )
     metadata["elapsed_seconds"] = time.time() - started
     per_seed.to_csv(output / "katja_ensemble_population_per_seed.csv", index=False)
