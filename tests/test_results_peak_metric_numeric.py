@@ -24,6 +24,27 @@ def test_peak_metric_rows_sorts_csv_loaded_metric_values_numerically() -> None:
     assert peaks.loc[0, "peak_distance_to_prefer_time"] == pytest.approx(0.2)
 
 
+def test_peak_metric_rows_preserves_columns_matching_internal_sort_names() -> None:
+    frame = pd.DataFrame(
+        {
+            "decoder": ["logistic", "logistic"],
+            "participant": ["s1", "s1"],
+            "time": [0.1, 0.2],
+            "accuracy": [0.8, 0.9],
+            "_peak_metric_numeric": ["loser metric metadata", "winner metric metadata"],
+            "_peak_time_numeric": ["loser time metadata", "winner time metadata"],
+            "_peak_distance_to_prefer_time": ["loser distance metadata", "winner distance metadata"],
+        }
+    )
+
+    peaks = peak_metric_rows(frame, "accuracy", ("decoder", "participant"))
+
+    assert peaks.loc[0, "_peak_metric_numeric"] == "winner metric metadata"
+    assert peaks.loc[0, "_peak_time_numeric"] == "winner time metadata"
+    assert peaks.loc[0, "_peak_distance_to_prefer_time"] == "winner distance metadata"
+    assert peaks.loc[0, "peak_distance_to_prefer_time"] == pytest.approx(0.2)
+
+
 @pytest.mark.parametrize(
     ("column", "value"),
     [
