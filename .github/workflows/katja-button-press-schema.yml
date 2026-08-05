@@ -1,0 +1,132 @@
+name: Katja button-press schema probe
+
+on:
+    workflow_dispatch:
+    pull_request:
+        branches: [main]
+        paths:
+            - .github/workflows/katja-button-press-schema.yml
+            - workflow-triggers/katja_button_press_schema.txt
+
+permissions:
+    contents: read
+
+jobs:
+    probe:
+        runs-on: [self-hosted, Linux]
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@v7
+            - uses: actions/setup-python@v7
+              with:
+                  python-version: "3.11"
+            - run: python -m pip install --disable-pip-version-check numpy scipy h5py mat73
+            - name: Probe behavior and SPM schemas
+              shell: bash
+              env:
+                  KATJA_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
+              run: |
+                  set -euo pipefail
+                  report="${RUNNER_TEMP}/katja-schema.txt"
+                  python - "$report" <<'PY'
+                  from __future__ import annotations
+
+                  import collections
+                  import json
+                  import os
+                  import pathlib
+                  import sys
+                  from typing import Any
+
+                  import h5py
+                  import mat73
+                  import numpy as np
+                  from scipy.io import loadmat
+
+                  report = pathlib.Path(sys.argv[1])
+                  root = pathlib.Path(os.environ["KATJA_ROOT"])
+
+                  def compact(value: Any, depth: int = 0) -> Any:
+                      if depth > 5:
+                          return f"<{type(value).__name__}>"
+                      if isinstance(value, dict):
+                          return {str(k): compact(v, depth + 1) for k, v in value.items()}
+                      if isinstance(value, (list, tuple)):
+                          if len(value) > 30:
+                              return {"type": type(value).__name__, "len": len(value), "head": [compact(v, depth + 1) for v in value[:5]]}
+                          return [compact(v, depth + 1) for v in value]
+                      if isinstance(value, np.ndarray):
+                          out = {"shape": list(value.shape), "dtype": str(value.dtype)}
+                          if value.size <= 120:
+                              out["values"] = compact(value.tolist(), depth + 1)
+                          else:
+                              try:
+                                  finite = np.asarray(value, dtype=float)
+                                  out.update(min=float(np.nanmin(finite)), max=float(np.nanmax(finite)))
+                              except Exception:
+                                  pass
+                          return out
+                      if isinstance(value, np.generic):
+                          return value.item()
+                      if isinstance(value, (str, int, float, bool)) or value is None:
+                          return value
+                      if hasattr(value, "_fieldnames"):
+                          return {field: compact(getattr(value, field), depth + 1) for field in value._fieldnames}
+                      return repr(value)[:1000]
+
+                  def hdf_tree(path: pathlib.Path, handle) -> None:
+                      handle.write(f"\n## HDF5 TREE {path}\n")
+                      with h5py.File(path, "r") as archive:
+                          def visit(name: str, item: h5py.Group | h5py.Dataset) -> None:
+                              attrs = {str(k): compact(v) for k, v in item.attrs.items()}
+                              if isinstance(item, h5py.Group):
+                                  handle.write(f"GROUP {name} attrs={json.dumps(attrs, default=str)}\n")
+                                  return
+                              handle.write(
+                                  f"DATASET {name} shape={item.shape} dtype={item.dtype} "
+                                  f"attrs={json.dumps(attrs, default=str)}\n"
+                              )
+                              if item.size <= 120:
+                                  try:
+                                      handle.write(f"  raw={compact(item[()])}\n")
+                                  except Exception as exc:
+                                      handle.write(f"  raw_error={type(exc).__name__}: {exc}\n")
+                          archive.visititems(visit)
+
+                  with report.open("w", encoding="utf-8") as handle:
+                      for filename in ("behDataMEG.mat", "targetMEG.mat"):
+                          path = root / "beh_data" / "s05" / filename
+                          hdf_tree(path, handle)
+                          loaded = mat73.loadmat(path)
+                          handle.write(f"\n## MAT73 {path}\n")
+                          handle.write(json.dumps(compact(loaded), indent=2, default=str)[:500_000])
+                          handle.write("\n")
+
+                      spm_path = next((root / "s05").glob("fc*.mat"))
+                      raw = loadmat(spm_path, squeeze_me=True, struct_as_record=False)
+                      d = raw["D"]
+                      handle.write(f"\n## SPM {spm_path}\n")
+                      handle.write(f"fields={d._fieldnames}\n")
+                      handle.write(f"type={d.type} Nsamples={d.Nsamples} Fsample={d.Fsample} timeOnset={d.timeOnset}\n")
+                      handle.write(f"data={compact(d.data)}\n")
+                      channels = np.atleast_1d(d.channels)
+                      handle.write(f"channel_count={len(channels)} fields={channels[0]._fieldnames}\n")
+                      types = collections.Counter(str(getattr(channel, "type", "")) for channel in channels)
+                      bad = collections.Counter(str(getattr(channel, "bad", "")) for channel in channels)
+                      handle.write(f"channel_types={dict(types)}\nchannel_bad={dict(bad)}\n")
+                      for index, channel in enumerate(channels):
+                          if index < 20 or str(getattr(channel, "type", "")).upper() != "MEGGRAD":
+                              handle.write(f"channel[{index}]={json.dumps(compact(channel), default=str)}\n")
+                      trials = np.atleast_1d(d.trials)
+                      handle.write(f"trial_count={len(trials)} fields={trials[0]._fieldnames}\n")
+                      for index in list(range(min(5, len(trials)))) + list(range(max(5, len(trials)-2), len(trials))):
+                          handle.write(f"trial[{index}]={json.dumps(compact(trials[index]), default=str)[:20000]}\n")
+
+                  print(report.read_text(encoding="utf-8"))
+                  PY
+            - if: always()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: katja-button-press-schema
+                  path: ${{ runner.temp }}/katja-schema.txt
+                  if-no-files-found: error
