@@ -13,6 +13,7 @@ _PROBABILITY_NORMALIZATION_ATOL = 1e-6
 _WEIGHTED_REDUCTION_SAFETY_FACTOR = 1024.0
 _COMPLEX_PROBABILITY_ERROR = "probabilities must contain real-valued probability values, not complex values"
 _COMPLEX_LABEL_ERROR = "labels must contain real integer class indices, not complex values"
+_COMPLEX_WEIGHT_ERROR = "sample_weight must contain real-valued numeric weights, not complex values"
 
 
 def _label_input_array(labels: Any) -> np.ndarray:
@@ -71,7 +72,12 @@ def _validate_probability_inputs(probabilities: Any, labels: Any) -> tuple[np.nd
         probabilities = np.maximum(probabilities, 0.0)
     with np.errstate(over="ignore", invalid="ignore"):
         row_sums = probabilities.sum(axis=1)
-    if not np.all(np.isfinite(row_sums)) or not np.allclose(row_sums, 1.0, atol=_PROBABILITY_NORMALIZATION_ATOL, rtol=0.0):
+    if not np.all(np.isfinite(row_sums)) or not np.allclose(
+        row_sums,
+        1.0,
+        atol=_PROBABILITY_NORMALIZATION_ATOL,
+        rtol=0.0,
+    ):
         raise ValueError("probability rows must sum to one")
     probabilities = probabilities / row_sums[:, None]
     labels = weighted._coerce_label_indices(labels)
@@ -80,13 +86,30 @@ def _validate_probability_inputs(probabilities: Any, labels: Any) -> tuple[np.nd
     return probabilities, labels
 
 
+def _complex_safe_numeric_scalar(original_coerce):
+    """Wrap weighted scalar validation so complex controls cannot narrow to real."""
+
+    @wraps(original_coerce)
+    def _coerce_numeric_scalar(value: object, message: str) -> float:
+        if _contains_complex(value):
+            raise ValueError(message)
+        return original_coerce(value, message)
+
+    return _coerce_numeric_scalar
+
+
 def _overflow_safe_sample_weight_validator(original_validate):
-    """Wrap sample-weight validation with scale-invariant reduction protection."""
+    """Wrap sample-weight validation with domain and reduction protection."""
 
     @wraps(original_validate)
     def validate_sample_weight(sample_weight: Any, n_samples: int) -> np.ndarray:
+        weighted = importlib.import_module("neureptrace.metrics.weighted")
+        raw_weights = weighted._sample_weight_array(sample_weight)
+        if _contains_complex(raw_weights):
+            raise ValueError(_COMPLEX_WEIGHT_ERROR)
+
         with np.errstate(over="ignore", invalid="ignore", under="ignore"):
-            weights = original_validate(sample_weight, n_samples)
+            weights = original_validate(raw_weights, n_samples)
             total_weight = float(np.sum(weights))
         float_info = np.finfo(float)
         safe_max_total = float_info.max / _WEIGHTED_REDUCTION_SAFETY_FACTOR
@@ -105,13 +128,14 @@ def _overflow_safe_sample_weight_validator(original_validate):
 
 
 def install() -> None:
-    """Patch weighted metrics for probability roundoff and stable weight reductions."""
+    """Patch weighted metrics for strict domains and stable reductions."""
 
     weighted = importlib.import_module("neureptrace.metrics.weighted")
     if getattr(weighted, _PATCH_MARKER, False):
         return
 
     weighted._validate_probability_inputs = _validate_probability_inputs
+    weighted._coerce_numeric_scalar = _complex_safe_numeric_scalar(weighted._coerce_numeric_scalar)
     validate_sample_weight = _overflow_safe_sample_weight_validator(weighted.validate_sample_weight)
     weighted.validate_sample_weight = validate_sample_weight
 
