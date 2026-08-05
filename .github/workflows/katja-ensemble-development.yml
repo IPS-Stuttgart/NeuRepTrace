@@ -35,21 +35,11 @@ jobs:
             - name: Validate development scope
               shell: bash
               run: |
-                  python - <<'PY'
-                  import json
-                  from pathlib import Path
-
-                  config = json.loads(
-                      Path(
-                          "experiments/katja-ensemble-development-config.json"
-                      ).read_text(encoding="utf-8")
-                  )
-                  if not config.get("enabled", False):
-                      raise SystemExit("The ensemble development gate is disabled")
-                  if config.get("target") != "s05":
-                      raise SystemExit("The ensemble sweep must remain s05-only")
-                  print(json.dumps(config, indent=2, sort_keys=True))
-                  PY
+                  set -euo pipefail
+                  config=experiments/katja-ensemble-development-config.json
+                  grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' "$config"
+                  grep -Eq '"target"[[:space:]]*:[[:space:]]*"s05"' "$config"
+                  cat "$config"
 
             - name: Restore patch baseline and apply experiment patches
               shell: bash
