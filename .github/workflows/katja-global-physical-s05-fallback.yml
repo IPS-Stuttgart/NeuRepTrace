@@ -1,4 +1,4 @@
-name: Katja global physical-finger s05 fallback
+name: Katja exact global physical-finger s05 screen
 
 on:
   workflow_dispatch:
