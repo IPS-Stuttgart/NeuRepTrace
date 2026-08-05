@@ -1,7 +1,7 @@
 diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_spm_feature_cache.py
 --- a/src/neureptrace/katja_spm_feature_cache.py
 +++ b/src/neureptrace/katja_spm_feature_cache.py
-@@ -10,12 +10,17 @@ from __future__ import annotations
+@@ -10,14 +10,18 @@ from __future__ import annotations
  import argparse
  import json
  from dataclasses import dataclass
@@ -21,7 +21,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
  
  DEFAULT_WINDOW_CENTERS_SECONDS = (-0.15, -0.05, 0.05, 0.15)
  DEFAULT_WINDOW_WIDTH_SECONDS = 0.10
-@@ -435,7 +440,6 @@ def extract_subject_feature_rows(
+@@ -435,7 +439,6 @@ def extract_subject_feature_rows(
      cue_finger = np.asarray(behavior["cue_finger"])
      timing_ms = np.asarray(behavior["timing_ms"], dtype=float)
      cue_duration_ms = np.asarray(behavior["cue_duration_ms"], dtype=float)
@@ -29,7 +29,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
      npress = np.asarray(behavior["npress"], dtype=float)
      sequence = np.asarray(behavior["sequence_ids"])
  
-@@ -446,10 +450,13 @@ def extract_subject_feature_rows(
+@@ -446,10 +449,11 @@ def extract_subject_feature_rows(
          recorded = press[trial_index, :5]
          instructed = cue_finger[trial_index, :5]
          correct_order = bool(
@@ -43,7 +43,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
              and np.array_equal(recorded, instructed)
          )
          if not correct_order:
-@@ -633,7 +640,7 @@ def build_katja_spm_feature_cache(
+@@ -633,7 +637,7 @@ def build_katja_spm_feature_cache(
              f"Subject feature widths differ unexpectedly: {sorted(feature_widths)}."
          )
      metadata = {
@@ -52,7 +52,7 @@ diff --git a/src/neureptrace/katja_spm_feature_cache.py b/src/neureptrace/katja_
          "participants": list(participant_tuple),
          "selected_channel_policy": (
              "intersection_of_good_MEGGRAD_across_participants"
-@@ -653,9 +660,7 @@ def build_katja_spm_feature_cache(
+@@ -653,7 +657,5 @@ def build_katja_spm_feature_cache(
          "button_lag_seconds": float(button_lag_seconds),
          "event_positions": [2, 3, 4, 5],
 -        "correct_order_rule": (
