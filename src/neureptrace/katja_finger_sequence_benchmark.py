@@ -10,7 +10,7 @@ import argparse
 import copy
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -37,6 +37,9 @@ from neureptrace.decoding.progressive_sequence_finetune import (
     permutation_constrained_decode,
     select_nested_trial_calibration_splits,
 )
+
+if TYPE_CHECKING:
+    from typing import Any
 
 __all__ = (
     "DEFAULT_CALIBRATION_COUNTS",
