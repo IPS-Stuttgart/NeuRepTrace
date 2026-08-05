@@ -122,6 +122,42 @@ def _annotation_class_mask(
     raise ValueError("Template annotations must contain stimulus_class or stimulus_label.")
 
 
+def _validated_annotation_onset_times(annotations: pd.DataFrame) -> np.ndarray:
+    """Return finite real onset times without accepting lossy scalar coercions."""
+
+    onset_times: list[float] = []
+    invalid_rows: list[object] = []
+    for row_index, raw_value in annotations["onset_time"].items():
+        value = raw_value
+        if isinstance(value, np.ndarray):
+            if value.ndim != 0:
+                invalid_rows.append(row_index)
+                onset_times.append(np.nan)
+                continue
+            value = value.item()
+        elif isinstance(value, np.generic):
+            value = value.item()
+        if isinstance(value, (bool, complex)):
+            invalid_rows.append(row_index)
+            onset_times.append(np.nan)
+            continue
+        try:
+            onset_time = float(value)
+        except (TypeError, ValueError, OverflowError):
+            invalid_rows.append(row_index)
+            onset_times.append(np.nan)
+            continue
+        if not np.isfinite(onset_time):
+            invalid_rows.append(row_index)
+        onset_times.append(onset_time)
+    if invalid_rows:
+        raise ValueError(
+            "Template annotation onset_time values must be finite real numbers; "
+            f"invalid row(s): {invalid_rows[:5]}."
+        )
+    return np.asarray(onset_times, dtype=float)
+
+
 def fit_stimulus_event_templates(
     observations: pd.DataFrame,
     annotations: pd.DataFrame,
@@ -143,6 +179,8 @@ def fit_stimulus_event_templates(
         raise ValueError("Observation rows must contain a time column.")
     if "onset_time" not in annotations.columns:
         raise ValueError("Template annotations must contain onset_time.")
+    annotations = annotations.copy()
+    annotations["onset_time"] = _validated_annotation_onset_times(annotations)
     if min_template_events < 1:
         raise ValueError("min_template_events must be at least 1.")
     if not 0 < min_template_coverage <= 1:
