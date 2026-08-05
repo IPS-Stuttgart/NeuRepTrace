@@ -65,7 +65,7 @@ class PermutationDecodingResult:
 class ProgressiveSequenceCalibrationResult:
     """Fitted decoder and predictions for disjoint target evaluation trials."""
 
-    model: "TorchProgressiveSequenceClassifier"
+    model: Any
     probabilities: np.ndarray
     constrained_probabilities: np.ndarray
     predictions: np.ndarray
