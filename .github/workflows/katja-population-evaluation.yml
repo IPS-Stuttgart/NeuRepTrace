@@ -30,22 +30,35 @@ concurrency:
 
 jobs:
     population-evaluation:
-        name: Full 17-target neural benchmark
+        name: Confirmatory 16-target neural benchmark
         runs-on: [self-hosted, Linux, X64, nvidia-smi]
         timeout-minutes: 240
         env:
             KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
             KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_v2.npz
+            KATJA_PATCH_BASELINE: ca2ca39a1a3e5d7fd0b7cee4f697c9a9e1a47aa4
         steps:
             - name: Check out experiment branch
               uses: actions/checkout@v7
+              with:
+                  fetch-depth: 1
 
-            - name: Apply corrected protocol and full-data refit patches
+            - name: Restore patch baseline and apply experiment patches
+              shell: bash
               run: |
+                  set -euo pipefail
+                  git fetch --no-tags --depth=1 origin "$KATJA_PATCH_BASELINE"
+                  for path in \
+                    src/neureptrace/decoding/_progressive_sequence_model.py \
+                    src/neureptrace/decoding/_progressive_sequence_training.py
+                  do
+                      git show "$KATJA_PATCH_BASELINE:$path" > "$path"
+                  done
                   git apply --check experiments/katja-correct-order.patch
                   git apply experiments/katja-correct-order.patch
                   git apply --check experiments/katja-refit-full-data.patch
                   git apply experiments/katja-refit-full-data.patch
+                  git diff --check
 
             - name: Set up Python
               uses: actions/setup-python@v7
@@ -95,12 +108,31 @@ jobs:
                     tests/test_katja_finger_sequence_benchmark.py \
                     | tee "${RUNNER_TEMP}/katja-population-tests.txt"
 
-            - name: Build corrected response-locked feature cache when absent
+            - name: Validate or rebuild corrected response-locked cache
               shell: bash
               run: |
                   set -euo pipefail
                   mkdir -p "$(dirname "$KATJA_CACHE")"
-                  if [ ! -s "$KATJA_CACHE" ]; then
+                  cache_valid=0
+                  if [ -s "$KATJA_CACHE" ]; then
+                      if python - <<'PY'
+                  import json
+                  import os
+
+                  import numpy as np
+
+                  path = os.environ["KATJA_CACHE"]
+                  with np.load(path, allow_pickle=False) as cache:
+                      metadata = json.loads(str(cache["metadata_json"].item()))
+                  assert metadata["format"] == "neureptrace_katja_button_press_event_features_v2"
+                  assert metadata["correct_order_rule"] == "npress==5 and recorded press equals cueFinger"
+                  print({"cache": path, "shape": list(cache["features"].shape), "metadata": metadata["format"]})
+                  PY
+                      then
+                          cache_valid=1
+                      fi
+                  fi
+                  if [ "$cache_valid" -ne 1 ]; then
                       temporary="${KATJA_CACHE%.npz}.tmp.${GITHUB_RUN_ID}.npz"
                       rm -f "$temporary"
                       python -m neureptrace.katja_spm_feature_cache \
@@ -111,7 +143,7 @@ jobs:
                       mv "$temporary" "$KATJA_CACHE"
                   fi
 
-            - name: Run full target-by-seed-by-k population evaluation
+            - name: Run confirmatory target-by-seed-by-k evaluation
               shell: bash
               run: |
                   set -euo pipefail
@@ -125,15 +157,10 @@ jobs:
                   import time
                   from pathlib import Path
 
-                  import pandas as pd
-                  import torch
-
                   from neureptrace._katja_finger_sequence_support import (
                       DEFAULT_CALIBRATION_COUNTS,
                       DEFAULT_CALIBRATION_SEEDS,
                       DEFAULT_PARTICIPANTS,
-                      JULIA_FULL_FINETUNE_ACCURACY,
-                      _mean_sem,
                       load_katja_feature_cache,
                   )
                   from neureptrace.katja_finger_sequence_benchmark import (
@@ -148,7 +175,7 @@ jobs:
                       for target in DEFAULT_PARTICIPANTS
                       if target != development_target
                   )
-                  base_model = {
+                  model_kwargs = {
                       "hidden_units": 96,
                       "num_layers": 2,
                       "num_heads": 4,
@@ -165,196 +192,56 @@ jobs:
                       "device": "cuda",
                       "refit_source_on_all": True,
                       "refit_target_on_all": True,
+                      "sinkhorn_loss_weight": 0.0,
+                      "assignment_loss_weight": 0.0,
                   }
-                  configurations = (
-                      (
-                          "pca64_independent_loss",
-                          {
-                              "sinkhorn_loss_weight": 0.0,
-                              "assignment_loss_weight": 0.0,
-                          },
-                      ),
-                      ("pca64_assignment_loss", {}),
+                  started = time.time()
+                  per_seed, per_target, summary, metadata = (
+                      run_katja_finger_sequence_benchmark(
+                          cache,
+                          participants=DEFAULT_PARTICIPANTS,
+                          target_participants=confirmatory_targets,
+                          calibration_counts=DEFAULT_CALIBRATION_COUNTS,
+                          calibration_seeds=DEFAULT_CALIBRATION_SEEDS,
+                          n_source_participants=9,
+                          source_selection_seed=13,
+                          pca_components=64,
+                          model_kwargs=model_kwargs,
+                      )
                   )
-
-                  def cohort_summary(
-                      per_target: pd.DataFrame,
-                      *,
-                      included_targets: tuple[str, ...],
-                      cohort: str,
-                  ) -> pd.DataFrame:
-                      selected = per_target[
-                          per_target["target"].isin(included_targets)
-                      ].copy()
-                      rows = []
-                      for k, frame in selected.groupby("k", sort=True):
-                          independent_mean, independent_sem = _mean_sem(
-                              frame["independent_accuracy"].to_numpy()
-                          )
-                          permutation_mean, permutation_sem = _mean_sem(
-                              frame["permutation_accuracy"].to_numpy()
-                          )
-                          julia = JULIA_FULL_FINETUNE_ACCURACY[int(k)]
-                          rows.append(
-                              {
-                                  "cohort": cohort,
-                                  "k": int(k),
-                                  "n_targets": int(frame.shape[0]),
-                                  "independent_accuracy_mean": independent_mean,
-                                  "independent_accuracy_sem": independent_sem,
-                                  "permutation_accuracy_mean": permutation_mean,
-                                  "permutation_accuracy_sem": permutation_sem,
-                                  "julia_full_finetune_accuracy": julia,
-                                  "independent_delta_vs_julia": (
-                                      independent_mean - julia
-                                  ),
-                                  "permutation_delta_vs_julia": (
-                                      permutation_mean - julia
-                                  ),
-                                  "independent_outperforms_julia": bool(
-                                      independent_mean > julia
-                                  ),
-                                  "permutation_outperforms_julia": bool(
-                                      permutation_mean > julia
-                                  ),
-                              }
-                          )
-                      return pd.DataFrame(rows).sort_values("k").reset_index(
-                          drop=True
-                      )
-
-                  per_seed_frames = []
-                  per_target_frames = []
-                  all17_summary_frames = []
-                  confirmatory_summary_frames = []
-                  metadata = {
-                      "dataset_root": os.environ["KATJA_DATASET_ROOT"],
-                      "feature_cache": os.environ["KATJA_CACHE"],
-                      "development_target": development_target,
-                      "confirmatory_targets": list(confirmatory_targets),
-                      "primary_configuration": "pca64_independent_loss",
-                      "configuration_selection": (
-                          "Selected on the prior one-seed s05 development sweep; "
-                          "s05 is excluded from the confirmatory population summary."
-                      ),
-                      "calibration_counts": list(DEFAULT_CALIBRATION_COUNTS),
-                      "calibration_seeds": list(DEFAULT_CALIBRATION_SEEDS),
-                      "configurations": {},
-                  }
-
-                  for configuration, overrides in configurations:
-                      model_kwargs = {**base_model, **overrides}
-                      started = time.time()
-                      per_seed, per_target, _, benchmark_metadata = (
-                          run_katja_finger_sequence_benchmark(
-                              cache,
-                              participants=DEFAULT_PARTICIPANTS,
-                              target_participants=DEFAULT_PARTICIPANTS,
-                              calibration_counts=DEFAULT_CALIBRATION_COUNTS,
-                              calibration_seeds=DEFAULT_CALIBRATION_SEEDS,
-                              n_source_participants=9,
-                              source_selection_seed=13,
-                              pca_components=64,
-                              model_kwargs=model_kwargs,
-                          )
-                      )
-                      elapsed = time.time() - started
-                      per_seed.insert(0, "configuration", configuration)
-                      per_seed.insert(1, "elapsed_seconds", elapsed)
-                      per_target.insert(0, "configuration", configuration)
-                      per_target.insert(1, "elapsed_seconds", elapsed)
-                      all17 = cohort_summary(
-                          per_target,
-                          included_targets=DEFAULT_PARTICIPANTS,
-                          cohort="all17_exploratory",
-                      )
-                      confirmatory = cohort_summary(
-                          per_target,
-                          included_targets=confirmatory_targets,
-                          cohort="confirmatory16_excluding_s05",
-                      )
-                      all17.insert(0, "configuration", configuration)
-                      all17.insert(1, "elapsed_seconds", elapsed)
-                      confirmatory.insert(0, "configuration", configuration)
-                      confirmatory.insert(1, "elapsed_seconds", elapsed)
-                      per_seed_frames.append(per_seed)
-                      per_target_frames.append(per_target)
-                      all17_summary_frames.append(all17)
-                      confirmatory_summary_frames.append(confirmatory)
-                      metadata["configurations"][configuration] = {
+                  elapsed = time.time() - started
+                  metadata.update(
+                      {
                           "elapsed_seconds": elapsed,
-                          "model_kwargs": model_kwargs,
-                          "benchmark_metadata": benchmark_metadata,
+                          "development_target": development_target,
+                          "confirmatory_targets": list(confirmatory_targets),
+                          "configuration": "pca64_independent_loss",
+                          "configuration_selection": (
+                              "Selected on the prior one-seed s05 development sweep; "
+                              "s05 is excluded from this confirmatory summary."
+                          ),
+                          "feature_cache": os.environ["KATJA_CACHE"],
+                          "patch_baseline": os.environ["KATJA_PATCH_BASELINE"],
                       }
-                      print(
-                          f"\n=== {configuration}: all 17 targets "
-                          f"({elapsed:.1f} s) ==="
-                      )
-                      print(all17.to_string(index=False))
-                      print(
-                          f"\n=== {configuration}: confirmatory 16 targets "
-                          "excluding s05 ==="
-                      )
-                      print(confirmatory.to_string(index=False))
-                      torch.cuda.empty_cache()
-
-                  all_per_seed = pd.concat(per_seed_frames, ignore_index=True)
-                  all_per_target = pd.concat(per_target_frames, ignore_index=True)
-                  all17_summary = pd.concat(
-                      all17_summary_frames, ignore_index=True
                   )
-                  confirmatory_summary = pd.concat(
-                      confirmatory_summary_frames, ignore_index=True
-                  )
-                  all_per_seed.to_csv(
-                      output / "katja_population_per_seed.csv", index=False
-                  )
-                  all_per_target.to_csv(
-                      output / "katja_population_per_target.csv", index=False
-                  )
-                  all17_summary.to_csv(
-                      output / "katja_population_summary_all17.csv", index=False
-                  )
-                  confirmatory_summary.to_csv(
-                      output / "katja_population_summary_confirmatory16.csv",
-                      index=False,
-                  )
+                  per_seed.to_csv(output / "katja_population_per_seed.csv", index=False)
+                  per_target.to_csv(output / "katja_population_per_target.csv", index=False)
+                  summary.to_csv(output / "katja_population_summary_confirmatory16.csv", index=False)
                   (output / "katja_population_metadata.json").write_text(
                       json.dumps(metadata, indent=2, sort_keys=True),
                       encoding="utf-8",
                   )
-
-                  print("\n=== Confirmatory k20 ranking ===")
-                  print(
-                      confirmatory_summary[
-                          confirmatory_summary["k"] == 20
-                      ]
-                      .sort_values(
-                          [
-                              "independent_accuracy_mean",
-                              "permutation_accuracy_mean",
-                          ],
-                          ascending=False,
-                      )[
-                          [
-                              "configuration",
-                              "n_targets",
-                              "independent_accuracy_mean",
-                              "independent_accuracy_sem",
-                              "permutation_accuracy_mean",
-                              "permutation_accuracy_sem",
-                              "independent_delta_vs_julia",
-                              "permutation_delta_vs_julia",
-                          ]
-                      ]
-                      .to_string(index=False)
-                  )
+                  print(f"Elapsed seconds: {elapsed:.1f}")
+                  print(summary.to_string(index=False))
                   PY
 
-            - name: Write population result to workflow summary
+            - name: Write result to workflow summary
               if: always()
               shell: bash
               run: |
+                  if ! command -v python >/dev/null 2>&1; then
+                      exit 0
+                  fi
                   python - <<'PY'
                   import os
                   from pathlib import Path
@@ -366,41 +253,28 @@ jobs:
                       / "katja-population-evaluation"
                       / "katja_population_summary_confirmatory16.csv"
                   )
-                  summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
                   if not result.exists():
-                      summary_path.write_text(
-                          "## Katja population evaluation\n\nNo summary CSV was produced.\n",
-                          encoding="utf-8",
-                      )
                       raise SystemExit(0)
-                  frame = pd.read_csv(result)
-                  primary = frame[
-                      frame["configuration"] == "pca64_independent_loss"
-                  ].copy()
-                  primary["independent_accuracy_mean"] *= 100.0
-                  primary["independent_accuracy_sem"] *= 100.0
-                  primary["permutation_accuracy_mean"] *= 100.0
-                  primary["permutation_accuracy_sem"] *= 100.0
-                  primary["julia_full_finetune_accuracy"] *= 100.0
-                  primary["independent_delta_vs_julia"] *= 100.0
-                  columns = [
-                      "k",
-                      "n_targets",
+                  frame = pd.read_csv(result).copy()
+                  percent_columns = [
                       "independent_accuracy_mean",
                       "independent_accuracy_sem",
                       "permutation_accuracy_mean",
                       "permutation_accuracy_sem",
                       "julia_full_finetune_accuracy",
                       "independent_delta_vs_julia",
+                      "permutation_delta_vs_julia",
                   ]
+                  frame[percent_columns] *= 100.0
+                  summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
                   with summary_path.open("a", encoding="utf-8") as stream:
                       stream.write("## Katja confirmatory population evaluation\n\n")
                       stream.write(
-                          "Primary configuration: PCA64 independent-loss; "
-                          "16 targets excluding development target s05.\n\n"
+                          "PCA64 independent-loss configuration; five seeds; "
+                          "16 targets excluding development target s05.\n\n```text\n"
                       )
-                      stream.write(primary[columns].to_markdown(index=False))
-                      stream.write("\n")
+                      stream.write(frame.to_string(index=False))
+                      stream.write("\n```\n")
                   PY
 
             - name: Upload population evaluation results
