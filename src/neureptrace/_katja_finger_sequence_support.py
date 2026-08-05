@@ -56,6 +56,42 @@ def _as_1d(values: np.ndarray, *, name: str, n_rows: int) -> np.ndarray:
     return array
 
 
+def _integer_cache_field(values: np.ndarray, *, name: str, n_rows: int) -> np.ndarray:
+    """Return a one-dimensional integer cache field without lossy coercion."""
+
+    array = _as_1d(values, name=name, n_rows=n_rows)
+    if np.issubdtype(array.dtype, np.bool_) or np.issubdtype(array.dtype, np.complexfloating):
+        raise ValueError(f"Cache field {name!r} must contain finite integer values.")
+    if array.dtype == object:
+        invalid_domain = np.fromiter(
+            (
+                isinstance(value, (bool, np.bool_, complex, np.complexfloating))
+                for value in array
+            ),
+            dtype=bool,
+            count=array.size,
+        )
+        if bool(invalid_domain.any()):
+            rows = np.flatnonzero(invalid_domain).tolist()[:5]
+            raise ValueError(
+                f"Cache field {name!r} must contain finite integer values; invalid value(s) at row(s) {rows}."
+            )
+    try:
+        numeric = array.astype(np.float64)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"Cache field {name!r} must contain finite integer values.") from exc
+    finite = np.isfinite(numeric)
+    integral = finite & (numeric == np.rint(numeric))
+    in_range = (numeric >= float(-(2**63))) & (numeric < float(2**63))
+    valid = integral & in_range
+    if not bool(valid.all()):
+        rows = np.flatnonzero(~valid).tolist()[:5]
+        raise ValueError(
+            f"Cache field {name!r} must contain finite integer values; invalid value(s) at row(s) {rows}."
+        )
+    return numeric.astype(np.int64)
+
+
 def _cache_field(cache: Any, *names: str, required: bool = True):
     for name in names:
         if name in cache:
@@ -94,7 +130,7 @@ def load_katja_feature_cache(path: str | Path) -> dict[str, np.ndarray]:
             "features": feature_array,
             "subjects": _as_1d(subjects, name="subjects", n_rows=n_rows).astype(str),
             "trial_ids": _as_1d(trial_ids, name="trial_ids", n_rows=n_rows).astype(object),
-            "press_positions": _as_1d(positions, name="press_positions", n_rows=n_rows),
+            "press_positions": _integer_cache_field(positions, name="press_positions", n_rows=n_rows),
             "sequence_ids": _as_1d(sequence_ids, name="sequence_ids", n_rows=n_rows).astype(object),
         }
         if labels is not None:
