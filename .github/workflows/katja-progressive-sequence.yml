@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - .github/workflows/katja-progressive-sequence.yml
+      - experiments/katja-correct-order.patch
       - experiments/katja-refit-full-data.patch
       - src/neureptrace/katja_spm_feature_cache.py
       - src/neureptrace/katja_finger_sequence_benchmark.py
@@ -29,13 +30,15 @@ jobs:
     timeout-minutes: 180
     env:
       KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
-      KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_v1.npz
+      KATJA_CACHE: /mnt/lexar4tb/datasets/Katja Button Press Data/.neureptrace/katja_finger_events_v2.npz
     steps:
       - name: Check out experiment branch
         uses: actions/checkout@v7
 
-      - name: Apply refit-on-all experiment patch
+      - name: Apply protocol and refit experiment patches
         run: |
+          git apply --check experiments/katja-correct-order.patch
+          git apply experiments/katja-correct-order.patch
           git apply --check experiments/katja-refit-full-data.patch
           git apply experiments/katja-refit-full-data.patch
 
@@ -99,7 +102,6 @@ jobs:
 
           from neureptrace._katja_finger_sequence_support import (
               DEFAULT_PARTICIPANTS,
-              _composite_trial_ids,
               _constant_trial_values,
               _fit_source_preprocessor,
               _stable_source_selection,
@@ -117,7 +119,9 @@ jobs:
           trial_ids = cache["trial_ids"]
           positions = cache["press_positions"].astype(int)
           sequence_ids = cache["sequence_ids"]
-          included = cache["correct_order"].astype(bool) & np.isin(positions, [2, 3, 4, 5])
+          included = cache["correct_order"].astype(bool) & np.isin(
+              positions, [2, 3, 4, 5]
+          )
           labels = derive_participant_local_finger_labels(
               subjects,
               cache["finger_codes"],
@@ -166,8 +170,12 @@ jobs:
               seed=13,
               context=("katja_finger", target),
           )[20]
-          calibration_rows = target_packed.row_indices[split.calibration_indices].reshape(-1)
-          evaluation_rows = target_packed.row_indices[split.evaluation_indices].reshape(-1)
+          calibration_rows = target_packed.row_indices[
+              split.calibration_indices
+          ].reshape(-1)
+          evaluation_rows = target_packed.row_indices[
+              split.evaluation_indices
+          ].reshape(-1)
           source_y = labels[source_mask].astype(int)
           target_y = labels[target_mask].astype(int)
 
@@ -180,30 +188,49 @@ jobs:
               )
 
           source_only = model().fit(source_x, source_y)
-          target_only = model().fit(target_x[calibration_rows], target_y[calibration_rows])
-          pooled_x = np.concatenate([source_x, target_x[calibration_rows]], axis=0)
-          pooled_y = np.concatenate([source_y, target_y[calibration_rows]], axis=0)
+          target_only = model().fit(
+              target_x[calibration_rows], target_y[calibration_rows]
+          )
+          pooled_x = np.concatenate(
+              [source_x, target_x[calibration_rows]], axis=0
+          )
+          pooled_y = np.concatenate(
+              [source_y, target_y[calibration_rows]], axis=0
+          )
           pooled_weight = np.concatenate(
               [
                   np.full(source_y.shape[0], 0.5 / source_y.shape[0]),
-                  np.full(calibration_rows.shape[0], 0.5 / calibration_rows.shape[0]),
+                  np.full(
+                      calibration_rows.shape[0],
+                      0.5 / calibration_rows.shape[0],
+                  ),
               ]
           )
-          weighted = model().fit(pooled_x, pooled_y, sample_weight=pooled_weight)
+          weighted = model().fit(
+              pooled_x, pooled_y, sample_weight=pooled_weight
+          )
           report = {
               "cache_shape": list(cache["features"].shape),
               "target": target,
               "sources": list(sources),
-              "n_calibration_trials": int(split.calibration_indices.size),
+              "n_calibration_trials": int(
+                  split.calibration_indices.size
+              ),
               "n_evaluation_trials": int(split.evaluation_indices.size),
               "source_only_accuracy": float(
-                  source_only.score(target_x[evaluation_rows], target_y[evaluation_rows])
+                  source_only.score(
+                      target_x[evaluation_rows], target_y[evaluation_rows]
+                  )
               ),
               "target_only_accuracy": float(
-                  target_only.score(target_x[evaluation_rows], target_y[evaluation_rows])
+                  target_only.score(
+                      target_x[evaluation_rows], target_y[evaluation_rows]
+                  )
               ),
               "fixed_loss_share_accuracy": float(
-                  weighted.score(target_x[evaluation_rows], target_y[evaluation_rows])
+                  weighted.score(
+                      target_x[evaluation_rows], target_y[evaluation_rows]
+                  )
               ),
           }
           print(json.dumps(report, indent=2, sort_keys=True))
@@ -233,7 +260,10 @@ jobs:
               run_katja_finger_sequence_benchmark,
           )
 
-          output = Path(os.environ["RUNNER_TEMP"]) / "katja-refit-sweep-s05"
+          output = (
+              Path(os.environ["RUNNER_TEMP"])
+              / "katja-refit-sweep-s05"
+          )
           cache = load_katja_feature_cache(os.environ["KATJA_CACHE"])
           base = {
               "hidden_units": 96,
@@ -258,17 +288,26 @@ jobs:
               (
                   "pca64_refit_independent_loss",
                   64,
-                  {"sinkhorn_loss_weight": 0.0, "assignment_loss_weight": 0.0},
+                  {
+                      "sinkhorn_loss_weight": 0.0,
+                      "assignment_loss_weight": 0.0,
+                  },
               ),
               (
                   "pca256_refit_independent_loss",
                   256,
-                  {"sinkhorn_loss_weight": 0.0, "assignment_loss_weight": 0.0},
+                  {
+                      "sinkhorn_loss_weight": 0.0,
+                      "assignment_loss_weight": 0.0,
+                  },
               ),
               (
                   "raw1092_refit_independent_loss",
                   None,
-                  {"sinkhorn_loss_weight": 0.0, "assignment_loss_weight": 0.0},
+                  {
+                      "sinkhorn_loss_weight": 0.0,
+                      "assignment_loss_weight": 0.0,
+                  },
               ),
               (
                   "pca64_refit_no_full",
@@ -301,21 +340,27 @@ jobs:
           for name, pca_components, overrides in configurations:
               started = time.time()
               kwargs = {**base, **overrides}
-              per_seed, per_target, summary, metadata = run_katja_finger_sequence_benchmark(
-                  cache,
-                  participants=DEFAULT_PARTICIPANTS,
-                  target_participants=("s05",),
-                  calibration_counts=(10, 15, 20),
-                  calibration_seeds=(13,),
-                  n_source_participants=9,
-                  source_selection_seed=13,
-                  pca_components=pca_components,
-                  model_kwargs=kwargs,
+              per_seed, per_target, summary, metadata = (
+                  run_katja_finger_sequence_benchmark(
+                      cache,
+                      participants=DEFAULT_PARTICIPANTS,
+                      target_participants=("s05",),
+                      calibration_counts=(10, 15, 20),
+                      calibration_seeds=(13,),
+                      n_source_participants=9,
+                      source_selection_seed=13,
+                      pca_components=pca_components,
+                      model_kwargs=kwargs,
+                  )
               )
               elapsed = time.time() - started
               for frame in (per_seed, per_target, summary):
                   frame.insert(0, "configuration", name)
-                  frame.insert(1, "pca_components", "none" if pca_components is None else pca_components)
+                  frame.insert(
+                      1,
+                      "pca_components",
+                      "none" if pca_components is None else pca_components,
+                  )
                   frame.insert(2, "elapsed_seconds", elapsed)
               seed_frames.append(per_seed)
               target_frames.append(per_target)
@@ -332,15 +377,25 @@ jobs:
           all_seed = pd.concat(seed_frames, ignore_index=True)
           all_target = pd.concat(target_frames, ignore_index=True)
           all_summary = pd.concat(summary_frames, ignore_index=True)
-          all_seed.to_csv(output / "katja_refit_sweep_per_seed.csv", index=False)
-          all_target.to_csv(output / "katja_refit_sweep_per_target.csv", index=False)
-          all_summary.to_csv(output / "katja_refit_sweep_summary.csv", index=False)
+          all_seed.to_csv(
+              output / "katja_refit_sweep_per_seed.csv", index=False
+          )
+          all_target.to_csv(
+              output / "katja_refit_sweep_per_target.csv", index=False
+          )
+          all_summary.to_csv(
+              output / "katja_refit_sweep_summary.csv", index=False
+          )
           (output / "katja_refit_sweep_metadata.json").write_text(
-              json.dumps(run_metadata, indent=2, sort_keys=True), encoding="utf-8"
+              json.dumps(run_metadata, indent=2, sort_keys=True),
+              encoding="utf-8",
           )
           print("\n=== k20 ranking by independent accuracy ===")
           ranking = all_summary[all_summary["k"] == 20].sort_values(
-              ["independent_accuracy_mean", "permutation_accuracy_mean"],
+              [
+                  "independent_accuracy_mean",
+                  "permutation_accuracy_mean",
+              ],
               ascending=False,
           )
           print(
