@@ -11,7 +11,7 @@ import argparse
 import copy
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -37,9 +37,6 @@ from neureptrace.decoding.progressive_sequence_finetune import (
     pack_complete_trial_events,
     permutation_constrained_decode,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 def scored_variable_press_accuracy(
