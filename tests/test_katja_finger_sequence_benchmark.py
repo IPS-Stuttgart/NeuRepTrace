@@ -1,4 +1,6 @@
-from pathlib import Path
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -6,6 +8,9 @@ from neureptrace.katja_finger_sequence_benchmark import (
     derive_participant_local_finger_labels,
     load_katja_feature_cache,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_load_cache_flattens_feature_tail_and_accepts_physical_codes(tmp_path: Path):
