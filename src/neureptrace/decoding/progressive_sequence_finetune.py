@@ -21,6 +21,7 @@ from neureptrace.decoding._progressive_sequence_core import (
     _as_feature_tensor,
     _as_label_matrix,
     _as_object_vector,
+    _integer,
     pack_complete_trial_events,
     permutation_constrained_decode,
     select_nested_trial_calibration_splits,
@@ -48,6 +49,29 @@ __all__ = (
 )
 
 
+def _validated_trial_indices(
+    values: Sequence[int] | np.ndarray,
+    *,
+    name: str,
+    n_trials: int,
+) -> np.ndarray:
+    """Validate split indices without silently truncating or repeating trials."""
+
+    raw = np.asarray(values, dtype=object)
+    if raw.ndim == 0:
+        raw = raw.reshape(1)
+    indices: list[int] = []
+    for value in raw.reshape(-1):
+        index = _integer(value, f"{name} values")
+        if index < 0 or index >= n_trials:
+            raise ValueError(f"{name} contains an out-of-range target trial index.")
+        indices.append(index)
+    result = np.asarray(indices, dtype=int)
+    if np.unique(result).size != result.size:
+        raise ValueError(f"{name} must not contain duplicate target trial indices.")
+    return result
+
+
 def fit_progressive_sequence_target_calibrated_decoder(
     *,
     source_features: Sequence | np.ndarray,
@@ -69,14 +93,20 @@ def fit_progressive_sequence_target_calibrated_decoder(
         raise ValueError("Source and target tensors must have matching event and feature dimensions.")
     if source_y.shape != source_x.shape[:2] or target_y.shape != target_x.shape[:2]:
         raise ValueError("Label matrices must match their feature tensors.")
-    calibration_indices = np.asarray(split.calibration_indices, dtype=int).reshape(-1)
-    evaluation_indices = np.asarray(split.evaluation_indices, dtype=int).reshape(-1)
+    calibration_indices = _validated_trial_indices(
+        split.calibration_indices,
+        name="calibration_indices",
+        n_trials=target_x.shape[0],
+    )
+    evaluation_indices = _validated_trial_indices(
+        split.evaluation_indices,
+        name="evaluation_indices",
+        n_trials=target_x.shape[0],
+    )
     if calibration_indices.size == 0 or evaluation_indices.size == 0:
         raise ValueError("Both calibration and evaluation trial sets must be non-empty.")
     if np.intersect1d(calibration_indices, evaluation_indices).size:
         raise ValueError("Calibration and evaluation trial indices must be disjoint.")
-    if np.any(calibration_indices < 0) or np.any(evaluation_indices < 0) or np.any(calibration_indices >= target_x.shape[0]) or np.any(evaluation_indices >= target_x.shape[0]):
-        raise ValueError("Split contains an out-of-range target trial index.")
 
     target_stratum_vector = None if target_strata is None else _as_object_vector(target_strata, name="target_strata")
     if target_stratum_vector is not None and target_stratum_vector.shape[0] != target_x.shape[0]:
