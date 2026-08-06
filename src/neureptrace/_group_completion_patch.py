@@ -200,7 +200,11 @@ def _fill_missing_values(frame: pd.DataFrame | None, tokens: dict[str, str]) -> 
     prepared = frame.copy()
     for column, token in tokens.items():
         if column in prepared.columns:
-            prepared[column] = prepared[column].where(prepared[column].notna(), token)
+            # Constrained pandas dtypes such as category, Int64, and boolean
+            # reject a string sentinel. Object conversion keeps their scalar
+            # values while allowing the temporary identifier to be inserted.
+            series = prepared[column].astype(object)
+            prepared[column] = series.where(series.notna(), token)
     return prepared
 
 
