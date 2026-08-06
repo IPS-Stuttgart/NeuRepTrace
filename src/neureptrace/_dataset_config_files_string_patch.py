@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from functools import wraps
 from pathlib import Path
 from typing import Any
 
 _PATCH_MARKER = "_neureptrace_dataset_config_files_string_patch_installed"
 _SECTION_PATCH_MARKER = "_neureptrace_dataset_config_section_validation_patch_installed"
+_MANIFEST_OUTPUT_PATCH_MARKER = "_neureptrace_dataset_manifest_output_path_patch_installed"
 
 
 def _with_scalar_files_normalized(config: Mapping[str, Any], dataset: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -41,6 +42,40 @@ def _optional_section(config: Mapping[str, Any], name: str, *, error_type: type[
     if not isinstance(value, Mapping):
         raise error_type(f"Config section '{name}' must be a mapping.")
     return dict(value)
+
+
+def _install_manifest_output_path_guard() -> None:
+    """Reject manifest destinations that would overwrite the source config."""
+
+    dataset_manifest = importlib.import_module("neureptrace.dataset_manifest")
+    if getattr(dataset_manifest, _MANIFEST_OUTPUT_PATCH_MARKER, False):
+        return
+
+    original_write_manifest = dataset_manifest.write_manifest_from_dataset_config
+
+    @wraps(original_write_manifest)
+    def write_manifest_from_dataset_config(
+        config_path: Path | str,
+        out_path: Path | str,
+        *,
+        run_names: Sequence[str] | str | None = None,
+        absolute_paths: bool = False,
+    ) -> Any:
+        config_file = Path(config_path).expanduser().resolve(strict=False)
+        out_file = Path(out_path).expanduser().resolve(strict=False)
+        if config_file == out_file:
+            raise ValueError(
+                "Dataset manifest output path must differ from the input config path."
+            )
+        return original_write_manifest(
+            config_path,
+            out_path,
+            run_names=run_names,
+            absolute_paths=absolute_paths,
+        )
+
+    dataset_manifest.write_manifest_from_dataset_config = write_manifest_from_dataset_config
+    setattr(dataset_manifest, _MANIFEST_OUTPUT_PATCH_MARKER, True)
 
 
 def _install_optional_section_validation(dataset_config: Any) -> None:
@@ -80,8 +115,9 @@ def _install_optional_section_validation(dataset_config: Any) -> None:
 
 
 def install() -> None:
-    """Install dataset file normalization and strict optional-section validation."""
+    """Install dataset normalization, validation, and manifest output safety."""
 
+    _install_manifest_output_path_guard()
     dataset_config = importlib.import_module("neureptrace.dataset_config")
     _install_optional_section_validation(dataset_config)
     if getattr(dataset_config, _PATCH_MARKER, False):
