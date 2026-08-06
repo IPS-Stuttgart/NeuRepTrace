@@ -66,6 +66,9 @@ def _restore(frame: pd.DataFrame, placeholders: dict[str, str]) -> pd.DataFrame:
 
 
 def install() -> None:
+    importlib.import_module(
+        "neureptrace._semantic_stage_reader_missing_group_patch"
+    ).install()
     semantic_stages = importlib.import_module("neureptrace.semantic_stages")
 
     original_dominant = semantic_stages.summarize_dominant_timecourse
