@@ -246,6 +246,15 @@ def run_full_curve(
         raise ValueError("Development participant s05 must remain excluded.")
     if len(set(targets)) != len(targets):
         raise ValueError("targets must be unique.")
+    expected_targets = set(DEFAULT_TARGETS)
+    observed_targets = set(targets)
+    if observed_targets != expected_targets:
+        missing = sorted(expected_targets - observed_targets)
+        unexpected = sorted(observed_targets - expected_targets)
+        raise ValueError(
+            "Locked full curve requires the exact target cohort; "
+            f"missing={missing!r}, unexpected={unexpected!r}."
+        )
     if tuple(sorted(set(calibration_counts))) != tuple(calibration_counts):
         raise ValueError("calibration_counts must be unique and increasing.")
     if tuple(calibration_counts) != DEFAULT_CALIBRATION_COUNTS:
