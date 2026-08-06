@@ -10,10 +10,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from neureptrace._object_label_utils import values_equal
+
 _PATCH_MARKER = "_neureptrace_prior_shift_missing_label_patch_installed"
 
 
 def _is_missing_label_scalar(value: Any) -> bool:
+    if isinstance(value, (np.datetime64, np.timedelta64)) and bool(np.isnat(value)):
+        return True
     if isinstance(value, np.generic):
         value = value.item()
     if value is pd.NA or value is pd.NaT:
@@ -35,8 +39,8 @@ def install() -> None:
 
     @wraps(original_object_equal)
     def _object_equal(left: Any, right: Any) -> bool:
-        if _is_missing_label_scalar(left) and _is_missing_label_scalar(right):
-            return True
+        if _is_missing_label_scalar(left) or _is_missing_label_scalar(right):
+            return values_equal(left, right)
 
         left = _comparable_scalar(left)
         right = _comparable_scalar(right)
@@ -44,8 +48,8 @@ def install() -> None:
         if isinstance(left, container_types) or isinstance(right, container_types):
             left = prior_shift._hashable_object_value(left)
             right = prior_shift._hashable_object_value(right)
-            if _is_missing_label_scalar(left) and _is_missing_label_scalar(right):
-                return True
+            if _is_missing_label_scalar(left) or _is_missing_label_scalar(right):
+                return values_equal(left, right)
             if isinstance(left, tuple) or isinstance(right, tuple):
                 if not isinstance(left, tuple) or not isinstance(right, tuple) or len(left) != len(right):
                     return False
