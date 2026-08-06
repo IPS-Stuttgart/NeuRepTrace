@@ -122,17 +122,24 @@ def peak_metric_rows(
 
     rows: list[pd.Series] = []
     for _, group in _iter_groups(frame, group_columns):
-        ranked = group.copy()
-        ranked["_peak_metric_numeric"] = _finite_numeric_series(ranked[metric_column], name=metric_column)
-        ranked["_peak_time_numeric"] = _finite_numeric_series(ranked[time_column], name=time_column)
-        ranked["_peak_distance_to_prefer_time"] = (ranked["_peak_time_numeric"] - preferred).abs()
-        ranked = ranked.sort_values(
-            ["_peak_metric_numeric", "_peak_distance_to_prefer_time", "_peak_time_numeric"],
-            ascending=[False, True, True],
+        metric_values = _finite_numeric_series(group[metric_column], name=metric_column)
+        time_values = _finite_numeric_series(group[time_column], name=time_column)
+        distances = (time_values - preferred).abs()
+        ranking = pd.DataFrame(
+            {
+                "metric": metric_values.to_numpy(dtype=float, copy=False),
+                "distance": distances.to_numpy(dtype=float, copy=False),
+                "time": time_values.to_numpy(dtype=float, copy=False),
+                "position": np.arange(len(group), dtype=int),
+            }
+        ).sort_values(
+            ["metric", "distance", "time", "position"],
+            ascending=[False, True, True, True],
             kind="mergesort",
         )
-        selected = ranked.iloc[0].drop(labels=["_peak_metric_numeric", "_peak_time_numeric", "_peak_distance_to_prefer_time"])
-        selected["peak_distance_to_prefer_time"] = float(ranked.iloc[0]["_peak_distance_to_prefer_time"])
+        selected_position = int(ranking.iloc[0]["position"])
+        selected = group.iloc[selected_position].copy()
+        selected["peak_distance_to_prefer_time"] = float(distances.iloc[selected_position])
         rows.append(selected)
 
     result = _sort_group_rows(pd.DataFrame(rows), group_columns)
