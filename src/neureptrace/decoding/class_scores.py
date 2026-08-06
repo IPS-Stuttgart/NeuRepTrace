@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import numpy as np
@@ -102,6 +102,58 @@ def _unique_label_vector(labels: Sequence | np.ndarray) -> np.ndarray:
     return _object_label_vector(unique)
 
 
+def _materialize_score_values(values: object) -> object:
+    """Materialize nested iterables once so validation cannot consume generators."""
+
+    if isinstance(values, np.ndarray) or isinstance(values, (str, bytes)):
+        return values
+    if hasattr(values, "__array__") or not isinstance(values, Iterable):
+        return values
+    return [_materialize_score_values(value) for value in values]
+
+
+def _score_values_contain_boolean(values: object) -> bool:
+    """Return whether score output contains Boolean flags at any nesting depth."""
+
+    if isinstance(values, (bool, np.bool_)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.bool_):
+            return bool(values.size)
+        if values.dtype == object:
+            return any(_score_values_contain_boolean(value) for value in values.ravel(order="C"))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _score_values_contain_boolean(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+        return False
+    return any(_score_values_contain_boolean(value) for value in values)
+
+
+def _score_values_contain_complex(values: object) -> bool:
+    """Return whether score output contains complex values at any nesting depth."""
+
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return bool(values.size)
+        if values.dtype == object:
+            return any(_score_values_contain_complex(value) for value in values.ravel(order="C"))
+        return False
+    if hasattr(values, "__array__"):
+        try:
+            return _score_values_contain_complex(np.asarray(values, dtype=object))
+        except (TypeError, ValueError):
+            return False
+    if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+        return False
+    return any(_score_values_contain_complex(value) for value in values)
+
+
 def model_classes(model: Any, fallback_labels: Sequence | np.ndarray | None = None) -> np.ndarray | None:
     """Return fitted class labels from a classifier or sklearn-style pipeline."""
 
@@ -132,19 +184,28 @@ def as_class_score_matrix(
     """
 
     classes = _label_vector(classes)
+    raw_scores = _materialize_score_values(raw_scores)
+    if _score_values_contain_complex(raw_scores):
+        raise ValueError("raw_scores must contain real-valued scores.")
+    if _score_values_contain_boolean(raw_scores):
+        raise ValueError("raw_scores must contain numeric score values, not boolean flags.")
     scores = np.asarray(raw_scores, dtype=float)
     if scores.ndim == 1:
         if scores.shape[0] != n_samples or classes.size != 2:
             return None
-        return np.column_stack((-scores, scores))
-    if scores.ndim != 2 or scores.shape[0] != n_samples:
+        matrix = np.column_stack((-scores, scores))
+    elif scores.ndim != 2 or scores.shape[0] != n_samples:
         return None
-    if scores.shape[1] == classes.size:
-        return scores
-    if scores.shape[1] == 1 and classes.size == 2:
+    elif scores.shape[1] == classes.size:
+        matrix = scores
+    elif scores.shape[1] == 1 and classes.size == 2:
         column = scores[:, 0]
-        return np.column_stack((-column, column))
-    return None
+        matrix = np.column_stack((-column, column))
+    else:
+        return None
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("raw_scores must contain only finite values.")
+    return matrix
 
 
 def _prediction_class_score_matrix(predictions: Sequence | np.ndarray, classes: np.ndarray, *, n_samples: int) -> np.ndarray | None:
