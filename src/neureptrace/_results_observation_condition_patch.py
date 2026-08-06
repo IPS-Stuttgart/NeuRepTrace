@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from functools import wraps
@@ -18,6 +19,7 @@ _POSITIVE_INTEGER_ARRAYLIKE_ATTR = "_neureptrace_results_rejects_arraylike_posit
 _FINITE_SCALAR_ARRAYLIKE_ATTR = "_neureptrace_results_rejects_arraylike_finite_numeric_scalar_controls"
 _COMPLEX_METRIC_TABLE_ATTR = "_neureptrace_results_rejects_complex_metric_table_values"
 _EXACT_OBSERVATION_LABEL_ATTR = "_neureptrace_results_exact_probability_observation_labels"
+_SIGNED_PROBABILITY_LABEL_RE = re.compile(r"^[+-]?\d+$")
 _MAX_EXACT_FLOAT_INTEGER = 2**53
 
 
@@ -107,6 +109,26 @@ def _exact_integer_labels(values: pd.Series) -> np.ndarray:
     labels = np.empty(len(values), dtype=object)
     for index, value in enumerate(values.tolist()):
         labels[index] = _exact_integer_label(value, name=name)
+    return labels
+
+
+def _probability_label_values(prob_columns: Sequence[str]) -> tuple[int, ...]:
+    suffixes = tuple(column.removeprefix("prob_class_") for column in prob_columns)
+    if not all(_SIGNED_PROBABILITY_LABEL_RE.fullmatch(suffix) for suffix in suffixes):
+        return tuple(range(len(prob_columns)))
+
+    labels = tuple(int(suffix) for suffix in suffixes)
+    seen: set[int] = set()
+    duplicates: list[int] = []
+    for label in labels:
+        if label in seen and label not in duplicates:
+            duplicates.append(label)
+        seen.add(label)
+    if duplicates:
+        raise ValueError(
+            "prob_class_* columns must map to unique class labels; "
+            f"duplicate label(s): {duplicates}."
+        )
     return labels
 
 
@@ -202,7 +224,7 @@ def _probability_ece_by_group_exact(
     if working[prob_columns].isna().any().any():
         raise ValueError("Probability-observation columns must be numeric and non-missing.")
 
-    probability_label_values = results._label_values_from_probability_columns(prob_columns)
+    probability_label_values = _probability_label_values(prob_columns)
     results._label_positions(labels, probability_label_values)
     probabilities = working[prob_columns].to_numpy(dtype=float)
     if not np.isfinite(probabilities).all():
