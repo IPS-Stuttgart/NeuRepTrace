@@ -8,6 +8,7 @@ PCA, neural fitting, and reporting are performed here.
 from __future__ import annotations
 
 import json
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,8 @@ def _integer_cache_field(values: np.ndarray, *, name: str, n_rows: int) -> np.nd
     array = _as_1d(values, name=name, n_rows=n_rows)
     error = f"Cache field {name!r} must contain finite integer values."
     int64_info = np.iinfo(np.int64)
+    int64_min = int(int64_info.min)
+    int64_max = int(int64_info.max)
 
     if np.issubdtype(array.dtype, np.bool_) or np.issubdtype(array.dtype, np.complexfloating):
         raise ValueError(error)
@@ -89,15 +92,20 @@ def _integer_cache_field(values: np.ndarray, *, name: str, n_rows: int) -> np.nd
                 integer = int(text, 10)
             except (TypeError, ValueError):
                 try:
-                    numeric = float(text)
-                except (TypeError, ValueError, OverflowError):
+                    numeric = Decimal(text)
+                except (InvalidOperation, TypeError, ValueError):
                     invalid_rows.append(row)
                     continue
-                if not np.isfinite(numeric) or numeric != np.rint(numeric):
+                if (
+                    not numeric.is_finite()
+                    or numeric != numeric.to_integral_value()
+                    or numeric < int64_min
+                    or numeric > int64_max
+                ):
                     invalid_rows.append(row)
                     continue
                 integer = int(numeric)
-            if integer < int64_info.min or integer > int64_info.max:
+            if integer < int64_min or integer > int64_max:
                 invalid_rows.append(row)
                 continue
             parsed[row] = integer
