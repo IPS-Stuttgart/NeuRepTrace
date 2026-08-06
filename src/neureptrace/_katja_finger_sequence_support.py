@@ -56,6 +56,65 @@ def _as_1d(values: np.ndarray, *, name: str, n_rows: int) -> np.ndarray:
     return array
 
 
+def _integer_cache_field(values: np.ndarray, *, name: str, n_rows: int) -> np.ndarray:
+    """Return a one-dimensional integer cache field without lossy coercion."""
+
+    array = _as_1d(values, name=name, n_rows=n_rows)
+    error = f"Cache field {name!r} must contain finite integer values."
+    int64_info = np.iinfo(np.int64)
+
+    if np.issubdtype(array.dtype, np.bool_) or np.issubdtype(array.dtype, np.complexfloating):
+        raise ValueError(error)
+    if np.issubdtype(array.dtype, np.signedinteger):
+        return array.astype(np.int64, copy=False)
+    if np.issubdtype(array.dtype, np.unsignedinteger):
+        valid = array <= int64_info.max
+    elif np.issubdtype(array.dtype, np.floating):
+        numeric = array.astype(np.float64, copy=False)
+        valid = (
+            np.isfinite(numeric)
+            & (numeric == np.rint(numeric))
+            & (numeric >= int64_info.min)
+            & (numeric < 2**63)
+        )
+    else:
+        parsed = np.empty(array.size, dtype=np.int64)
+        invalid_rows: list[int] = []
+        for row, value in enumerate(array.tolist()):
+            if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+                invalid_rows.append(row)
+                continue
+            text = str(value).strip()
+            try:
+                integer = int(text, 10)
+            except (TypeError, ValueError):
+                try:
+                    numeric = float(text)
+                except (TypeError, ValueError, OverflowError):
+                    invalid_rows.append(row)
+                    continue
+                if not np.isfinite(numeric) or numeric != np.rint(numeric):
+                    invalid_rows.append(row)
+                    continue
+                integer = int(numeric)
+            if integer < int64_info.min or integer > int64_info.max:
+                invalid_rows.append(row)
+                continue
+            parsed[row] = integer
+        if invalid_rows:
+            raise ValueError(
+                f"Cache field {name!r} must contain finite integer values; invalid value(s) at row(s) {invalid_rows[:5]}."
+            )
+        return parsed
+
+    if not bool(valid.all()):
+        rows = np.flatnonzero(~valid).tolist()[:5]
+        raise ValueError(
+            f"Cache field {name!r} must contain finite integer values; invalid value(s) at row(s) {rows}."
+        )
+    return array.astype(np.int64)
+
+
 def _cache_field(cache: Any, *names: str, required: bool = True):
     for name in names:
         if name in cache:
@@ -94,7 +153,7 @@ def load_katja_feature_cache(path: str | Path) -> dict[str, np.ndarray]:
             "features": feature_array,
             "subjects": _as_1d(subjects, name="subjects", n_rows=n_rows).astype(str),
             "trial_ids": _as_1d(trial_ids, name="trial_ids", n_rows=n_rows).astype(object),
-            "press_positions": _as_1d(positions, name="press_positions", n_rows=n_rows),
+            "press_positions": _integer_cache_field(positions, name="press_positions", n_rows=n_rows),
             "sequence_ids": _as_1d(sequence_ids, name="sequence_ids", n_rows=n_rows).astype(object),
         }
         if labels is not None:
