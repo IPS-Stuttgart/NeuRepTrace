@@ -32,6 +32,30 @@ def test_katja_cache_preserves_integral_press_positions(tmp_path: Path) -> None:
     np.testing.assert_array_equal(cache["press_positions"], positions)
 
 
+def test_katja_cache_preserves_exact_decimal_integer_strings(tmp_path: Path) -> None:
+    cache_path = tmp_path / "features.npz"
+    positions = np.asarray(
+        [
+            "9007199254740993.0",
+            "1e3",
+            "-2.0",
+            "9223372036854775807.0",
+        ],
+        dtype=object,
+    )
+    _write_cache(cache_path, positions)
+
+    cache = load_katja_feature_cache(cache_path)
+
+    np.testing.assert_array_equal(
+        cache["press_positions"],
+        np.asarray(
+            [9007199254740993, 1000, -2, np.iinfo(np.int64).max],
+            dtype=np.int64,
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     "press_positions",
     [
@@ -40,6 +64,11 @@ def test_katja_cache_preserves_integral_press_positions(tmp_path: Path) -> None:
         pytest.param(np.asarray([True, False, True, False]), id="boolean"),
         pytest.param(np.asarray([1.0, np.nan, 3.0, 4.0]), id="non-finite"),
         pytest.param(np.asarray([1, complex(2, 1), 3, 4], dtype=object), id="object-complex"),
+        pytest.param(np.asarray(["1", "2.5", "3", "4"], dtype=object), id="object-fractional"),
+        pytest.param(
+            np.asarray(["1", "2", "3", "9223372036854775808.0"], dtype=object),
+            id="object-out-of-range",
+        ),
         pytest.param(np.asarray([1, 2, 3, 2**63], dtype=np.uint64), id="out-of-range"),
     ],
 )
