@@ -47,15 +47,16 @@ def _is_complex_scalar(value: object) -> bool:
 
 
 def _patched_validate_time_window(window: Sequence[object], *, name: str) -> tuple[float, float]:
-    if not isinstance(window, (str, bytes)):
-        try:
-            values = tuple(window)
-        except TypeError:
-            values = ()
-        for value in values:
-            if _is_complex_scalar(value):
-                raise ValueError(f"{name} endpoints must be finite real numeric values, not complex values.")
-    return _ORIGINAL_VALIDATE_TIME_WINDOW(window, name=name)
+    if isinstance(window, (str, bytes)):
+        return _ORIGINAL_VALIDATE_TIME_WINDOW(window, name=name)
+    try:
+        values = tuple(window)
+    except TypeError:
+        return _ORIGINAL_VALIDATE_TIME_WINDOW(window, name=name)
+    for value in values:
+        if _is_complex_scalar(value):
+            raise ValueError(f"{name} endpoints must be finite real numeric values, not complex values.")
+    return _ORIGINAL_VALIDATE_TIME_WINDOW(values, name=name)
 
 
 def _patched_validate_calibration_summary(summary: pd.DataFrame) -> pd.DataFrame:
