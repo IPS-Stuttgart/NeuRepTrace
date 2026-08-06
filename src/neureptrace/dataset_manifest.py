@@ -225,7 +225,7 @@ def _materialize_file_path(value: Any, *, participant: int, root: str, config_di
 
 
 def _is_absolute_path(path: str) -> bool:
-    return path.startswith(("/", "~")) or bool(_DRIVE_RE.match(path))
+    return path.startswith(("/", "~", "\\\\")) or bool(_DRIVE_RE.match(path))
 
 
 def _join_path(root: str, child: str) -> str:
