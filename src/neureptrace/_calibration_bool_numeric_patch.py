@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from functools import wraps
 from pathlib import Path
 
@@ -13,6 +13,7 @@ from . import calibration as _calibration
 
 _ORIGINAL_VALIDATE_CALIBRATION_SUMMARY = _calibration._validate_calibration_summary
 _ORIGINAL_VALIDATE_RELIABILITY_BINS = _calibration._validate_reliability_bins
+_ORIGINAL_VALIDATE_TIME_WINDOW = _calibration._validate_time_window
 _ORIGINAL_SUMMARIZE_CALIBRATION_METRICS = _calibration.summarize_calibration_metrics
 _INSTALLED = False
 
@@ -31,6 +32,30 @@ def _reject_boolean_numeric_values(frame: pd.DataFrame, columns: Iterable[str], 
             raise ValueError(
                 f"{source} contains boolean values in numeric column '{column}' at row(s) {bad_rows}."
             )
+
+
+def _is_complex_scalar(value: object) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        try:
+            scalar = value.item()
+        except ValueError:
+            return False
+        return isinstance(scalar, (complex, np.complexfloating))
+    return False
+
+
+def _patched_validate_time_window(window: Sequence[object], *, name: str) -> tuple[float, float]:
+    if not isinstance(window, (str, bytes)):
+        try:
+            values = tuple(window)
+        except TypeError:
+            values = ()
+        for value in values:
+            if _is_complex_scalar(value):
+                raise ValueError(f"{name} endpoints must be finite real numeric values, not complex values.")
+    return _ORIGINAL_VALIDATE_TIME_WINDOW(window, name=name)
 
 
 def _patched_validate_calibration_summary(summary: pd.DataFrame) -> pd.DataFrame:
@@ -85,6 +110,7 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    _calibration._validate_time_window = _patched_validate_time_window
     _calibration._validate_calibration_summary = _patched_validate_calibration_summary
     _calibration._validate_reliability_bins = _patched_validate_reliability_bins
     _calibration.summarize_calibration_metrics = _patched_summarize_calibration_metrics
