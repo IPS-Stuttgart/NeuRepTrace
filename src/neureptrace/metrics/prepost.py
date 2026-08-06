@@ -35,14 +35,15 @@ def summarize_window_metric(
     for group_key, group in _iter_groups(window_frame, group_columns):
         row = _group_row(group_columns, group_key)
         values = _finite_numeric_or_missing_series(group[metric_column], name=metric_column)
+        n_rows, mean, std, sem = _stable_summary_statistics(values)
         row.update(
             {
                 "window_start": window_start,
                 "window_stop": window_stop,
-                "n_rows": int(values.notna().sum()),
-                f"{metric_column}_mean": _float_or_nan(values.mean()),
-                f"{metric_column}_std": _float_or_nan(values.std()),
-                f"{metric_column}_sem": _float_or_nan(values.sem()),
+                "n_rows": n_rows,
+                f"{metric_column}_mean": mean,
+                f"{metric_column}_std": std,
+                f"{metric_column}_sem": sem,
             }
         )
         rows.append(row)
@@ -210,6 +211,48 @@ def _finite_numeric_or_missing_series(values: object, *, name: str) -> pd.Series
     if bool(invalid.any()) or not np.all(np.isfinite(numeric)):
         raise ValueError(message)
     return parsed
+
+
+def _stable_summary_statistics(values: pd.Series) -> tuple[int, float, float, float]:
+    """Return count, mean, sample standard deviation, and SEM without overflow."""
+
+    vector = values.dropna().to_numpy(dtype=float)
+    n_rows = int(vector.size)
+    if n_rows == 0:
+        return 0, float("nan"), float("nan"), float("nan")
+
+    scale = float(np.max(np.abs(vector)))
+    if scale == 0.0:
+        mean = 0.0
+        if n_rows == 1:
+            return n_rows, mean, float("nan"), float("nan")
+        return n_rows, mean, 0.0, 0.0
+
+    normalized = vector / scale
+    normalized_mean = math.fsum(float(value) for value in normalized) / n_rows
+    normalized_mean = min(1.0, max(-1.0, normalized_mean))
+    mean = _rescale_summary_value(normalized_mean, scale)
+    if n_rows == 1:
+        return n_rows, mean, float("nan"), float("nan")
+
+    squared_deviations = (
+        (float(value) - normalized_mean) ** 2 for value in normalized
+    )
+    normalized_variance = math.fsum(squared_deviations) / (n_rows - 1)
+    normalized_std = math.sqrt(max(0.0, normalized_variance))
+    std = _rescale_summary_value(normalized_std, scale)
+    sem = _rescale_summary_value(normalized_std / math.sqrt(n_rows), scale)
+    return n_rows, mean, std, sem
+
+
+def _rescale_summary_value(value: float, scale: float) -> float:
+    if value == 0.0 or scale == 0.0:
+        return 0.0
+    magnitude = abs(value)
+    maximum = np.finfo(float).max
+    if magnitude > 1.0 and scale > maximum / magnitude:
+        return math.copysign(float("inf"), value)
+    return float(value * scale)
 
 
 def _is_boolean_scalar(value: object) -> bool:
