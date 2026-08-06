@@ -1,8 +1,9 @@
-"""Route random-subspace sample weights through sklearn Pipeline final estimators."""
+"""Route random-subspace sample weights through supported Pipeline estimators."""
 
 from __future__ import annotations
 
 from functools import wraps
+from inspect import signature
 from typing import Any
 
 import numpy as np
@@ -39,8 +40,22 @@ class _PipelineSampleWeightAdapter(BaseEstimator):
         raise AttributeError(name)
 
 
+def _fit_accepts_parameter(estimator: Any, parameter: str) -> bool:
+    fit = getattr(estimator, "fit", None)
+    if fit is None:
+        return False
+    try:
+        parameters = signature(fit).parameters
+    except (TypeError, ValueError):
+        return False
+    return parameter in parameters
+
+
 def _wrap_pipeline(estimator):
-    if isinstance(estimator, Pipeline):
+    if not isinstance(estimator, Pipeline) or not estimator.steps:
+        return estimator
+    final_estimator = estimator.steps[-1][1]
+    if final_estimator is not None and _fit_accepts_parameter(final_estimator, "sample_weight"):
         return _PipelineSampleWeightAdapter(estimator)
     return estimator
 
