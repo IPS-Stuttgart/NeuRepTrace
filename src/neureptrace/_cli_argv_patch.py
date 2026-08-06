@@ -1,14 +1,16 @@
-"""Patch public detection CLI main so tests and callers can pass argv explicitly."""
+"""Patch public stimulus-detection CLI and output-path safety."""
 
 from __future__ import annotations
 
 import argparse
 import importlib
 from collections.abc import Sequence
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
 _PATCH_MARKER = "_neureptrace_cli_argv_patch_installed"
+_OUTPUT_PATH_PATCH_MARKER = "_neureptrace_stimulus_output_paths_patched"
 
 
 def _build_parser(public: Any) -> argparse.ArgumentParser:
@@ -36,6 +38,50 @@ def _build_parser(public: Any) -> argparse.ArgumentParser:
     return parser
 
 
+def _validate_distinct_output_paths(
+    *,
+    out_events: str | Path | None,
+    out_summary: str | Path | None,
+    out_thresholds: str | Path | None,
+) -> None:
+    """Reject output aliases before any stimulus-detection work or writes occur."""
+
+    destinations: dict[Path, str] = {}
+    for name, raw_path in (
+        ("out_events", out_events),
+        ("out_summary", out_summary),
+        ("out_thresholds", out_thresholds),
+    ):
+        if raw_path is None:
+            continue
+        destination = Path(raw_path).expanduser().resolve(strict=False)
+        previous = destinations.get(destination)
+        if previous is not None:
+            raise ValueError(
+                "Stimulus detection output paths must resolve to distinct files; "
+                f"{previous} and {name} both resolve to {destination}."
+            )
+        destinations[destination] = name
+
+
+def _install_output_path_guard(public: Any) -> None:
+    original_detect = public.detect_stimulus_events_from_csvs
+    if getattr(original_detect, _OUTPUT_PATH_PATCH_MARKER, False):
+        return
+
+    @wraps(original_detect)
+    def detect_stimulus_events_from_csvs(*args: Any, **kwargs: Any):
+        _validate_distinct_output_paths(
+            out_events=kwargs.get("out_events"),
+            out_summary=kwargs.get("out_summary"),
+            out_thresholds=kwargs.get("out_thresholds"),
+        )
+        return original_detect(*args, **kwargs)
+
+    setattr(detect_stimulus_events_from_csvs, _OUTPUT_PATH_PATCH_MARKER, True)
+    public.detect_stimulus_events_from_csvs = detect_stimulus_events_from_csvs
+
+
 def install() -> None:
     from neureptrace import (
         _onset_sensitivity_setting_id_patch,
@@ -48,6 +94,7 @@ def install() -> None:
     _onset_workflow_plot_optional_columns_patch.install()
     importlib.import_module("neureptrace._semantic_stage_missing_group_patch").install()
     public = importlib.import_module("neureptrace._stimulus_detection_public")
+    _install_output_path_guard(public)
     if getattr(public.main, _PATCH_MARKER, False):
         return
 
