@@ -18,6 +18,7 @@ SOURCE_DOMAIN_ENSEMBLE_CATEGORY_2 = "2_unlabeled_target_adaptive"
 ENSEMBLE_WEIGHTING_MODES = ("uniform", "target_confidence", "target_entropy", "target_feature_similarity")
 DEFAULT_TEMPERATURE = 1.0
 DEFAULT_EPSILON = 1e-12
+PREDICT_PROBA_TOLERANCE = 1e-6
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +200,7 @@ def _covariance(matrix: np.ndarray) -> np.ndarray:
 def _aligned_probabilities(model: BaseEstimator, features: np.ndarray, *, classes: np.ndarray, epsilon: float) -> np.ndarray:
     if hasattr(model, "predict_proba"):
         raw = np.asarray(model.predict_proba(features), dtype=float)
+        raw = _validate_predict_proba_output(raw, expected_rows=features.shape[0])
         model_classes = np.asarray(getattr(model, "classes_", classes), dtype=object)
     elif hasattr(model, "decision_function"):
         raw, model_classes = _decision_probabilities(model, features, classes)
@@ -221,6 +223,23 @@ def _aligned_probabilities(model: BaseEstimator, features: np.ndarray, *, classe
         if class_label in class_to_column:
             aligned[:, class_to_column[class_label]] = raw[:, source_column]
     return _normalize_probability_rows(aligned, epsilon=epsilon)
+
+
+def _validate_predict_proba_output(probabilities: np.ndarray, *, expected_rows: int) -> np.ndarray:
+    matrix = np.asarray(probabilities, dtype=float)
+    if matrix.ndim != 2:
+        raise ValueError("predict_proba output must be a two-dimensional matrix.")
+    if matrix.shape[0] != expected_rows:
+        raise ValueError("predict_proba output must contain one row per feature row.")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("predict_proba output must contain only finite values.")
+    tolerance = PREDICT_PROBA_TOLERANCE
+    if np.any(matrix < -tolerance) or np.any(matrix > 1.0 + tolerance):
+        raise ValueError("predict_proba output values must lie between 0 and 1.")
+    row_sums = np.sum(matrix, axis=1)
+    if not np.allclose(row_sums, 1.0, rtol=0.0, atol=tolerance):
+        raise ValueError("predict_proba output rows must sum to 1.")
+    return np.clip(matrix, 0.0, 1.0)
 
 
 def _decision_probabilities(model: BaseEstimator, features: np.ndarray, classes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
