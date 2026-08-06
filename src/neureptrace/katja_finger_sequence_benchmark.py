@@ -39,6 +39,7 @@ from neureptrace.decoding.progressive_sequence_finetune import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from typing import Any
 
 __all__ = (
@@ -52,6 +53,55 @@ __all__ = (
     "main",
     "run_katja_finger_sequence_benchmark",
 )
+
+
+def _integer_control(value: Any, *, name: str, minimum: int | None = None) -> int:
+    """Normalize one integer experiment control without lossy coercion."""
+
+    if isinstance(value, (bool, np.bool_, complex, np.complexfloating)):
+        raise ValueError(f"{name} must be an integer.")
+    if isinstance(value, (int, np.integer)):
+        integer = int(value)
+    else:
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{name} must be an integer.") from exc
+        if not np.isfinite(number) or number % 1.0 != 0.0:
+            raise ValueError(f"{name} must be an integer.")
+        integer = int(number)
+    if minimum is not None and integer < minimum:
+        if minimum == 0:
+            raise ValueError(f"{name} must be a non-negative integer.")
+        if minimum == 1:
+            raise ValueError(f"{name} must be a positive integer.")
+        raise ValueError(f"{name} must be an integer greater than or equal to {minimum}.")
+    return integer
+
+
+def _integer_registry(
+    values: Iterable[Any],
+    *,
+    name: str,
+    minimum: int | None = None,
+) -> tuple[int, ...]:
+    """Normalize a non-empty registry of unique integer controls."""
+
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} must be a non-empty sequence of integers.")
+    try:
+        items = tuple(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a non-empty sequence of integers.") from exc
+    if not items:
+        raise ValueError(f"{name} must not be empty.")
+    normalized = tuple(
+        _integer_control(value, name=f"{name} value", minimum=minimum)
+        for value in items
+    )
+    if len(set(normalized)) != len(normalized):
+        raise ValueError(f"{name} must contain unique values.")
+    return normalized
 
 
 def run_katja_finger_sequence_benchmark(
@@ -69,6 +119,33 @@ def run_katja_finger_sequence_benchmark(
     model_kwargs: dict[str, Any] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     """Run the complete target-by-seed-by-k benchmark from event-row features."""
+
+    calibration_counts = _integer_registry(
+        calibration_counts,
+        name="calibration_counts",
+        minimum=1,
+    )
+    calibration_seeds = _integer_registry(
+        calibration_seeds,
+        name="calibration_seeds",
+        minimum=0,
+    )
+    event_positions = _integer_registry(event_positions, name="event_positions")
+    n_source_participants = _integer_control(
+        n_source_participants,
+        name="n_source_participants",
+        minimum=1,
+    )
+    source_selection_seed = _integer_control(
+        source_selection_seed,
+        name="source_selection_seed",
+        minimum=0,
+    )
+    pca_components = (
+        None
+        if pca_components is None
+        else _integer_control(pca_components, name="pca_components", minimum=1)
+    )
 
     subjects = cache["subjects"].astype(str)
     trial_ids = cache["trial_ids"]
@@ -159,14 +236,14 @@ def run_katja_finger_sequence_benchmark(
                 calibration_counts=calibration_counts,
                 max_per_stratum=max(calibration_counts),
                 min_evaluation_per_stratum=1,
-                seed=int(calibration_seed),
+                seed=calibration_seed,
                 context=("katja_finger", target),
             )
-            seed_model_config = {**model_config, "random_state": int(calibration_seed)}
+            seed_model_config = {**model_config, "random_state": calibration_seed}
             base_model = TorchProgressiveSequenceClassifier(**seed_model_config)
             base_model.fit_source(source_packed.features, source_packed.labels, source_subjects=source_trial_subjects)
             for calibration_count in calibration_counts:
-                split = splits[int(calibration_count)]
+                split = splits[calibration_count]
                 model = copy.deepcopy(base_model)
                 model.adapt_target(
                     target_packed.features[split.calibration_indices],
@@ -186,8 +263,8 @@ def run_katja_finger_sequence_benchmark(
                 rows.append(
                     {
                         "target": target,
-                        "seed": int(calibration_seed),
-                        "k": int(calibration_count),
+                        "seed": calibration_seed,
+                        "k": calibration_count,
                         "n_source_participants": len(selected_sources),
                         "source_participants": ",".join(selected_sources),
                         "n_source_trials": int(source_packed.features.shape[0]),
@@ -199,7 +276,7 @@ def run_katja_finger_sequence_benchmark(
                         "source_validation_mode": model.source_validation_mode_,
                         "target_validation_mode": model.target_validation_mode_,
                         "adaptation_stages": ",".join(item["stage"] for item in model.adaptation_stage_history_),
-                        "pca_components_requested": None if pca_components is None else int(pca_components),
+                        "pca_components_requested": pca_components,
                         "pca_components_effective": int(source_packed.features.shape[2]),
                     }
                 )
@@ -241,12 +318,12 @@ def run_katja_finger_sequence_benchmark(
     metadata = {
         "participants": list(participants),
         "target_participants": list(targets),
-        "calibration_counts": [int(value) for value in calibration_counts],
-        "calibration_seeds": [int(value) for value in calibration_seeds],
-        "event_positions": [int(value) for value in event_positions],
-        "source_selection_seed": int(source_selection_seed),
+        "calibration_counts": list(calibration_counts),
+        "calibration_seeds": list(calibration_seeds),
+        "event_positions": list(event_positions),
+        "source_selection_seed": source_selection_seed,
         "source_selection": {target: list(sources) for target, sources in source_selection_registry.items()},
-        "pca_components": None if pca_components is None else int(pca_components),
+        "pca_components": pca_components,
         "model_kwargs": model_config,
         "evaluation_unit": "finger_event",
         "seed_aggregation": "mean_within_target_then_population_mean_and_sem",
