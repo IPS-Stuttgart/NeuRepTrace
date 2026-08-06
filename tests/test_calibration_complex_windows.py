@@ -31,3 +31,12 @@ def _summary_frame() -> pd.DataFrame:
 def test_summarize_calibration_metrics_rejects_complex_window_endpoints(endpoint):
     with pytest.raises(ValueError, match="finite real numeric values, not complex"):
         summarize_calibration_metrics(_summary_frame(), effect_window=(endpoint, 0.2))
+
+
+def test_summarize_calibration_metrics_preserves_one_shot_window_iterables():
+    effect_window = (endpoint for endpoint in (0.1, 0.2))
+
+    summary = summarize_calibration_metrics(_summary_frame(), effect_window=effect_window)
+
+    assert summary["decoder"].tolist() == ["logistic"]
+    assert summary["effect_ece_mean"].tolist() == [0.06]
