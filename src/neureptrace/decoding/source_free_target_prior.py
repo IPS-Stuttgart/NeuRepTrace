@@ -308,14 +308,36 @@ def _contains_boolean_value(values: Any) -> bool:
     return False
 
 
+def _contains_complex_value(values: Any) -> bool:
+    if isinstance(values, (complex, np.complexfloating)):
+        return True
+    if isinstance(values, np.generic):
+        return isinstance(values.item(), (complex, np.complexfloating))
+    if isinstance(values, np.ndarray):
+        if np.issubdtype(values.dtype, np.complexfloating):
+            return True
+        if values.dtype == object:
+            return any(_contains_complex_value(value) for value in values.reshape(-1))
+        return False
+    if isinstance(values, (str, bytes, bytearray, Mapping)):
+        return False
+    if isinstance(values, Iterable):
+        return any(_contains_complex_value(value) for value in values)
+    return False
+
+
 def _validate_prior(prior: np.ndarray, *, n_classes: int) -> np.ndarray:
     materialized = _materialize_probability_input(prior)
     if _contains_boolean_value(materialized):
         raise ValueError("target prior must be numeric probability values, not boolean indicators.")
+    if _contains_complex_value(materialized):
+        raise ValueError("target prior must contain real-valued probability values, not complex values.")
     try:
-        target_prior = np.asarray(materialized, dtype=float).reshape(-1)
+        target_prior = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
         raise ValueError("target prior must be numeric.") from exc
+    if target_prior.ndim != 1:
+        raise ValueError("target prior must have shape (n_classes,).")
     if target_prior.shape[0] != int(n_classes):
         raise ValueError("target prior must have one entry per class.")
     if not np.all(np.isfinite(target_prior)) or np.any(target_prior < 0.0):
@@ -330,6 +352,8 @@ def _normalize_probability_rows(probabilities: np.ndarray) -> np.ndarray:
     materialized = _materialize_probability_input(probabilities)
     if _contains_boolean_value(materialized):
         raise ValueError("probabilities must be numeric probability values, not boolean indicators.")
+    if _contains_complex_value(materialized):
+        raise ValueError("probabilities must contain real-valued probability values, not complex values.")
     try:
         raw = np.asarray(materialized)
     except (TypeError, ValueError) as exc:
