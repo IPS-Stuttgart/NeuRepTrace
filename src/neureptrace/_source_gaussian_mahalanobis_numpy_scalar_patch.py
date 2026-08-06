@@ -2,7 +2,7 @@
 
 This module keeps strict source-only Gaussian and Mahalanobis helpers robust for
 configuration scalars, feature-matrix validation, Gaussian likelihood evaluation,
-and Gaussian result precision.
+Gaussian result precision, and statistically correct tied covariance pooling.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def _compact_float32(values: np.ndarray) -> np.ndarray:
 
 
 def install() -> None:
-    """Install scalar, feature, likelihood, and Gaussian result-precision guards."""
+    """Install scalar, feature, likelihood, covariance, and precision guards."""
 
     global _INSTALLED
     if _INSTALLED:
@@ -106,6 +106,7 @@ def install() -> None:
     original_gaussian_feature_matrix = source_gaussian._feature_matrix
     original_mahalanobis_feature_matrix = source_mahalanobis._feature_matrix
     original_gaussian_log_likelihoods = source_gaussian.gaussian_log_likelihoods
+    original_apply_covariance_type = source_gaussian._apply_covariance_type
     original_fit_source_gaussian_decoder = source_gaussian.fit_source_gaussian_decoder
 
     @wraps(original_gaussian_feature_matrix)
@@ -142,6 +143,46 @@ def install() -> None:
         quadratic = np.sum(standardized * standardized, axis=2)
         log_det = np.sum(np.log(variance_matrix), axis=1)
         return -0.5 * (quadratic + log_det[None, :] + x.shape[1] * np.log(2.0 * np.pi))
+
+    @wraps(original_apply_covariance_type)
+    def _apply_covariance_type(
+        class_variances: np.ndarray,
+        *,
+        counts: np.ndarray,
+        covariance_type: str,
+        variance_floor: float,
+    ) -> np.ndarray:
+        """Pool unbiased class variances using their within-class degrees of freedom."""
+
+        if covariance_type not in {"tied_diagonal", "tied_spherical"}:
+            return original_apply_covariance_type(
+                class_variances,
+                counts=counts,
+                covariance_type=covariance_type,
+                variance_floor=variance_floor,
+            )
+
+        degrees_of_freedom = np.maximum(counts.astype(float) - 1.0, 0.0)
+        total_degrees_of_freedom = float(np.sum(degrees_of_freedom))
+        if total_degrees_of_freedom > 0.0:
+            tied = np.sum(
+                class_variances * degrees_of_freedom[:, None],
+                axis=0,
+                keepdims=True,
+            ) / total_degrees_of_freedom
+        else:
+            tied = np.full(
+                (1, class_variances.shape[1]),
+                variance_floor,
+                dtype=float,
+            )
+        tied = np.maximum(tied, variance_floor)
+
+        if covariance_type == "tied_diagonal":
+            return np.repeat(tied, class_variances.shape[0], axis=0)
+
+        shared = max(float(np.mean(tied)), variance_floor)
+        return np.full(class_variances.shape, shared, dtype=float)
 
     @wraps(original_fit_source_gaussian_decoder)
     def _fit_source_gaussian_decoder(
@@ -211,6 +252,7 @@ def install() -> None:
     source_gaussian._positive_float = _positive_float
     source_gaussian._feature_matrix = _gaussian_feature_matrix
     source_gaussian.gaussian_log_likelihoods = _gaussian_log_likelihoods
+    source_gaussian._apply_covariance_type = _apply_covariance_type
     source_gaussian.fit_source_gaussian_decoder = _fit_source_gaussian_decoder
     source_mahalanobis._positive_float = _positive_float
     source_mahalanobis._nonnegative_float = _nonnegative_float
