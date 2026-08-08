@@ -16,8 +16,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from neureptrace.katja_spm_feature_cache import load_subject_behavior
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -106,6 +104,8 @@ def load_cue_duration_registry(
     participants: Sequence[str],
 ) -> pd.DataFrame:
     """Load one cue duration for every participant and one-based trial ID."""
+
+    from neureptrace.katja_spm_feature_cache import load_subject_behavior
 
     root = Path(dataset_root)
     rows: list[pd.DataFrame] = []
