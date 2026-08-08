@@ -20,14 +20,10 @@ import numpy as np
 import pandas as pd
 
 from neureptrace._katja_finger_sequence_support import DEFAULT_PARTICIPANTS
-from neureptrace.katja_spm_feature_cache import (
-    SPMContinuousHeader,
-    load_spm_continuous_header,
-    load_subject_behavior,
-)
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from neureptrace.katja_spm_feature_cache import SPMContinuousHeader
 
 DEFAULT_TRIGGER_CHANNEL = "UPPT002"
 DEFAULT_EXPECTED_LAG_SECONDS = 0.03
@@ -284,6 +280,11 @@ def audit_subject_press_timing(
     trigger_threshold: float | None = None,
 ) -> pd.DataFrame:
     """Return one timing-audit row per trial and press for one participant."""
+
+    from neureptrace.katja_spm_feature_cache import (
+        load_spm_continuous_header,
+        load_subject_behavior,
+    )
 
     root = Path(dataset_root)
     header = load_spm_continuous_header(root / subject)
