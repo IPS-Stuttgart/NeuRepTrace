@@ -138,6 +138,17 @@ def install() -> None:
     if public_module.__dict__.get(_PATCH_MARKER, False):
         return
 
+    required_helpers = (
+        _MATCH_NAME,
+        "_add_annotation_candidate_columns",
+        "_annotation_id",
+        "_annotation_match_key",
+        "_annotation_value",
+        "_stream_columns",
+    )
+    if not all(name in public_module.__dict__ for name in required_helpers):
+        return
+
     original_match = public_module.__dict__[_MATCH_NAME]
     add_candidate_columns = public_module.__dict__["_add_annotation_candidate_columns"]
     annotation_id = public_module.__dict__["_annotation_id"]
