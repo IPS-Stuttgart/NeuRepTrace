@@ -225,19 +225,19 @@ def _validate_decoded_fold_integer_values(values: Any, *, name: str) -> None:
     """Reject values that cannot be represented as finite integer vectors."""
 
     if _contains_boolean_values(values):
-        raise ValueError(f"from_decoded_fold {name} must be integer-valued, not boolean.")
+        raise ValueError(f"from_decoded_fold {name} must contain integer values, not boolean flags.")
     if _contains_complex_values(values):
         raise ValueError(f"from_decoded_fold {name} must contain real integer-valued values, not complex values.")
     try:
         numeric = np.asarray(values, dtype=float)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"from_decoded_fold {name} must be integer-valued.") from exc
+        raise ValueError(f"from_decoded_fold {name} must contain finite integer values.") from exc
     if numeric.ndim != 1:
         raise ValueError(f"from_decoded_fold {name} must be a one-dimensional integer-valued vector.")
     if not np.isfinite(numeric).all():
         raise ValueError(f"from_decoded_fold {name} must contain finite integer-valued values.")
     if not np.equal(numeric, np.rint(numeric)).all():
-        raise ValueError(f"from_decoded_fold {name} must be integer-valued.")
+        raise ValueError(f"from_decoded_fold {name} must contain finite integer values.")
 
     limits = np.iinfo(np.int_)
     raw = np.asarray(values, dtype=object)
@@ -249,7 +249,7 @@ def _validate_decoded_fold_integer_values(values: Any, *, name: str) -> None:
         try:
             integer = int(value)
         except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(f"from_decoded_fold {name} must be integer-valued.") from exc
+            raise ValueError(f"from_decoded_fold {name} must contain finite integer values.") from exc
         if integer < int(limits.min) or integer > int(limits.max):
             raise ValueError(f"from_decoded_fold {name} values must fit the platform integer range.")
 
