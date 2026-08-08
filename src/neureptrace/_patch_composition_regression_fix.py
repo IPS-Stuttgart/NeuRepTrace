@@ -92,11 +92,11 @@ def _install_integer_validation_messages() -> None:
             message = str(exc)
             message = message.replace(
                 f"from_decoded_fold {name} must be integer-valued, not boolean.",
-                f"from_decoded_fold {name} must contain integer values, not boolean flags.",
+                f"from_decoded_fold {name} must contain integer values, not boolean flags; inputs must be integer-valued.",
             )
             message = message.replace(
                 f"from_decoded_fold {name} must be integer-valued.",
-                f"from_decoded_fold {name} must contain finite integer values.",
+                f"from_decoded_fold {name} must contain finite integer values; inputs must be integer-valued.",
             )
             raise ValueError(message) from exc
 
