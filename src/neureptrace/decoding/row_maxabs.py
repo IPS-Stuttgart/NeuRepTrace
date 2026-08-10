@@ -137,10 +137,30 @@ def _contains_boolean(value: object) -> bool:
     return False
 
 
+def _contains_complex(value: object) -> bool:
+    """Return whether a materialized feature container contains complex values."""
+
+    if isinstance(value, np.ndarray) and value.dtype != object:
+        return bool(value.size and np.iscomplexobj(value))
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, (str, bytes)):
+        return False
+
+    items = value.values() if isinstance(value, Mapping) else value
+    try:
+        iterator = iter(items)
+    except TypeError:
+        return False
+    return any(_contains_complex(item) for item in iterator)
+
+
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
     materialized = _materialize_one_pass_iterables(values)
     if _contains_boolean(materialized):
         raise ValueError(f"{name} must contain numeric, non-boolean feature values.")
+    if _contains_complex(materialized):
+        raise ValueError(f"{name} must contain real-valued feature values, not complex values.")
     try:
         matrix = np.asarray(materialized, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -160,14 +180,22 @@ def _is_boolean_scalar(value: Any) -> bool:
     return False
 
 
+def _is_complex_scalar(value: Any) -> bool:
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray) and value.shape == ():
+        return isinstance(value.item(), (complex, np.complexfloating))
+    return False
+
+
 def _positive_float(value: float | str, *, name: str) -> float:
-    if _is_boolean_scalar(value):
+    if _is_boolean_scalar(value) or _is_complex_scalar(value):
         raise ValueError(f"{name} must be positive and finite.")
     if isinstance(value, np.ndarray):
         if value.ndim != 0:
             raise ValueError(f"{name} must be positive and finite.")
         value = value.item()
-        if _is_boolean_scalar(value):
+        if _is_boolean_scalar(value) or _is_complex_scalar(value):
             raise ValueError(f"{name} must be positive and finite.")
     try:
         parsed = float(value)
