@@ -8,6 +8,17 @@
   "development_run_id": 31007742231,
   "development_target_excluded": "s05",
   "enabled": false,
+  "endpoint_scope": {
+    "directly_comparable_to_julia_online_sliding_window": false,
+    "includes_first_press": false,
+    "includes_null_or_background_windows": false,
+    "known_press_times": true,
+    "name": "event_conditioned_four_variable_finger",
+    "reference_delta_interpretation": "descriptive provenance only; the endpoints differ",
+    "scored_press_positions": [2, 3, 4, 5],
+    "structured_endpoint": "one-to-one assignment across the four known press events",
+    "unconstrained_endpoint": "one independent finger prediction at each known press event"
+  },
   "feature_cache": "katja_finger_events_exact_ica_v4.npz",
   "follow_up_run_id": 31009907653,
   "primary_configuration": "hybrid_source_model_ensemble6",

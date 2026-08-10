@@ -209,12 +209,21 @@ def _patch_class_score_matrix() -> None:
     @wraps(original)
     def as_class_score_matrix(raw_scores, classes, *, n_samples: int):
         class_order = class_scores._label_vector(classes)
-        scores = np.asarray(raw_scores, dtype=float)
+        materialized = class_scores._materialize_score_values(raw_scores)
+        if class_scores._score_values_contain_complex(materialized):
+            raise ValueError("raw_scores must contain real-valued scores.")
+        if class_scores._score_values_contain_boolean(materialized):
+            raise ValueError(
+                "raw_scores must contain numeric score values, not boolean flags."
+            )
+        scores = np.asarray(materialized, dtype=float)
+        if not np.all(np.isfinite(scores)):
+            raise ValueError("raw_scores must contain only finite values.")
         if scores.ndim == 1 and scores.shape[0] == n_samples and class_order.size == 2:
             return _binary_decision_scores_to_logits(scores)
         if scores.ndim == 2 and scores.shape == (n_samples, 1) and class_order.size == 2:
             return _binary_decision_scores_to_logits(scores[:, 0])
-        return original(raw_scores, classes, n_samples=n_samples)
+        return original(materialized, classes, n_samples=n_samples)
 
     setattr(as_class_score_matrix, _BINARY_DECISION_PATCH_MARKER, True)
     class_scores.as_class_score_matrix = as_class_score_matrix

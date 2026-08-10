@@ -92,6 +92,19 @@ The permutation constraint is valid only after auditing that every included
 trial contains each participant-local variable finger exactly once. Do not
 apply it if repetitions or omissions are present.
 
+### Endpoint boundary
+
+This reconstructed target is event conditioned: press times are known, presses
+2–5 are scored once each, the first press is excluded, and null/background
+periods are absent. It is not the same endpoint as continuous online decoding
+with sliding windows through the execution period.
+
+Consequently, the existing 65.79% independent event accuracy and 71.01%
+one-to-one constrained accuracy are **not directly comparable** with Julia's
+reported 59.4% sliding-window result. Any stored numerical delta against that
+reference is descriptive provenance only, not a method-superiority estimate.
+See `docs/katja_online_window_alignment.md` for the alignment plan.
+
 ## End-to-end Katja feature-cache runner
 
 The repository also provides:
@@ -124,5 +137,6 @@ target before the population mean and SEM.
 Use `--source-map-json` to reproduce an existing exact target-to-nine-sources
 registry. Sequence ID is used only for calibration stratification and never
 enters the model features. Outputs include per-seed, per-target, and
-population-summary CSV files, with deltas against Julia's reported
-full-fine-tuning values at k1, k3, k5, k10, k15, and k20.
+population-summary CSV files. The historical Julia-reference columns remain in
+those outputs for reproducibility, but they must be interpreted under the
+endpoint boundary above.
