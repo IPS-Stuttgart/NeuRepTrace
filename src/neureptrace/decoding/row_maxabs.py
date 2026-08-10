@@ -140,21 +140,19 @@ def _contains_boolean(value: object) -> bool:
 def _contains_complex(value: object) -> bool:
     """Return whether a materialized feature container contains complex values."""
 
+    if isinstance(value, np.ndarray) and value.dtype != object:
+        return bool(value.size and np.iscomplexobj(value))
     if isinstance(value, (complex, np.complexfloating)):
         return True
-    if isinstance(value, np.ndarray):
-        if np.issubdtype(value.dtype, np.complexfloating):
-            return bool(value.size)
-        if value.dtype == object:
-            return any(_contains_complex(item) for item in value.flat)
-        return False
     if isinstance(value, (str, bytes)):
         return False
-    if isinstance(value, Mapping):
-        return any(_contains_complex(item) for item in value.values())
-    if isinstance(value, Iterable):
-        return any(_contains_complex(item) for item in value)
-    return False
+
+    items = value.values() if isinstance(value, Mapping) else value
+    try:
+        iterator = iter(items)
+    except TypeError:
+        return False
+    return any(_contains_complex(item) for item in iterator)
 
 
 def _feature_matrix(values: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
