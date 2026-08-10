@@ -1,4 +1,4 @@
-"""Normalize observation-ensemble source baseline debiasing flags."""
+"""Normalize and validate observation-ensemble scalar controls."""
 
 from __future__ import annotations
 
@@ -11,6 +11,12 @@ import numpy as np
 _PATCH_MARKER = "_neureptrace_observation_ensemble_source_debias_bool_patch_installed"
 _TRUE_STRINGS = {"1", "true", "t", "yes", "y", "on"}
 _FALSE_STRINGS = {"0", "false", "f", "no", "n", "off"}
+_REAL_CONTROL_NAMES = (
+    "weights",
+    "source_temperatures",
+    "probability_tolerance",
+    "baseline_window",
+)
 
 
 def _bool_error(name: str) -> ValueError:
@@ -46,8 +52,32 @@ def normalize_source_baseline_debiasing(value: Any, *, name: str = "source_basel
     raise _bool_error(name)
 
 
+def _contains_complex(value: Any) -> bool:
+    """Return whether a scalar or small control container contains complex values."""
+
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        if np.iscomplexobj(value):
+            return True
+        if value.dtype == object:
+            return any(_contains_complex(item) for item in value.flat)
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_contains_complex(item) for item in value)
+    to_numpy = getattr(value, "to_numpy", None)
+    if callable(to_numpy):
+        return _contains_complex(to_numpy())
+    return False
+
+
+def _validate_real_control(value: Any, *, name: str) -> None:
+    if value is not None and _contains_complex(value):
+        raise ValueError(f"{name} must contain only real-valued numbers.")
+
+
 def install() -> None:
-    """Patch ``ensemble_probability_observations`` boolean keyword normalization."""
+    """Patch observation-ensemble boolean normalization and real-control validation."""
 
     module = importlib.import_module("neureptrace.observation_ensemble")
     if getattr(module, _PATCH_MARKER, False):
@@ -60,6 +90,9 @@ def install() -> None:
         if "source_baseline_debiasing" in kwargs:
             kwargs = dict(kwargs)
             kwargs["source_baseline_debiasing"] = normalize_source_baseline_debiasing(kwargs["source_baseline_debiasing"])
+        for name in _REAL_CONTROL_NAMES:
+            if name in kwargs:
+                _validate_real_control(kwargs[name], name=name)
         return original_ensemble_probability_observations(*args, **kwargs)
 
     setattr(ensemble_probability_observations, _PATCH_MARKER, True)
