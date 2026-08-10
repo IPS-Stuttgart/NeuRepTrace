@@ -72,7 +72,9 @@ def test_stimulus_detection_preserves_missing_constrained_identifier_dtypes():
 
     assert len(thresholds) == 1
     assert pd.isna(thresholds.loc[0, "subject"])
-    assert pd.isna(thresholds.loc[0, "stream_id"])
+    # Thresholds are fitted per configured group. Stream identifiers partition
+    # the baseline calculation but intentionally remain event-level metadata.
+    assert "stream_id" not in thresholds.columns
 
     events = detect_stimulus_events(
         observations,
