@@ -282,7 +282,7 @@ On the common nine-target `k=20` cohort, after averaging five split seeds
 within each target and then computing SEM across targets, the main results are:
 
 | Method | Evaluation regime | Six-class accuracy |
-|---|---|---:|
+| --- | --- | ---: |
 | Source-only | Protocol 1 | 29.46 +/- 1.47% |
 | Direct Transformer ensemble | Protocol 3, independent window | 61.59 +/- 1.44% |
 | Direct + auxiliary blend | Protocol 3, calibration-only | 62.20 +/- 1.47% |
