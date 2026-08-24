@@ -1,3 +1,4 @@
 self-hosted-runner:
     labels:
         - nvidia-smi
+        - data-katja-button-press-v1
