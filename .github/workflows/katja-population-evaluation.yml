@@ -83,7 +83,8 @@ jobs:
         name: Exact-ICA selected 16-target confirmation
         needs: selection-gate
         if: needs.selection-gate.outputs.enabled == 'true'
-        runs-on: [self-hosted, Linux, X64, nvidia-smi, data-katja-button-press-v1]
+        runs-on:
+            [self-hosted, Linux, X64, nvidia-smi, data-katja-button-press-v1]
         timeout-minutes: 240
         env:
             KATJA_DATASET_ROOT: /mnt/lexar4tb/datasets/Katja Button Press Data
